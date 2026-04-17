@@ -1,25 +1,38 @@
 // Plugin entry point. Obsidian instantiates this class on load, calls
 // onload(), and calls onunload() when the plugin is disabled or reloaded.
 
-import { Plugin } from 'obsidian';
+import { Notice, Plugin } from 'obsidian';
 import {
   CompendiumSettingTab,
   DEFAULT_SETTINGS,
   type CompendiumSettings,
 } from './settings';
+import { DocRegistry } from './sync/docRegistry';
+import { StatusBar } from './ui/statusBar';
 
 export default class CompendiumPlugin extends Plugin {
   settings: CompendiumSettings = DEFAULT_SETTINGS;
+  private registry: DocRegistry | null = null;
+  private statusBar: StatusBar | null = null;
+  private unsubscribe: (() => void) | null = null;
 
   override async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new CompendiumSettingTab(this.app, this));
-    // Sync wiring lands in Milestone 4.2+.
-    console.log('[compendium] plugin loaded');
+
+    this.statusBar = new StatusBar(this.addStatusBarItem(), this.app);
+
+    if (!this.settings.serverUrl || !this.settings.authToken) {
+      new Notice('Compendium: open Settings → Community plugins → Compendium to configure.');
+      return;
+    }
+    this.startSync();
   }
 
   override async onunload(): Promise<void> {
-    console.log('[compendium] plugin unloaded');
+    this.stopSync();
+    this.statusBar?.dispose();
+    this.statusBar = null;
   }
 
   async loadSettings(): Promise<void> {
@@ -31,8 +44,28 @@ export default class CompendiumPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
-  /** Called from the settings pane. Real wiring lands in 4.2. */
   async reconnect(): Promise<void> {
-    // no-op in 4.1; reconnect logic wired in with the provider.
+    this.stopSync();
+    if (this.settings.serverUrl && this.settings.authToken) this.startSync();
+  }
+
+  private startSync(): void {
+    this.registry = new DocRegistry({
+      serverUrl: this.settings.serverUrl,
+      authToken: this.settings.authToken,
+    });
+    this.unsubscribe = this.registry.onStatusChange((status, count) => {
+      this.statusBar?.render(status, count);
+    });
+    // File-to-Y.Doc mirroring is wired in Milestone 4.3. For now the
+    // registry is inert — no providers created until something calls get().
+  }
+
+  private stopSync(): void {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    this.registry?.destroyAll();
+    this.registry = null;
+    this.statusBar?.render('idle', 0);
   }
 }
