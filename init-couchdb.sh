@@ -19,7 +19,7 @@ else
     print_done() { echo "Done."; }
     R=""; BOLD=""; DIM=""; GOLD=""; GREEN=""; GREY=""
 fi
-UI_TOTAL_STEPS=4
+UI_TOTAL_STEPS=5
 
 if [[ ! -f "$SCRIPT_DIR/.env" ]]; then
     print_err ".env not found. Copy .env.example to .env and fill in the COUCHDB_* values."
@@ -114,7 +114,58 @@ case "$code" in
     *)       print_err "Failed to create database '$DB' (HTTP $code)"; exit 1 ;;
 esac
 
-print_step 4 "Checking CORS (Obsidian desktop origin)"
+print_step 4 "Creating player account for friends"
+if [[ -n "$PLAYER_USER" && -n "$PLAYER_PASSWORD" ]]; then
+    USER_DOC_ID="org.couchdb.user:$PLAYER_USER"
+
+    # PUT user doc — handle both 'new' and 'already exists' cases.
+    code=$(curl -sL -o /tmp/player-resp -w "%{http_code}" -X PUT $AUTH \
+        -H "Content-Type: application/json" \
+        -d "$(python3 -c "import json; print(json.dumps({'name':'$PLAYER_USER','password':'$PLAYER_PASSWORD','roles':[],'type':'user'}))")" \
+        "$COUCHDB_URL/_users/$USER_DOC_ID")
+    case "$code" in
+        201|202)
+            print_ok "Player user '$PLAYER_USER' created."
+            ;;
+        409)
+            # Exists — fetch current rev and update password in place.
+            rev=$(curl -sfL $AUTH "$COUCHDB_URL/_users/$USER_DOC_ID" \
+                | python3 -c "import sys,json; print(json.load(sys.stdin)['_rev'])")
+            upd=$(python3 -c "import json; print(json.dumps({'_rev':'$rev','name':'$PLAYER_USER','password':'$PLAYER_PASSWORD','roles':[],'type':'user'}))")
+            code=$(curl -sL -o /dev/null -w "%{http_code}" -X PUT $AUTH \
+                -H "Content-Type: application/json" -d "$upd" \
+                "$COUCHDB_URL/_users/$USER_DOC_ID")
+            if [[ "$code" =~ ^20 ]]; then
+                print_ok "Player user '$PLAYER_USER' password updated."
+            else
+                print_err "Failed to update player user (HTTP $code)"; exit 1
+            fi
+            ;;
+        *)
+            print_err "Failed to create player user (HTTP $code)"
+            cat /tmp/player-resp 2>/dev/null; echo
+            exit 1
+            ;;
+    esac
+    rm -f /tmp/player-resp
+
+    # Grant read/write on the vault DB (admins section left empty — only the
+    # admin user configured in CouchDB env vars stays admin).
+    sec=$(curl -sL -o /dev/null -w "%{http_code}" -X PUT $AUTH \
+        -H "Content-Type: application/json" \
+        -d "{\"admins\":{\"names\":[],\"roles\":[]},\"members\":{\"names\":[\"$PLAYER_USER\"],\"roles\":[]}}" \
+        "$COUCHDB_URL/$DB/_security")
+    if [[ "$sec" =~ ^20 ]]; then
+        print_ok "Player has read/write on '$DB' (no admin rights)."
+    else
+        print_err "Failed to set _security on '$DB' (HTTP $sec)"; exit 1
+    fi
+else
+    print_warn "PLAYER_USER / PLAYER_PASSWORD not set in .env — skipping player account."
+    print_info "Friends would have to use your admin creds, which is not recommended."
+fi
+
+print_step 5 "Checking CORS (Obsidian desktop origin)"
 preflight=$(curl -sL -o /dev/null -w "%{http_code}" \
     -H "Origin: app://obsidian.md" \
     -H "Access-Control-Request-Method: GET" \
@@ -127,13 +178,21 @@ else
 fi
 
 print_done
+
+if [[ -n "$PLAYER_USER" && -n "$PLAYER_PASSWORD" ]]; then
+    echo "  ${BOLD}${GOLD}Share these values with your friends (non-admin):${R}"
+    echo "     ${BOLD}URI:${R}      $COUCHDB_URL"
+    echo "     ${BOLD}Username:${R} $PLAYER_USER"
+    echo "     ${BOLD}Password:${R} $PLAYER_PASSWORD"
+    echo "     ${BOLD}Database:${R} $DB"
+    echo ""
+fi
+
+echo "  ${BOLD}${GREY}For your own machine (admin — keep private):${R}"
+echo "     ${DIM}URI:${R}      $COUCHDB_URL"
+echo "     ${DIM}Username:${R} $COUCHDB_USER"
+echo "     ${DIM}Password:${R} $COUCHDB_PASSWORD"
+echo "     ${DIM}Database:${R} $DB"
 echo ""
-echo "  ${BOLD}${GOLD}Paste these values into Obsidian → LiveSync → Remote database:${R}"
-echo "     ${BOLD}URI:${R}      $COUCHDB_URL"
-echo "     ${BOLD}Username:${R} $COUCHDB_USER"
-echo "     ${BOLD}Password:${R} $COUCHDB_PASSWORD"
-echo "     ${BOLD}Database:${R} $DB"
-echo ""
-echo "  ${DIM}${GREY}Share the same four values with your friends. After Setup, enable${R}"
-echo "  ${DIM}${GREY}'LiveSync' mode for near-real-time file updates.${R}"
+echo "  ${DIM}${GREY}Everyone enables 'LiveSync' mode in Obsidian for sub-second updates.${R}"
 echo ""
