@@ -5,17 +5,19 @@
 
 set -e
 
-# ── FILL THESE IN after running init-railway.sh ──────────────────────────────
-RAILWAY_URL="FILL_IN_AFTER_RAILWAY_DEPLOY"
-RAILWAY_API_KEY="FILL_IN_AFTER_RAILWAY_DEPLOY"
-RAILWAY_DEVICE_ID="FILL_IN_AFTER_RAILWAY_DEPLOY"
-FOLDER_ID="the-compendium"
-# Path to your existing vault — adjust if different
-VAULT_PATH="$HOME/Documents/dnd/The-Compendium"
-# ─────────────────────────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
+    source "$SCRIPT_DIR/.env"
+else
+    echo "ERROR: .env file not found. Copy .env.example to .env and fill in all values."
+    exit 1
+fi
 
-if [[ "$RAILWAY_URL" == FILL* ]]; then
-    echo "ERROR: Fill in RAILWAY_URL, RAILWAY_API_KEY, and RAILWAY_DEVICE_ID at the top of this script first."
+FOLDER_ID="${FOLDER_ID:-the-compendium}"
+VAULT_PATH="${VAULT_PATH:-$HOME/Documents/The-Compendium}"
+
+if [[ -z "$RAILWAY_URL" || -z "$RAILWAY_API_KEY" || -z "$RAILWAY_DEVICE_ID" ]]; then
+    echo "ERROR: RAILWAY_URL, RAILWAY_API_KEY, and RAILWAY_DEVICE_ID must all be set in .env"
     exit 1
 fi
 

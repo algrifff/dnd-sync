@@ -5,13 +5,19 @@
 
 set -e
 
-RAILWAY_URL="${1:-}"
-RAILWAY_API_KEY="${2:-}"
-FOLDER_ID="the-compendium"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
+    source "$SCRIPT_DIR/.env"
+else
+    echo "ERROR: .env file not found. Copy .env.example to .env and fill in RAILWAY_URL and RAILWAY_API_KEY."
+    exit 1
+fi
+
+FOLDER_ID="${FOLDER_ID:-the-compendium}"
 FOLDER_PATH="/var/syncthing/The-Compendium"
 
 if [[ -z "$RAILWAY_URL" || -z "$RAILWAY_API_KEY" ]]; then
-    echo "Usage: ./init-railway.sh <railway-url> <api-key>"
+    echo "ERROR: RAILWAY_URL and RAILWAY_API_KEY must be set in .env"
     exit 1
 fi
 
@@ -60,4 +66,4 @@ echo "  RAILWAY_DEVICE_ID = $DEVICE_ID"
 echo "  FOLDER_ID        = $FOLDER_ID"
 echo "========================================================"
 echo ""
-echo "Next: run setup-owner.sh on YOUR machine to connect your local vault."
+echo "Next: add RAILWAY_DEVICE_ID to your .env, then run setup-owner.sh."

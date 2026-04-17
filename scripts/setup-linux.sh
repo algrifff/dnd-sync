@@ -4,12 +4,17 @@
 
 set -e
 
-# ── CONFIG (filled in by vault owner) ─────────────────────────────────────────
-RAILWAY_URL="FILL_IN"         # e.g. https://compendium.up.railway.app
-RAILWAY_API_KEY="FILL_IN"     # Syncthing API key
-RAILWAY_DEVICE_ID="FILL_IN"   # Railway device ID
-FOLDER_ID="the-compendium"
-VAULT_PATH="$HOME/Documents/The-Compendium"
+# Load from .env if present (for local use), otherwise use hardcoded values below
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -f "$SCRIPT_DIR/../.env" ]] && source "$SCRIPT_DIR/../.env"
+[[ -f "$SCRIPT_DIR/.env" ]] && source "$SCRIPT_DIR/.env"
+
+# ── CONFIG — vault owner: fill these in before sending to friends ──────────────
+RAILWAY_URL="${RAILWAY_URL:-FILL_IN}"
+RAILWAY_API_KEY="${RAILWAY_API_KEY:-FILL_IN}"
+RAILWAY_DEVICE_ID="${RAILWAY_DEVICE_ID:-FILL_IN}"
+FOLDER_ID="${FOLDER_ID:-the-compendium}"
+VAULT_PATH="${VAULT_PATH:-$HOME/Documents/The-Compendium}"
 # ─────────────────────────────────────────────────────────────────────────────
 
 if [[ "$RAILWAY_URL" == "FILL_IN" ]]; then
