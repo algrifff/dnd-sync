@@ -2,6 +2,8 @@
 
 Live-synced Obsidian vault for D&D notes. Powered by Syncthing + Railway.
 
+> 🧪 **Testing a replacement backend on this branch.** See [`LIVESYNC_BETA.md`](LIVESYNC_BETA.md) for CouchDB + Obsidian LiveSync setup and the speed-test protocol. Everything below still describes the main-branch Syncthing flow.
+
 ---
 
 ## How it works

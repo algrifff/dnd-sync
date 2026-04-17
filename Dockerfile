@@ -1,16 +1,8 @@
-FROM syncthing/syncthing:latest
+FROM couchdb:3.4
 
-# Web UI / API
-EXPOSE 8384
-# Sync protocol (TCP + UDP)
-EXPOSE 22000/tcp
-EXPOSE 22000/udp
+# CORS + LiveSync tuning. Loaded from local.d *after* the default local.ini,
+# so values here override CouchDB defaults.
+COPY couchdb/local.ini /opt/couchdb/etc/local.d/10-livesync.ini
 
-ENV STNORESTART=yes
-ENV STNODEFAULTFOLDER=yes
-# STGUIAPIKEY is set via Railway environment variables — do not hardcode here
-
-CMD ["--home=/var/syncthing", \
-     "--no-browser", \
-     "--no-restart", \
-     "--gui-address=0.0.0.0:8384"]
+# CouchDB HTTP API / web UI
+EXPOSE 5984
