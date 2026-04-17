@@ -11,7 +11,6 @@ type DocStats = {
 type StatsProbe = () => DocStats[];
 
 declare global {
-  // eslint-disable-next-line no-var
   var __compendiumStatsProbe: StatsProbe | undefined;
 }
 
