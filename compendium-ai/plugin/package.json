@@ -4,6 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "echo 'plugin typecheck: scaffolded in Milestone 4'"
+    "build": "bun run esbuild.config.mjs --production",
+    "dev": "bun run esbuild.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@compendium/shared": "workspace:*",
+    "yjs": "^13.6.20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.24.0",
+    "obsidian": "^1.7.2"
   }
 }

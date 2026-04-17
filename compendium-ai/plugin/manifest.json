@@ -1,0 +1,9 @@
+{
+  "id": "compendium",
+  "name": "Compendium",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Real-time vault sync for The Compendium (D&D). Syncs markdown via Yjs + WebSocket; binaries via HTTP.",
+  "author": "Alex Griffiths",
+  "isDesktopOnly": false
+}
