@@ -55,10 +55,15 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
     installerKey: expected,
   });
 
-  return new Response(new Uint8Array(installer.body), {
+  // Copy into a fresh ArrayBuffer-backed Uint8Array so BlobPart accepts it.
+  const bytes = new Uint8Array(installer.body.byteLength);
+  bytes.set(installer.body);
+
+  return new Response(bytes, {
     status: 200,
     headers: {
       'Content-Type': installer.contentType,
+      'Content-Length': String(bytes.byteLength),
       'Content-Disposition': `attachment; filename="${installer.filename}"`,
       'Cache-Control': 'no-store',
     },

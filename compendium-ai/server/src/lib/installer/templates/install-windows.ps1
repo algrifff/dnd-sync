@@ -31,9 +31,36 @@ Write-Host "  $BOLD$GOLD" "T H E   C O M P E N D I U M$R"
 Write-Host "  $GREY" "Installing the real-time vault plugin...$R"
 
 # --- Install Obsidian if missing --------------------------------------------
+function Find-Obsidian {
+    $candidates = @(
+        "$env:LOCALAPPDATA\Obsidian\Obsidian.exe",
+        "$env:LOCALAPPDATA\Programs\Obsidian\Obsidian.exe",
+        "${env:ProgramFiles}\Obsidian\Obsidian.exe",
+        "${env:ProgramFiles(x86)}\Obsidian\Obsidian.exe"
+    )
+    foreach ($p in $candidates) { if (Test-Path $p) { return $p } }
+
+    foreach ($root in @("HKCU:\Software\Classes\obsidian\shell\open\command",
+                        "HKLM:\Software\Classes\obsidian\shell\open\command")) {
+        try {
+            $v = (Get-ItemProperty $root -ErrorAction Stop).'(default)'
+            if ($v -match '"([^"]+Obsidian\.exe)"') {
+                if (Test-Path $matches[1]) { return $matches[1] }
+            }
+        } catch {}
+    }
+    return $null
+}
+
 Step "Installing Obsidian"
-$obsidianExe = "$env:LOCALAPPDATA\Obsidian\Obsidian.exe"
-if (-not (Test-Path $obsidianExe)) {
+$obsidianExe = Find-Obsidian
+if ($obsidianExe) {
+    Ok "Obsidian already installed ($obsidianExe)."
+} elseif (Get-Command winget -ErrorAction SilentlyContinue) {
+    Info "Installing Obsidian via winget..."
+    winget install --id Obsidian.Obsidian --silent --accept-source-agreements --accept-package-agreements | Out-Null
+    Ok "Obsidian installed."
+} else {
     Info "Downloading Obsidian..."
     $installer     = "$env:TEMP\ObsidianSetup.exe"
     $latestRelease = Invoke-RestMethod "https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest"
@@ -41,12 +68,15 @@ if (-not (Test-Path $obsidianExe)) {
     if (-not $asset) {
         $asset = $latestRelease.assets | Where-Object { $_.name -like "*.exe" } | Select-Object -First 1
     }
+    if (-not $asset) {
+        Write-Host "    $RED" "!$R Could not find an Obsidian installer in the latest release."
+        Write-Host "      Install Obsidian manually from https://obsidian.md and rerun this script."
+        exit 1
+    }
     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installer
     Start-Process -FilePath $installer -Args "/S" -Wait
     Remove-Item $installer -ErrorAction SilentlyContinue
     Ok "Obsidian installed."
-} else {
-    Ok "Obsidian already installed."
 }
 
 # --- Prepare vault + plugin folder ------------------------------------------

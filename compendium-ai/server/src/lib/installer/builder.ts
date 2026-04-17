@@ -79,22 +79,17 @@ function buildWindowsBat(params: InstallerParams): string {
 }
 
 export function buildInstaller(os: OsTarget, params: InstallerParams): BuiltInstaller {
+  // Always serve as octet-stream: forces the browser to save the file using
+  // the Content-Disposition filename rather than guessing at a renderer.
+  const octet = 'application/octet-stream';
   switch (os) {
     case 'mac': {
       const body = Buffer.from(render('install-mac.sh', params), 'utf8');
-      return {
-        filename: 'compendium-mac.command',
-        contentType: 'application/x-sh; charset=utf-8',
-        body,
-      };
+      return { filename: 'compendium-mac.command', contentType: octet, body };
     }
     case 'linux': {
       const body = Buffer.from(render('install-linux.sh', params), 'utf8');
-      return {
-        filename: 'compendium-linux.sh',
-        contentType: 'application/x-sh; charset=utf-8',
-        body,
-      };
+      return { filename: 'compendium-linux.sh', contentType: octet, body };
     }
     case 'windows.ps1': {
       // PowerShell 5.1 needs a BOM to parse UTF-8 correctly.
@@ -102,16 +97,12 @@ export function buildInstaller(os: OsTarget, params: InstallerParams): BuiltInst
         Buffer.from([0xef, 0xbb, 0xbf]),
         Buffer.from(render('install-windows.ps1', params), 'utf8'),
       ]);
-      return {
-        filename: 'compendium-install.ps1',
-        contentType: 'text/plain; charset=utf-8',
-        body,
-      };
+      return { filename: 'compendium-install.ps1', contentType: octet, body };
     }
     case 'windows.bat': {
       return {
         filename: 'compendium-windows.bat',
-        contentType: 'application/bat; charset=utf-8',
+        contentType: octet,
         body: Buffer.from(buildWindowsBat(params), 'utf8'),
       };
     }
