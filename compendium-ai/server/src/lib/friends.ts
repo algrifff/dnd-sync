@@ -86,12 +86,21 @@ export function getFriendById(id: string): FriendWithToken | null {
   return { ...friendFromRow(row), token: row.token };
 }
 
-/** Returns true if the bearer token matches any non-revoked friend. */
+/**
+ * Returns true if the bearer token matches any non-revoked friend. Defensive:
+ * if the friends table doesn't exist yet (e.g. a partially-applied migration
+ * on a pre-v3 deployment), swallow the error and return false so the shared
+ * player_token path in auth.verifyToken stays operational.
+ */
 export function isFriendToken(token: string): boolean {
-  const row = getDb()
-    .query<{ cnt: number }, [string]>(
-      'SELECT COUNT(*) AS cnt FROM friends WHERE token = ? AND revoked_at IS NULL',
-    )
-    .get(token);
-  return (row?.cnt ?? 0) > 0;
+  try {
+    const row = getDb()
+      .query<{ cnt: number }, [string]>(
+        'SELECT COUNT(*) AS cnt FROM friends WHERE token = ? AND revoked_at IS NULL',
+      )
+      .get(token);
+    return (row?.cnt ?? 0) > 0;
+  } catch {
+    return false;
+  }
 }
