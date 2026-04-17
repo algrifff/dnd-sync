@@ -12,16 +12,35 @@ import { deleteBinary, fetchInventory, getBinary, putBinary } from './http';
 import type { HttpConfig } from './http';
 
 const MIME: Record<string, string> = {
+  // images
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
   '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
-  '.pdf': 'application/pdf',
-  '.mp3': 'audio/mpeg',
+  '.bmp': 'image/bmp',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
+  '.tiff': 'image/tiff',
+  '.ico': 'image/vnd.microsoft.icon',
+  '.avif': 'image/avif',
+  // video
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.avi': 'video/x-msvideo',
+  '.mkv': 'video/x-matroska',
+  '.m4v': 'video/x-m4v',
+  // audio
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+  '.flac': 'audio/flac',
+  '.aac': 'audio/aac',
+  // docs
+  '.pdf': 'application/pdf',
 };
 
 function isBinary(path: string): boolean {
@@ -66,7 +85,7 @@ export class BinarySync {
       }),
     );
 
-    await this.pullMissing();
+    await this.reconcile();
   }
 
   stop(): void {
@@ -75,9 +94,15 @@ export class BinarySync {
     this.started = false;
   }
 
-  // ── Pulls ───────────────────────────────────────────────────────────────
+  // ── Two-way bootstrap ──────────────────────────────────────────────────
+  //
+  // On startup we need to reconcile both directions so that binary files
+  // that existed before the plugin was enabled end up on the server, and
+  // binaries uploaded from other clients land on disk here. Both vault
+  // events (create/modify/delete) only fire for changes that happen after
+  // the plugin is running, so this is the bootstrapping step.
 
-  private async pullMissing(): Promise<void> {
+  private async reconcile(): Promise<void> {
     let inventory;
     try {
       inventory = await fetchInventory(this.cfg);
@@ -86,6 +111,9 @@ export class BinarySync {
       return;
     }
 
+    const serverPaths = new Set(inventory.binaryFiles.map((f) => f.path));
+
+    // Server → local: pull anything the server knows about that's missing here.
     for (const entry of inventory.binaryFiles) {
       const existing = this.app.vault.getAbstractFileByPath(entry.path);
       if (existing) continue;
@@ -96,6 +124,18 @@ export class BinarySync {
         await this.app.vault.createBinary(entry.path, data);
       } catch (err) {
         console.error('[compendium] failed to pull binary', entry.path, err);
+      }
+    }
+
+    // Local → server: push anything we have that the server doesn't.
+    const localBinaries = this.app.vault.getFiles().filter((f) => isBinary(f.path));
+    for (const file of localBinaries) {
+      if (serverPaths.has(file.path)) continue;
+      try {
+        const data = await this.app.vault.readBinary(file);
+        await putBinary(this.cfg, file.path, data, mimeFor(file.path));
+      } catch (err) {
+        console.error('[compendium] initial upload failed', file.path, err);
       }
     }
   }
