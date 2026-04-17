@@ -6,7 +6,8 @@
   "scripts": {
     "typecheck": "bun --filter '*' typecheck",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "release": "bun installer/build-release.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.1.10",
