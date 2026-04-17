@@ -1,36 +1,14 @@
 #!/usr/bin/env bash
 # The Compendium — Linux Setup
 # Run: bash setup-linux.sh
+# Or use the one-liner from the Releases page.
 
 set -e
-
-# Load from .env if present (owner use), otherwise fall back to hardcoded values
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[[ -f "$SCRIPT_DIR/../.env" ]] && source "$SCRIPT_DIR/../.env"
-[[ -f "$SCRIPT_DIR/.env"    ]] && source "$SCRIPT_DIR/.env"
-
-# ── CONFIG (vault owner: fill these in before sending to friends) ─────────────
-RAILWAY_URL="${RAILWAY_URL:-FILL_IN}"
-RAILWAY_API_KEY="${RAILWAY_API_KEY:-FILL_IN}"
-RAILWAY_DEVICE_ID="${RAILWAY_DEVICE_ID:-FILL_IN}"
-FOLDER_ID="${FOLDER_ID:-the-compendium}"
-VAULT_PATH="${VAULT_PATH:-$HOME/Documents/The-Compendium}"
-LOCAL_ST_API_KEY="compendium-setup-key"
-# ─────────────────────────────────────────────────────────────────────────────
-
-if [[ "$RAILWAY_URL" == "FILL_IN" ]]; then
-    echo "ERROR: This script hasn't been configured. Ask the vault owner for an updated version."
-    exit 1
-fi
+source /dev/stdin <<< "$(curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/_wizard.sh 2>/dev/null || cat "$(dirname "${BASH_SOURCE[0]}")/_wizard.sh")"
 
 print_step() { echo ""; echo "[$1/5] $2"; }
 print_ok()   { echo "  ✓ $1"; }
 print_info() { echo "  $1"; }
-
-echo ""
-echo "==============================="
-echo "  The Compendium — Sync Setup  "
-echo "==============================="
 
 # ── 1. Install Obsidian ───────────────────────────────────────────────────────
 print_step 1 "Checking Obsidian..."
@@ -50,7 +28,6 @@ print(url)
     mkdir -p "$HOME/.local/bin"
     curl -L "$OBSIDIAN_URL" -o "$OBSIDIAN_BIN"
     chmod +x "$OBSIDIAN_BIN"
-
     mkdir -p "$HOME/.local/share/applications"
     cat > "$HOME/.local/share/applications/obsidian.desktop" << EOF
 [Desktop Entry]
@@ -62,7 +39,7 @@ Categories=Office;
 MimeType=x-scheme-handler/obsidian;
 EOF
     xdg-mime default obsidian.desktop x-scheme-handler/obsidian 2>/dev/null || true
-    print_ok "Obsidian installed to $OBSIDIAN_BIN"
+    print_ok "Obsidian installed."
 fi
 
 # ── 2. Install Syncthing ──────────────────────────────────────────────────────
@@ -102,13 +79,12 @@ print_step 3 "Creating vault folder..."
 mkdir -p "$VAULT_PATH"
 print_ok "Vault folder: $VAULT_PATH"
 
-# ── 4. Start Syncthing with known API key and configure ───────────────────────
-print_step 4 "Starting Syncthing..."
+# ── 4. Start Syncthing and configure ─────────────────────────────────────────
+print_step 4 "Connecting to sync server..."
 ST_DATA="$HOME/.local/share/syncthing"
 mkdir -p "$ST_DATA"
 LOCAL_API="http://localhost:8384"
 
-# Kill any existing instance so we start with a known API key
 if pgrep -x syncthing > /dev/null 2>&1; then
     print_info "Stopping existing Syncthing instance..."
     pkill -x syncthing || true
@@ -116,74 +92,53 @@ if pgrep -x syncthing > /dev/null 2>&1; then
 fi
 
 STGUIAPIKEY="$LOCAL_ST_API_KEY" syncthing \
-    --no-browser \
-    --home="$ST_DATA" \
-    --gui-address="127.0.0.1:8384" \
+    --no-browser --home="$ST_DATA" --gui-address="127.0.0.1:8384" \
     > /tmp/syncthing-setup.log 2>&1 &
 
-print_info "Waiting for Syncthing API..."
+print_info "Waiting for Syncthing to start..."
 for i in {1..30}; do
     curl -sf -H "X-API-Key: $LOCAL_ST_API_KEY" "$LOCAL_API/rest/system/ping" > /dev/null 2>&1 && break
     sleep 2
 done
 if ! curl -sf -H "X-API-Key: $LOCAL_ST_API_KEY" "$LOCAL_API/rest/system/ping" > /dev/null 2>&1; then
-    echo "ERROR: Syncthing failed to start. Log:"; cat /tmp/syncthing-setup.log; exit 1
+    echo "ERROR: Syncthing failed to start."; cat /tmp/syncthing-setup.log; exit 1
 fi
 
 LOCAL_DEVICE_ID=$(curl -s -H "X-API-Key: $LOCAL_ST_API_KEY" "$LOCAL_API/rest/system/status" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['myID'])")
-print_info "Your device ID: $LOCAL_DEVICE_ID"
 
-# Add Railway device locally
 curl -sf -X POST "$LOCAL_API/rest/config/devices" \
-    -H "X-API-Key: $LOCAL_ST_API_KEY" \
-    -H "Content-Type: application/json" \
+    -H "X-API-Key: $LOCAL_ST_API_KEY" -H "Content-Type: application/json" \
     -d "{\"deviceID\":\"$RAILWAY_DEVICE_ID\",\"name\":\"The Compendium Server\",\"addresses\":[\"dynamic\"],\"autoAcceptFolders\":false}" \
     > /dev/null || true
 
-# Add vault folder locally
 curl -sf -X POST "$LOCAL_API/rest/config/folders" \
-    -H "X-API-Key: $LOCAL_ST_API_KEY" \
-    -H "Content-Type: application/json" \
-    -d "{
-        \"id\": \"$FOLDER_ID\",
-        \"label\": \"The Compendium\",
-        \"path\": \"$VAULT_PATH\",
-        \"type\": \"sendreceive\",
-        \"devices\": [{\"deviceID\": \"$RAILWAY_DEVICE_ID\"}],
-        \"rescanIntervalS\": 30,
-        \"fsWatcherEnabled\": true
-    }" \
+    -H "X-API-Key: $LOCAL_ST_API_KEY" -H "Content-Type: application/json" \
+    -d "{\"id\":\"$FOLDER_ID\",\"label\":\"The Compendium\",\"path\":\"$VAULT_PATH\",\"type\":\"sendreceive\",\"devices\":[{\"deviceID\":\"$RAILWAY_DEVICE_ID\"}],\"rescanIntervalS\":30,\"fsWatcherEnabled\":true}" \
     > /dev/null || true
 
-# Register with Railway
 curl -sfL -X POST "$RAILWAY_URL/rest/config/devices" \
-    -H "X-API-Key: $RAILWAY_API_KEY" \
-    -H "Content-Type: application/json" \
+    -H "X-API-Key: $RAILWAY_API_KEY" -H "Content-Type: application/json" \
     -d "{\"deviceID\":\"$LOCAL_DEVICE_ID\",\"name\":\"$(hostname)\",\"addresses\":[\"dynamic\"],\"autoAcceptFolders\":false}" \
-    > /dev/null || print_info "Note: Could not register with server — vault owner may need to approve your device."
+    > /dev/null || print_info "Note: Could not register — ask your DM to approve your device."
 
-# Add this device to Railway's vault folder (with duplicate guard)
 FOLDER_CFG=$(curl -sL -H "X-API-Key: $RAILWAY_API_KEY" "$RAILWAY_URL/rest/config/folders/$FOLDER_ID")
 UPDATED=$(echo "$FOLDER_CFG" | python3 -c "
 import sys, json
 cfg = json.load(sys.stdin)
-ids = [d['deviceID'] for d in cfg['devices']]
-if '$LOCAL_DEVICE_ID' not in ids:
+if '$LOCAL_DEVICE_ID' not in [d['deviceID'] for d in cfg['devices']]:
     cfg['devices'].append({'deviceID': '$LOCAL_DEVICE_ID', 'encryptionPassword': ''})
 print(json.dumps(cfg))
 ")
 curl -sfL -X PUT "$RAILWAY_URL/rest/config/folders/$FOLDER_ID" \
-    -H "X-API-Key: $RAILWAY_API_KEY" \
-    -H "Content-Type: application/json" \
+    -H "X-API-Key: $RAILWAY_API_KEY" -H "Content-Type: application/json" \
     -d "$UPDATED" > /dev/null || true
 
 print_ok "Connected to sync server."
 
-# ── 5. Auto-start Syncthing via systemd ──────────────────────────────────────
+# ── 5. Auto-start via systemd ─────────────────────────────────────────────────
 print_step 5 "Setting Syncthing to run on login..."
 if command -v systemctl &>/dev/null && systemctl --user status > /dev/null 2>&1; then
-    # Try enabling the packaged unit first, then fall back to writing our own
     if ! systemctl --user enable --now syncthing 2>/dev/null; then
         mkdir -p "$HOME/.config/systemd/user"
         cat > "$HOME/.config/systemd/user/syncthing.service" << EOF
@@ -203,8 +158,7 @@ EOF
     fi
     print_ok "Syncthing will start automatically on login."
 else
-    print_info "No systemd user session found. Start Syncthing manually with:"
-    print_info "  syncthing --no-browser --home=$ST_DATA"
+    print_info "No systemd session found. Start manually with: syncthing --no-browser"
 fi
 
 echo ""
@@ -215,7 +169,5 @@ echo ""
 echo "The vault is syncing in the background."
 echo "It may take a few minutes to download everything on first run."
 echo ""
-echo "Your vault will be at:"
-echo "  $VAULT_PATH"
-echo ""
+echo "Your vault: $VAULT_PATH"
 echo "In Obsidian: File > Open Vault > select the folder above."

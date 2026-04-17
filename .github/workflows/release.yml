@@ -45,6 +45,5 @@ jobs:
           files: |
             scripts/setup-windows.bat
             scripts/setup-windows.ps1
-            scripts/setup-mac.command
             scripts/setup-linux.sh
           fail_on_unmatched_files: true

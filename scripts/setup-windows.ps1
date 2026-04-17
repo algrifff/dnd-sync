@@ -1,33 +1,56 @@
 # The Compendium — Windows Setup
-# Right-click and choose "Run with PowerShell"
-# Or: powershell -ExecutionPolicy Bypass -File setup-windows.ps1
+# Double-click setup-windows.bat to run this.
 
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 $ErrorActionPreference = "Stop"
-
-# ── CONFIG (vault owner: fill these in before sending to friends) ─────────────
-$RAILWAY_URL       = "FILL_IN"   # e.g. https://compendium.up.railway.app
-$RAILWAY_API_KEY   = "FILL_IN"   # STGUIAPIKEY value from Railway
-$RAILWAY_DEVICE_ID = "FILL_IN"   # from init-railway.sh output
-$FOLDER_ID         = "the-compendium"
-$VAULT_PATH        = "$env:USERPROFILE\Documents\The-Compendium"
-$LOCAL_ST_API_KEY  = "compendium-setup-key"
-# ─────────────────────────────────────────────────────────────────────────────
-
-if ($RAILWAY_URL -eq "FILL_IN") {
-    Write-Host "ERROR: This script hasn't been configured. Ask the vault owner for an updated version." -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
-}
 
 function Write-Step($n, $msg) { Write-Host ""; Write-Host "[$n/5] $msg" -ForegroundColor Cyan }
 function Write-OK($msg)       { Write-Host "  OK: $msg" -ForegroundColor Green }
 function Write-Info($msg)     { Write-Host "  $msg" -ForegroundColor Gray }
 
+$FOLDER_ID        = "the-compendium"
+$VAULT_PATH       = "$env:USERPROFILE\Documents\The-Compendium"
+$LOCAL_ST_API_KEY = "compendium-setup-key"
+
+# ── Wizard ────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "===============================" -ForegroundColor Magenta
 Write-Host "  The Compendium — Sync Setup  " -ForegroundColor Magenta
 Write-Host "===============================" -ForegroundColor Magenta
+Write-Host ""
+Write-Host "This will install Obsidian and set up the shared vault on your machine."
+Write-Host "You'll need two things from your DM before continuing."
+Write-Host ""
+
+Write-Host "Step 1 of 2 — Server address" -ForegroundColor Yellow
+Write-Host "  This looks like: https://something.up.railway.app"
+$RAILWAY_URL = Read-Host "  Enter server address"
+$RAILWAY_URL = $RAILWAY_URL.TrimEnd("/")
+
+Write-Host ""
+Write-Host "Step 2 of 2 — Join key" -ForegroundColor Yellow
+Write-Host "  Your DM should have sent you a join key."
+$RAILWAY_API_KEY = Read-Host "  Enter join key"
+
+Write-Host ""
+Write-Host "Verifying connection..." -ForegroundColor Gray
+try {
+    Invoke-RestMethod -Uri "$RAILWAY_URL/rest/system/ping" `
+        -Headers @{"X-API-Key" = $RAILWAY_API_KEY} -ErrorAction Stop | Out-Null
+} catch {
+    Write-Host ""
+    Write-Host "ERROR: Could not connect to the sync server." -ForegroundColor Red
+    Write-Host "  Check the server address and join key and try again." -ForegroundColor Red
+    Read-Host "Press Enter to exit"; exit 1
+}
+
+# Get Railway device ID
+$railwayStatus = Invoke-RestMethod -Uri "$RAILWAY_URL/rest/system/status" `
+    -Headers @{"X-API-Key" = $RAILWAY_API_KEY}
+$RAILWAY_DEVICE_ID = $railwayStatus.myID
+
+Write-Host "  Connected!" -ForegroundColor Green
+Write-Host ""
 
 # ── 1. Install Obsidian ───────────────────────────────────────────────────────
 Write-Step 1 "Checking Obsidian..."
@@ -78,9 +101,8 @@ New-Item -ItemType Directory -Force -Path $VAULT_PATH | Out-Null
 Write-OK "Vault folder: $VAULT_PATH"
 
 # ── 4. Start Syncthing with known API key and configure ───────────────────────
-Write-Step 4 "Starting Syncthing..."
+Write-Step 4 "Connecting to sync server..."
 
-# Kill any existing instance so we can start with a known API key
 $running = Get-Process syncthing -ErrorAction SilentlyContinue
 if ($running) {
     Write-Info "Stopping existing Syncthing instance..."
@@ -95,7 +117,7 @@ Start-Process -FilePath $stExe `
     -WindowStyle Hidden
 Remove-Item Env:\STGUIAPIKEY -ErrorAction SilentlyContinue
 
-Write-Info "Waiting for Syncthing API..."
+Write-Info "Waiting for Syncthing to start..."
 $localApi = "http://localhost:8384"
 $headers  = @{ "X-API-Key" = $LOCAL_ST_API_KEY }
 $ready = $false
@@ -110,19 +132,17 @@ if (-not $ready) {
     Read-Host "Press Enter to exit"; exit 1
 }
 
-# Get local device ID
-$status = Invoke-RestMethod -Uri "$localApi/rest/system/status" -Headers $headers
+$status        = Invoke-RestMethod -Uri "$localApi/rest/system/status" -Headers $headers
 $localDeviceId = $status.myID
-Write-Info "Your device ID: $localDeviceId"
 
 # Add Railway as a device locally
 try {
     Invoke-RestMethod -Uri "$localApi/rest/config/devices" -Method Post -Headers $headers `
         -ContentType "application/json" `
         -Body (@{
-            deviceID         = $RAILWAY_DEVICE_ID
-            name             = "The Compendium Server"
-            addresses        = @("dynamic")
+            deviceID          = $RAILWAY_DEVICE_ID
+            name              = "The Compendium Server"
+            addresses         = @("dynamic")
             autoAcceptFolders = $false
         } | ConvertTo-Json) | Out-Null
 } catch { }
@@ -148,16 +168,16 @@ try {
     Invoke-RestMethod -Uri "$RAILWAY_URL/rest/config/devices" -Method Post -Headers $railwayHeaders `
         -ContentType "application/json" `
         -Body (@{
-            deviceID         = $localDeviceId
-            name             = $env:COMPUTERNAME
-            addresses        = @("dynamic")
+            deviceID          = $localDeviceId
+            name              = $env:COMPUTERNAME
+            addresses         = @("dynamic")
             autoAcceptFolders = $false
         } | ConvertTo-Json) | Out-Null
 } catch { }
 
-# Add this device to Railway's vault folder (with duplicate guard)
+# Add this device to Railway's vault folder (duplicate-safe)
 try {
-    $folderCfg = Invoke-RestMethod -Uri "$RAILWAY_URL/rest/config/folders/$FOLDER_ID" -Headers $railwayHeaders
+    $folderCfg    = Invoke-RestMethod -Uri "$RAILWAY_URL/rest/config/folders/$FOLDER_ID" -Headers $railwayHeaders
     $alreadyAdded = $folderCfg.devices | Where-Object { $_.deviceID -eq $localDeviceId }
     if (-not $alreadyAdded) {
         $folderCfg.devices += [PSCustomObject]@{ deviceID = $localDeviceId; encryptionPassword = "" }
@@ -168,8 +188,8 @@ try {
         -Body ($folderCfg | ConvertTo-Json -Depth 10) | Out-Null
     Write-OK "Registered with sync server."
 } catch {
-    Write-Host "  Note: Could not auto-register with server — $_" -ForegroundColor Yellow
-    Write-Host "  The vault owner can add you manually via the Railway Syncthing UI." -ForegroundColor Yellow
+    Write-Host "  Note: Could not register automatically — $_" -ForegroundColor Yellow
+    Write-Host "  Ask your DM to approve your device in the sync dashboard." -ForegroundColor Yellow
 }
 
 # ── 5. Auto-start Syncthing on login ─────────────────────────────────────────
