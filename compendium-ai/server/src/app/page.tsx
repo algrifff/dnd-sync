@@ -104,8 +104,25 @@ export default function Dashboard() {
         </div>
       )}
 
-      {stats && <StatsView stats={stats} />}
-      {token && <InstallersSection token={token} />}
+      <Tabs
+        tabs={[
+          {
+            id: 'overview',
+            label: 'Overview',
+            render: () => (
+              <>
+                {stats && <StatsTiles stats={stats} />}
+                <InstallersSection token={token} />
+              </>
+            ),
+          },
+          {
+            id: 'docs',
+            label: 'Docs',
+            render: () => (stats ? <DocsView stats={stats} /> : null),
+          },
+        ]}
+      />
 
       <footer className="mt-10 flex items-center gap-3 text-xs text-neutral-500">
         <button
@@ -118,6 +135,36 @@ export default function Dashboard() {
         <span>polling every {POLL_MS / 1000}s</span>
       </footer>
     </main>
+  );
+}
+
+function Tabs({
+  tabs,
+}: {
+  tabs: Array<{ id: string; label: string; render: () => React.ReactNode }>;
+}) {
+  const [active, setActive] = useState(tabs[0]?.id ?? '');
+  const current = tabs.find((t) => t.id === active) ?? tabs[0];
+  return (
+    <div>
+      <div className="flex border-b border-neutral-800 mb-4">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setActive(t.id)}
+            className={
+              'px-4 py-2 text-sm border-b-2 -mb-px transition ' +
+              (active === t.id
+                ? 'border-amber-400 text-amber-400'
+                : 'border-transparent text-neutral-400 hover:text-neutral-200')
+            }
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div>{current?.render()}</div>
+    </div>
   );
 }
 
@@ -200,43 +247,89 @@ function InstallersSection({ token }: { token: string }) {
 
   if (!installerKey || !origin) return null;
 
-  const macCmd = `curl -fsSL "${origin}/install/mac?key=${installerKey}" | bash`;
-  const linuxCmd = `curl -fsSL "${origin}/install/linux?key=${installerKey}" | bash`;
-  const windowsUrl = `${origin}/install/windows.bat?key=${installerKey}`;
+  return (
+    <div className="mt-6 space-y-4">
+      <InstallerRows
+        title="Shared installers"
+        subtitle="Use these for quick tests — any friend can run them."
+        installerKey={installerKey}
+        origin={origin}
+        onRotate={rotate}
+        copy={copy}
+        justCopied={justCopied}
+      />
+      <FriendsPanel
+        token={token}
+        installerKey={installerKey}
+        origin={origin}
+        copy={copy}
+        justCopied={justCopied}
+      />
+    </div>
+  );
+}
 
+type CopyFn = (label: string, value: string) => void;
+
+function installerUrlsFor(origin: string, installerKey: string, friendId?: string): {
+  mac: string;
+  linux: string;
+  windows: string;
+} {
+  const q = (path: string): string => {
+    const params = new URLSearchParams({ key: installerKey });
+    if (friendId) params.set('friend', friendId);
+    return `${origin}${path}?${params.toString()}`;
+  };
+  return {
+    mac: `curl -fsSL "${q('/install/mac')}" | bash`,
+    linux: `curl -fsSL "${q('/install/linux')}" | bash`,
+    windows: q('/install/windows.bat'),
+  };
+}
+
+function InstallerRows({
+  title,
+  subtitle,
+  installerKey,
+  origin,
+  onRotate,
+  friendId,
+  copy,
+  justCopied,
+}: {
+  title: string;
+  subtitle: string;
+  installerKey: string;
+  origin: string;
+  onRotate?: () => void;
+  friendId?: string;
+  copy: CopyFn;
+  justCopied: string | null;
+}) {
+  const urls = installerUrlsFor(origin, installerKey, friendId);
+  const prefix = friendId ? `${friendId}:` : 'shared:';
   const rows = [
-    {
-      label: 'Mac',
-      hint: 'Paste into Terminal (Cmd+Space → "Terminal"). Bypasses Gatekeeper.',
-      value: macCmd,
-    },
-    {
-      label: 'Linux',
-      hint: 'Paste into any terminal.',
-      value: linuxCmd,
-    },
-    {
-      label: 'Windows',
-      hint: 'Open this URL in a browser — it downloads compendium-windows.bat. Double-click to run.',
-      value: windowsUrl,
-    },
+    { label: 'Mac', hint: 'Paste into Terminal.', value: urls.mac },
+    { label: 'Linux', hint: 'Paste into any terminal.', value: urls.linux },
+    { label: 'Windows', hint: 'Open in a browser → downloads .bat → double-click.', value: urls.windows },
   ];
 
   return (
-    <section className="mt-6 rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+    <section className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
       <div className="flex items-baseline justify-between mb-3">
-        <h2 className="text-sm font-semibold text-neutral-300">Friend installers</h2>
-        <button
-          onClick={rotate}
-          className="text-xs text-neutral-400 hover:text-amber-400"
-          title="Invalidate current commands + URL"
-        >
-          rotate key
-        </button>
+        <h2 className="text-sm font-semibold text-neutral-300">{title}</h2>
+        {onRotate && (
+          <button
+            onClick={onRotate}
+            className="text-xs text-neutral-400 hover:text-amber-400"
+            title="Invalidate all install URLs"
+          >
+            rotate key
+          </button>
+        )}
       </div>
-      <p className="text-xs text-neutral-500 mb-3">
-        Share the right command per friend. Rotate the key if any leaks.
-      </p>
+      <p className="text-xs text-neutral-500 mb-3">{subtitle}</p>
       <ul className="space-y-3">
         {rows.map((r) => (
           <li key={r.label}>
@@ -246,10 +339,10 @@ function InstallersSection({ token }: { token: string }) {
                 {r.value}
               </code>
               <button
-                onClick={() => copy(r.label, r.value)}
+                onClick={() => copy(`${prefix}${r.label}`, r.value)}
                 className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-amber-500 hover:text-amber-400 shrink-0"
               >
-                {justCopied === r.label ? 'copied' : 'copy'}
+                {justCopied === `${prefix}${r.label}` ? 'copied' : 'copy'}
               </button>
             </div>
             <div className="text-xs text-neutral-500 mt-1 ml-[4.5rem]">{r.hint}</div>
@@ -260,7 +353,152 @@ function InstallersSection({ token }: { token: string }) {
   );
 }
 
-function StatsView({ stats }: { stats: Stats }) {
+type Friend = {
+  id: string;
+  name: string;
+  createdAt: number;
+  revokedAt: number | null;
+};
+
+function FriendsPanel({
+  token,
+  installerKey,
+  origin,
+  copy,
+  justCopied,
+}: {
+  token: string;
+  installerKey: string;
+  origin: string;
+  copy: CopyFn;
+  justCopied: string | null;
+}) {
+  const [friends, setFriends] = useState<Friend[] | null>(null);
+  const [newName, setNewName] = useState('');
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const res = await fetch('/api/friends', {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+    if (!res.ok) return;
+    const body = (await res.json()) as { friends: Friend[] };
+    setFriends(body.friends);
+  }, [token]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const add = useCallback(async () => {
+    const name = newName.trim();
+    if (!name) return;
+    const res = await fetch('/api/friends', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) return;
+    setNewName('');
+    await load();
+  }, [newName, token, load]);
+
+  const revoke = useCallback(
+    async (id: string) => {
+      if (!confirm('Revoke this friend? They\'ll be disconnected.')) return;
+      const res = await fetch(`/api/friends/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      await load();
+    },
+    [token, load],
+  );
+
+  return (
+    <section className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+      <h2 className="text-sm font-semibold text-neutral-300 mb-1">Friends (per-person tokens)</h2>
+      <p className="text-xs text-neutral-500 mb-3">
+        Each friend has their own token — revoke one without affecting anyone else.
+      </p>
+
+      <form
+        onSubmit={(e) => { e.preventDefault(); void add(); }}
+        className="flex gap-2 mb-4"
+      >
+        <input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder="Ben"
+          className="flex-1 rounded-md bg-neutral-950 border border-neutral-700 px-3 py-1.5 text-sm outline-none focus:border-neutral-500"
+        />
+        <button
+          type="submit"
+          className="text-sm px-3 py-1.5 rounded-md bg-amber-500 text-neutral-950 font-medium hover:bg-amber-400 disabled:opacity-50"
+          disabled={!newName.trim()}
+        >
+          Add friend
+        </button>
+      </form>
+
+      {friends === null ? (
+        <div className="text-sm text-neutral-500">loading…</div>
+      ) : friends.length === 0 ? (
+        <div className="text-sm text-neutral-500">No friends yet.</div>
+      ) : (
+        <ul className="divide-y divide-neutral-800">
+          {friends.map((f) => {
+            const revoked = f.revokedAt !== null;
+            const isOpen = expanded === f.id;
+            return (
+              <li key={f.id} className="py-2">
+                <div className="flex items-center gap-3">
+                  <span className={'flex-1 text-sm ' + (revoked ? 'line-through text-neutral-500' : '')}>
+                    {f.name}
+                  </span>
+                  <span className="text-xs text-neutral-500">
+                    {revoked ? `revoked ${fmtAgo(f.revokedAt!)}` : fmtAgo(f.createdAt)}
+                  </span>
+                  {!revoked && (
+                    <>
+                      <button
+                        onClick={() => setExpanded(isOpen ? null : f.id)}
+                        className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-amber-500 hover:text-amber-400"
+                      >
+                        {isOpen ? 'hide' : 'URLs'}
+                      </button>
+                      <button
+                        onClick={() => void revoke(f.id)}
+                        className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-red-500 hover:text-red-400"
+                      >
+                        revoke
+                      </button>
+                    </>
+                  )}
+                </div>
+                {isOpen && !revoked && (
+                  <div className="mt-2">
+                    <InstallerRows
+                      title={`For ${f.name}`}
+                      subtitle="These install with that friend's personal token."
+                      installerKey={installerKey}
+                      origin={origin}
+                      friendId={f.id}
+                      copy={copy}
+                      justCopied={justCopied}
+                    />
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function StatsTiles({ stats }: { stats: Stats }) {
   const tiles = useMemo(
     () => [
       { label: 'Uptime', value: fmtUptime(stats.uptimeSeconds) },
@@ -274,52 +512,54 @@ function StatsView({ stats }: { stats: Stats }) {
   );
 
   return (
-    <div className="space-y-6">
-      <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {tiles.map((t) => (
-          <div key={t.label} className="rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-3">
-            <div className="text-xs uppercase tracking-wide text-neutral-500">{t.label}</div>
-            <div className={`mt-1 text-xl font-semibold ${t.emphasis ? 'text-amber-400' : ''}`}>
-              {t.value}
-            </div>
-            {t.hint && <div className="text-xs text-neutral-500 mt-0.5">{t.hint}</div>}
+    <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      {tiles.map((t) => (
+        <div key={t.label} className="rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-3">
+          <div className="text-xs uppercase tracking-wide text-neutral-500">{t.label}</div>
+          <div className={`mt-1 text-xl font-semibold ${t.emphasis ? 'text-amber-400' : ''}`}>
+            {t.value}
           </div>
-        ))}
-      </section>
-
-      <section className="grid md:grid-cols-2 gap-6">
-        <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-          <h2 className="text-sm font-semibold text-neutral-300 mb-3">Active docs</h2>
-          {stats.connections.byDoc.length === 0 ? (
-            <div className="text-sm text-neutral-500">No clients connected.</div>
-          ) : (
-            <ul className="space-y-1">
-              {stats.connections.byDoc.map((d) => (
-                <li key={d.path} className="flex justify-between text-sm font-mono">
-                  <span className="truncate mr-3">{d.path}</span>
-                  <span className="text-amber-400">{d.connections}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+          {t.hint && <div className="text-xs text-neutral-500 mt-0.5">{t.hint}</div>}
         </div>
+      ))}
+    </section>
+  );
+}
 
-        <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-          <h2 className="text-sm font-semibold text-neutral-300 mb-3">Recently updated</h2>
-          {stats.recentDocs.length === 0 ? (
-            <div className="text-sm text-neutral-500">No docs yet.</div>
-          ) : (
-            <ul className="space-y-1">
-              {stats.recentDocs.map((d) => (
-                <li key={d.path} className="flex justify-between text-sm font-mono">
-                  <span className="truncate mr-3">{d.path}</span>
-                  <span className="text-neutral-500">{fmtAgo(d.updatedAt)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </section>
-    </div>
+function DocsView({ stats }: { stats: Stats }) {
+  return (
+    <section className="grid md:grid-cols-2 gap-6">
+      <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+        <h2 className="text-sm font-semibold text-neutral-300 mb-3">Active docs</h2>
+        {stats.connections.byDoc.length === 0 ? (
+          <div className="text-sm text-neutral-500">No clients connected.</div>
+        ) : (
+          <ul className="space-y-1">
+            {stats.connections.byDoc.map((d) => (
+              <li key={d.path} className="flex justify-between text-sm font-mono">
+                <span className="truncate mr-3">{d.path}</span>
+                <span className="text-amber-400">{d.connections}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+        <h2 className="text-sm font-semibold text-neutral-300 mb-3">Recently updated</h2>
+        {stats.recentDocs.length === 0 ? (
+          <div className="text-sm text-neutral-500">No docs yet.</div>
+        ) : (
+          <ul className="space-y-1">
+            {stats.recentDocs.map((d) => (
+              <li key={d.path} className="flex justify-between text-sm font-mono">
+                <span className="truncate mr-3">{d.path}</span>
+                <span className="text-neutral-500">{fmtAgo(d.updatedAt)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
   );
 }

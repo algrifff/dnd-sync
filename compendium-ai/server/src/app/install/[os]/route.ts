@@ -8,6 +8,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import { getConfigValue } from '@/lib/config';
+import { getFriendById } from '@/lib/friends';
 import { buildInstaller, type OsTarget } from '@/lib/installer/builder';
 
 export const dynamic = 'force-dynamic';
@@ -49,9 +50,21 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
     return new Response('invalid or missing installer key', { status: 403 });
   }
 
+  // Optional friend override: each named friend has their own token so
+  // revocation is per-person. Falls back to the shared player_token.
+  const friendId = url.searchParams.get('friend');
+  let playerToken = getConfigValue('player_token');
+  if (friendId) {
+    const friend = getFriendById(friendId);
+    if (!friend) {
+      return new Response('friend not found or revoked', { status: 404 });
+    }
+    playerToken = friend.token;
+  }
+
   const installer = buildInstaller(os, {
     serverUrl: resolveServerUrl(req),
-    playerToken: getConfigValue('player_token'),
+    playerToken,
     installerKey: expected,
   });
 

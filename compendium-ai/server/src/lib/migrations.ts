@@ -64,6 +64,21 @@ const MIGRATIONS: readonly Migration[] = [
       ) WITHOUT ROWID;
     `,
   },
+  {
+    version: 3,
+    description: 'friends: per-player named tokens with revocation',
+    sql: `
+      CREATE TABLE friends (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        token      TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL,
+        revoked_at INTEGER
+      ) WITHOUT ROWID;
+
+      CREATE INDEX friends_active ON friends(revoked_at) WHERE revoked_at IS NULL;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {
