@@ -67,16 +67,18 @@ if [[ -z "$ST_BIN" ]]; then
     VERSION=$(curl -s https://api.github.com/repos/syncthing/syncthing/releases/latest \
         | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
     FNAME="syncthing-macos-${ST_ARCH}-${VERSION}"
-    URL="https://github.com/syncthing/syncthing/releases/download/${VERSION}/${FNAME}.tar.gz"
-    if ! curl -fL "$URL" -o /tmp/syncthing.tar.gz; then
+    # macOS assets are distributed as .zip
+    URL="https://github.com/syncthing/syncthing/releases/download/${VERSION}/${FNAME}.zip"
+    if ! curl -fL "$URL" -o /tmp/syncthing.zip; then
         print_err "Could not download Syncthing from $URL"
         exit 1
     fi
-    tar -xzf /tmp/syncthing.tar.gz -C /tmp
+    rm -rf "/tmp/${FNAME}"
+    unzip -q /tmp/syncthing.zip -d /tmp
     sudo mkdir -p /usr/local/bin
     sudo mv "/tmp/${FNAME}/syncthing" /usr/local/bin/syncthing
     sudo chmod +x /usr/local/bin/syncthing
-    rm -rf /tmp/syncthing.tar.gz "/tmp/${FNAME}"
+    rm -rf /tmp/syncthing.zip "/tmp/${FNAME}"
     ST_BIN="/usr/local/bin/syncthing"
 
     if ! "$ST_BIN" --version &>/dev/null; then

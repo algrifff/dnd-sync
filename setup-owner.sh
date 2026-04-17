@@ -67,16 +67,25 @@ install_syncthing_binary() {
     VERSION=$(curl -s https://api.github.com/repos/syncthing/syncthing/releases/latest \
         | grep '"tag_name"' | cut -d'"' -f4)
     local FILENAME="syncthing-${PLATFORM}-${ARCH}-${VERSION}"
-    local URL="https://github.com/syncthing/syncthing/releases/download/${VERSION}/${FILENAME}.tar.gz"
-    if ! curl -fL "$URL" -o /tmp/syncthing.tar.gz; then
+    # macOS releases are .zip; Linux releases are .tar.gz
+    local EXT
+    [[ "$PLATFORM" == "macos" ]] && EXT="zip" || EXT="tar.gz"
+    local URL="https://github.com/syncthing/syncthing/releases/download/${VERSION}/${FILENAME}.${EXT}"
+    local ARCHIVE="/tmp/syncthing.${EXT}"
+    if ! curl -fL "$URL" -o "$ARCHIVE"; then
         print_err "Could not download Syncthing from $URL"
         exit 1
     fi
-    tar -xzf /tmp/syncthing.tar.gz -C /tmp
+    rm -rf "/tmp/${FILENAME}"
+    if [[ "$EXT" == "zip" ]]; then
+        unzip -q "$ARCHIVE" -d /tmp
+    else
+        tar -xzf "$ARCHIVE" -C /tmp
+    fi
     sudo mkdir -p /usr/local/bin
     sudo mv "/tmp/${FILENAME}/syncthing" /usr/local/bin/syncthing
     sudo chmod +x /usr/local/bin/syncthing
-    rm -rf /tmp/syncthing.tar.gz "/tmp/${FILENAME}"
+    rm -rf "$ARCHIVE" "/tmp/${FILENAME}"
 
     if ! /usr/local/bin/syncthing --version &>/dev/null; then
         print_err "Installed syncthing binary won't execute on this CPU."
