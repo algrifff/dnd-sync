@@ -15,6 +15,7 @@ import type { App, EventRef, TAbstractFile } from 'obsidian';
 import type * as Y from 'yjs';
 import { MARKDOWN_EXTENSIONS } from '@compendium/shared';
 import type { DocRegistry } from './docRegistry';
+import { fetchInventory, type HttpConfig } from './http';
 
 const LOCAL_ORIGIN = Symbol('compendium.local');
 
@@ -37,9 +38,10 @@ export class FileMirror {
   constructor(
     private readonly app: App,
     private readonly registry: DocRegistry,
+    private readonly cfg: HttpConfig,
   ) {}
 
-  start(): void {
+  async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
 
@@ -47,6 +49,9 @@ export class FileMirror {
     for (const file of this.app.vault.getMarkdownFiles()) {
       void this.track(file.path);
     }
+
+    // Pull down server-side docs we don't have locally.
+    await this.syncInventory();
 
     this.eventRefs.push(
       this.app.vault.on('modify', (f) => {
@@ -62,6 +67,17 @@ export class FileMirror {
         if (f instanceof TFile && isMarkdown(f.path)) void this.onLocalRename(f, oldPath);
       }),
     );
+  }
+
+  private async syncInventory(): Promise<void> {
+    try {
+      const inventory = await fetchInventory(this.cfg);
+      for (const entry of inventory.textDocs) {
+        if (!this.tracked.has(entry.path)) void this.track(entry.path);
+      }
+    } catch (err) {
+      console.error('[compendium] inventory fetch failed', err);
+    }
   }
 
   stop(): void {
