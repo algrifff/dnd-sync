@@ -63,6 +63,24 @@ export async function deleteBinary(cfg: HttpConfig, path: string): Promise<void>
   }
 }
 
+export async function fetchPluginVersion(cfg: HttpConfig): Promise<{ hash: string }> {
+  const res = await doRequest(cfg, {
+    url: `${normalizeBase(cfg.serverUrl)}/api/plugin/version`,
+    method: 'GET',
+  });
+  if (res.status !== 200) throw new Error(`plugin version failed: ${res.status}`);
+  return JSON.parse(res.text) as { hash: string };
+}
+
+export async function fetchPluginBundle(cfg: HttpConfig): Promise<ArrayBuffer> {
+  const res = await doRequest(cfg, {
+    url: `${normalizeBase(cfg.serverUrl)}/api/plugin/bundle`,
+    method: 'GET',
+  });
+  if (res.status !== 200) throw new Error(`plugin bundle failed: ${res.status}`);
+  return res.arrayBuffer;
+}
+
 function encodePath(path: string): string {
   return path.split('/').map(encodeURIComponent).join('/');
 }

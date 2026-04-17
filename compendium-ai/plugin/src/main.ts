@@ -10,6 +10,7 @@ import {
 import { BinarySync } from './sync/binarySync';
 import { DocRegistry } from './sync/docRegistry';
 import { FileMirror } from './sync/fileMirror';
+import { PluginUpdater } from './sync/updater';
 import { StatusBar } from './ui/statusBar';
 
 export default class CompendiumPlugin extends Plugin {
@@ -17,6 +18,7 @@ export default class CompendiumPlugin extends Plugin {
   private registry: DocRegistry | null = null;
   private mirror: FileMirror | null = null;
   private binary: BinarySync | null = null;
+  private updater: PluginUpdater | null = null;
   private statusBar: StatusBar | null = null;
   private unsubscribe: (() => void) | null = null;
 
@@ -64,15 +66,19 @@ export default class CompendiumPlugin extends Plugin {
     });
     this.mirror = new FileMirror(this.app, this.registry, cfg);
     this.binary = new BinarySync(this.app, cfg);
+    this.updater = new PluginUpdater(this.app, this, cfg);
     // Wait for the Obsidian layout to finish loading before enumerating —
     // otherwise vault.getMarkdownFiles() can return an empty list on first boot.
     this.app.workspace.onLayoutReady(() => {
       void this.mirror?.start();
       void this.binary?.start();
+      this.updater?.start();
     });
   }
 
   private stopSync(): void {
+    this.updater?.stop();
+    this.updater = null;
     this.binary?.stop();
     this.binary = null;
     this.mirror?.stop();
