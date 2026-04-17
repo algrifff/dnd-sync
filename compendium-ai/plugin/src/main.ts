@@ -7,6 +7,8 @@ import {
   DEFAULT_SETTINGS,
   type CompendiumSettings,
 } from './settings';
+import { CmBinding } from './editor/cmBinding';
+import { makeIdentity } from './editor/identity';
 import { BinarySync } from './sync/binarySync';
 import { DocRegistry } from './sync/docRegistry';
 import { FileMirror } from './sync/fileMirror';
@@ -18,6 +20,7 @@ export default class CompendiumPlugin extends Plugin {
   private registry: DocRegistry | null = null;
   private mirror: FileMirror | null = null;
   private binary: BinarySync | null = null;
+  private cmBinding: CmBinding | null = null;
   private updater: PluginUpdater | null = null;
   private statusBar: StatusBar | null = null;
   private unsubscribe: (() => void) | null = null;
@@ -48,6 +51,9 @@ export default class CompendiumPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+    // Push display-name changes into any active cursor bindings so peers
+    // see the new label without a reconnect.
+    this.cmBinding?.updateIdentity(makeIdentity(this.settings.displayName));
   }
 
   async reconnect(): Promise<void> {
@@ -84,12 +90,14 @@ export default class CompendiumPlugin extends Plugin {
     });
     this.mirror = new FileMirror(this.app, this.registry, cfg);
     this.binary = new BinarySync(this.app, cfg);
+    this.cmBinding = new CmBinding(this.app, this.registry, makeIdentity(this.settings.displayName));
     this.updater = new PluginUpdater(this.app, this, cfg);
     // Wait for the Obsidian layout to finish loading before enumerating —
     // otherwise vault.getMarkdownFiles() can return an empty list on first boot.
     this.app.workspace.onLayoutReady(() => {
       void this.mirror?.start();
       void this.binary?.start();
+      this.cmBinding?.start();
       this.updater?.start();
     });
   }
@@ -97,6 +105,8 @@ export default class CompendiumPlugin extends Plugin {
   private stopSync(): void {
     this.updater?.stop();
     this.updater = null;
+    this.cmBinding?.stop();
+    this.cmBinding = null;
     this.binary?.stop();
     this.binary = null;
     this.mirror?.stop();

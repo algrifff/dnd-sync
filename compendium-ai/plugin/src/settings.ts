@@ -8,11 +8,14 @@ import type CompendiumPlugin from './main';
 export type CompendiumSettings = {
   serverUrl: string;
   authToken: string;
+  /** Shown above your cursor when live-editing with friends. */
+  displayName: string;
 };
 
 export const DEFAULT_SETTINGS: CompendiumSettings = {
   serverUrl: '',
   authToken: '',
+  displayName: '',
 };
 
 export class CompendiumSettingTab extends PluginSettingTab {
@@ -54,6 +57,19 @@ export class CompendiumSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+
+    new Setting(containerEl)
+      .setName('Display name')
+      .setDesc('Shown on your cursor when you live-edit a note with a friend.')
+      .addText((text) =>
+        text
+          .setPlaceholder('Alex')
+          .setValue(this.plugin.settings.displayName)
+          .onChange(async (value) => {
+            this.plugin.settings.displayName = value.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
 
     new Setting(containerEl)
       .setName('Connection')
