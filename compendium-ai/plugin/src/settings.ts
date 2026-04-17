@@ -21,6 +21,41 @@ export const DEFAULT_SETTINGS: CompendiumSettings = {
   displayColor: '',
 };
 
+/**
+ * Cleans whatever the user pasted into the server URL field. Handles:
+ * - surrounding whitespace
+ * - ws:// or wss:// schemes (swap to http(s)://)
+ * - trailing slashes
+ * - trailing /api/..., /install/..., /sync/... (friends sometimes paste a full URL)
+ */
+export function normalizeServerUrl(raw: string): string {
+  let s = raw.trim();
+  if (!s) return '';
+  s = s.replace(/^ws:\/\//i, 'http://').replace(/^wss:\/\//i, 'https://');
+  // If no scheme, default to https.
+  if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
+  // Strip any trailing path segments beyond the origin.
+  try {
+    const u = new URL(s);
+    return `${u.protocol}//${u.host}`.replace(/\/+$/, '');
+  } catch {
+    return s.replace(/\/+$/, '');
+  }
+}
+
+/**
+ * Cleans the auth-token field. Handles tokens that got pasted with
+ * surrounding whitespace, a `Bearer ` prefix, or query-string noise
+ * like `&friend=...` that leaked in from an earlier bug.
+ */
+export function normalizeAuthToken(raw: string): string {
+  let s = raw.trim();
+  s = s.replace(/^Bearer\s+/i, '');
+  // Stop at first space or '&' — a correct token is alphanumerics only.
+  s = s.split(/[&\s?]/)[0] ?? '';
+  return s;
+}
+
 export class CompendiumSettingTab extends PluginSettingTab {
   constructor(
     app: App,
@@ -42,7 +77,7 @@ export class CompendiumSettingTab extends PluginSettingTab {
           .setPlaceholder('https://compendium.up.railway.app')
           .setValue(this.plugin.settings.serverUrl)
           .onChange(async (value) => {
-            this.plugin.settings.serverUrl = value.trim().replace(/\/+$/, '');
+            this.plugin.settings.serverUrl = normalizeServerUrl(value);
             await this.plugin.saveSettings();
           }),
       );
@@ -56,7 +91,7 @@ export class CompendiumSettingTab extends PluginSettingTab {
           .setPlaceholder('paste your token')
           .setValue(this.plugin.settings.authToken)
           .onChange(async (value) => {
-            this.plugin.settings.authToken = value.trim();
+            this.plugin.settings.authToken = normalizeAuthToken(value);
             await this.plugin.saveSettings();
           });
       });

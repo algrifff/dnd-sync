@@ -5,6 +5,8 @@ import { Notice, Plugin } from 'obsidian';
 import {
   CompendiumSettingTab,
   DEFAULT_SETTINGS,
+  normalizeAuthToken,
+  normalizeServerUrl,
   type CompendiumSettings,
 } from './settings';
 import { CmBinding } from './editor/cmBinding';
@@ -52,12 +54,13 @@ export default class CompendiumPlugin extends Plugin {
   async loadSettings(): Promise<void> {
     const raw = (await this.loadData()) as Partial<CompendiumSettings> | null;
     this.settings = { ...DEFAULT_SETTINGS, ...(raw ?? {}) };
-    // Older installers sometimes wrote extra query-string junk into the token
-    // field (e.g. `<hex>&friend=<uuid>`). Strip anything after the first '&'
-    // or whitespace so the value is always a clean bearer token.
-    const cleaned = this.settings.authToken.split(/[&\s]/)[0] ?? '';
-    if (cleaned !== this.settings.authToken) {
-      this.settings.authToken = cleaned;
+
+    // Self-heal messy values from past-me's bugs or human paste mistakes.
+    const healedUrl = normalizeServerUrl(this.settings.serverUrl);
+    const healedToken = normalizeAuthToken(this.settings.authToken);
+    if (healedUrl !== this.settings.serverUrl || healedToken !== this.settings.authToken) {
+      this.settings.serverUrl = healedUrl;
+      this.settings.authToken = healedToken;
       await this.saveSettings();
     }
   }

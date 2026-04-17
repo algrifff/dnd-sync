@@ -10,7 +10,7 @@
 //   * Our ytext transactions use LOCAL_ORIGIN. The observer ignores updates
 //     that carry this origin so they don't immediately re-write the file.
 
-import { Notice, TFile } from 'obsidian';
+import { MarkdownView, Notice, TFile } from 'obsidian';
 import type { App, EventRef, TAbstractFile } from 'obsidian';
 import type * as Y from 'yjs';
 import { MARKDOWN_EXTENSIONS } from '@compendium/shared';
@@ -101,6 +101,11 @@ export class FileMirror {
 
     const observer: Tracked['observer'] = (_event, tx) => {
       if (tx.origin === LOCAL_ORIGIN) return;
+      // If the file is open in an editor, yCollab (in CmBinding) applies
+      // character-level updates directly to the EditorView and Obsidian
+      // auto-saves on change. Writing the whole file here would race with
+      // y-codemirror's position mapping and has caused 'null parent' crashes.
+      if (this.isFileOpen(path)) return;
       void this.writeLocal(path, ytext.toString());
     };
     ytext.observe(observer);
@@ -145,6 +150,11 @@ export class FileMirror {
       return;
     }
 
+    // If the file is open in an editor, yCollab streams keystroke-level
+    // changes into ytext — a coarse delete+insert here would race with it
+    // and clobber in-flight character edits.
+    if (this.isFileOpen(file.path)) return;
+
     if (!this.tracked.has(file.path)) {
       await this.track(file.path);
     }
@@ -159,6 +169,15 @@ export class FileMirror {
       t.ytext.delete(0, t.ytext.length);
       t.ytext.insert(0, content);
     }, LOCAL_ORIGIN);
+  }
+
+  private isFileOpen(path: string): boolean {
+    const leaves = this.app.workspace.getLeavesOfType('markdown');
+    for (const leaf of leaves) {
+      const view = leaf.view;
+      if (view instanceof MarkdownView && view.file?.path === path) return true;
+    }
+    return false;
   }
 
   private async onLocalCreate(file: TFile): Promise<void> {
