@@ -104,14 +104,19 @@ __MANIFEST_BASE64__
     [Convert]::FromBase64String($manifestB64)
 )
 
+# PowerShell 5.1's Set-Content -Encoding UTF8 writes a byte-order mark.
+# Obsidian reads these files with JSON.parse which chokes on a BOM, so write
+# them via WriteAllText with an explicit no-BOM UTF-8 encoding.
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+
 $data = @{
     serverUrl = $SERVER_URL
     authToken = $PLAYER_TOKEN
 } | ConvertTo-Json -Compress
-Set-Content -Path (Join-Path $pluginDir "data.json") -Value $data -Encoding UTF8
+[System.IO.File]::WriteAllText((Join-Path $pluginDir "data.json"), $data, $utf8NoBom)
 
 $communityPluginsPath = Join-Path $VAULT_PATH ".obsidian\community-plugins.json"
-Set-Content -Path $communityPluginsPath -Value '["compendium"]' -Encoding UTF8
+[System.IO.File]::WriteAllText($communityPluginsPath, '["compendium"]', $utf8NoBom)
 
 Ok "Plugin configured with your DM's server."
 

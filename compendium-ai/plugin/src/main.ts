@@ -52,6 +52,14 @@ export default class CompendiumPlugin extends Plugin {
   async loadSettings(): Promise<void> {
     const raw = (await this.loadData()) as Partial<CompendiumSettings> | null;
     this.settings = { ...DEFAULT_SETTINGS, ...(raw ?? {}) };
+    // Older installers sometimes wrote extra query-string junk into the token
+    // field (e.g. `<hex>&friend=<uuid>`). Strip anything after the first '&'
+    // or whitespace so the value is always a clean bearer token.
+    const cleaned = this.settings.authToken.split(/[&\s]/)[0] ?? '';
+    if (cleaned !== this.settings.authToken) {
+      this.settings.authToken = cleaned;
+      await this.saveSettings();
+    }
   }
 
   async saveSettings(): Promise<void> {

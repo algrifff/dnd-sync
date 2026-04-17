@@ -66,6 +66,7 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
     serverUrl: resolveServerUrl(req),
     playerToken,
     installerKey: expected,
+    ...(friendId ? { friendId } : {}),
   });
 
   // Copy into a fresh ArrayBuffer-backed Uint8Array so BlobPart accepts it.

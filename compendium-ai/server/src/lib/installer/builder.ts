@@ -12,6 +12,9 @@ export type InstallerParams = {
   serverUrl: string;
   playerToken: string;
   installerKey: string;
+  /** Optional: the friend id the installer was requested with, so the .bat
+   *  can forward it to the .ps1 download and the PS1 gets the right token. */
+  friendId?: string;
 };
 
 export type BuiltInstaller = {
@@ -59,8 +62,12 @@ function render(
 
 function buildWindowsBat(params: InstallerParams): string {
   // Tiny .bat that downloads the .ps1 (curl is built into Windows 10+) and
-  // runs it. Friend double-clicks the .bat — one file to share.
-  const url = `${params.serverUrl}/install/windows.ps1?key=${params.installerKey}`;
+  // runs it. Friend double-clicks the .bat — one file to share. Forwards
+  // the friend id (if any) so the PS1 gets that friend's personal token
+  // rather than the shared one.
+  const query = new URLSearchParams({ key: params.installerKey });
+  if (params.friendId) query.set('friend', params.friendId);
+  const url = `${params.serverUrl}/install/windows.ps1?${query.toString()}`;
   return [
     '@echo off',
     'chcp 65001 > nul',
