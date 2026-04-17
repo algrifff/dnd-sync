@@ -16,6 +16,7 @@ import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import { WS_PATH } from '@compendium/shared';
 import { bindState, writeStateNow } from '@/lib/yjs-persistence';
+import { registerStatsProbe } from './stats';
 
 const MESSAGE_SYNC = 0;
 const MESSAGE_AWARENESS = 1;
@@ -28,6 +29,12 @@ type SharedDoc = {
 };
 
 const docs = new Map<string, SharedDoc>();
+
+registerStatsProbe(() =>
+  [...docs.values()]
+    .map((d) => ({ path: d.docName, connections: d.conns.size }))
+    .filter((d) => d.connections > 0),
+);
 
 function broadcast(shared: SharedDoc, message: Uint8Array, origin: WebSocket | null): void {
   for (const conn of shared.conns) {
