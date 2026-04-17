@@ -64,12 +64,12 @@ fi
 
 echo ""
 print_info "Verifying CouchDB connection..."
-if ! curl -sfu "$COUCHDB_USER:$COUCHDB_PASSWORD" "$COUCHDB_URL/_session" >/dev/null; then
+if ! curl -sfLu "$COUCHDB_USER:$COUCHDB_PASSWORD" "$COUCHDB_URL/_session" >/dev/null; then
     print_err "Could not authenticate to CouchDB."
     echo "     ${DIM}${GREY}Check the URL / username / password, then run again.${R}"
     exit 1
 fi
-if ! curl -sfu "$COUCHDB_USER:$COUCHDB_PASSWORD" "$COUCHDB_URL/$COUCHDB_DBNAME" >/dev/null; then
+if ! curl -sfLu "$COUCHDB_USER:$COUCHDB_PASSWORD" "$COUCHDB_URL/$COUCHDB_DBNAME" >/dev/null; then
     print_err "Database '$COUCHDB_DBNAME' not found — ask your DM to run init-couchdb.sh."
     exit 1
 fi

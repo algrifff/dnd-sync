@@ -34,11 +34,22 @@ source "$SCRIPT_DIR/.env"
 DB="${COUCHDB_DBNAME:-vault}"
 COUCHDB_URL="${COUCHDB_URL%/}"
 
+# Railway auto-redirects http:// → https:// (301). Detect and upgrade so our
+# URL matches what the server actually serves.
+if [[ "$COUCHDB_URL" == http://* ]]; then
+    final="$(curl -sILo /dev/null -w '%{url_effective}' "$COUCHDB_URL/" 2>/dev/null || true)"
+    final="${final%/}"
+    if [[ "$final" == https://* && "$final" != "$COUCHDB_URL" ]]; then
+        print_warn "Upgrading COUCHDB_URL to $final (server redirected). Please update .env."
+        COUCHDB_URL="$final"
+    fi
+fi
+
 AUTH="-u $COUCHDB_USER:$COUCHDB_PASSWORD"
 
 print_step 1 "Waiting for CouchDB to come online"
 for i in {1..60}; do
-    if curl -sf "$COUCHDB_URL/_up" >/dev/null 2>&1; then
+    if curl -sfL "$COUCHDB_URL/_up" >/dev/null 2>&1; then
         print_ok "CouchDB is responding at $COUCHDB_URL"
         break
     fi
@@ -47,7 +58,7 @@ for i in {1..60}; do
 done
 
 print_step 2 "Verifying admin credentials"
-if ! curl -sf $AUTH "$COUCHDB_URL/_session" >/dev/null; then
+if ! curl -sfL $AUTH "$COUCHDB_URL/_session" >/dev/null; then
     print_err "Admin login failed. Check COUCHDB_USER / COUCHDB_PASSWORD match the Railway env vars."
     exit 1
 fi
@@ -55,14 +66,14 @@ print_ok "Admin credentials accepted."
 
 print_step 3 "Creating databases"
 for sys in _users _replicator _global_changes; do
-    code=$(curl -s -o /dev/null -w "%{http_code}" -X PUT $AUTH "$COUCHDB_URL/$sys")
+    code=$(curl -sL -o /dev/null -w "%{http_code}" -X PUT $AUTH "$COUCHDB_URL/$sys")
     case "$code" in
         201|202|412) print_ok "$sys ready." ;;
         *)           print_err "Failed to create $sys (HTTP $code)"; exit 1 ;;
     esac
 done
 
-code=$(curl -s -o /dev/null -w "%{http_code}" -X PUT $AUTH "$COUCHDB_URL/$DB")
+code=$(curl -sL -o /dev/null -w "%{http_code}" -X PUT $AUTH "$COUCHDB_URL/$DB")
 case "$code" in
     201|202) print_ok "Vault database '$DB' created." ;;
     412)     print_ok "Vault database '$DB' already exists." ;;
@@ -70,7 +81,7 @@ case "$code" in
 esac
 
 print_step 4 "Checking CORS (Obsidian desktop origin)"
-preflight=$(curl -s -o /dev/null -w "%{http_code}" \
+preflight=$(curl -sL -o /dev/null -w "%{http_code}" \
     -H "Origin: app://obsidian.md" \
     -H "Access-Control-Request-Method: GET" \
     -X OPTIONS "$COUCHDB_URL/$DB")
