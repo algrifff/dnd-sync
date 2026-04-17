@@ -1,7 +1,5 @@
 FROM syncthing/syncthing:latest
 
-VOLUME /var/syncthing
-
 # Web UI / API
 EXPOSE 8384
 # Sync protocol (TCP + UDP)
