@@ -23,7 +23,9 @@ done
 echo " ready."
 
 echo "Fetching Railway device ID..."
-DEVICE_ID=$(curl -s -H "X-API-Key: $RAILWAY_API_KEY" "$RAILWAY_URL/rest/system/status" \
+STATUS_RESPONSE=$(curl -s -H "X-API-Key: $RAILWAY_API_KEY" "$RAILWAY_URL/rest/system/status")
+echo "  Raw response: $STATUS_RESPONSE"
+DEVICE_ID=$(echo "$STATUS_RESPONSE" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['myID'])")
 echo "  Railway device ID: $DEVICE_ID"
 
