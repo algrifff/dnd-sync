@@ -1,101 +1,166 @@
 # The Compendium — Sync Setup
 
-Syncs the Obsidian vault across all players via Syncthing + Railway.
+Live-synced Obsidian vault for D&D notes. Powered by Syncthing + Railway.
 
 ---
 
-## One-time deployment (vault owner only)
+## How it works
+
+```
+Your machine ──► Railway (always-on hub) ◄── Friends' machines
+```
+
+Syncthing runs silently in the background on everyone's machine and syncs through Railway. Changes appear on all machines within seconds. Railway stays up even when your machine is off, so friends can sync any time.
+
+---
+
+## For friends — Getting started
+
+Pick the script for your OS, run it once, and you're done.
+
+### Windows
+
+1. Download `scripts/setup-windows.ps1`
+2. Right-click → **Run with PowerShell**
+   - If Windows blocks it, open PowerShell and run:
+     ```
+     powershell -ExecutionPolicy Bypass -File setup-windows.ps1
+     ```
+3. Wait ~5 minutes for the initial sync to finish
+4. Obsidian opens automatically — go to **File → Open Vault** and select `Documents\The-Compendium`
+
+### Mac
+
+1. Download `scripts/setup-mac.sh`
+2. Open Terminal (`Cmd+Space` → type Terminal)
+3. Type `bash ` (with a space), then drag the file into the Terminal window, press Enter
+4. If macOS asks for permission, click Allow
+5. Wait ~5 minutes for the initial sync to finish
+6. Obsidian opens automatically — go to **File → Open Vault** and select `Documents/The-Compendium`
+
+### Linux
+
+1. Download `scripts/setup-linux.sh`
+2. Open a terminal and run:
+   ```bash
+   bash setup-linux.sh
+   ```
+3. Wait ~5 minutes for the initial sync to finish
+4. Open Obsidian → **File → Open Vault** → select `Documents/The-Compendium`
+
+### After setup
+
+- Syncthing runs in the background automatically — you don't need to do anything
+- Every time you save a file in Obsidian it syncs within seconds
+- Check sync status at any time: open a browser and go to `http://localhost:8384`
+
+---
+
+## For the vault owner — Initial deployment
+
+### Prerequisites
+
+- A [Railway](https://railway.app) account
+- Git
+- `bash`, `curl`, `python3` available (standard on Mac/Linux; use WSL on Windows)
 
 ### Step 1 — Deploy to Railway
 
-1. Go to [railway.app](https://railway.app) and create a new project
-2. Choose **Deploy from GitHub repo** (or upload this folder directly)
+1. Push this repo to GitHub (already done if you're reading this there)
+2. In Railway: **New Project → Deploy from GitHub repo** → select this repo
 3. Add a **Volume** to the service, mounted at `/var/syncthing`
-4. Set these **environment variables** in Railway:
+4. Under **Variables**, add:
    ```
-   STGUIAPIKEY = choose-a-strong-random-key-here
-   STNORESTART = yes
+   STGUIAPIKEY   = <choose a strong random string, e.g. zx7q9mK2pLwFbR3n>
+   STNORESTART   = yes
    STNODEFAULTFOLDER = yes
    ```
-   (The API key is your own — make it random like `zx7q9mK2pLwFbR3n`. Write it down.)
-5. Set the **exposed port** to `8384`
-6. Deploy — wait for it to go green
+5. Under **Settings → Networking**, generate a public domain and set the port to `8384`
+6. Deploy and wait for it to go green
 
-### Step 2 — Initialize the vault folder on Railway
+### Step 2 — Create your `.env` file
 
-Once deployed, run this from your machine (Linux/Mac):
 ```bash
-chmod +x init-railway.sh
-./init-railway.sh https://your-app.up.railway.app YOUR_STGUIAPIKEY
+cp .env.example .env
 ```
 
-This will print out three values you'll need in the next step.
+Edit `.env` and fill in `RAILWAY_URL` and `RAILWAY_API_KEY` (the `STGUIAPIKEY` value you chose).
 
-### Step 3 — Connect your local machine
+### Step 3 — Initialise the vault folder on Railway
 
-Fill in the values printed by `init-railway.sh` at the top of `setup-owner.sh`, then run it:
+```bash
+chmod +x init-railway.sh
+./init-railway.sh
+```
+
+This creates the vault folder on Railway and prints your `RAILWAY_DEVICE_ID`. Add that to `.env`:
+
+```
+RAILWAY_DEVICE_ID = <printed by init-railway.sh>
+```
+
+### Step 4 — Connect your local machine
+
 ```bash
 chmod +x setup-owner.sh
 ./setup-owner.sh
 ```
 
-Your local vault will begin uploading to Railway. First sync may take a few minutes.
+This starts Syncthing locally, connects it to Railway, and begins uploading your vault. The first sync may take several minutes depending on vault size.
 
-### Step 4 — Update friend scripts
+### Step 5 — Prepare and share friend scripts
 
-Fill in `RAILWAY_URL`, `RAILWAY_API_KEY`, and `RAILWAY_DEVICE_ID` at the top of:
-- `scripts/setup-windows.ps1`
-- `scripts/setup-mac.sh`
-- `scripts/setup-linux.sh`
+Fill in the three values at the top of each friend script:
 
-Then send the correct script to each friend.
+```
+RAILWAY_URL       = https://your-app.up.railway.app
+RAILWAY_API_KEY   = your-stguiapikey
+RAILWAY_DEVICE_ID = from-init-railway-output
+```
 
----
+These are in `scripts/setup-windows.ps1`, `scripts/setup-mac.sh`, and `scripts/setup-linux.sh`.
 
-## Sending scripts to friends
-
-| Platform | Script to send | How they run it |
-|----------|---------------|----------------|
-| Windows  | `setup-windows.ps1` | Right-click → Run with PowerShell |
-| Mac      | `setup-mac.sh` | Open Terminal, type `bash ` then drag the file in, press Enter |
-| Linux    | `setup-linux.sh` | `bash setup-linux.sh` in a terminal |
+Send the right script to each friend. They run it once and are done.
 
 ---
 
-## Vault location on friend machines
+## File locations after setup
 
-| Platform | Default path |
-|----------|-------------|
+| Platform | Vault path |
+|----------|-----------|
 | Windows  | `C:\Users\<name>\Documents\The-Compendium` |
 | Mac      | `~/Documents/The-Compendium` |
 | Linux    | `~/Documents/The-Compendium` |
-
-Friends open Obsidian and select that folder as their vault on first launch.
-
----
-
-## How sync works
-
-```
-Your machine ──► Railway (always on) ◄── Friends
-```
-
-- Syncthing runs silently in the background on everyone's machine
-- Changes sync within seconds when everyone is online
-- Railway acts as the hub — sync works even when your machine is off
-- If two people edit the same file simultaneously, Syncthing creates a `.sync-conflict` copy
-  so no data is lost — just manually merge the two versions
 
 ---
 
 ## Troubleshooting
 
-**"Syncthing didn't start"** — reboot and run the script again.
+**Sync stopped / files not updating**
+Check Syncthing is running: open `http://localhost:8384` in a browser. If it doesn't load, restart it:
+- Windows: find `syncthing.exe` in `AppData\Local\Syncthing` and run it
+- Mac: `brew services restart syncthing` or run `syncthing --no-browser`
+- Linux: `systemctl --user restart syncthing`
 
-**Files aren't syncing** — check that Syncthing is running (Windows: check Task Manager;
-Mac/Linux: `pgrep syncthing`). Restart it with `syncthing --no-browser`.
+**"Device not connected" in Syncthing UI**
+Railway may have restarted. Wait a minute and it should reconnect automatically.
 
-**Friend's device isn't showing up** — check Railway logs; manually add their device ID
-via the Railway Syncthing web UI at `https://your-app.up.railway.app`.
+**Conflict files appearing (`.sync-conflict` in filename)**
+Two people edited the same file at the same time. Open both versions, merge the changes manually, and delete the conflict copy.
 
-**Railway Syncthing web UI** — accessible at your Railway URL with the API key as password.
+**Script was blocked by Windows / Mac security**
+- Windows: open PowerShell as Administrator and run `Set-ExecutionPolicy RemoteSigned`
+- Mac: go to **System Settings → Privacy & Security** and click **Allow Anyway**
+
+**A friend's device isn't syncing after running the script**
+Their device ID may not have registered with Railway. Go to your Railway Syncthing UI at `https://your-app.up.railway.app`, find the pending device, and click **Add**.
+
+---
+
+## Railway costs
+
+| Item | Cost |
+|------|------|
+| Syncthing compute | ~$5/mo (Railway hobby plan) |
+| Persistent volume (per GB) | $0.25/GB/month |
+| **Friends' machines** | **Free** |
