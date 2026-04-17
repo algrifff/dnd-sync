@@ -17,6 +17,12 @@ jobs:
       - name: Sync .command from .sh
         run: cp scripts/setup-mac.sh scripts/setup-mac.command
 
+      - name: Bundle Windows files into a single zip
+        run: |
+          mkdir -p dist/compendium-windows
+          cp scripts/setup-windows.bat scripts/setup-windows.ps1 dist/compendium-windows/
+          cd dist && zip -r compendium-windows.zip compendium-windows
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -25,7 +31,9 @@ jobs:
             ## Setup Instructions
 
             ### 🪟 Windows
-            Download **`setup-windows.bat`** and double-click it.
+            1. Download **`compendium-windows.zip`** below
+            2. Right-click the zip → **Extract All…**
+            3. Open the extracted folder and double-click **`setup-windows.bat`**
 
             ### 🍎 Mac
             Open **Terminal** (press `Cmd+Space`, type `Terminal`, press Enter) and paste this:
@@ -43,7 +51,6 @@ jobs:
             Syncthing installs and configures automatically.
             Your vault appears at `Documents/The-Compendium` once the initial sync completes (~5 min).
           files: |
-            scripts/setup-windows.bat
-            scripts/setup-windows.ps1
+            dist/compendium-windows.zip
             scripts/setup-linux.sh
           fail_on_unmatched_files: true
