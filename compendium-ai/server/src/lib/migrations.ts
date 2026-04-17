@@ -53,6 +53,17 @@ const MIGRATIONS: readonly Migration[] = [
       END;
     `,
   },
+  {
+    version: 2,
+    description: 'config table for auto-generated tokens + installer key',
+    sql: `
+      CREATE TABLE config (
+        key        TEXT    PRIMARY KEY,
+        value      TEXT    NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) WITHOUT ROWID;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

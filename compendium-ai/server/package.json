@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run server.ts",
+    "dev": "PLUGIN_BUNDLE_DIR=../plugin bun run server.ts",
     "build": "next build",
     "start": "NODE_ENV=production bun run server.ts",
     "typecheck": "tsc --noEmit"

@@ -7,17 +7,18 @@ import next from 'next';
 import { WebSocketServer } from 'ws';
 import { WS_PATH } from '@compendium/shared';
 import { getDb } from '@/lib/db';
-import { assertTokensConfigured, parseBearer, verifyToken } from '@/lib/auth';
+import { parseBearer, verifyToken } from '@/lib/auth';
+import { ensureConfig } from '@/lib/config';
 import { handleConnection } from '@/ws/setup';
 
 const port = Number(process.env.PORT ?? 3000);
 const hostname = process.env.HOSTNAME ?? '0.0.0.0';
 const dev = process.env.NODE_ENV !== 'production';
 
-// Fail fast if tokens aren't set, and open SQLite so migrations run before
-// any request is handled.
-assertTokensConfigured();
+// Open SQLite (runs migrations) then seed config so tokens auto-generate
+// on first boot. ensureConfig logs the admin token once if freshly created.
 getDb();
+ensureConfig();
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();

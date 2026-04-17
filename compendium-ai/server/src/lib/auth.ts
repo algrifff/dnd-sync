@@ -1,15 +1,11 @@
-// Bearer-token auth. Two tokens: ADMIN_TOKEN and PLAYER_TOKEN, both pulled
-// from environment. Any authenticated caller can sync / search / read+write
-// files; admin-only actions (future /api/chat) gate on the returned role.
+// Bearer-token auth. Token values come from lib/config (env vars win, else
+// the config table). verifyToken returns the role for admin / player tokens
+// and null otherwise.
 
 import { timingSafeEqual } from 'node:crypto';
+import { getConfigValue } from './config';
 
 export type Role = 'admin' | 'player';
-
-function readEnvToken(name: 'ADMIN_TOKEN' | 'PLAYER_TOKEN'): string | null {
-  const v = process.env[name];
-  return v && v.length > 0 ? v : null;
-}
 
 function safeEqual(a: string, b: string): boolean {
   const A = Buffer.from(a);
@@ -21,10 +17,12 @@ function safeEqual(a: string, b: string): boolean {
 /** Classifies a presented token; returns null if it matches neither role. */
 export function verifyToken(token: string | null | undefined): Role | null {
   if (!token) return null;
-  const admin = readEnvToken('ADMIN_TOKEN');
-  const player = readEnvToken('PLAYER_TOKEN');
-  if (admin && safeEqual(token, admin)) return 'admin';
-  if (player && safeEqual(token, player)) return 'player';
+  try {
+    if (safeEqual(token, getConfigValue('admin_token'))) return 'admin';
+    if (safeEqual(token, getConfigValue('player_token'))) return 'player';
+  } catch {
+    // config not ready — treat as unauthorized rather than crashing
+  }
   return null;
 }
 
@@ -55,16 +53,15 @@ export function requireRequestAuth(req: Request): Role | Response {
   return role;
 }
 
-/** Require both token env vars at boot. Called from server.ts. */
-export function assertTokensConfigured(): void {
-  const missing: string[] = [];
-  if (!readEnvToken('ADMIN_TOKEN')) missing.push('ADMIN_TOKEN');
-  if (!readEnvToken('PLAYER_TOKEN')) missing.push('PLAYER_TOKEN');
-  if (missing.length) {
-    console.error(
-      `[auth] missing required env var(s): ${missing.join(', ')}. ` +
-        `Set them in .env.local (dev) or the Railway service variables (prod).`,
-    );
-    process.exit(1);
+/** Gate on admin role specifically. Returns a 403 Response if the role is 'player'. */
+export function requireAdminAuth(req: Request): Role | Response {
+  const auth = requireRequestAuth(req);
+  if (auth instanceof Response) return auth;
+  if (auth !== 'admin') {
+    return new Response(JSON.stringify({ error: 'admin only' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
+  return auth;
 }

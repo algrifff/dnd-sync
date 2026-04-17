@@ -105,6 +105,7 @@ export default function Dashboard() {
       )}
 
       {stats && <StatsView stats={stats} />}
+      {token && <InstallersSection token={token} />}
 
       <footer className="mt-10 flex items-center gap-3 text-xs text-neutral-500">
         <button
@@ -153,6 +154,90 @@ function LoginForm({ onSubmit }: { onSubmit: (token: string) => void }) {
         </button>
       </form>
     </main>
+  );
+}
+
+function InstallersSection({ token }: { token: string }) {
+  const [installerKey, setInstallerKey] = useState<string | null>(null);
+  const [justCopied, setJustCopied] = useState<string | null>(null);
+  const [origin, setOrigin] = useState<string>('');
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
+
+  const loadKey = useCallback(async () => {
+    const res = await fetch('/api/installer', {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+    if (!res.ok) return;
+    const body = (await res.json()) as { installerKey: string };
+    setInstallerKey(body.installerKey);
+  }, [token]);
+
+  useEffect(() => {
+    void loadKey();
+  }, [loadKey]);
+
+  const rotate = useCallback(async () => {
+    if (!confirm('Rotate the installer key? Old URLs will stop working.')) return;
+    const res = await fetch('/api/installer', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    const body = (await res.json()) as { installerKey: string };
+    setInstallerKey(body.installerKey);
+  }, [token]);
+
+  const copy = useCallback((label: string, value: string) => {
+    void navigator.clipboard.writeText(value).then(() => {
+      setJustCopied(label);
+      setTimeout(() => setJustCopied(null), 1500);
+    });
+  }, []);
+
+  if (!installerKey || !origin) return null;
+
+  const rows = [
+    { label: 'Mac', filename: 'compendium-mac.command', url: `${origin}/install/mac?key=${installerKey}` },
+    { label: 'Linux', filename: 'compendium-linux.sh', url: `${origin}/install/linux?key=${installerKey}` },
+    { label: 'Windows', filename: 'compendium-windows.bat', url: `${origin}/install/windows.bat?key=${installerKey}` },
+  ];
+
+  return (
+    <section className="mt-6 rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+      <div className="flex items-baseline justify-between mb-3">
+        <h2 className="text-sm font-semibold text-neutral-300">Friend installers</h2>
+        <button
+          onClick={rotate}
+          className="text-xs text-neutral-400 hover:text-amber-400"
+          title="Invalidate current URLs"
+        >
+          rotate key
+        </button>
+      </div>
+      <p className="text-xs text-neutral-500 mb-3">
+        Share one URL per friend (per OS). They visit it, the installer downloads, they double-click — Obsidian opens syncing.
+      </p>
+      <ul className="space-y-2">
+        {rows.map((r) => (
+          <li key={r.label} className="flex items-center gap-2">
+            <span className="text-xs text-neutral-500 w-16">{r.label}</span>
+            <code className="flex-1 font-mono text-xs text-neutral-300 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 truncate">
+              {r.url}
+            </code>
+            <button
+              onClick={() => copy(r.label, r.url)}
+              className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-amber-500 hover:text-amber-400"
+            >
+              {justCopied === r.label ? 'copied' : 'copy'}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
