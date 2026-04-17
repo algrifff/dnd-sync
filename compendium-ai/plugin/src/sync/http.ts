@@ -12,7 +12,13 @@ export type HttpConfig = {
 
 export type InventoryResponse = {
   textDocs: Array<{ path: string; updatedAt: number; bytes: number }>;
-  binaryFiles: Array<{ path: string; mimeType: string; size: number; updatedAt: number }>;
+  binaryFiles: Array<{
+    path: string;
+    mimeType: string;
+    size: number;
+    updatedAt: number;
+    contentHash: string;
+  }>;
 };
 
 function normalizeBase(url: string): string {

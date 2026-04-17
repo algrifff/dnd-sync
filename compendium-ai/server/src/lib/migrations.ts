@@ -79,6 +79,13 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX friends_active ON friends(revoked_at) WHERE revoked_at IS NULL;
     `,
   },
+  {
+    version: 4,
+    description: 'binary_files: content_hash for idempotent sync',
+    sql: `
+      ALTER TABLE binary_files ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

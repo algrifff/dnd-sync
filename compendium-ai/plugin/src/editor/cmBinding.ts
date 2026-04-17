@@ -24,10 +24,15 @@ export type UserIdentity = {
 type Bound = {
   leaf: WorkspaceLeaf;
   cm: EditorView;
+  /** One compartment per leaf, reused across file switches. Re-appending a
+   *  fresh compartment on every switch would leak dormant ones into the
+   *  editor's extension tree. */
   compartment: Compartment;
-  path: string;
-  awareness: Awareness;
-  undoManager: Y.UndoManager;
+  /** Null while the compartment is reconfigured to the empty extension
+   *  (i.e. we're between bindings on this leaf). */
+  path: string | null;
+  awareness: Awareness | null;
+  undoManager: Y.UndoManager | null;
 };
 
 export class CmBinding {
@@ -60,13 +65,17 @@ export class CmBinding {
   updateIdentity(next: UserIdentity): void {
     this.identity = next;
     // Refresh each awareness so name/color changes take effect immediately.
-    for (const { awareness } of this.bindings.values()) {
-      awareness.setLocalStateField('user', {
-        name: next.name,
-        color: next.color,
-        colorLight: next.colorLight,
-      });
+    for (const bound of this.bindings.values()) {
+      if (bound.awareness) bound.awareness.setLocalStateField('user', this.userField());
     }
+  }
+
+  private userField(): { name: string; color: string; colorLight: string } {
+    return {
+      name: this.identity.name,
+      color: this.identity.color,
+      colorLight: this.identity.colorLight,
+    };
   }
 
   // ── Core sync loop ──────────────────────────────────────────────────────
@@ -91,61 +100,75 @@ export class CmBinding {
   private syncLeaf(leaf: WorkspaceLeaf): void {
     const view = leaf.view;
     if (!(view instanceof MarkdownView)) return;
-    const file = view.file;
     const cm = extractCm(view);
     if (!cm) return;
+    const file = view.file;
 
     const existing = this.bindings.get(leaf);
+
+    // Pane closed without a file (rare). Detach the active extension but
+    // keep the compartment around — the leaf might come back.
     if (!file) {
-      if (existing) {
-        this.reconfigure(existing.cm, existing.compartment, []);
-        existing.undoManager.destroy();
-        this.bindings.delete(leaf);
-      }
+      if (existing) this.detach(existing);
       return;
     }
 
-    if (existing && existing.path === file.path && existing.cm === cm) return;
+    // Same leaf, same file, same editor view — already wired up.
+    if (existing && existing.cm === cm && existing.path === file.path) return;
 
-    if (existing) {
-      this.reconfigure(existing.cm, existing.compartment, []);
-      existing.undoManager.destroy();
+    // The editor view itself was replaced (e.g. mode switch). Drop the
+    // whole binding so we install a fresh compartment on the new view.
+    if (existing && existing.cm !== cm) {
+      this.detach(existing);
       this.bindings.delete(leaf);
     }
 
-    this.attach(leaf, cm, file.path);
+    this.bindFile(leaf, cm, file.path);
   }
 
-  private attach(leaf: WorkspaceLeaf, cm: EditorView, path: string): void {
+  /** Attach yCollab for `path` on this editor view. Creates a compartment
+   *  the first time we see this leaf+cm pair; reuses it for subsequent
+   *  file switches via reconfigure. */
+  private bindFile(leaf: WorkspaceLeaf, cm: EditorView, path: string): void {
     const record = this.registry.get(path);
     const ytext = record.doc.getText('content');
     const awareness = record.provider.awareness;
-    awareness.setLocalStateField('user', {
-      name: this.identity.name,
-      color: this.identity.color,
-      colorLight: this.identity.colorLight,
-    });
+    awareness.setLocalStateField('user', this.userField());
 
     const undoManager = new Y.UndoManager(ytext);
     const ext = yCollab(ytext, awareness, { undoManager });
 
+    let bound = this.bindings.get(leaf);
+    if (bound && bound.cm === cm) {
+      // Reuse the existing compartment — switch its contents to the new file.
+      bound.undoManager?.destroy();
+      cm.dispatch({ effects: bound.compartment.reconfigure(ext) });
+      bound.path = path;
+      bound.awareness = awareness;
+      bound.undoManager = undoManager;
+      return;
+    }
+
     const compartment = new Compartment();
-    cm.dispatch({
-      effects: StateEffect.appendConfig.of(compartment.of(ext)),
-    });
-
-    this.bindings.set(leaf, { leaf, cm, compartment, path, awareness, undoManager });
+    cm.dispatch({ effects: StateEffect.appendConfig.of(compartment.of(ext)) });
+    bound = { leaf, cm, compartment, path, awareness, undoManager };
+    this.bindings.set(leaf, bound);
   }
 
-  private reconfigure(cm: EditorView, compartment: Compartment, ext: unknown): void {
-    cm.dispatch({
-      effects: compartment.reconfigure(ext as Parameters<typeof compartment.reconfigure>[0]),
-    });
+  /** Reconfigure the compartment to no extension and drop UndoManager.
+   *  The Bound entry stays so the next bindFile reuses the compartment. */
+  private detach(bound: Bound): void {
+    bound.cm.dispatch({ effects: bound.compartment.reconfigure([]) });
+    bound.undoManager?.destroy();
+    bound.path = null;
+    bound.awareness = null;
+    bound.undoManager = null;
   }
 
+  /** Like detach but for full teardown — also forgets the binding. */
   private dispose(bound: Bound): void {
-    this.reconfigure(bound.cm, bound.compartment, []);
-    bound.undoManager.destroy();
+    this.detach(bound);
+    this.bindings.delete(bound.leaf);
   }
 }
 

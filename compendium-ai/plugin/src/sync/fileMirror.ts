@@ -1,14 +1,16 @@
 // Bridges Obsidian vault events ↔ Yjs docs for markdown files.
 //
-// Two flows to reconcile:
-//   Local edit  → vault.on('modify') → replace ytext → Yjs broadcasts
-//   Remote edit → Yjs observer → write file → (vault.on('modify') fires but we ignore it)
+// Feedback loops are avoided through two orthogonal checks:
+//   * Our ytext writes use LOCAL_ORIGIN; the observer ignores transactions
+//     carrying that origin so they don't trigger a file write downstream.
+//   * Our file writes stash the last-written content per path. When the
+//     vault fires 'modify' and the file's content matches what we just
+//     wrote, we skip — it's our own echo. This replaces the earlier
+//     `ignoreNextModify` Set, which was add-only and couldn't track
+//     overlapping writes triggered by bursts of remote updates.
 //
-// Feedback loops are prevented in two ways:
-//   * Our file writes set a per-path "ignore-next-modify" flag. The vault
-//     handler clears it and returns without reprocessing.
-//   * Our ytext transactions use LOCAL_ORIGIN. The observer ignores updates
-//     that carry this origin so they don't immediately re-write the file.
+// Remote updates are debounced per path (150 ms) so rapid-fire character
+// edits from a typing peer don't translate to a write-per-keystroke on disk.
 
 import { MarkdownView, Notice, TFile } from 'obsidian';
 import type { App, EventRef, TAbstractFile } from 'obsidian';
@@ -18,6 +20,7 @@ import type { DocRegistry } from './docRegistry';
 import { fetchInventory, type HttpConfig } from './http';
 
 const LOCAL_ORIGIN = Symbol('compendium.local');
+const WRITE_DEBOUNCE_MS = 150;
 
 function isMarkdown(path: string): boolean {
   const lower = path.toLowerCase();
@@ -30,7 +33,12 @@ type Tracked = {
 };
 
 export class FileMirror {
-  private readonly ignoreNextModify = new Set<string>();
+  /** Last content we successfully wrote to each path. The vault.modify
+   *  handler consults this — if the file content matches, it's our own
+   *  echo and we skip. Multiple overlapping writes are handled because
+   *  this tracks actual bytes rather than a "has been written" flag. */
+  private readonly lastWritten = new Map<string, string>();
+  private readonly writeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly tracked = new Map<string, Tracked>();
   private readonly eventRefs: EventRef[] = [];
   private started = false;
@@ -83,9 +91,12 @@ export class FileMirror {
   stop(): void {
     for (const ref of this.eventRefs) this.app.vault.offref(ref);
     this.eventRefs.length = 0;
+    for (const timer of this.writeTimers.values()) clearTimeout(timer);
+    this.writeTimers.clear();
     // Provider/doc lifecycle is owned by DocRegistry.destroyAll().
     for (const t of this.tracked.values()) t.ytext.unobserve(t.observer);
     this.tracked.clear();
+    this.lastWritten.clear();
     this.started = false;
   }
 
@@ -101,9 +112,9 @@ export class FileMirror {
       // If the file is open in an editor, yCollab (in CmBinding) applies
       // character-level updates directly to the EditorView and Obsidian
       // auto-saves on change. Writing the whole file here would race with
-      // y-codemirror's position mapping and has caused 'null parent' crashes.
+      // y-codemirror's position mapping.
       if (this.isFileOpen(path)) return;
-      void this.writeLocal(path, ytext.toString());
+      this.scheduleWrite(path);
     };
     ytext.observe(observer);
     this.tracked.set(path, { ytext, observer });
@@ -142,25 +153,26 @@ export class FileMirror {
   // ── Vault event handlers ────────────────────────────────────────────────
 
   private async onLocalModify(file: TFile): Promise<void> {
-    if (this.ignoreNextModify.has(file.path)) {
-      this.ignoreNextModify.delete(file.path);
-      return;
-    }
-
     // If the file is open in an editor, yCollab streams keystroke-level
-    // changes into ytext — a coarse delete+insert here would race with it
-    // and clobber in-flight character edits.
+    // changes into ytext — a coarse delete+insert here would race with it.
     if (this.isFileOpen(file.path)) return;
 
     if (!this.tracked.has(file.path)) {
       await this.track(file.path);
     }
-
     const t = this.tracked.get(file.path);
     if (!t) return;
-    const content = await this.app.vault.read(file);
-    if (t.ytext.toString() === content) return;
 
+    const content = await this.app.vault.read(file);
+
+    // Echo check: if the file's content matches what we most recently wrote
+    // from a remote update, this modify event is our own write coming back.
+    // Safe to ignore — survives overlapping writes because we compare actual
+    // bytes rather than consuming a one-shot flag.
+    if (this.lastWritten.get(file.path) === content) return;
+
+    // Local content truly differs from ytext → push the change up.
+    if (t.ytext.toString() === content) return;
     const doc = this.registry.get(file.path).doc;
     doc.transact(() => {
       t.ytext.delete(0, t.ytext.length);
@@ -202,27 +214,48 @@ export class FileMirror {
 
   // ── File I/O ────────────────────────────────────────────────────────────
 
+  /** Queue a debounced write; coalesces rapid remote updates into one
+   *  disk write per debounce window. Always reads the latest ytext at
+   *  flush time so we write the most recent content even if the timer
+   *  fires later than expected. */
+  private scheduleWrite(path: string): void {
+    const existing = this.writeTimers.get(path);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this.writeTimers.delete(path);
+      const record = this.tracked.get(path);
+      if (!record) return;
+      void this.writeLocal(path, record.ytext.toString());
+    }, WRITE_DEBOUNCE_MS);
+    this.writeTimers.set(path, timer);
+  }
+
   private async writeLocal(path: string, content: string): Promise<void> {
-    this.ignoreNextModify.add(path);
+    // Record what we're about to write BEFORE dispatching vault.modify so
+    // the event handler (which fires as part of vault.modify / vault.create
+    // bookkeeping) can recognise its own echo synchronously.
+    this.lastWritten.set(path, content);
     try {
       const existing = this.app.vault.getAbstractFileByPath(path);
       if (existing instanceof TFile) {
         await this.app.vault.modify(existing, content);
       } else if (!existing) {
-        // Make sure any parent folders exist.
-        const lastSlash = path.lastIndexOf('/');
-        if (lastSlash > 0) {
-          const dir = path.slice(0, lastSlash);
-          if (!this.app.vault.getAbstractFileByPath(dir)) {
-            await this.app.vault.createFolder(dir);
-          }
-        }
+        await this.ensureFolderFor(path);
         await this.app.vault.create(path, content);
       }
     } catch (err) {
-      this.ignoreNextModify.delete(path);
+      this.lastWritten.delete(path);
       new Notice(`Compendium: failed to write ${path}`);
       console.error('[compendium] writeLocal failed', path, err);
+    }
+  }
+
+  private async ensureFolderFor(path: string): Promise<void> {
+    const lastSlash = path.lastIndexOf('/');
+    if (lastSlash <= 0) return;
+    const dir = path.slice(0, lastSlash);
+    if (!this.app.vault.getAbstractFileByPath(dir)) {
+      await this.app.vault.createFolder(dir);
     }
   }
 }

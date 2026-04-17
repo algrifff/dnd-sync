@@ -12,6 +12,7 @@ type BinaryEntry = {
   mimeType: string;
   size: number;
   updatedAt: number;
+  contentHash: string;
 };
 
 export const dynamic = 'force-dynamic';
@@ -32,7 +33,11 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   const binaryFiles = db
     .query<BinaryEntry, []>(
-      `SELECT path, mime_type AS mimeType, size, updated_at AS updatedAt
+      `SELECT path,
+              mime_type     AS mimeType,
+              size,
+              updated_at    AS updatedAt,
+              content_hash  AS contentHash
          FROM binary_files
          ORDER BY path`,
     )
