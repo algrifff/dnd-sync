@@ -102,6 +102,47 @@ PLUGINS
 
 ok "Plugin configured with your DM's server."
 
+# ── Register the vault with Obsidian ────────────────────────────────────────
+step "Registering the vault with Obsidian"
+register_vault() {
+    local obsidian_config="$HOME/Library/Application Support/obsidian/obsidian.json"
+    local obsidian_dir
+    obsidian_dir=$(dirname "$obsidian_config")
+    mkdir -p "$obsidian_dir"
+
+    python3 - "$obsidian_config" "$VAULT_PATH" <<'PY'
+import json, os, sys, time, uuid
+
+config_path, vault_path = sys.argv[1], sys.argv[2]
+
+cfg = {}
+if os.path.isfile(config_path):
+    try:
+        with open(config_path, 'r', encoding='utf-8-sig') as f:
+            cfg = json.load(f)
+    except Exception:
+        cfg = {}
+cfg.setdefault('vaults', {})
+
+for entry in cfg['vaults'].values():
+    if entry.get('path') == vault_path:
+        print('already-registered'); sys.exit(0)
+
+vault_id = uuid.uuid4().hex[:16]
+cfg['vaults'][vault_id] = {'path': vault_path, 'ts': int(time.time() * 1000)}
+
+with open(config_path, 'w', encoding='utf-8') as f:
+    json.dump(cfg, f)
+print('registered')
+PY
+}
+if out=$(register_vault 2>&1); then
+    ok "Vault registered with Obsidian ($out)."
+else
+    echo "    ${RED}!${R} Couldn't register the vault: $out"
+    echo "      Open Obsidian manually and pick 'Open folder as vault' → $VAULT_PATH"
+fi
+
 # ── Verify the server is reachable ───────────────────────────────────────────
 step "Pinging the server"
 if curl -sfL "$SERVER_URL/api/health" > /dev/null; then

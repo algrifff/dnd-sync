@@ -83,11 +83,8 @@ export class FileMirror {
   stop(): void {
     for (const ref of this.eventRefs) this.app.vault.offref(ref);
     this.eventRefs.length = 0;
-    for (const [path, t] of this.tracked) {
-      t.ytext.unobserve(t.observer);
-      // Provider/doc lifecycle is owned by DocRegistry.destroyAll().
-      void path;
-    }
+    // Provider/doc lifecycle is owned by DocRegistry.destroyAll().
+    for (const t of this.tracked.values()) t.ytext.unobserve(t.observer);
     this.tracked.clear();
     this.started = false;
   }
@@ -192,8 +189,9 @@ export class FileMirror {
       this.tracked.delete(path);
     }
     this.registry.delete(path);
-    // Server-side text_docs deletion wires in when the DELETE endpoint
-    // lands; for now the row lingers until 4.4.
+    // Server-side text_docs rows linger after local deletion — the server
+    // doesn't yet expose a DELETE endpoint for text docs. Low-priority
+    // correctness gap: orphans add DB size but don't misbehave.
   }
 
   private async onLocalRename(file: TFile, oldPath: string): Promise<void> {

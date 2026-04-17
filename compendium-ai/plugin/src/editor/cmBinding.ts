@@ -53,10 +53,7 @@ export class CmBinding {
   stop(): void {
     for (const ref of this.eventRefs) this.app.workspace.offref(ref);
     this.eventRefs.length = 0;
-    for (const [leaf, bound] of this.bindings) {
-      this.dispose(bound);
-      void leaf; // suppress unused warning
-    }
+    for (const bound of this.bindings.values()) this.dispose(bound);
     this.bindings.clear();
   }
 

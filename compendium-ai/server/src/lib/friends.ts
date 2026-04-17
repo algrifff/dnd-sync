@@ -45,6 +45,29 @@ export function listFriends(): Friend[] {
     .map(friendFromRow);
 }
 
+/** Admin-only variant that includes active friends' tokens so the dashboard
+ *  can expose them for manual plugin configuration. Revoked rows omitted. */
+export function listActiveFriendsWithTokens(): FriendWithToken[] {
+  return getDb()
+    .query<
+      {
+        id: string;
+        name: string;
+        token: string;
+        created_at: number;
+        revoked_at: number | null;
+      },
+      []
+    >(
+      `SELECT id, name, token, created_at, revoked_at
+         FROM friends
+         WHERE revoked_at IS NULL
+         ORDER BY created_at DESC`,
+    )
+    .all()
+    .map((row) => ({ ...friendFromRow(row), token: row.token }));
+}
+
 export function createFriend(name: string): FriendWithToken {
   const trimmed = name.trim();
   if (!trimmed) throw new Error('friend name is required');
@@ -87,10 +110,10 @@ export function getFriendById(id: string): FriendWithToken | null {
 }
 
 /**
- * Returns true if the bearer token matches any non-revoked friend. Defensive:
- * if the friends table doesn't exist yet (e.g. a partially-applied migration
- * on a pre-v3 deployment), swallow the error and return false so the shared
- * player_token path in auth.verifyToken stays operational.
+ * Returns true if the bearer token matches any non-revoked friend.
+ * Tolerates the missing-table case (migration v3 not yet applied) by
+ * returning false so the shared player_token path stays operational;
+ * any other DB error still propagates.
  */
 export function isFriendToken(token: string): boolean {
   try {
@@ -100,7 +123,10 @@ export function isFriendToken(token: string): boolean {
       )
       .get(token);
     return (row?.cnt ?? 0) > 0;
-  } catch {
-    return false;
+  } catch (err) {
+    if (err instanceof Error && /no such table: friends/i.test(err.message)) {
+      return false;
+    }
+    throw err;
   }
 }

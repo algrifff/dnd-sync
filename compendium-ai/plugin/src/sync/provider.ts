@@ -1,7 +1,7 @@
 // Wraps y-websocket's WebsocketProvider with the URL + auth shape our server
 // expects, and exposes a typed status stream.
 
-import * as Y from 'yjs';
+import type * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { WS_PATH } from '@compendium/shared';
 

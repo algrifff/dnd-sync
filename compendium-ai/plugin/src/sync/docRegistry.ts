@@ -86,13 +86,14 @@ export class DocRegistry {
 
   private aggregate(): AggregateStatus {
     if (this.records.size === 0) return 'idle';
-    let any = { connecting: false, disconnected: false };
+    let anyDisconnected = false;
+    let anyConnecting = false;
     for (const record of this.records.values()) {
-      if (record.status === 'disconnected') any.disconnected = true;
-      else if (record.status === 'connecting') any.connecting = true;
+      if (record.status === 'disconnected') anyDisconnected = true;
+      else if (record.status === 'connecting') anyConnecting = true;
     }
-    if (any.disconnected) return 'disconnected';
-    if (any.connecting) return 'connecting';
+    if (anyDisconnected) return 'disconnected';
+    if (anyConnecting) return 'connecting';
     return 'connected';
   }
 

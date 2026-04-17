@@ -204,39 +204,29 @@ function LoginForm({ onSubmit }: { onSubmit: (token: string) => void }) {
   );
 }
 
+type Credentials = {
+  serverUrl: string;
+  installerKey: string;
+  shared: { playerToken: string };
+  friends: Array<{ id: string; name: string; token: string; createdAt: number }>;
+};
+
 function InstallersSection({ token }: { token: string }) {
-  const [installerKey, setInstallerKey] = useState<string | null>(null);
+  const [creds, setCreds] = useState<Credentials | null>(null);
+  const [newFriendName, setNewFriendName] = useState('');
+  const [expandedFriend, setExpandedFriend] = useState<string | null>(null);
   const [justCopied, setJustCopied] = useState<string | null>(null);
-  const [origin, setOrigin] = useState<string>('');
 
-  useEffect(() => {
-    setOrigin(window.location.origin);
-  }, []);
-
-  const loadKey = useCallback(async () => {
-    const res = await fetch('/api/installer', {
+  const loadCreds = useCallback(async () => {
+    const res = await fetch('/api/credentials', {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     });
     if (!res.ok) return;
-    const body = (await res.json()) as { installerKey: string };
-    setInstallerKey(body.installerKey);
+    setCreds((await res.json()) as Credentials);
   }, [token]);
 
-  useEffect(() => {
-    void loadKey();
-  }, [loadKey]);
-
-  const rotate = useCallback(async () => {
-    if (!confirm('Rotate the installer key? Old URLs will stop working.')) return;
-    const res = await fetch('/api/installer', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) return;
-    const body = (await res.json()) as { installerKey: string };
-    setInstallerKey(body.installerKey);
-  }, [token]);
+  useEffect(() => { void loadCreds(); }, [loadCreds]);
 
   const copy = useCallback((label: string, value: string) => {
     void navigator.clipboard.writeText(value).then(() => {
@@ -245,23 +235,61 @@ function InstallersSection({ token }: { token: string }) {
     });
   }, []);
 
-  if (!installerKey || !origin) return null;
+  const rotateKey = useCallback(async () => {
+    if (!confirm('Rotate the installer key? All current install URLs will stop working.')) return;
+    const res = await fetch('/api/installer', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    await loadCreds();
+  }, [token, loadCreds]);
+
+  const addFriend = useCallback(async () => {
+    const name = newFriendName.trim();
+    if (!name) return;
+    const res = await fetch('/api/friends', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) return;
+    setNewFriendName('');
+    await loadCreds();
+  }, [newFriendName, token, loadCreds]);
+
+  const revokeFriend = useCallback(
+    async (id: string) => {
+      if (!confirm("Revoke this friend? They'll be disconnected immediately.")) return;
+      const res = await fetch(`/api/friends/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      if (expandedFriend === id) setExpandedFriend(null);
+      await loadCreds();
+    },
+    [token, expandedFriend, loadCreds],
+  );
+
+  if (!creds) return null;
 
   return (
     <div className="mt-6 space-y-4">
-      <InstallerRows
-        title="Shared installers"
-        subtitle="Use these for quick tests — any friend can run them."
-        installerKey={installerKey}
-        origin={origin}
-        onRotate={rotate}
+      <SharedInstallerPanel
+        creds={creds}
+        onRotate={rotateKey}
         copy={copy}
         justCopied={justCopied}
       />
       <FriendsPanel
-        token={token}
-        installerKey={installerKey}
-        origin={origin}
+        creds={creds}
+        newName={newFriendName}
+        onNewNameChange={setNewFriendName}
+        onAdd={addFriend}
+        onRevoke={revokeFriend}
+        expandedId={expandedFriend}
+        onToggleExpanded={setExpandedFriend}
         copy={copy}
         justCopied={justCopied}
       />
@@ -271,150 +299,77 @@ function InstallersSection({ token }: { token: string }) {
 
 type CopyFn = (label: string, value: string) => void;
 
-function installerUrlsFor(origin: string, installerKey: string, friendId?: string): {
-  mac: string;
-  linux: string;
-  windows: string;
-} {
-  const q = (path: string): string => {
-    const params = new URLSearchParams({ key: installerKey });
-    if (friendId) params.set('friend', friendId);
-    return `${origin}${path}?${params.toString()}`;
-  };
-  return {
-    mac: `curl -fsSL "${q('/install/mac')}" | bash`,
-    linux: `curl -fsSL "${q('/install/linux')}" | bash`,
-    windows: q('/install/windows.bat'),
-  };
+function installCommandFor(
+  kind: 'mac' | 'linux' | 'windows',
+  creds: Credentials,
+  friendId?: string,
+): string {
+  const params = new URLSearchParams({ key: creds.installerKey });
+  if (friendId) params.set('friend', friendId);
+  const url = `${creds.serverUrl}${kind === 'windows' ? '/install/windows.bat' : `/install/${kind}`}?${params.toString()}`;
+  if (kind === 'windows') return url;
+  return `curl -fsSL "${url}" | bash`;
 }
 
-function InstallerRows({
-  title,
-  subtitle,
-  installerKey,
-  origin,
+function SharedInstallerPanel({
+  creds,
   onRotate,
-  friendId,
   copy,
   justCopied,
 }: {
-  title: string;
-  subtitle: string;
-  installerKey: string;
-  origin: string;
-  onRotate?: () => void;
-  friendId?: string;
+  creds: Credentials;
+  onRotate: () => void;
   copy: CopyFn;
   justCopied: string | null;
 }) {
-  const urls = installerUrlsFor(origin, installerKey, friendId);
-  const prefix = friendId ? `${friendId}:` : 'shared:';
-  const rows = [
-    { label: 'Mac', hint: 'Paste into Terminal.', value: urls.mac },
-    { label: 'Linux', hint: 'Paste into any terminal.', value: urls.linux },
-    { label: 'Windows', hint: 'Open in a browser → downloads .bat → double-click.', value: urls.windows },
-  ];
-
   return (
     <section className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-      <div className="flex items-baseline justify-between mb-3">
-        <h2 className="text-sm font-semibold text-neutral-300">{title}</h2>
-        {onRotate && (
-          <button
-            onClick={onRotate}
-            className="text-xs text-neutral-400 hover:text-amber-400"
-            title="Invalidate all install URLs"
-          >
-            rotate key
-          </button>
-        )}
-      </div>
-      <p className="text-xs text-neutral-500 mb-3">{subtitle}</p>
-      <ul className="space-y-3">
-        {rows.map((r) => (
-          <li key={r.label}>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-neutral-500 w-16 shrink-0">{r.label}</span>
-              <code className="flex-1 font-mono text-xs text-neutral-300 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 truncate">
-                {r.value}
-              </code>
-              <button
-                onClick={() => copy(`${prefix}${r.label}`, r.value)}
-                className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-amber-500 hover:text-amber-400 shrink-0"
-              >
-                {justCopied === `${prefix}${r.label}` ? 'copied' : 'copy'}
-              </button>
-            </div>
-            <div className="text-xs text-neutral-500 mt-1 ml-[4.5rem]">{r.hint}</div>
-          </li>
-        ))}
-      </ul>
+      <header className="flex items-baseline justify-between mb-1">
+        <h2 className="text-sm font-semibold text-neutral-300">Shared installers</h2>
+        <button
+          onClick={onRotate}
+          className="text-xs text-neutral-400 hover:text-amber-400"
+          title="Invalidate every current install URL"
+        >
+          rotate key
+        </button>
+      </header>
+      <p className="text-xs text-neutral-500 mb-3">
+        Quick tests. Any friend can run these — they all get the same shared token.
+      </p>
+      <InstallCommands creds={creds} scope="shared" copy={copy} justCopied={justCopied} />
+      <ManualSetupFields
+        scope="shared"
+        serverUrl={creds.serverUrl}
+        playerToken={creds.shared.playerToken}
+        copy={copy}
+        justCopied={justCopied}
+      />
     </section>
   );
 }
 
-type Friend = {
-  id: string;
-  name: string;
-  createdAt: number;
-  revokedAt: number | null;
-};
-
 function FriendsPanel({
-  token,
-  installerKey,
-  origin,
+  creds,
+  newName,
+  onNewNameChange,
+  onAdd,
+  onRevoke,
+  expandedId,
+  onToggleExpanded,
   copy,
   justCopied,
 }: {
-  token: string;
-  installerKey: string;
-  origin: string;
+  creds: Credentials;
+  newName: string;
+  onNewNameChange: (v: string) => void;
+  onAdd: () => void;
+  onRevoke: (id: string) => void;
+  expandedId: string | null;
+  onToggleExpanded: (id: string | null) => void;
   copy: CopyFn;
   justCopied: string | null;
 }) {
-  const [friends, setFriends] = useState<Friend[] | null>(null);
-  const [newName, setNewName] = useState('');
-  const [expanded, setExpanded] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    const res = await fetch('/api/friends', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
-    if (!res.ok) return;
-    const body = (await res.json()) as { friends: Friend[] };
-    setFriends(body.friends);
-  }, [token]);
-
-  useEffect(() => { void load(); }, [load]);
-
-  const add = useCallback(async () => {
-    const name = newName.trim();
-    if (!name) return;
-    const res = await fetch('/api/friends', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ name }),
-    });
-    if (!res.ok) return;
-    setNewName('');
-    await load();
-  }, [newName, token, load]);
-
-  const revoke = useCallback(
-    async (id: string) => {
-      if (!confirm('Revoke this friend? They\'ll be disconnected.')) return;
-      const res = await fetch(`/api/friends/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return;
-      await load();
-    },
-    [token, load],
-  );
-
   return (
     <section className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
       <h2 className="text-sm font-semibold text-neutral-300 mb-1">Friends (per-person tokens)</h2>
@@ -423,12 +378,12 @@ function FriendsPanel({
       </p>
 
       <form
-        onSubmit={(e) => { e.preventDefault(); void add(); }}
+        onSubmit={(e) => { e.preventDefault(); onAdd(); }}
         className="flex gap-2 mb-4"
       >
         <input
           value={newName}
-          onChange={(e) => setNewName(e.target.value)}
+          onChange={(e) => onNewNameChange(e.target.value)}
           placeholder="Ben"
           className="flex-1 rounded-md bg-neutral-950 border border-neutral-700 px-3 py-1.5 text-sm outline-none focus:border-neutral-500"
         />
@@ -441,49 +396,43 @@ function FriendsPanel({
         </button>
       </form>
 
-      {friends === null ? (
-        <div className="text-sm text-neutral-500">loading…</div>
-      ) : friends.length === 0 ? (
+      {creds.friends.length === 0 ? (
         <div className="text-sm text-neutral-500">No friends yet.</div>
       ) : (
         <ul className="divide-y divide-neutral-800">
-          {friends.map((f) => {
-            const revoked = f.revokedAt !== null;
-            const isOpen = expanded === f.id;
+          {creds.friends.map((f) => {
+            const isOpen = expandedId === f.id;
             return (
               <li key={f.id} className="py-2">
                 <div className="flex items-center gap-3">
-                  <span className={'flex-1 text-sm ' + (revoked ? 'line-through text-neutral-500' : '')}>
-                    {f.name}
-                  </span>
-                  <span className="text-xs text-neutral-500">
-                    {revoked ? `revoked ${fmtAgo(f.revokedAt!)}` : fmtAgo(f.createdAt)}
-                  </span>
-                  {!revoked && (
-                    <>
-                      <button
-                        onClick={() => setExpanded(isOpen ? null : f.id)}
-                        className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-amber-500 hover:text-amber-400"
-                      >
-                        {isOpen ? 'hide' : 'URLs'}
-                      </button>
-                      <button
-                        onClick={() => void revoke(f.id)}
-                        className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-red-500 hover:text-red-400"
-                      >
-                        revoke
-                      </button>
-                    </>
-                  )}
+                  <span className="flex-1 text-sm">{f.name}</span>
+                  <span className="text-xs text-neutral-500">{fmtAgo(f.createdAt)}</span>
+                  <button
+                    onClick={() => onToggleExpanded(isOpen ? null : f.id)}
+                    className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-amber-500 hover:text-amber-400"
+                  >
+                    {isOpen ? 'hide' : 'show install'}
+                  </button>
+                  <button
+                    onClick={() => onRevoke(f.id)}
+                    className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-red-500 hover:text-red-400"
+                  >
+                    revoke
+                  </button>
                 </div>
-                {isOpen && !revoked && (
-                  <div className="mt-2">
-                    <InstallerRows
-                      title={`For ${f.name}`}
-                      subtitle="These install with that friend's personal token."
-                      installerKey={installerKey}
-                      origin={origin}
+                {isOpen && (
+                  <div className="mt-3 rounded border border-neutral-800 bg-neutral-950 p-3">
+                    <InstallCommands
+                      creds={creds}
+                      scope={`friend-${f.id}`}
                       friendId={f.id}
+                      copy={copy}
+                      justCopied={justCopied}
+                    />
+                    <ManualSetupFields
+                      scope={`friend-${f.id}`}
+                      serverUrl={creds.serverUrl}
+                      playerToken={f.token}
                       copy={copy}
                       justCopied={justCopied}
                     />
@@ -495,6 +444,166 @@ function FriendsPanel({
         </ul>
       )}
     </section>
+  );
+}
+
+// ── Presentation components ─────────────────────────────────────────────────
+
+function InstallCommands({
+  creds,
+  scope,
+  friendId,
+  copy,
+  justCopied,
+}: {
+  creds: Credentials;
+  scope: string;
+  friendId?: string;
+  copy: CopyFn;
+  justCopied: string | null;
+}) {
+  const rows: Array<{ os: 'mac' | 'linux' | 'windows'; label: string; hint: string }> = [
+    { os: 'mac', label: 'Mac', hint: 'Paste into Terminal.' },
+    { os: 'linux', label: 'Linux', hint: 'Paste into any terminal.' },
+    { os: 'windows', label: 'Windows', hint: 'Open in a browser → downloads .bat → double-click.' },
+  ];
+  return (
+    <ul className="space-y-3">
+      {rows.map((r) => {
+        const cmd = installCommandFor(r.os, creds, friendId);
+        const id = `${scope}:${r.os}`;
+        return (
+          <li key={r.os}>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-500 w-16 shrink-0">{r.label}</span>
+              <code className="flex-1 font-mono text-xs text-neutral-300 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 truncate">
+                {cmd}
+              </code>
+              <button
+                onClick={() => copy(id, cmd)}
+                className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-amber-500 hover:text-amber-400 shrink-0"
+              >
+                {justCopied === id ? 'copied' : 'copy'}
+              </button>
+            </div>
+            <div className="text-xs text-neutral-500 mt-1 ml-[4.5rem]">{r.hint}</div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function ManualSetupFields({
+  scope,
+  serverUrl,
+  playerToken,
+  copy,
+  justCopied,
+}: {
+  scope: string;
+  serverUrl: string;
+  playerToken: string;
+  copy: CopyFn;
+  justCopied: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-3 pt-3 border-t border-neutral-800">
+      <button
+        onClick={() => setOpen(!open)}
+        className="text-xs text-neutral-400 hover:text-amber-400"
+      >
+        {open ? '▾' : '▸'} Manual setup (if the install script fails)
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          <p className="text-xs text-neutral-500">
+            Paste these into Obsidian → Settings → Community plugins → Compendium.
+          </p>
+          <PlainField
+            label="Server URL"
+            value={serverUrl}
+            copyId={`${scope}:url`}
+            copy={copy}
+            justCopied={justCopied}
+          />
+          <SecretField
+            label="Auth token"
+            value={playerToken}
+            copyId={`${scope}:token`}
+            copy={copy}
+            justCopied={justCopied}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlainField({
+  label,
+  value,
+  copyId,
+  copy,
+  justCopied,
+}: {
+  label: string;
+  value: string;
+  copyId: string;
+  copy: CopyFn;
+  justCopied: string | null;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-neutral-500 w-20 shrink-0">{label}</span>
+      <code className="flex-1 font-mono text-xs text-neutral-300 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 truncate">
+        {value}
+      </code>
+      <button
+        onClick={() => copy(copyId, value)}
+        className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-amber-500 hover:text-amber-400 shrink-0"
+      >
+        {justCopied === copyId ? 'copied' : 'copy'}
+      </button>
+    </div>
+  );
+}
+
+function SecretField({
+  label,
+  value,
+  copyId,
+  copy,
+  justCopied,
+}: {
+  label: string;
+  value: string;
+  copyId: string;
+  copy: CopyFn;
+  justCopied: string | null;
+}) {
+  const [reveal, setReveal] = useState(false);
+  const masked = '•'.repeat(Math.min(value.length, 24));
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-neutral-500 w-20 shrink-0">{label}</span>
+      <code className="flex-1 font-mono text-xs text-neutral-300 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 truncate">
+        {reveal ? value : masked}
+      </code>
+      <button
+        onClick={() => setReveal(!reveal)}
+        className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-amber-500 hover:text-amber-400 shrink-0"
+      >
+        {reveal ? 'hide' : 'reveal'}
+      </button>
+      <button
+        onClick={() => copy(copyId, value)}
+        className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-amber-500 hover:text-amber-400 shrink-0"
+      >
+        {justCopied === copyId ? 'copied' : 'copy'}
+      </button>
+    </div>
   );
 }
 

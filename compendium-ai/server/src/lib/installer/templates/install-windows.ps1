@@ -120,6 +120,55 @@ $communityPluginsPath = Join-Path $VAULT_PATH ".obsidian\community-plugins.json"
 
 Ok "Plugin configured with your DM's server."
 
+# --- Register the vault with Obsidian --------------------------------------
+# Obsidian remembers vaults in %APPDATA%\obsidian\obsidian.json. If we don't
+# register our folder there, obsidian://open?vault=... on a fresh install
+# either does nothing or opens the wrong vault. This writes an entry so the
+# vault shows up in Obsidian's vault picker and open-by-path works.
+Step "Registering the vault with Obsidian"
+try {
+    $obsidianConfigDir = Join-Path $env:APPDATA "obsidian"
+    if (-not (Test-Path $obsidianConfigDir)) {
+        New-Item -ItemType Directory -Force -Path $obsidianConfigDir | Out-Null
+    }
+    $obsidianConfigPath = Join-Path $obsidianConfigDir "obsidian.json"
+
+    if (Test-Path $obsidianConfigPath) {
+        $raw = (Get-Content $obsidianConfigPath -Raw -Encoding UTF8).TrimStart([char]0xFEFF)
+        $obsidianConfig = $raw | ConvertFrom-Json
+    } else {
+        $obsidianConfig = [PSCustomObject]@{ vaults = [PSCustomObject]@{} }
+    }
+    if (-not $obsidianConfig.vaults) {
+        $obsidianConfig | Add-Member -MemberType NoteProperty -Name vaults -Value ([PSCustomObject]@{}) -Force
+    }
+
+    $alreadyRegistered = $false
+    foreach ($entry in $obsidianConfig.vaults.PSObject.Properties) {
+        if ($entry.Value.path -eq $VAULT_PATH) {
+            $alreadyRegistered = $true
+            break
+        }
+    }
+
+    if (-not $alreadyRegistered) {
+        $vaultId = [Guid]::NewGuid().ToString('N').Substring(0, 16)
+        $vaultEntry = [PSCustomObject]@{
+            path = $VAULT_PATH
+            ts = [int64](([DateTimeOffset](Get-Date)).ToUnixTimeMilliseconds())
+        }
+        $obsidianConfig.vaults | Add-Member -MemberType NoteProperty -Name $vaultId -Value $vaultEntry
+        $json = $obsidianConfig | ConvertTo-Json -Depth 6 -Compress
+        [System.IO.File]::WriteAllText($obsidianConfigPath, $json, $utf8NoBom)
+        Ok "Vault registered with Obsidian."
+    } else {
+        Ok "Vault already registered with Obsidian."
+    }
+} catch {
+    Write-Host "    $RED" "!$R Couldn't register the vault automatically: $_"
+    Write-Host "      You may need to click 'Open folder as vault' in Obsidian and pick $VAULT_PATH."
+}
+
 # --- Verify the server is reachable -----------------------------------------
 Step "Pinging the server"
 try {
