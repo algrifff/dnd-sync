@@ -1,2 +1,8 @@
 .env
-scripts/setup-mac.command
+.env.local
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

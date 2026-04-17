@@ -36,7 +36,7 @@ Obsidian (vault folder + CodeMirror editor)
 
 ## Repo layout
 
-pnpm workspaces inside a new `compendium-ai/` subfolder of this repo. Existing Syncthing scripts stay untouched at the repo root.
+Bun workspaces inside the `compendium-ai/` subfolder of this repo.
 
 ```
 compendium-sync/                     ← existing repo
