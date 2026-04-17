@@ -16,37 +16,17 @@ Syncthing runs silently in the background on everyone's machine and syncs throug
 
 ## For friends — Getting started
 
-Pick the script for your OS, run it once, and you're done.
+**[⬇ Download the latest installer from the Releases page](../../releases/latest)**
 
-### Windows
+| OS | Download | How to run |
+|----|----------|-----------|
+| Windows | `setup-windows.bat` | Double-click it |
+| Mac | `setup-mac.command` | Double-click it (if blocked: right-click → Open) |
+| Linux | `setup-linux.sh` | `bash setup-linux.sh` in a terminal |
 
-1. Download `scripts/setup-windows.ps1`
-2. Right-click → **Run with PowerShell**
-   - If Windows blocks it, open PowerShell and run:
-     ```
-     powershell -ExecutionPolicy Bypass -File setup-windows.ps1
-     ```
-3. Wait ~5 minutes for the initial sync to finish
-4. Obsidian opens automatically — go to **File → Open Vault** and select `Documents\The-Compendium`
-
-### Mac
-
-1. Download `scripts/setup-mac.sh`
-2. Open Terminal (`Cmd+Space` → type Terminal)
-3. Type `bash ` (with a space), then drag the file into the Terminal window, press Enter
-4. If macOS asks for permission, click Allow
-5. Wait ~5 minutes for the initial sync to finish
-6. Obsidian opens automatically — go to **File → Open Vault** and select `Documents/The-Compendium`
-
-### Linux
-
-1. Download `scripts/setup-linux.sh`
-2. Open a terminal and run:
-   ```bash
-   bash setup-linux.sh
-   ```
-3. Wait ~5 minutes for the initial sync to finish
-4. Open Obsidian → **File → Open Vault** → select `Documents/The-Compendium`
+Wait ~5 minutes for the initial sync, then open Obsidian and select your vault:
+- **Windows:** `Documents\The-Compendium`
+- **Mac / Linux:** `~/Documents/The-Compendium`
 
 ### After setup
 

@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync .command from .sh
+        run: cp scripts/setup-mac.sh scripts/setup-mac.command
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "The Compendium Sync ${{ github.ref_name }}"
+          body: |
+            ## Setup Instructions
+
+            Download the file for your operating system and double-click it.
+
+            | OS | File |
+            |----|------|
+            | Windows | `setup-windows.bat` |
+            | Mac | `setup-mac.command` |
+            | Linux | `setup-linux.sh` |
+
+            **Windows:** Double-click `setup-windows.bat`
+            **Mac:** Double-click `setup-mac.command` (if macOS blocks it: right-click → Open)
+            **Linux:** Open a terminal and run `bash setup-linux.sh`
+
+            ---
+            Syncthing will be installed and configured automatically.
+            Your vault will appear at `Documents/The-Compendium` once the initial sync completes (~5 min).
+          files: |
+            scripts/setup-windows.bat
+            scripts/setup-windows.ps1
+            scripts/setup-mac.command
+            scripts/setup-linux.sh
+          fail_on_unmatched_files: true
