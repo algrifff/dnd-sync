@@ -10,12 +10,15 @@ export type CompendiumSettings = {
   authToken: string;
   /** Shown above your cursor when live-editing with friends. */
   displayName: string;
+  /** Hex '#rrggbb' for your cursor + selection highlight. Empty = derived from name. */
+  displayColor: string;
 };
 
 export const DEFAULT_SETTINGS: CompendiumSettings = {
   serverUrl: '',
   authToken: '',
   displayName: '',
+  displayColor: '',
 };
 
 export class CompendiumSettingTab extends PluginSettingTab {
@@ -68,6 +71,28 @@ export class CompendiumSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.displayName = value.trim();
             await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Cursor colour')
+      .setDesc('Your cursor + selection highlight. Reset to derive automatically from your name.')
+      .addColorPicker((picker) =>
+        picker
+          .setValue(this.plugin.settings.displayColor || '#e67e22')
+          .onChange(async (value) => {
+            this.plugin.settings.displayColor = value;
+            await this.plugin.saveSettings();
+          }),
+      )
+      .addExtraButton((btn) =>
+        btn
+          .setIcon('reset')
+          .setTooltip('Auto (derived from name)')
+          .onClick(async () => {
+            this.plugin.settings.displayColor = '';
+            await this.plugin.saveSettings();
+            this.display();
           }),
       );
 

@@ -8,6 +8,7 @@ import {
   type CompendiumSettings,
 } from './settings';
 import { CmBinding } from './editor/cmBinding';
+import { injectCursorStyles } from './editor/cursorStyles';
 import { makeIdentity } from './editor/identity';
 import { BinarySync } from './sync/binarySync';
 import { DocRegistry } from './sync/docRegistry';
@@ -24,12 +25,14 @@ export default class CompendiumPlugin extends Plugin {
   private updater: PluginUpdater | null = null;
   private statusBar: StatusBar | null = null;
   private unsubscribe: (() => void) | null = null;
+  private removeCursorStyles: (() => void) | null = null;
 
   override async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new CompendiumSettingTab(this.app, this));
 
     this.statusBar = new StatusBar(this.addStatusBarItem(), this.app);
+    this.removeCursorStyles = injectCursorStyles();
 
     if (!this.settings.serverUrl || !this.settings.authToken) {
       new Notice('Compendium: open Settings → Community plugins → Compendium to configure.');
@@ -40,6 +43,8 @@ export default class CompendiumPlugin extends Plugin {
 
   override async onunload(): Promise<void> {
     this.stopSync();
+    this.removeCursorStyles?.();
+    this.removeCursorStyles = null;
     this.statusBar?.dispose();
     this.statusBar = null;
   }
@@ -53,7 +58,7 @@ export default class CompendiumPlugin extends Plugin {
     await this.saveData(this.settings);
     // Push display-name changes into any active cursor bindings so peers
     // see the new label without a reconnect.
-    this.cmBinding?.updateIdentity(makeIdentity(this.settings.displayName));
+    this.cmBinding?.updateIdentity(makeIdentity(this.settings.displayName, this.settings.displayColor));
   }
 
   async reconnect(): Promise<void> {
@@ -90,7 +95,7 @@ export default class CompendiumPlugin extends Plugin {
     });
     this.mirror = new FileMirror(this.app, this.registry, cfg);
     this.binary = new BinarySync(this.app, cfg);
-    this.cmBinding = new CmBinding(this.app, this.registry, makeIdentity(this.settings.displayName));
+    this.cmBinding = new CmBinding(this.app, this.registry, makeIdentity(this.settings.displayName, this.settings.displayColor));
     this.updater = new PluginUpdater(this.app, this, cfg);
     // Wait for the Obsidian layout to finish loading before enumerating —
     // otherwise vault.getMarkdownFiles() can return an empty list on first boot.
