@@ -18,6 +18,12 @@ import ws from 'ws';
 
 const SERVER = process.env.SERVER ?? 'ws://localhost:3000/sync';
 const DOC_NAME = `verify-${Date.now()}.md`;
+const TOKEN = process.env.PLAYER_TOKEN ?? process.env.ADMIN_TOKEN;
+if (!TOKEN) {
+  console.error('verify-sync: set PLAYER_TOKEN (or ADMIN_TOKEN) env var before running');
+  process.exit(1);
+}
+const CLIENT_OPTS = { params: { token: TOKEN } };
 
 function waitForSynced(provider: WebsocketProvider): Promise<void> {
   return new Promise((resolve) => {
@@ -51,7 +57,7 @@ async function main(): Promise<void> {
   console.log(`verify-sync: ${SERVER}/${DOC_NAME}`);
 
   const docA = new Y.Doc();
-  const providerA = new WebsocketProvider(SERVER, DOC_NAME, docA);
+  const providerA = new WebsocketProvider(SERVER, DOC_NAME, docA, CLIENT_OPTS);
 
   await step('client A connects + syncs', async () => {
     await waitForSynced(providerA);
@@ -62,7 +68,7 @@ async function main(): Promise<void> {
   });
 
   const docB = new Y.Doc();
-  const providerB = new WebsocketProvider(SERVER, DOC_NAME, docB);
+  const providerB = new WebsocketProvider(SERVER, DOC_NAME, docB, CLIENT_OPTS);
 
   await step('client B connects + receives "hello"', async () => {
     await waitForSynced(providerB);
@@ -79,7 +85,7 @@ async function main(): Promise<void> {
   });
 
   const docC = new Y.Doc();
-  const providerC = new WebsocketProvider(SERVER, DOC_NAME, docC);
+  const providerC = new WebsocketProvider(SERVER, DOC_NAME, docC, CLIENT_OPTS);
 
   await step('client C connects cold + receives persisted "hello"', async () => {
     await waitForSynced(providerC);

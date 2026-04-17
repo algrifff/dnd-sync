@@ -7,13 +7,16 @@ import next from 'next';
 import { WebSocketServer } from 'ws';
 import { WS_PATH } from '@compendium/shared';
 import { getDb } from '@/lib/db';
+import { assertTokensConfigured, parseBearer, verifyToken } from '@/lib/auth';
 import { handleConnection } from '@/ws/setup';
 
 const port = Number(process.env.PORT ?? 3000);
 const hostname = process.env.HOSTNAME ?? '0.0.0.0';
 const dev = process.env.NODE_ENV !== 'production';
 
-// Open SQLite eagerly so migrations run before any request is handled.
+// Fail fast if tokens aren't set, and open SQLite so migrations run before
+// any request is handled.
+assertTokensConfigured();
 getDb();
 
 const app = next({ dev, hostname, port });
@@ -38,15 +41,25 @@ wss.on('connection', (ws, req) => {
 });
 
 server.on('upgrade', (req, socket, head) => {
-  const pathname = new URL(req.url ?? '/', `http://${hostname}`).pathname;
-  if (pathname.startsWith(`${WS_PATH}/`)) {
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit('connection', ws, req);
-    });
-  } else {
+  const url = new URL(req.url ?? '/', `http://${hostname}`);
+  if (!url.pathname.startsWith(`${WS_PATH}/`)) {
     // Let Next handle its own upgrades (e.g. HMR in dev).
     socket.destroy();
+    return;
   }
+
+  const token =
+    parseBearer(req.headers['authorization'] as string | undefined) ??
+    url.searchParams.get('token');
+  if (!verifyToken(token)) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    wss.emit('connection', ws, req);
+  });
 });
 
 server.listen(port, hostname, () => {
