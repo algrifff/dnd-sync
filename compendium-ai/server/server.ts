@@ -7,6 +7,7 @@ import next from 'next';
 import { WebSocketServer } from 'ws';
 import { WS_PATH } from '@compendium/shared';
 import { getDb } from '@/lib/db';
+import { handleConnection } from '@/ws/setup';
 
 const port = Number(process.env.PORT ?? 3000);
 const hostname = process.env.HOSTNAME ?? '0.0.0.0';
@@ -32,14 +33,13 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ noServer: true });
 
-wss.on('connection', (ws) => {
-  // Milestone 2.3 plugs Yjs in here. For now, confirm the handshake works.
-  ws.on('close', () => {});
+wss.on('connection', (ws, req) => {
+  handleConnection(ws, req);
 });
 
 server.on('upgrade', (req, socket, head) => {
   const pathname = new URL(req.url ?? '/', `http://${hostname}`).pathname;
-  if (pathname === WS_PATH || pathname.startsWith(`${WS_PATH}/`)) {
+  if (pathname.startsWith(`${WS_PATH}/`)) {
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit('connection', ws, req);
     });
