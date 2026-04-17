@@ -6,10 +6,14 @@ import { createServer } from 'node:http';
 import next from 'next';
 import { WebSocketServer } from 'ws';
 import { WS_PATH } from '@compendium/shared';
+import { getDb } from '@/lib/db';
 
 const port = Number(process.env.PORT ?? 3000);
 const hostname = process.env.HOSTNAME ?? '0.0.0.0';
 const dev = process.env.NODE_ENV !== 'production';
+
+// Open SQLite eagerly so migrations run before any request is handled.
+getDb();
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
