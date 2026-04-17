@@ -1,10 +1,6 @@
 @echo off
-echo ===============================
-echo   The Compendium - Sync Setup
-echo ===============================
-echo.
-echo Starting setup, please wait...
-echo.
+REM UTF-8 console so the dragon banner renders correctly.
+chcp 65001 > nul
 
 powershell -ExecutionPolicy Bypass -File "%~dp0setup-windows.ps1"
 
