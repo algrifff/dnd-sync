@@ -78,12 +78,27 @@ for i in {1..30}; do
     sleep 2
 done
 
-# Read local API key from config
-if [[ "$(uname)" == "Darwin" ]]; then
-    CONFIG_PATH="$HOME/Library/Application Support/Syncthing/config.xml"
-else
-    CONFIG_PATH="$HOME/.local/share/syncthing/config.xml"
+# Read local API key from config — check all known locations
+CONFIG_PATH=""
+for candidate in \
+    "$HOME/Library/Application Support/Syncthing/config.xml" \
+    "$HOME/.local/share/syncthing/config.xml" \
+    "$HOME/.config/syncthing/config.xml" \
+    "${XDG_DATA_HOME:-$HOME/.local/share}/syncthing/config.xml"; do
+    if [[ -f "$candidate" ]]; then
+        CONFIG_PATH="$candidate"
+        break
+    fi
+done
+
+if [[ -z "$CONFIG_PATH" ]]; then
+    echo "ERROR: Could not find Syncthing config. Searched:"
+    echo "  ~/.local/share/syncthing/config.xml"
+    echo "  ~/.config/syncthing/config.xml"
+    echo "Try running 'syncthing --no-browser' manually, wait 10 seconds, then re-run this script."
+    exit 1
 fi
+echo "  Config found at: $CONFIG_PATH"
 LOCAL_API_KEY=$(grep -oP '(?<=<apikey>)[^<]+' "$CONFIG_PATH")
 
 # Get local device ID
