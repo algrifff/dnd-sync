@@ -72,14 +72,24 @@ fi
 AUTH="-u $COUCHDB_USER:$COUCHDB_PASSWORD"
 
 print_step 1 "Waiting for CouchDB to come online"
+# /_up may or may not require auth depending on CouchDB config — try with
+# credentials so we succeed either way. Fall back to /_session to distinguish
+# 'server down' from 'auth rejected'.
+ok=""
 for i in {1..60}; do
-    if curl -sfL "$COUCHDB_URL/_up" >/dev/null 2>&1; then
-        print_ok "CouchDB is responding at $COUCHDB_URL"
-        break
-    fi
+    code=$(curl -sLo /dev/null -w "%{http_code}" $AUTH "$COUCHDB_URL/_up")
+    if [[ "$code" == "200" ]]; then ok=1; break; fi
+    # Server up but health endpoint locked behind auth failure? Probe /_session.
+    sess=$(curl -sLo /dev/null -w "%{http_code}" $AUTH "$COUCHDB_URL/_session")
+    if [[ "$sess" == "200" ]]; then ok=1; break; fi
     sleep 2
-    [[ $i -eq 60 ]] && { print_err "CouchDB did not come up. Check the Railway deploy logs."; exit 1; }
 done
+if [[ -z "$ok" ]]; then
+    print_err "CouchDB did not respond at $COUCHDB_URL (last code: $code / $sess)."
+    echo "     ${DIM}${GREY}If Railway logs say CouchDB started, check the service's public domain maps to port 5984.${R}"
+    exit 1
+fi
+print_ok "CouchDB is responding at $COUCHDB_URL"
 
 print_step 2 "Verifying admin credentials"
 if ! curl -sfL $AUTH "$COUCHDB_URL/_session" >/dev/null; then
