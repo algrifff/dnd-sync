@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
 # The Compendium — Linux Setup
-# Run: bash setup-linux.sh
-# Or use the one-liner from the Releases page.
+# Run: curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/setup-linux.sh | bash
 
 set -e
-source /dev/stdin <<< "$(curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/_wizard.sh 2>/dev/null || cat "$(dirname "${BASH_SOURCE[0]}")/_wizard.sh")"
 
-print_step() { echo ""; echo "[$1/5] $2"; }
-print_ok()   { echo "  ✓ $1"; }
-print_info() { echo "  $1"; }
+_WIZARD_URL="https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/_wizard.sh"
+_LOCAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _LOCAL_DIR=""
+if [[ -n "$_LOCAL_DIR" && -f "$_LOCAL_DIR/_wizard.sh" ]]; then
+    source "$_LOCAL_DIR/_wizard.sh"
+else
+    source /dev/stdin <<< "$(curl -fsSL "$_WIZARD_URL")"
+fi
+
+UI_TOTAL_STEPS=5
 
 # ── 1. Install Obsidian ───────────────────────────────────────────────────────
-print_step 1 "Checking Obsidian..."
+print_step 1 "Installing Obsidian"
 OBSIDIAN_BIN="$HOME/.local/bin/obsidian.AppImage"
 if command -v obsidian &>/dev/null || [[ -f "$OBSIDIAN_BIN" ]]; then
     print_ok "Obsidian already installed."
 else
-    print_info "Downloading Obsidian AppImage..."
+    print_info "Downloading the Obsidian AppImage..."
     OBSIDIAN_URL=$(curl -s https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest \
         | python3 -c "
 import sys, json
@@ -26,7 +30,7 @@ if not url: raise SystemExit('No AppImage found')
 print(url)
 ")
     mkdir -p "$HOME/.local/bin"
-    curl -L "$OBSIDIAN_URL" -o "$OBSIDIAN_BIN"
+    curl -fL "$OBSIDIAN_URL" -o "$OBSIDIAN_BIN"
     chmod +x "$OBSIDIAN_BIN"
     mkdir -p "$HOME/.local/share/applications"
     cat > "$HOME/.local/share/applications/obsidian.desktop" << EOF
@@ -43,8 +47,8 @@ EOF
 fi
 
 # ── 2. Install Syncthing ──────────────────────────────────────────────────────
-print_step 2 "Checking Syncthing..."
-if command -v syncthing &>/dev/null; then
+print_step 2 "Installing Syncthing"
+if command -v syncthing &>/dev/null && syncthing --version &>/dev/null; then
     print_ok "Syncthing already installed."
 else
     if command -v apt-get &>/dev/null; then
@@ -59,28 +63,29 @@ else
     elif command -v pacman &>/dev/null; then
         sudo pacman -S --noconfirm syncthing
     else
-        print_info "Downloading binary..."
+        print_info "Downloading Syncthing binary..."
         ARCH=$(uname -m)
         [[ "$ARCH" == "aarch64" ]] && ST_ARCH="arm64" || ST_ARCH="amd64"
         VERSION=$(curl -s https://api.github.com/repos/syncthing/syncthing/releases/latest \
             | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
         FNAME="syncthing-linux-${ST_ARCH}-${VERSION}"
-        curl -L "https://github.com/syncthing/syncthing/releases/download/${VERSION}/${FNAME}.tar.gz" \
+        curl -fL "https://github.com/syncthing/syncthing/releases/download/${VERSION}/${FNAME}.tar.gz" \
             -o /tmp/syncthing.tar.gz
         tar -xzf /tmp/syncthing.tar.gz -C /tmp
         sudo mv "/tmp/${FNAME}/syncthing" /usr/local/bin/syncthing
+        sudo chmod +x /usr/local/bin/syncthing
         rm -rf /tmp/syncthing.tar.gz "/tmp/${FNAME}"
     fi
     print_ok "Syncthing installed."
 fi
 
 # ── 3. Create vault folder ────────────────────────────────────────────────────
-print_step 3 "Creating vault folder..."
+print_step 3 "Preparing vault folder"
 mkdir -p "$VAULT_PATH"
-print_ok "Vault folder: $VAULT_PATH"
+print_ok "Vault folder ready: $VAULT_PATH"
 
-# ── 4. Start Syncthing and configure ─────────────────────────────────────────
-print_step 4 "Connecting to sync server..."
+# ── 4. Start Syncthing and wire everything up ─────────────────────────────────
+print_step 4 "Connecting to the sync server"
 ST_DATA="$HOME/.local/share/syncthing"
 mkdir -p "$ST_DATA"
 LOCAL_API="http://localhost:8384"
@@ -101,7 +106,9 @@ for i in {1..30}; do
     sleep 2
 done
 if ! curl -sf -H "X-API-Key: $LOCAL_ST_API_KEY" "$LOCAL_API/rest/system/ping" > /dev/null 2>&1; then
-    echo "ERROR: Syncthing failed to start."; cat /tmp/syncthing-setup.log; exit 1
+    print_err "Syncthing failed to start. Log:"
+    cat /tmp/syncthing-setup.log
+    exit 1
 fi
 
 LOCAL_DEVICE_ID=$(curl -s -H "X-API-Key: $LOCAL_ST_API_KEY" "$LOCAL_API/rest/system/status" \
@@ -120,7 +127,7 @@ curl -sf -X POST "$LOCAL_API/rest/config/folders" \
 curl -sfL -X POST "$RAILWAY_URL/rest/config/devices" \
     -H "X-API-Key: $RAILWAY_API_KEY" -H "Content-Type: application/json" \
     -d "{\"deviceID\":\"$LOCAL_DEVICE_ID\",\"name\":\"$(hostname)\",\"addresses\":[\"dynamic\"],\"autoAcceptFolders\":false}" \
-    > /dev/null || print_info "Note: Could not register — ask your DM to approve your device."
+    > /dev/null || print_warn "Could not auto-register — ask your DM to approve your device in the Syncthing UI."
 
 FOLDER_CFG=$(curl -sL -H "X-API-Key: $RAILWAY_API_KEY" "$RAILWAY_URL/rest/config/folders/$FOLDER_ID")
 UPDATED=$(echo "$FOLDER_CFG" | python3 -c "
@@ -134,10 +141,10 @@ curl -sfL -X PUT "$RAILWAY_URL/rest/config/folders/$FOLDER_ID" \
     -H "X-API-Key: $RAILWAY_API_KEY" -H "Content-Type: application/json" \
     -d "$UPDATED" > /dev/null || true
 
-print_ok "Connected to sync server."
+print_ok "Connected and sharing the vault folder."
 
 # ── 5. Auto-start via systemd ─────────────────────────────────────────────────
-print_step 5 "Setting Syncthing to run on login..."
+print_step 5 "Enabling auto-start on login"
 if command -v systemctl &>/dev/null && systemctl --user status > /dev/null 2>&1; then
     if ! systemctl --user enable --now syncthing 2>/dev/null; then
         mkdir -p "$HOME/.config/systemd/user"
@@ -158,16 +165,12 @@ EOF
     fi
     print_ok "Syncthing will start automatically on login."
 else
-    print_info "No systemd session found. Start manually with: syncthing --no-browser"
+    print_warn "No systemd user session. Start manually with: syncthing --no-browser"
 fi
 
+print_done
+echo "  ${GREEN}›${R} Your vault: ${BOLD}$VAULT_PATH${R}"
+echo "  ${GREEN}›${R} In Obsidian: ${BOLD}File → Open Vault${R} → select that folder."
+echo "  ${GREEN}›${R} Status dashboard: ${BOLD}http://localhost:8384${R}"
 echo ""
-echo "==============================="
-echo "  Setup complete!"
-echo "==============================="
-echo ""
-echo "The vault is syncing in the background."
-echo "It may take a few minutes to download everything on first run."
-echo ""
-echo "Your vault: $VAULT_PATH"
-echo "In Obsidian: File > Open Vault > select the folder above."
+echo "  ${DIM}${GREY}First sync can take a few minutes.${R}"

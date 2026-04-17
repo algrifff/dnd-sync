@@ -16,34 +16,45 @@ Syncthing runs silently in the background on everyone's machine and syncs throug
 
 ## For friends — Getting started
 
-**[⬇ Download the latest installer from the Releases page](../../releases/latest)**
+You'll need **two things** from your DM before you start:
+1. **Server address** — looks like `https://xxx.up.railway.app`
+2. **Join key** — a secret string
 
-### Windows
-Download **`setup-windows.bat`** from the release and double-click it.
+Then follow the three steps for your OS below. The installer is pretty: it greets you with a dragon, walks through 5 coloured steps, and ends by opening Obsidian for you.
 
-### Mac
-Open **Terminal** (`Cmd+Space` → type Terminal → Enter) and paste:
-```bash
-curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/setup-mac.sh | bash
-```
+### 🍎 Mac
 
-### Linux
-Open a terminal and paste:
-```bash
-curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/setup-linux.sh | bash
-```
+1. Open **Terminal** (`Cmd+Space` → type `Terminal` → Enter)
+2. Paste this and hit Enter:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/setup-mac.sh | bash
+   ```
+3. Type in the server address and join key when asked
+
+### 🐧 Linux
+
+1. Open a terminal
+2. Paste this and hit Enter:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/setup-linux.sh | bash
+   ```
+3. Type in the server address and join key when asked
+
+### 🪟 Windows
+
+1. Download **[`setup-windows.bat`](../../releases/latest)** from the Releases page
+2. Double-click it
+3. Type in the server address and join key when asked
 
 ---
 
-Wait ~5 minutes for the initial sync, then open Obsidian → **File → Open Vault** → select:
-- **Windows:** `Documents\The-Compendium`
-- **Mac / Linux:** `~/Documents/The-Compendium`
-
 ### After setup
 
-- Syncthing runs in the background automatically — you don't need to do anything
-- Every time you save a file in Obsidian it syncs within seconds
-- Check sync status at any time: open a browser and go to `http://localhost:8384`
+- **First sync:** wait ~5 minutes, then open **Obsidian → File → Open Vault** and pick:
+  - **Mac / Linux:** `~/Documents/The-Compendium`
+  - **Windows:** `Documents\The-Compendium`
+- Syncthing runs silently in the background from now on — every save syncs within seconds.
+- **Check sync status** any time at `http://localhost:8384`.
 
 ---
 

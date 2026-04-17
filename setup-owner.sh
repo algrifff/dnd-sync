@@ -1,97 +1,148 @@
 #!/usr/bin/env bash
 # Run this on YOUR machine (the vault owner) after init-railway.sh.
-# Works on Linux, WSL, and Mac.
+# Works on Linux, WSL, and Mac (Intel + Apple Silicon).
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load UI helpers if available (colors + banner). Fall back to plain output otherwise.
+if [[ -f "$SCRIPT_DIR/scripts/_ui.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/scripts/_ui.sh"
+else
+    show_banner() { :; }
+    print_step() { echo ""; echo "[$1/4] $2"; }
+    print_ok()   { echo "   ✓ $1"; }
+    print_info() { echo "   › $1"; }
+    print_warn() { echo "   ! $1"; }
+    print_err()  { echo "   ✗ $1"; }
+    print_done() { echo ""; echo "=== Setup complete! ==="; }
+    R=""; BOLD=""; DIM=""; GOLD=""; GREEN=""; GREY=""
+fi
+
+UI_TOTAL_STEPS=4
+
 if [[ -f "$SCRIPT_DIR/.env" ]]; then
     source "$SCRIPT_DIR/.env"
 else
-    echo "ERROR: .env file not found. Copy .env.example to .env and fill in all values."
+    print_err ".env file not found. Copy .env.example to .env and fill it in."
     exit 1
 fi
 
 FOLDER_ID="${FOLDER_ID:-the-compendium}"
 VAULT_PATH="${VAULT_PATH:-$HOME/Documents/The-Compendium}"
 LOCAL_API="http://localhost:8384"
-# Use a fixed local API key so we never need to read the config file
 LOCAL_API_KEY="${LOCAL_ST_API_KEY:-compendium-local-key}"
 
 if [[ -z "$RAILWAY_URL" || -z "$RAILWAY_API_KEY" || -z "$RAILWAY_DEVICE_ID" ]]; then
-    echo "ERROR: RAILWAY_URL, RAILWAY_API_KEY, and RAILWAY_DEVICE_ID must all be set in .env"
+    print_err "RAILWAY_URL, RAILWAY_API_KEY, and RAILWAY_DEVICE_ID must all be set in .env"
     exit 1
 fi
 
-echo "=== The Compendium — Owner Setup ==="
-echo ""
+show_banner
+echo "  ${BOLD}${GOLD}🐉  Vault owner setup${R}  ${DIM}${GREY}(uploading the vault to Railway)${R}"
 
 # ── Install Syncthing ─────────────────────────────────────────────────────────
+detect_platform() {
+    case "$(uname)" in
+        Darwin) echo "macos" ;;
+        Linux)  echo "linux" ;;
+        *)      echo "unsupported" ;;
+    esac
+}
+
 install_syncthing_binary() {
-    local OS="$1"
+    local PLATFORM="$1"
     local ARCH
     ARCH=$(uname -m)
-    [[ "$ARCH" == "arm64" || "$ARCH" == "aarch64" ]] && ARCH="arm64" || ARCH="amd64"
+    case "$ARCH" in
+        arm64|aarch64) ARCH="arm64" ;;
+        x86_64|amd64)  ARCH="amd64" ;;
+        *) print_err "Unsupported CPU architecture: $ARCH"; exit 1 ;;
+    esac
 
-    echo "[1/4] Downloading Syncthing..."
+    print_info "Downloading Syncthing (${PLATFORM}-${ARCH})..."
     local VERSION
     VERSION=$(curl -s https://api.github.com/repos/syncthing/syncthing/releases/latest \
         | grep '"tag_name"' | cut -d'"' -f4)
-    local FILENAME="syncthing-${OS}-${ARCH}-${VERSION}"
-    curl -L "https://github.com/syncthing/syncthing/releases/download/${VERSION}/${FILENAME}.tar.gz" \
-        -o /tmp/syncthing.tar.gz
+    local FILENAME="syncthing-${PLATFORM}-${ARCH}-${VERSION}"
+    local URL="https://github.com/syncthing/syncthing/releases/download/${VERSION}/${FILENAME}.tar.gz"
+    if ! curl -fL "$URL" -o /tmp/syncthing.tar.gz; then
+        print_err "Could not download Syncthing from $URL"
+        exit 1
+    fi
     tar -xzf /tmp/syncthing.tar.gz -C /tmp
+    sudo mkdir -p /usr/local/bin
     sudo mv "/tmp/${FILENAME}/syncthing" /usr/local/bin/syncthing
+    sudo chmod +x /usr/local/bin/syncthing
     rm -rf /tmp/syncthing.tar.gz "/tmp/${FILENAME}"
+
+    if ! /usr/local/bin/syncthing --version &>/dev/null; then
+        print_err "Installed syncthing binary won't execute on this CPU."
+        [[ "$PLATFORM" == "macos" ]] && echo "     ${DIM}${GREY}If you're on Apple Silicon, try: softwareupdate --install-rosetta${R}"
+        exit 1
+    fi
 }
 
+print_step 1 "Installing Syncthing"
+PLATFORM="$(detect_platform)"
+if [[ "$PLATFORM" == "unsupported" ]]; then
+    print_err "Unsupported OS: $(uname)"
+    exit 1
+fi
+
+# Validate existing binary — a prior Intel-brew install on Apple Silicon will fail here.
 if command -v syncthing &>/dev/null; then
-    echo "[1/4] Syncthing already installed."
-elif [[ "$(uname)" == "Darwin" ]] && command -v brew &>/dev/null; then
-    brew install syncthing
+    if syncthing --version &>/dev/null; then
+        print_ok "Syncthing already installed."
+    else
+        print_warn "Existing syncthing binary won't run on this CPU. Reinstalling with the native one."
+        install_syncthing_binary "$PLATFORM"
+        hash -r
+        print_ok "Syncthing reinstalled."
+    fi
 else
-    install_syncthing_binary "$(uname | tr '[:upper:]' '[:lower:]')"
+    install_syncthing_binary "$PLATFORM"
+    hash -r
+    print_ok "Syncthing installed."
 fi
 
 # ── Start Syncthing with a known API key ──────────────────────────────────────
-echo "[2/4] Starting Syncthing..."
+print_step 2 "Starting Syncthing"
 
-# Kill any existing instance so we can start with our known API key
 if pgrep -x syncthing > /dev/null 2>&1; then
-    echo "  Stopping existing Syncthing instance..."
+    print_info "Stopping existing Syncthing instance..."
     pkill -x syncthing || true
     sleep 3
 fi
 
 STGUIAPIKEY="$LOCAL_API_KEY" syncthing --no-browser --gui-address="127.0.0.1:8384" > /tmp/syncthing-owner.log 2>&1 &
-echo "  Waiting for Syncthing API..."
+print_info "Waiting for Syncthing API..."
 for i in {1..30}; do
     curl -sf -H "X-API-Key: $LOCAL_API_KEY" "$LOCAL_API/rest/system/ping" > /dev/null 2>&1 && break
     sleep 2
 done
 
 if ! curl -sf -H "X-API-Key: $LOCAL_API_KEY" "$LOCAL_API/rest/system/ping" > /dev/null 2>&1; then
-    echo "ERROR: Syncthing did not start. Log output:"
+    print_err "Syncthing did not start. Log output:"
     cat /tmp/syncthing-owner.log
     exit 1
 fi
 
-# Get local device ID
 LOCAL_DEVICE_ID=$(curl -s -H "X-API-Key: $LOCAL_API_KEY" "$LOCAL_API/rest/system/status" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['myID'])")
-echo "  Your device ID: $LOCAL_DEVICE_ID"
+print_ok "Local device ID: $LOCAL_DEVICE_ID"
 
-# ── Wire up Syncthing ─────────────────────────────────────────────────────────
-echo "[3/4] Connecting to Railway..."
+# ── Wire Syncthing to Railway ─────────────────────────────────────────────────
+print_step 3 "Connecting to Railway"
 
-# Add Railway as a device locally
 curl -sf -X POST "$LOCAL_API/rest/config/devices" \
     -H "X-API-Key: $LOCAL_API_KEY" \
     -H "Content-Type: application/json" \
     -d "{\"deviceID\":\"$RAILWAY_DEVICE_ID\",\"name\":\"The Compendium Server\",\"addresses\":[\"dynamic\"],\"autoAcceptFolders\":false}" \
     > /dev/null || true
 
-# Add vault folder locally, shared with Railway
 curl -sf -X POST "$LOCAL_API/rest/config/folders" \
     -H "X-API-Key: $LOCAL_API_KEY" \
     -H "Content-Type: application/json" \
@@ -106,14 +157,12 @@ curl -sf -X POST "$LOCAL_API/rest/config/folders" \
     }" \
     > /dev/null || true
 
-# Register this device with Railway
 curl -sfL -X POST "$RAILWAY_URL/rest/config/devices" \
     -H "X-API-Key: $RAILWAY_API_KEY" \
     -H "Content-Type: application/json" \
     -d "{\"deviceID\":\"$LOCAL_DEVICE_ID\",\"name\":\"Owner\",\"addresses\":[\"dynamic\"],\"autoAcceptFolders\":false}" \
     > /dev/null || true
 
-# Add this device to Railway's vault folder
 FOLDER_CONFIG=$(curl -sL -H "X-API-Key: $RAILWAY_API_KEY" "$RAILWAY_URL/rest/config/folders/$FOLDER_ID")
 UPDATED_CONFIG=$(echo "$FOLDER_CONFIG" | python3 -c "
 import sys, json
@@ -129,8 +178,14 @@ curl -sfL -X PUT "$RAILWAY_URL/rest/config/folders/$FOLDER_ID" \
     -d "$UPDATED_CONFIG" \
     > /dev/null
 
-echo "[4/4] Done! Your vault is now syncing to Railway."
-echo "  Files will upload in the background — check progress at http://localhost:8384"
+print_ok "Connected to Railway."
+
+# ── Done ──────────────────────────────────────────────────────────────────────
+print_step 4 "Uploading the vault"
+print_ok "Vault is syncing to Railway in the background."
+
+print_done
+echo "  ${GREEN}›${R} Watch progress at ${BOLD}http://localhost:8384${R}"
+echo "  ${GREEN}›${R} Add this to ${BOLD}.env${R} so future runs reuse the same key:"
+echo "       ${DIM}LOCAL_ST_API_KEY=$LOCAL_API_KEY${R}"
 echo ""
-echo "  Add this to your .env to reuse the same API key next time:"
-echo "  LOCAL_ST_API_KEY=$LOCAL_API_KEY"

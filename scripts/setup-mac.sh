@@ -1,21 +1,26 @@
 #!/usr/bin/env bash
 # The Compendium — Mac Setup
-# Run in Terminal: bash setup-mac.sh
-# Or use the one-liner from the Releases page.
+# Run: curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/setup-mac.sh | bash
 
 set -e
-source /dev/stdin <<< "$(curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/_wizard.sh 2>/dev/null || cat "$(dirname "${BASH_SOURCE[0]}")/_wizard.sh")"
 
-print_step() { echo ""; echo "[$1/5] $2"; }
-print_ok()   { echo "  ✓ $1"; }
-print_info() { echo "  $1"; }
+# Load shared wizard (banner + prompts + helpers). Curl fallback handles piped invocation.
+_WIZARD_URL="https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/_wizard.sh"
+_LOCAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _LOCAL_DIR=""
+if [[ -n "$_LOCAL_DIR" && -f "$_LOCAL_DIR/_wizard.sh" ]]; then
+    source "$_LOCAL_DIR/_wizard.sh"
+else
+    source /dev/stdin <<< "$(curl -fsSL "$_WIZARD_URL")"
+fi
+
+UI_TOTAL_STEPS=5
 
 # ── 1. Install Obsidian ───────────────────────────────────────────────────────
-print_step 1 "Checking Obsidian..."
+print_step 1 "Installing Obsidian"
 if [[ -d "/Applications/Obsidian.app" ]]; then
     print_ok "Obsidian already installed."
 else
-    print_info "Downloading Obsidian..."
+    print_info "Downloading latest Obsidian DMG..."
     ARCH=$(uname -m)
     OBSIDIAN_URL=$(curl -s https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest \
         | python3 -c "
@@ -28,7 +33,7 @@ url = next((a['browser_download_url'] for a in dmgs if 'universal' in a['name'])
 if not url: raise SystemExit('No DMG found')
 print(url)
 ")
-    curl -L "$OBSIDIAN_URL" -o /tmp/Obsidian.dmg
+    curl -fL "$OBSIDIAN_URL" -o /tmp/Obsidian.dmg
     hdiutil attach /tmp/Obsidian.dmg -quiet
     cp -R /Volumes/Obsidian/Obsidian.app /Applications/
     hdiutil detach /Volumes/Obsidian -quiet
@@ -36,40 +41,58 @@ print(url)
     print_ok "Obsidian installed."
 fi
 
-# ── 2. Install Syncthing ──────────────────────────────────────────────────────
-print_step 2 "Checking Syncthing..."
+# ── 2. Install Syncthing (arch-aware, direct download to avoid Intel-brew on M-series) ─
+print_step 2 "Installing Syncthing"
+ARCH=$(uname -m)
+case "$ARCH" in
+    arm64)  ST_ARCH="arm64" ;;
+    x86_64) ST_ARCH="amd64" ;;
+    *)      print_err "Unsupported CPU architecture: $ARCH"; exit 1 ;;
+esac
+
+# Validate any existing binary actually runs on this CPU (detects Intel-on-ARM breakage).
 ST_BIN=""
 if command -v syncthing &>/dev/null; then
-    ST_BIN=$(command -v syncthing)
-    print_ok "Syncthing already installed."
-elif command -v brew &>/dev/null; then
-    print_info "Installing via Homebrew..."
-    brew install syncthing
-    ST_BIN=$(command -v syncthing)
-    print_ok "Syncthing installed."
-else
-    print_info "Downloading Syncthing binary..."
-    ARCH=$(uname -m)
-    [[ "$ARCH" == "arm64" ]] && ST_ARCH="arm64" || ST_ARCH="amd64"
+    _existing="$(command -v syncthing)"
+    if "$_existing" --version &>/dev/null; then
+        ST_BIN="$_existing"
+        print_ok "Syncthing already installed ($ST_BIN)."
+    else
+        print_warn "Found broken Syncthing at $_existing (wrong architecture?). Reinstalling."
+    fi
+fi
+
+if [[ -z "$ST_BIN" ]]; then
+    print_info "Downloading Syncthing (macos-${ST_ARCH})..."
     VERSION=$(curl -s https://api.github.com/repos/syncthing/syncthing/releases/latest \
         | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
     FNAME="syncthing-macos-${ST_ARCH}-${VERSION}"
-    curl -L "https://github.com/syncthing/syncthing/releases/download/${VERSION}/${FNAME}.tar.gz" \
-        -o /tmp/syncthing.tar.gz
+    URL="https://github.com/syncthing/syncthing/releases/download/${VERSION}/${FNAME}.tar.gz"
+    if ! curl -fL "$URL" -o /tmp/syncthing.tar.gz; then
+        print_err "Could not download Syncthing from $URL"
+        exit 1
+    fi
     tar -xzf /tmp/syncthing.tar.gz -C /tmp
+    sudo mkdir -p /usr/local/bin
     sudo mv "/tmp/${FNAME}/syncthing" /usr/local/bin/syncthing
+    sudo chmod +x /usr/local/bin/syncthing
     rm -rf /tmp/syncthing.tar.gz "/tmp/${FNAME}"
     ST_BIN="/usr/local/bin/syncthing"
+
+    if ! "$ST_BIN" --version &>/dev/null; then
+        print_err "Syncthing won't run on this Mac. If you're on Apple Silicon, install Rosetta: softwareupdate --install-rosetta"
+        exit 1
+    fi
     print_ok "Syncthing installed."
 fi
 
 # ── 3. Create vault folder ────────────────────────────────────────────────────
-print_step 3 "Creating vault folder..."
+print_step 3 "Preparing vault folder"
 mkdir -p "$VAULT_PATH"
-print_ok "Vault folder: $VAULT_PATH"
+print_ok "Vault folder ready: $VAULT_PATH"
 
-# ── 4. Start Syncthing and configure ─────────────────────────────────────────
-print_step 4 "Connecting to sync server..."
+# ── 4. Start Syncthing and wire everything up ─────────────────────────────────
+print_step 4 "Connecting to the sync server"
 ST_DATA="$HOME/Library/Application Support/Syncthing"
 mkdir -p "$ST_DATA"
 LOCAL_API="http://localhost:8384"
@@ -90,7 +113,9 @@ for i in {1..30}; do
     sleep 2
 done
 if ! curl -sf -H "X-API-Key: $LOCAL_ST_API_KEY" "$LOCAL_API/rest/system/ping" > /dev/null 2>&1; then
-    echo "ERROR: Syncthing failed to start."; cat /tmp/syncthing-setup.log; exit 1
+    print_err "Syncthing failed to start. Log:"
+    cat /tmp/syncthing-setup.log
+    exit 1
 fi
 
 LOCAL_DEVICE_ID=$(curl -s -H "X-API-Key: $LOCAL_ST_API_KEY" "$LOCAL_API/rest/system/status" \
@@ -109,7 +134,7 @@ curl -sf -X POST "$LOCAL_API/rest/config/folders" \
 curl -sfL -X POST "$RAILWAY_URL/rest/config/devices" \
     -H "X-API-Key: $RAILWAY_API_KEY" -H "Content-Type: application/json" \
     -d "{\"deviceID\":\"$LOCAL_DEVICE_ID\",\"name\":\"$(hostname)\",\"addresses\":[\"dynamic\"],\"autoAcceptFolders\":false}" \
-    > /dev/null || print_info "Note: Could not register — ask your DM to approve your device."
+    > /dev/null || print_warn "Could not auto-register — ask your DM to approve your device in the Syncthing UI."
 
 FOLDER_CFG=$(curl -sL -H "X-API-Key: $RAILWAY_API_KEY" "$RAILWAY_URL/rest/config/folders/$FOLDER_ID")
 UPDATED=$(echo "$FOLDER_CFG" | python3 -c "
@@ -123,10 +148,10 @@ curl -sfL -X PUT "$RAILWAY_URL/rest/config/folders/$FOLDER_ID" \
     -H "X-API-Key: $RAILWAY_API_KEY" -H "Content-Type: application/json" \
     -d "$UPDATED" > /dev/null || true
 
-print_ok "Connected to sync server."
+print_ok "Connected and sharing the vault folder."
 
 # ── 5. Auto-start on login ────────────────────────────────────────────────────
-print_step 5 "Setting Syncthing to run on login..."
+print_step 5 "Enabling auto-start on login"
 mkdir -p "$HOME/Library/LaunchAgents"
 PLIST="$HOME/Library/LaunchAgents/net.syncthing.syncthing.plist"
 
@@ -158,17 +183,11 @@ else
     print_ok "Syncthing login item already configured."
 fi
 
+print_done
+echo "  ${GREEN}›${R} Your vault: ${BOLD}$VAULT_PATH${R}"
+echo "  ${GREEN}›${R} In Obsidian: ${BOLD}File → Open Vault${R} → select that folder."
+echo "  ${GREEN}›${R} Status dashboard: ${BOLD}http://localhost:8384${R}"
 echo ""
-echo "==============================="
-echo "  Setup complete!"
-echo "==============================="
-echo ""
-echo "The vault is syncing in the background."
-echo "It may take a few minutes to download everything on first run."
-echo ""
-echo "Your vault: $VAULT_PATH"
-echo "In Obsidian: File > Open Vault > select the folder above."
-echo ""
-echo "Opening Obsidian..."
-sleep 4
+echo "  ${DIM}${GREY}First sync can take a few minutes. Opening Obsidian...${R}"
+sleep 3
 open -a Obsidian
