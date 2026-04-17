@@ -117,21 +117,21 @@ curl -sf -X POST "$LOCAL_API/rest/config/folders" \
     > /dev/null
 
 # Register your device with Railway and share folder
-curl -sf -X POST "$RAILWAY_URL/rest/config/devices" \
+curl -sfL -X POST "$RAILWAY_URL/rest/config/devices" \
     -H "X-API-Key: $RAILWAY_API_KEY" \
     -H "Content-Type: application/json" \
     -d "{\"deviceID\":\"$LOCAL_DEVICE_ID\",\"name\":\"Owner\",\"addresses\":[\"dynamic\"],\"autoAcceptFolders\":false}" \
     > /dev/null
 
 # Update Railway folder to include your device
-FOLDER_CONFIG=$(curl -s -H "X-API-Key: $RAILWAY_API_KEY" "$RAILWAY_URL/rest/config/folders/$FOLDER_ID")
+FOLDER_CONFIG=$(curl -sL -H "X-API-Key: $RAILWAY_API_KEY" "$RAILWAY_URL/rest/config/folders/$FOLDER_ID")
 UPDATED_CONFIG=$(echo "$FOLDER_CONFIG" | python3 -c "
 import sys, json
 cfg = json.load(sys.stdin)
 cfg['devices'].append({'deviceID': '$LOCAL_DEVICE_ID', 'encryptionPassword': ''})
 print(json.dumps(cfg))
 ")
-curl -sf -X PUT "$RAILWAY_URL/rest/config/folders/$FOLDER_ID" \
+curl -sfL -X PUT "$RAILWAY_URL/rest/config/folders/$FOLDER_ID" \
     -H "X-API-Key: $RAILWAY_API_KEY" \
     -H "Content-Type: application/json" \
     -d "$UPDATED_CONFIG" \

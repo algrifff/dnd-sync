@@ -22,21 +22,21 @@ if [[ -z "$RAILWAY_URL" || -z "$RAILWAY_API_KEY" ]]; then
 fi
 
 echo "Waiting for Syncthing to be ready..."
-until curl -sf -H "X-API-Key: $RAILWAY_API_KEY" "$RAILWAY_URL/rest/system/ping" > /dev/null 2>&1; do
+until curl -sfL -H "X-API-Key: $RAILWAY_API_KEY" "$RAILWAY_URL/rest/system/ping" > /dev/null 2>&1; do
     printf "."
     sleep 3
 done
 echo " ready."
 
 echo "Fetching Railway device ID..."
-STATUS_RESPONSE=$(curl -s -H "X-API-Key: $RAILWAY_API_KEY" "$RAILWAY_URL/rest/system/status")
+STATUS_RESPONSE=$(curl -sL -H "X-API-Key: $RAILWAY_API_KEY" "$RAILWAY_URL/rest/system/status")
 echo "  Raw response: $STATUS_RESPONSE"
 DEVICE_ID=$(echo "$STATUS_RESPONSE" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['myID'])")
 echo "  Railway device ID: $DEVICE_ID"
 
 echo "Creating vault folder on Railway..."
-HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+HTTP_STATUS=$(curl -sL -o /dev/null -w "%{http_code}" -X POST \
     -H "X-API-Key: $RAILWAY_API_KEY" \
     -H "Content-Type: application/json" \
     -d "{
