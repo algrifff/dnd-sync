@@ -26,9 +26,18 @@ type SharedDoc = {
   doc: Y.Doc;
   awareness: awarenessProtocol.Awareness;
   conns: Set<WebSocket>;
+  /** Pending GC timer started when conns drops to 0. Cleared on reconnect. */
+  gcTimer: ReturnType<typeof setTimeout> | null;
 };
 
 const docs = new Map<string, SharedDoc>();
+
+/**
+ * How long to wait after the last connection closes before releasing a
+ * SharedDoc. Tunes the trade-off between reconnection latency (smaller is
+ * better) and churn under noisy clients (bigger is better).
+ */
+const DOC_GC_GRACE_MS = 15_000;
 
 registerStatsProbe(() =>
   [...docs.values()]
@@ -54,7 +63,7 @@ function getSharedDoc(docName: string): SharedDoc {
 
   bindState(docName, doc);
 
-  shared = { docName, doc, awareness, conns };
+  shared = { docName, doc, awareness, conns, gcTimer: null };
   docs.set(docName, shared);
 
   doc.on('update', (update: Uint8Array, origin: unknown) => {
@@ -105,6 +114,11 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage): void {
   }
 
   const shared = getSharedDoc(docName);
+  // If a GC was pending because the last client just left, cancel it.
+  if (shared.gcTimer) {
+    clearTimeout(shared.gcTimer);
+    shared.gcTimer = null;
+  }
   shared.conns.add(ws);
   ws.binaryType = 'arraybuffer';
 
@@ -153,6 +167,17 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage): void {
     );
     // Final flush so anything in the debounce window lands on disk.
     writeStateNow(shared.docName, shared.doc);
+
+    // If this was the last client, schedule release of the SharedDoc's
+    // in-memory state. A reconnect within the grace period cancels the GC.
+    if (shared.conns.size === 0 && !shared.gcTimer) {
+      shared.gcTimer = setTimeout(() => {
+        if (shared.conns.size !== 0) return;
+        if (docs.get(shared.docName) !== shared) return;
+        shared.doc.destroy();
+        docs.delete(shared.docName);
+      }, DOC_GC_GRACE_MS);
+    }
   });
 
   // Send the initial sync step 1 and current awareness to the new client.
