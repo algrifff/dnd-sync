@@ -51,8 +51,26 @@ export default class CompendiumPlugin extends Plugin {
   }
 
   async reconnect(): Promise<void> {
+    const desired = {
+      serverUrl: this.settings.serverUrl,
+      authToken: this.settings.authToken,
+    };
+
+    // If we're already running with the same config, don't tear down —
+    // that would abruptly close every WebSocket (Chrome logs one red
+    // 'failed' line per provider). y-websocket auto-reconnects on real
+    // drops, so a manual reconnect when nothing changed is noise.
+    if (this.registry) {
+      const current = this.registry.getConfig();
+      if (current.serverUrl === desired.serverUrl && current.authToken === desired.authToken) {
+        new Notice('Compendium: already connected with these settings.');
+        return;
+      }
+    }
+
     this.stopSync();
-    if (this.settings.serverUrl && this.settings.authToken) this.startSync();
+    if (desired.serverUrl && desired.authToken) this.startSync();
+    new Notice('Compendium: reconnected.');
   }
 
   private startSync(): void {

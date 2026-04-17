@@ -20,8 +20,13 @@ type Listener = (status: AggregateStatus, totalDocs: number) => void;
 export class DocRegistry {
   private readonly records = new Map<string, DocRecord>();
   private readonly listeners = new Set<Listener>();
+  private emitting = true;
 
   constructor(private readonly config: SyncConfig) {}
+
+  getConfig(): SyncConfig {
+    return this.config;
+  }
 
   has(path: string): boolean {
     return this.records.has(path);
@@ -55,11 +60,15 @@ export class DocRegistry {
   }
 
   destroyAll(): void {
+    // Suppress per-provider status churn so the status bar doesn't flicker
+    // through disconnected/connecting for every doc during teardown.
+    this.emitting = false;
     for (const record of this.records.values()) {
       record.provider.destroy();
       record.doc.destroy();
     }
     this.records.clear();
+    this.emitting = true;
     this.emit();
   }
 
@@ -88,6 +97,7 @@ export class DocRegistry {
   }
 
   private emit(): void {
+    if (!this.emitting) return;
     const status = this.aggregate();
     const size = this.records.size;
     for (const listener of this.listeners) listener(status, size);
