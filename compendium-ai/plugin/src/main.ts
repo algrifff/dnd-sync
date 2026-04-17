@@ -16,6 +16,7 @@ import { BinarySync } from './sync/binarySync';
 import { DocRegistry } from './sync/docRegistry';
 import { FileMirror } from './sync/fileMirror';
 import { PluginUpdater } from './sync/updater';
+import { VaultConfigSync } from './sync/vaultConfigSync';
 import { StatusBar } from './ui/statusBar';
 
 export default class CompendiumPlugin extends Plugin {
@@ -23,6 +24,7 @@ export default class CompendiumPlugin extends Plugin {
   private registry: DocRegistry | null = null;
   private mirror: FileMirror | null = null;
   private binary: BinarySync | null = null;
+  private vaultConfig: VaultConfigSync | null = null;
   private cmBinding: CmBinding | null = null;
   private updater: PluginUpdater | null = null;
   private statusBar: StatusBar | null = null;
@@ -106,6 +108,7 @@ export default class CompendiumPlugin extends Plugin {
     });
     this.mirror = new FileMirror(this.app, this.registry, cfg);
     this.binary = new BinarySync(this.app, cfg);
+    this.vaultConfig = new VaultConfigSync(this.app, cfg);
     this.cmBinding = new CmBinding(this.app, this.registry, makeIdentity(this.settings.displayName, this.settings.displayColor));
     this.updater = new PluginUpdater(this.app, this, cfg);
     // Wait for the Obsidian layout to finish loading before enumerating —
@@ -113,6 +116,7 @@ export default class CompendiumPlugin extends Plugin {
     this.app.workspace.onLayoutReady(() => {
       void this.mirror?.start();
       void this.binary?.start();
+      this.vaultConfig?.start();
       this.cmBinding?.start();
       this.updater?.start();
     });
@@ -123,6 +127,8 @@ export default class CompendiumPlugin extends Plugin {
     this.updater = null;
     this.cmBinding?.stop();
     this.cmBinding = null;
+    this.vaultConfig?.stop();
+    this.vaultConfig = null;
     this.binary?.stop();
     this.binary = null;
     this.mirror?.stop();
