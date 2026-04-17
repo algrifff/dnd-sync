@@ -1,0 +1,9 @@
+{
+  "name": "@compendium/plugin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "echo 'plugin typecheck: scaffolded in Milestone 4'"
+  }
+}

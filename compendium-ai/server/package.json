@@ -1,0 +1,9 @@
+{
+  "name": "@compendium/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "echo 'server typecheck: scaffolded in Milestone 2'"
+  }
+}

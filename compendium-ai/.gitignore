@@ -16,11 +16,9 @@ plugin/main.js.map
 .env.local
 .env.*.local
 
-# Bun
+# Bun cache. The lockfile (bun.lockb on 1.1, bun.lock on 1.2+) stays
+# checked in for reproducible installs.
 .bun/
-bun.lockb
-# Keep bun.lock (textual lockfile) — checked in for reproducibility
-!bun.lock
 
 # Editor / OS
 .vscode/
