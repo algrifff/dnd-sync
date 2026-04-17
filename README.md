@@ -18,13 +18,24 @@ Syncthing runs silently in the background on everyone's machine and syncs throug
 
 **[⬇ Download the latest installer from the Releases page](../../releases/latest)**
 
-| OS | Download | How to run |
-|----|----------|-----------|
-| Windows | `setup-windows.bat` | Double-click it |
-| Mac | `setup-mac.command` | Double-click it (if blocked: right-click → Open) |
-| Linux | `setup-linux.sh` | `bash setup-linux.sh` in a terminal |
+### Windows
+Download **`setup-windows.bat`** from the release and double-click it.
 
-Wait ~5 minutes for the initial sync, then open Obsidian and select your vault:
+### Mac
+Open **Terminal** (`Cmd+Space` → type Terminal → Enter) and paste:
+```bash
+curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/setup-mac.sh | bash
+```
+
+### Linux
+Open a terminal and paste:
+```bash
+curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/setup-linux.sh | bash
+```
+
+---
+
+Wait ~5 minutes for the initial sync, then open Obsidian → **File → Open Vault** → select:
 - **Windows:** `Documents\The-Compendium`
 - **Mac / Linux:** `~/Documents/The-Compendium`
 
