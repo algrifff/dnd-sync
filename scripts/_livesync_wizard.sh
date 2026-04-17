@@ -25,8 +25,24 @@ else
     fi
 fi
 
-# Load .env if running from a local checkout (owner convenience).
-[[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/../.env" ]] && source "$SCRIPT_DIR/../.env"
+# Tolerant .env parser — used only when a local .env exists (owner convenience).
+_ls_load_env() {
+    local file="$1" line key val
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        [[ -z "${line// }" || "$line" =~ ^[[:space:]]*# ]] && continue
+        if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+            key="${BASH_REMATCH[1]}"
+            val="${BASH_REMATCH[2]}"
+            val="${val%\"}"; val="${val#\"}"
+            val="${val%\'}"; val="${val#\'}"
+            val="${val%"${val##*[![:space:]]}"}"
+            printf -v "$key" '%s' "$val"
+            export "$key"
+        fi
+    done < "$file"
+}
+[[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/../.env" ]] && _ls_load_env "$SCRIPT_DIR/../.env"
 
 VAULT_PATH="${VAULT_PATH:-$HOME/Documents/The-Compendium}"
 UI_TOTAL_STEPS=5

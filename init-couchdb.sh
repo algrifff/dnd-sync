@@ -25,14 +25,38 @@ if [[ ! -f "$SCRIPT_DIR/.env" ]]; then
     print_err ".env not found. Copy .env.example to .env and fill in the COUCHDB_* values."
     exit 1
 fi
-# shellcheck disable=SC1091
-source "$SCRIPT_DIR/.env"
+
+# Tolerant .env parser — accepts KEY=VALUE, KEY = VALUE, KEY="VALUE", trims
+# surrounding whitespace/quotes. Survives common hand-editing mistakes.
+_load_env() {
+    local file="$1" line key val
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"                        # strip CR (Windows line endings)
+        [[ -z "${line// }" || "$line" =~ ^[[:space:]]*# ]] && continue
+        if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+            key="${BASH_REMATCH[1]}"
+            val="${BASH_REMATCH[2]}"
+            val="${val%\"}"; val="${val#\"}"        # strip matched double quotes
+            val="${val%\'}"; val="${val#\'}"        # or single quotes
+            val="${val%"${val##*[![:space:]]}"}"    # right-trim whitespace
+            printf -v "$key" '%s' "$val"
+            export "$key"
+        fi
+    done < "$file"
+}
+_load_env "$SCRIPT_DIR/.env"
 
 : "${COUCHDB_URL:?COUCHDB_URL must be set in .env}"
 : "${COUCHDB_USER:?COUCHDB_USER must be set in .env}"
 : "${COUCHDB_PASSWORD:?COUCHDB_PASSWORD must be set in .env}"
 DB="${COUCHDB_DBNAME:-vault}"
 COUCHDB_URL="${COUCHDB_URL%/}"
+
+# Auto-prepend https:// if the user left the scheme off.
+if [[ "$COUCHDB_URL" != http://* && "$COUCHDB_URL" != https://* ]]; then
+    print_warn "No scheme on COUCHDB_URL — assuming https://$COUCHDB_URL. Please update .env."
+    COUCHDB_URL="https://$COUCHDB_URL"
+fi
 
 # Railway auto-redirects http:// → https:// (301). Detect and upgrade so our
 # URL matches what the server actually serves.
