@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Run this on YOUR machine (the vault owner) after init-railway.sh.
-# This connects your existing local vault to Railway.
-# Works on Linux and Mac.
+# Works on Linux, WSL, and Mac.
 
 set -e
 
@@ -15,6 +14,9 @@ fi
 
 FOLDER_ID="${FOLDER_ID:-the-compendium}"
 VAULT_PATH="${VAULT_PATH:-$HOME/Documents/The-Compendium}"
+LOCAL_API="http://localhost:8384"
+# Use a fixed local API key so we never need to read the config file
+LOCAL_API_KEY="${LOCAL_ST_API_KEY:-compendium-local-key}"
 
 if [[ -z "$RAILWAY_URL" || -z "$RAILWAY_API_KEY" || -z "$RAILWAY_DEVICE_ID" ]]; then
     echo "ERROR: RAILWAY_URL, RAILWAY_API_KEY, and RAILWAY_DEVICE_ID must all be set in .env"
@@ -25,16 +27,6 @@ echo "=== The Compendium — Owner Setup ==="
 echo ""
 
 # ── Install Syncthing ─────────────────────────────────────────────────────────
-install_syncthing_mac() {
-    if command -v brew &>/dev/null; then
-        echo "[1/4] Installing Syncthing via Homebrew..."
-        brew install syncthing
-        brew services start syncthing
-    else
-        install_syncthing_binary "darwin"
-    fi
-}
-
 install_syncthing_binary() {
     local OS="$1"
     local ARCH
@@ -46,60 +38,43 @@ install_syncthing_binary() {
     VERSION=$(curl -s https://api.github.com/repos/syncthing/syncthing/releases/latest \
         | grep '"tag_name"' | cut -d'"' -f4)
     local FILENAME="syncthing-${OS}-${ARCH}-${VERSION}"
-    local URL="https://github.com/syncthing/syncthing/releases/download/${VERSION}/${FILENAME}.tar.gz"
-
-    curl -L "$URL" -o /tmp/syncthing.tar.gz
+    curl -L "https://github.com/syncthing/syncthing/releases/download/${VERSION}/${FILENAME}.tar.gz" \
+        -o /tmp/syncthing.tar.gz
     tar -xzf /tmp/syncthing.tar.gz -C /tmp
     sudo mv "/tmp/${FILENAME}/syncthing" /usr/local/bin/syncthing
     rm -rf /tmp/syncthing.tar.gz "/tmp/${FILENAME}"
-    echo "  Installed to /usr/local/bin/syncthing"
 }
 
 if command -v syncthing &>/dev/null; then
     echo "[1/4] Syncthing already installed."
-elif [[ "$(uname)" == "Darwin" ]]; then
-    install_syncthing_mac
+elif [[ "$(uname)" == "Darwin" ]] && command -v brew &>/dev/null; then
+    brew install syncthing
 else
-    install_syncthing_binary "linux"
+    install_syncthing_binary "$(uname | tr '[:upper:]' '[:lower:]')"
 fi
 
-# ── Start Syncthing ───────────────────────────────────────────────────────────
+# ── Start Syncthing with a known API key ──────────────────────────────────────
 echo "[2/4] Starting Syncthing..."
-if ! pgrep -x syncthing > /dev/null; then
-    syncthing --no-browser &
-    sleep 6
+
+# Kill any existing instance so we can start with our known API key
+if pgrep -x syncthing > /dev/null 2>&1; then
+    echo "  Stopping existing Syncthing instance..."
+    pkill -x syncthing || true
+    sleep 3
 fi
 
-# Wait for API
-LOCAL_API="http://localhost:8384"
+STGUIAPIKEY="$LOCAL_API_KEY" syncthing --no-browser --gui-address="127.0.0.1:8384" > /tmp/syncthing-owner.log 2>&1 &
 echo "  Waiting for Syncthing API..."
 for i in {1..30}; do
-    curl -sf "$LOCAL_API/rest/system/ping" > /dev/null 2>&1 && break
+    curl -sf -H "X-API-Key: $LOCAL_API_KEY" "$LOCAL_API/rest/system/ping" > /dev/null 2>&1 && break
     sleep 2
 done
 
-# Read local API key from config — check all known locations
-CONFIG_PATH=""
-for candidate in \
-    "$HOME/Library/Application Support/Syncthing/config.xml" \
-    "$HOME/.local/share/syncthing/config.xml" \
-    "$HOME/.config/syncthing/config.xml" \
-    "${XDG_DATA_HOME:-$HOME/.local/share}/syncthing/config.xml"; do
-    if [[ -f "$candidate" ]]; then
-        CONFIG_PATH="$candidate"
-        break
-    fi
-done
-
-if [[ -z "$CONFIG_PATH" ]]; then
-    echo "ERROR: Could not find Syncthing config. Searched:"
-    echo "  ~/.local/share/syncthing/config.xml"
-    echo "  ~/.config/syncthing/config.xml"
-    echo "Try running 'syncthing --no-browser' manually, wait 10 seconds, then re-run this script."
+if ! curl -sf -H "X-API-Key: $LOCAL_API_KEY" "$LOCAL_API/rest/system/ping" > /dev/null 2>&1; then
+    echo "ERROR: Syncthing did not start. Log output:"
+    cat /tmp/syncthing-owner.log
     exit 1
 fi
-echo "  Config found at: $CONFIG_PATH"
-LOCAL_API_KEY=$(grep -oP '(?<=<apikey>)[^<]+' "$CONFIG_PATH")
 
 # Get local device ID
 LOCAL_DEVICE_ID=$(curl -s -H "X-API-Key: $LOCAL_API_KEY" "$LOCAL_API/rest/system/status" \
@@ -114,7 +89,7 @@ curl -sf -X POST "$LOCAL_API/rest/config/devices" \
     -H "X-API-Key: $LOCAL_API_KEY" \
     -H "Content-Type: application/json" \
     -d "{\"deviceID\":\"$RAILWAY_DEVICE_ID\",\"name\":\"The Compendium Server\",\"addresses\":[\"dynamic\"],\"autoAcceptFolders\":false}" \
-    > /dev/null
+    > /dev/null || true
 
 # Add vault folder locally, shared with Railway
 curl -sf -X POST "$LOCAL_API/rest/config/folders" \
@@ -129,21 +104,23 @@ curl -sf -X POST "$LOCAL_API/rest/config/folders" \
         \"rescanIntervalS\": 30,
         \"fsWatcherEnabled\": true
     }" \
-    > /dev/null
+    > /dev/null || true
 
-# Register your device with Railway and share folder
+# Register this device with Railway
 curl -sfL -X POST "$RAILWAY_URL/rest/config/devices" \
     -H "X-API-Key: $RAILWAY_API_KEY" \
     -H "Content-Type: application/json" \
     -d "{\"deviceID\":\"$LOCAL_DEVICE_ID\",\"name\":\"Owner\",\"addresses\":[\"dynamic\"],\"autoAcceptFolders\":false}" \
-    > /dev/null
+    > /dev/null || true
 
-# Update Railway folder to include your device
+# Add this device to Railway's vault folder
 FOLDER_CONFIG=$(curl -sL -H "X-API-Key: $RAILWAY_API_KEY" "$RAILWAY_URL/rest/config/folders/$FOLDER_ID")
 UPDATED_CONFIG=$(echo "$FOLDER_CONFIG" | python3 -c "
 import sys, json
 cfg = json.load(sys.stdin)
-cfg['devices'].append({'deviceID': '$LOCAL_DEVICE_ID', 'encryptionPassword': ''})
+ids = [d['deviceID'] for d in cfg['devices']]
+if '$LOCAL_DEVICE_ID' not in ids:
+    cfg['devices'].append({'deviceID': '$LOCAL_DEVICE_ID', 'encryptionPassword': ''})
 print(json.dumps(cfg))
 ")
 curl -sfL -X PUT "$RAILWAY_URL/rest/config/folders/$FOLDER_ID" \
@@ -153,6 +130,7 @@ curl -sfL -X PUT "$RAILWAY_URL/rest/config/folders/$FOLDER_ID" \
     > /dev/null
 
 echo "[4/4] Done! Your vault is now syncing to Railway."
-echo "  Files will upload in the background — this may take a few minutes for the first sync."
+echo "  Files will upload in the background — check progress at http://localhost:8384"
 echo ""
-echo "Share the setup scripts in compendium-sync/scripts/ with your friends."
+echo "  Add this to your .env to reuse the same API key next time:"
+echo "  LOCAL_ST_API_KEY=$LOCAL_API_KEY"
