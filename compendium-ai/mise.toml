@@ -1,0 +1,5 @@
+# Tool versions for the Compendium monorepo.
+# Activate with `mise install` (reads this file when you cd into the folder).
+
+[tools]
+bun = "1.1"

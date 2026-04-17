@@ -106,18 +106,18 @@ Separating `shared / server / plugin` lets the plugin import the exact Zod schem
 
 | Layer             | Choice                                | Notes                                              |
 |-------------------|---------------------------------------|----------------------------------------------------|
-| Runtime           | Node 22 LTS                           | Railway + `better-sqlite3` compatible              |
+| Version manager   | mise                                  | `.mise.toml` pins Bun (and anything else)          |
+| Runtime + package manager | Bun 1.1                      | Native TS, workspaces, single tool for install/run |
 | Server framework  | Next.js 15 (App Router)               | Route handlers for REST; custom `server.ts` for WS |
 | Language          | TypeScript 5.x, strict                | `strict`, `noUncheckedIndexedAccess`               |
 | Styling           | Tailwind CSS v4                       | Preconfigured, dormant in Phase 1                  |
 | Validation        | Zod 3.x                               | All API boundaries                                 |
 | CRDT              | Yjs + `y-websocket` + `y-protocols`   | Server and plugin must match versions              |
 | WebSocket         | `ws`                                  | Next.js server exposes raw upgrade handler         |
-| DB                | `better-sqlite3`                      | Synchronous, WAL mode                              |
+| DB                | `better-sqlite3`                      | Synchronous, WAL mode (kept runtime-agnostic)      |
 | Migrations        | Hand-rolled `runMigrations()`         | ~30 lines, no ORM                                  |
 | AI (Phase 3)      | `ai` v4 + `@ai-sdk/anthropic`         | `streamText` with `tool()` helpers                 |
 | Plugin bundler    | esbuild                               | Same as `obsidian-sample-plugin`                   |
-| Package manager   | pnpm 9                                | Workspaces, no Turbo                               |
 | Lint / format     | ESLint flat config + Prettier         | Minimal rules                                      |
 
 ## Milestones
@@ -125,16 +125,18 @@ Separating `shared / server / plugin` lets the plugin import the exact Zod schem
 ### Milestone 1 — Foundation
 
 **Step 1.1 — Monorepo scaffold**
-- `mkdir compendium-ai && cd compendium-ai`
-- `pnpm init`, `pnpm-workspace.yaml` listing `shared`, `server`, `plugin`
-- Root `tsconfig.base.json` with strict settings
+- `cd compendium-ai`
+- `mise.toml` pins `bun = "1.1"`
+- Root `package.json` with `workspaces: ["shared", "server", "plugin"]`
+- Root `tsconfig.base.json` with strict settings (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`)
 - `.editorconfig`, `.prettierrc`, `.gitignore`, `eslint.config.mjs`
-- **Done when:** `pnpm -r build` runs (no-op) without errors
+- **Done when:** `mise install && bun install` succeeds with zero deps
 
 **Step 1.2 — `@compendium/shared`**
-- `shared/src/protocol.ts` with Zod schemas for `AuthHeader`, `SearchResult`, `FileUploadRequest`, `ChatMessage`. Export types via `z.infer`.
+- `shared/src/protocol.ts` with Zod schemas for `AuthToken`, `SearchResult`, `FileMetadata`, `ChatMessage`. Export types via `z.infer`.
 - `shared/src/constants.ts` with `WS_PATH = '/sync'`, `MARKDOWN_EXTENSIONS`, `BINARY_EXTENSIONS`.
-- **Done when:** `pnpm --filter @compendium/shared build` produces type-correct dist
+- Consumed as TS source — no build step. `exports: { ".": "./src/index.ts" }`.
+- **Done when:** `bun --filter '@compendium/shared' typecheck` passes
 
 ### Milestone 2 — Server core
 
