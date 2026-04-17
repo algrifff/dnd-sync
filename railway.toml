@@ -3,6 +3,4 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-healthcheckPath = "/rest/system/ping"
-healthcheckTimeout = 300
 restartPolicyType = "always"
