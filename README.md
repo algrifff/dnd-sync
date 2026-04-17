@@ -16,47 +16,49 @@ Syncthing runs silently in the background on everyone's machine and syncs throug
 
 ---
 
-## For friends — Getting started
+## For friends — Getting started (LiveSync / CouchDB branch)
 
-You'll need **two things** from your DM before you start:
-1. **Server address** — looks like `https://xxx.up.railway.app`
-2. **Join key** — a secret string
+You'll need **four things** from your DM before you start:
+1. **CouchDB URL** — looks like `https://xxx.up.railway.app`
+2. **Username**
+3. **Password**
+4. **Database name** — usually `vault`
 
-Then follow the three steps for your OS below. The installer is pretty: it greets you with a dragon, walks through 5 coloured steps, and ends by opening Obsidian for you.
+Then follow the steps for your OS below. The installer greets you with a dragon, installs Obsidian, drops the LiveSync plugin into your vault, and opens Obsidian.
 
 ### 🍎 Mac
 
 1. Open **Terminal** (`Cmd+Space` → type `Terminal` → Enter)
 2. Paste this and hit Enter:
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/setup-mac.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/livesync-couchdb/scripts/setup-livesync-mac.sh | bash
    ```
-3. Type in the server address and join key when asked
+3. Type in the four values when asked
 
 ### 🐧 Linux
 
 1. Open a terminal
 2. Paste this and hit Enter:
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/main/scripts/setup-linux.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/algrifff/dnd-sync/livesync-couchdb/scripts/setup-livesync-linux.sh | bash
    ```
-3. Type in the server address and join key when asked
+3. Type in the four values when asked
 
 ### 🪟 Windows
 
-1. Download **[`setup-windows.bat`](../../releases/latest)** from the Releases page
-2. Double-click it
-3. Type in the server address and join key when asked
+Not wired up on this branch yet — Windows friends should hold off until we merge, or use WSL for now.
 
 ---
 
-### After setup
+### After setup (in Obsidian)
 
-- **First sync:** wait ~5 minutes, then open **Obsidian → File → Open Vault** and pick:
-  - **Mac / Linux:** `~/Documents/The-Compendium`
-  - **Windows:** `Documents\The-Compendium`
-- Syncthing runs silently in the background from now on — every save syncs within seconds.
-- **Check sync status** any time at `http://localhost:8384`.
+One-time:
+1. **Settings → Community plugins → Turn on community plugins**
+2. Enable **Self-hosted LiveSync** in the list
+3. LiveSync tab → **Fetch everything from remote** (first sync pulls the vault down)
+4. Toggle **LiveSync mode** on — watch the 🔄 indicator appear in the status bar
+
+After that, every save syncs to everyone else within a second or two.
 
 ---
 
