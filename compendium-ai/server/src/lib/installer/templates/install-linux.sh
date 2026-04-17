@@ -27,10 +27,34 @@ echo "  ${BOLD}${GOLD}T H E   C O M P E N D I U M${R}"
 echo "  ${GREY}Installing the real-time vault plugin…${R}"
 
 # ── Install Obsidian if missing ──────────────────────────────────────────────
+find_obsidian() {
+    if command -v obsidian >/dev/null 2>&1; then
+        command -v obsidian; return 0
+    fi
+    local candidates=(
+        "$HOME/.local/bin/obsidian.AppImage"
+        "$HOME/Applications/Obsidian.AppImage"
+        "/opt/Obsidian/obsidian"
+        "/usr/bin/obsidian"
+    )
+    for p in "${candidates[@]}"; do
+        if [[ -e "$p" ]]; then echo "$p"; return 0; fi
+    done
+    # Flatpak install
+    if command -v flatpak >/dev/null 2>&1 && flatpak info md.obsidian.Obsidian >/dev/null 2>&1; then
+        echo "flatpak:md.obsidian.Obsidian"; return 0
+    fi
+    # Snap install
+    if command -v snap >/dev/null 2>&1 && snap list obsidian >/dev/null 2>&1; then
+        echo "snap:obsidian"; return 0
+    fi
+    return 1
+}
+
 step "Installing Obsidian"
 OBSIDIAN_BIN="$HOME/.local/bin/obsidian.AppImage"
-if command -v obsidian >/dev/null 2>&1 || [[ -f "$OBSIDIAN_BIN" ]]; then
-    ok "Obsidian already installed."
+if obsidian_path=$(find_obsidian); then
+    ok "Obsidian already installed ($obsidian_path)."
 else
     info "Downloading the Obsidian AppImage…"
     OBSIDIAN_URL=$(curl -s https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest \

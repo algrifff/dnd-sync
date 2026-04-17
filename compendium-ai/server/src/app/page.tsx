@@ -200,10 +200,26 @@ function InstallersSection({ token }: { token: string }) {
 
   if (!installerKey || !origin) return null;
 
+  const macCmd = `curl -fsSL "${origin}/install/mac?key=${installerKey}" | bash`;
+  const linuxCmd = `curl -fsSL "${origin}/install/linux?key=${installerKey}" | bash`;
+  const windowsUrl = `${origin}/install/windows.bat?key=${installerKey}`;
+
   const rows = [
-    { label: 'Mac', filename: 'compendium-mac.command', url: `${origin}/install/mac?key=${installerKey}` },
-    { label: 'Linux', filename: 'compendium-linux.sh', url: `${origin}/install/linux?key=${installerKey}` },
-    { label: 'Windows', filename: 'compendium-windows.bat', url: `${origin}/install/windows.bat?key=${installerKey}` },
+    {
+      label: 'Mac',
+      hint: 'Paste into Terminal (Cmd+Space → "Terminal"). Bypasses Gatekeeper.',
+      value: macCmd,
+    },
+    {
+      label: 'Linux',
+      hint: 'Paste into any terminal.',
+      value: linuxCmd,
+    },
+    {
+      label: 'Windows',
+      hint: 'Open this URL in a browser — it downloads compendium-windows.bat. Double-click to run.',
+      value: windowsUrl,
+    },
   ];
 
   return (
@@ -213,27 +229,30 @@ function InstallersSection({ token }: { token: string }) {
         <button
           onClick={rotate}
           className="text-xs text-neutral-400 hover:text-amber-400"
-          title="Invalidate current URLs"
+          title="Invalidate current commands + URL"
         >
           rotate key
         </button>
       </div>
       <p className="text-xs text-neutral-500 mb-3">
-        Share one URL per friend (per OS). They visit it, the installer downloads, they double-click — Obsidian opens syncing.
+        Share the right command per friend. Rotate the key if any leaks.
       </p>
-      <ul className="space-y-2">
+      <ul className="space-y-3">
         {rows.map((r) => (
-          <li key={r.label} className="flex items-center gap-2">
-            <span className="text-xs text-neutral-500 w-16">{r.label}</span>
-            <code className="flex-1 font-mono text-xs text-neutral-300 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 truncate">
-              {r.url}
-            </code>
-            <button
-              onClick={() => copy(r.label, r.url)}
-              className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-amber-500 hover:text-amber-400"
-            >
-              {justCopied === r.label ? 'copied' : 'copy'}
-            </button>
+          <li key={r.label}>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-500 w-16 shrink-0">{r.label}</span>
+              <code className="flex-1 font-mono text-xs text-neutral-300 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 truncate">
+                {r.value}
+              </code>
+              <button
+                onClick={() => copy(r.label, r.value)}
+                className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-amber-500 hover:text-amber-400 shrink-0"
+              >
+                {justCopied === r.label ? 'copied' : 'copy'}
+              </button>
+            </div>
+            <div className="text-xs text-neutral-500 mt-1 ml-[4.5rem]">{r.hint}</div>
           </li>
         ))}
       </ul>

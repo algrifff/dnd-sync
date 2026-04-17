@@ -29,9 +29,29 @@ echo "  ${BOLD}${GOLD}T H E   C O M P E N D I U M${R}"
 echo "  ${GREY}Installing the real-time vault plugin…${R}"
 
 # ── Install Obsidian if missing ──────────────────────────────────────────────
+find_obsidian() {
+    local candidates=(
+        "/Applications/Obsidian.app"
+        "$HOME/Applications/Obsidian.app"
+    )
+    for p in "${candidates[@]}"; do
+        if [[ -d "$p" ]]; then echo "$p"; return 0; fi
+    done
+    if command -v mdfind >/dev/null 2>&1; then
+        local found
+        found=$(mdfind "kMDItemCFBundleIdentifier == 'md.obsidian'" 2>/dev/null | head -1)
+        if [[ -n "$found" ]]; then echo "$found"; return 0; fi
+    fi
+    return 1
+}
+
 step "Installing Obsidian"
-if [[ -d "/Applications/Obsidian.app" ]]; then
-    ok "Obsidian already installed."
+if obsidian_path=$(find_obsidian); then
+    ok "Obsidian already installed ($obsidian_path)."
+elif command -v brew >/dev/null 2>&1; then
+    info "Installing Obsidian via Homebrew…"
+    brew install --cask obsidian
+    ok "Obsidian installed."
 else
     info "Downloading Obsidian…"
     ARCH=$(uname -m)
