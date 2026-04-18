@@ -41,18 +41,24 @@ export const WikiLink = Node.create({
   },
   renderHTML({ node }) {
     const { target, label, anchor, orphan } = node.attrs as Record<string, unknown>;
+    const targetStr = String(target ?? '');
+    const href = orphan ? '#orphan' : targetStr ? '/notes/' + encodePath(targetStr) : '#';
     return [
       'a',
       {
         class: `wikilink${orphan ? ' wikilink-orphan' : ''}`,
-        'data-target': String(target),
+        'data-target': targetStr,
         ...(anchor ? { 'data-anchor': String(anchor) } : {}),
-        href: '#', // client maps to /notes/<target> at render time
+        href,
       },
       String(label || target || ''),
     ];
   },
 });
+
+function encodePath(p: string): string {
+  return p.split('/').map(encodeURIComponent).join('/');
+}
 
 /** Block-level embed for images, videos, PDFs, other binaries. */
 export const Embed = Node.create({

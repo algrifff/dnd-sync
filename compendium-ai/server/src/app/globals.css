@@ -1,1 +1,234 @@
 @import 'tailwindcss';
+
+/* D&D palette — "round table, neatly typeset" */
+:root {
+  --parchment: #F4EDE0;
+  --parchment-sunk: #EAE1CF;
+  --vellum: #FBF5E8;
+  --ink: #2A241E;
+  --ink-soft: #5A4F42;
+  --rule: #D4C7AE;
+  --candlelight: #D4A85A;
+  --moss: #7B8A5F;
+  --wine: #8B4A52;
+  --sage: #6B7F8E;
+  --embers: #B5572A;
+  --shadow: #1E1A15;
+}
+
+html, body {
+  background-color: var(--parchment);
+  color: var(--ink);
+}
+
+/* Subtle paper texture — inline data-URI so we don't need a round-trip
+   to /public for the main chrome. 6% opacity via blend mode. */
+.surface-paper {
+  background-image:
+    radial-gradient(circle at 12% 30%, rgba(180, 150, 100, 0.06) 0, transparent 30%),
+    radial-gradient(circle at 85% 70%, rgba(180, 150, 100, 0.05) 0, transparent 35%);
+  background-blend-mode: multiply;
+}
+
+/* ── Tiptap read-mode surface ──────────────────────────────────────── */
+
+.note-surface .ProseMirror {
+  outline: none;
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+.note-surface .ProseMirror > * + * {
+  margin-top: 0.95em;
+}
+
+.note-surface .ProseMirror h1,
+.note-surface .ProseMirror h2,
+.note-surface .ProseMirror h3,
+.note-surface .ProseMirror h4 {
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.25;
+}
+
+.note-surface .ProseMirror h1 { font-size: 2.0rem; margin-top: 1.4em; }
+.note-surface .ProseMirror h2 { font-size: 1.55rem; margin-top: 1.4em; }
+.note-surface .ProseMirror h3 { font-size: 1.25rem; }
+.note-surface .ProseMirror h4 { font-size: 1.1rem; }
+
+.note-surface .ProseMirror p {
+  color: var(--ink);
+}
+
+.note-surface .ProseMirror strong { color: var(--ink); font-weight: 600; }
+.note-surface .ProseMirror em { font-style: italic; }
+.note-surface .ProseMirror code {
+  background-color: rgba(212, 168, 90, 0.15);
+  color: var(--ink);
+  border-radius: 4px;
+  padding: 0.06em 0.35em;
+  font-size: 0.9em;
+  font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
+}
+.note-surface .ProseMirror pre {
+  background: var(--vellum);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 0.9rem;
+}
+.note-surface .ProseMirror pre code {
+  background: transparent;
+  padding: 0;
+  color: var(--ink);
+}
+
+.note-surface .ProseMirror blockquote {
+  border-left: 3px solid var(--candlelight);
+  padding-left: 0.85em;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.note-surface .ProseMirror hr {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  margin: 1.8em 0;
+}
+
+.note-surface .ProseMirror ul,
+.note-surface .ProseMirror ol {
+  padding-left: 1.4em;
+}
+.note-surface .ProseMirror ul { list-style: disc; }
+.note-surface .ProseMirror ol { list-style: decimal; }
+.note-surface .ProseMirror li { margin: 0.25em 0; }
+.note-surface .ProseMirror li > p { margin: 0.2em 0; }
+
+.note-surface .ProseMirror ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+.note-surface .ProseMirror ul[data-type="taskList"] li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+}
+.note-surface .ProseMirror ul[data-type="taskList"] li > label {
+  user-select: none;
+}
+
+.note-surface .ProseMirror table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.95em;
+}
+.note-surface .ProseMirror th,
+.note-surface .ProseMirror td {
+  border: 1px solid var(--rule);
+  padding: 0.45em 0.7em;
+  text-align: left;
+  vertical-align: top;
+}
+.note-surface .ProseMirror th {
+  background: var(--parchment-sunk);
+  font-weight: 600;
+}
+
+.note-surface .ProseMirror a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: rgba(42, 36, 30, 0.35);
+}
+.note-surface .ProseMirror a:hover {
+  text-decoration-color: var(--ink);
+}
+
+/* ── Wikilinks ─────────────────────────────────────────────────────── */
+.note-surface .ProseMirror a.wikilink {
+  color: var(--ink);
+  text-decoration: none;
+  background-image: linear-gradient(to right, var(--candlelight) 0%, var(--candlelight) 100%);
+  background-size: 100% 1.5px;
+  background-position: 0 100%;
+  background-repeat: no-repeat;
+  padding-bottom: 1px;
+  transition: background-size 120ms ease;
+}
+.note-surface .ProseMirror a.wikilink:hover {
+  background-size: 100% 100%;
+  background-color: rgba(212, 168, 90, 0.25);
+}
+.note-surface .ProseMirror a.wikilink-orphan {
+  color: var(--ink-soft);
+  font-style: italic;
+  background: none;
+}
+
+/* ── Tag mentions ──────────────────────────────────────────────────── */
+.note-surface .ProseMirror a.tag {
+  display: inline-block;
+  font-size: 0.85em;
+  color: var(--ink-soft);
+  background: rgba(212, 168, 90, 0.15);
+  border: 1px solid rgba(212, 168, 90, 0.4);
+  border-radius: 999px;
+  padding: 0 8px;
+  text-decoration: none;
+  line-height: 1.6;
+}
+
+/* ── Embeds ───────────────────────────────────────────────────────── */
+.note-surface .ProseMirror figure.embed {
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--vellum);
+  margin: 1.2em 0;
+}
+
+/* ── Callouts ─────────────────────────────────────────────────────── */
+.note-surface .ProseMirror aside[data-callout] {
+  border-left: 4px solid var(--candlelight);
+  background: rgba(212, 168, 90, 0.1);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 1.1em 0;
+}
+.note-surface .ProseMirror aside[data-callout="warning"] { border-color: var(--embers); background: rgba(181, 87, 42, 0.1); }
+.note-surface .ProseMirror aside[data-callout="danger"] { border-color: var(--wine); background: rgba(139, 74, 82, 0.1); }
+.note-surface .ProseMirror aside[data-callout="tip"] { border-color: var(--moss); background: rgba(123, 138, 95, 0.1); }
+.note-surface .ProseMirror aside[data-callout="info"] { border-color: var(--sage); background: rgba(107, 127, 142, 0.1); }
+.note-surface .ProseMirror aside[data-callout]::before {
+  display: block;
+  font-size: 0.8em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+  content: attr(data-callout);
+  margin-bottom: 4px;
+}
+
+/* ── Embedded note cards ───────────────────────────────────────────── */
+.note-surface .ProseMirror aside.note-embed {
+  display: block;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--vellum);
+  padding: 10px 14px;
+  margin: 1em 0;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+/* Focus ring, accessible on parchment */
+*:focus-visible {
+  outline: 2px solid var(--candlelight);
+  outline-offset: 2px;
+}

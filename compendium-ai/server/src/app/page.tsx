@@ -1,14 +1,16 @@
-// Home route. Server component: reads the session cookie, renders a
-// session-aware header with logout, then mounts the existing admin
-// dashboard beneath. Middleware has already gated access (no session →
-// /login), so a session is expected by the time we render. If for any
-// reason it isn't, fall back to a redirect rather than a crash.
+// Home landing. Shows a lightweight welcome + recent notes + top-level
+// folders. The legacy admin-token dashboard is still reachable at
+// /admin/legacy (wired in Phase 8 cleanup).
 
 import type { ReactElement } from 'react';
 import { cookies } from 'next/headers';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
-import Dashboard from './Dashboard';
+import { DEFAULT_GROUP_ID } from '@/lib/users';
+import { getDb } from '@/lib/db';
+import { recentlyUpdated } from '@/lib/notes';
+import { buildTree } from '@/lib/tree';
 import { SessionHeader } from './SessionHeader';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +24,19 @@ export default async function HomePage(): Promise<ReactElement> {
   const session = readSession(cookieHeader);
   if (!session) redirect('/login?next=/');
 
+  const counts = getDb()
+    .query<{ notes: number; assets: number }, [string, string]>(
+      `SELECT
+         (SELECT COUNT(*) FROM notes  WHERE group_id = ?) AS notes,
+         (SELECT COUNT(*) FROM assets WHERE group_id = ?) AS assets`,
+    )
+    .get(DEFAULT_GROUP_ID, DEFAULT_GROUP_ID) ?? { notes: 0, assets: 0 };
+
+  const recent = recentlyUpdated(DEFAULT_GROUP_ID, 12);
+  const topFolders = buildTree(DEFAULT_GROUP_ID)
+    .root.children.filter((c) => c.kind === 'dir')
+    .slice(0, 6);
+
   return (
     <div className="min-h-screen bg-[#F4EDE0] text-[#2A241E]">
       <SessionHeader
@@ -30,7 +45,124 @@ export default async function HomePage(): Promise<ReactElement> {
         role={session.role}
         accentColor={session.accentColor}
       />
-      <Dashboard />
+      <main className="surface-paper mx-auto max-w-5xl px-6 py-10">
+        <section className="mb-10">
+          <h1
+            className="text-4xl font-bold tracking-tight text-[#2A241E]"
+            style={{ fontFamily: '"Fraunces", Georgia, serif' }}
+          >
+            Welcome, {session.displayName}.
+          </h1>
+          <p className="mt-2 text-sm text-[#5A4F42]">
+            {counts.notes} note{counts.notes === 1 ? '' : 's'} · {counts.assets} asset
+            {counts.assets === 1 ? '' : 's'} · signed in as <code>{session.username}</code>
+          </p>
+          {counts.notes === 0 && (
+            <p className="mt-4 rounded-[10px] border border-[#D4A85A]/40 bg-[#D4A85A]/10 px-4 py-3 text-sm text-[#5A4F42]">
+              {session.role === 'admin' ? (
+                <>
+                  The vault is empty. Head to{' '}
+                  <Link href="/admin/vault" className="underline">
+                    /admin/vault
+                  </Link>{' '}
+                  and upload a ZIP to get started.
+                </>
+              ) : (
+                'The vault is empty. Ask your DM to upload.'
+              )}
+            </p>
+          )}
+        </section>
+
+        {topFolders.length > 0 && (
+          <section className="mb-10">
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[#5A4F42]">
+              Browse
+            </h2>
+            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+              {topFolders.map((f) => {
+                if (f.kind !== 'dir') return null;
+                const first = findFirstNote(f);
+                return (
+                  <Link
+                    key={f.path}
+                    href={first ? '/notes/' + encodePath(first) : '#'}
+                    className="block rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-4 transition hover:scale-[1.015] hover:border-[#D4A85A]/60 hover:bg-[#FBF5E8]/80"
+                  >
+                    <div className="text-sm font-semibold text-[#2A241E]">{f.name}</div>
+                    <div className="mt-1 text-xs text-[#5A4F42]">
+                      {countFiles(f)} note{countFiles(f) === 1 ? '' : 's'}
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {recent.length > 0 && (
+          <section>
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[#5A4F42]">
+              Recently updated
+            </h2>
+            <ul className="divide-y divide-[#D4C7AE]/60 overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8]">
+              {recent.map((n) => (
+                <li key={n.path}>
+                  <Link
+                    href={'/notes/' + encodePath(n.path)}
+                    className="flex items-center justify-between px-4 py-3 transition hover:bg-[#F4EDE0]"
+                  >
+                    <span className="truncate">
+                      <span className="font-medium text-[#2A241E]">{n.title || baseName(n.path)}</span>
+                      <span className="ml-2 text-xs text-[#5A4F42]">{n.path}</span>
+                    </span>
+                    <span className="ml-4 shrink-0 text-xs text-[#5A4F42]">{fmtAgo(n.updatedAt)}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </main>
     </div>
   );
+}
+
+function findFirstNote(dir: { kind: 'dir'; children: Array<unknown> }): string | null {
+  for (const child of dir.children) {
+    const c = child as { kind: 'dir' | 'file'; path?: string; children?: unknown[] };
+    if (c.kind === 'file' && c.path) return c.path;
+    if (c.kind === 'dir' && c.children) {
+      const nested = findFirstNote({ kind: 'dir', children: c.children });
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+function countFiles(dir: { kind: 'dir'; children: Array<unknown> }): number {
+  let n = 0;
+  for (const child of dir.children) {
+    const c = child as { kind: 'dir' | 'file'; children?: unknown[] };
+    if (c.kind === 'file') n++;
+    else if (c.kind === 'dir' && c.children) n += countFiles({ kind: 'dir', children: c.children });
+  }
+  return n;
+}
+
+function encodePath(p: string): string {
+  return p.split('/').map(encodeURIComponent).join('/');
+}
+
+function baseName(p: string): string {
+  const last = p.split('/').pop() ?? p;
+  return last.replace(/\.(md|canvas)$/i, '');
+}
+
+function fmtAgo(ms: number): string {
+  const d = Date.now() - ms;
+  if (d < 60_000) return Math.round(d / 1000) + 's ago';
+  if (d < 3_600_000) return Math.round(d / 60_000) + 'm ago';
+  if (d < 86_400_000) return Math.round(d / 3_600_000) + 'h ago';
+  return Math.round(d / 86_400_000) + 'd ago';
 }

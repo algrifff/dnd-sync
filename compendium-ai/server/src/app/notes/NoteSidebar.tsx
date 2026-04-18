@@ -1,0 +1,166 @@
+// Right-rail sidebar: backlinks (grouped by folder), tags, outline.
+// Server component; purely static rendering driven by the DB payload.
+
+import type { ReactElement } from 'react';
+import Link from 'next/link';
+import type { BacklinkRow } from '@/lib/notes';
+
+export type OutlineItem = { level: number; text: string };
+
+export function NoteSidebar({
+  backlinks,
+  tags,
+  outline,
+}: {
+  backlinks: BacklinkRow[];
+  tags: string[];
+  outline: OutlineItem[];
+}): ReactElement {
+  const grouped = groupByFolder(backlinks);
+
+  return (
+    <aside className="h-full overflow-y-auto border-l border-[#D4C7AE] bg-[#EAE1CF]/40 px-4 py-4 text-sm">
+      <Section title="Backlinks" empty="No backlinks yet.">
+        {grouped.size === 0 ? null : (
+          <div className="space-y-3">
+            {[...grouped.entries()].map(([folder, items]) => (
+              <div key={folder}>
+                <div className="mb-1 text-xs uppercase tracking-wide text-[#5A4F42]">
+                  {folder || 'Root'}
+                </div>
+                <ul className="space-y-0.5">
+                  {items.map((b) => (
+                    <li key={b.from_path}>
+                      <Link
+                        href={'/notes/' + encodePath(b.from_path)}
+                        className="block truncate rounded-[4px] px-1 py-0.5 text-[#2A241E] transition hover:bg-[#D4A85A]/15"
+                      >
+                        {b.title || baseName(b.from_path)}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      <Section title="Tags" empty="No tags.">
+        {tags.length > 0 && (
+          <ul className="flex flex-wrap gap-1.5">
+            {tags.map((t) => (
+              <li key={t}>
+                <Link
+                  href={'/tags/' + encodeURIComponent(t)}
+                  className="inline-block rounded-full border border-[#D4A85A]/40 bg-[#D4A85A]/15 px-2 py-0.5 text-xs text-[#5A4F42] hover:bg-[#D4A85A]/25"
+                >
+                  {t}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
+      <Section title="Outline" empty="No headings.">
+        {outline.length > 0 && (
+          <ul className="space-y-0.5">
+            {outline.map((h, i) => (
+              <li
+                key={i}
+                className="truncate text-[#5A4F42]"
+                style={{ paddingLeft: `${(h.level - 1) * 10}px` }}
+              >
+                {h.text}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
+      <Section title="Graph">
+        <p className="text-xs text-[#5A4F42]">
+          Mini-graph comes in Phase&nbsp;6. Full graph lives at{' '}
+          <Link href="/graph" className="underline">
+            /graph
+          </Link>
+          .
+        </p>
+      </Section>
+    </aside>
+  );
+}
+
+function Section({
+  title,
+  empty,
+  children,
+}: {
+  title: string;
+  empty?: string;
+  children?: React.ReactNode;
+}): ReactElement {
+  return (
+    <section className="mb-6">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+        {title}
+      </h3>
+      {children ?? (empty ? <p className="text-xs text-[#5A4F42]/80">{empty}</p> : null)}
+    </section>
+  );
+}
+
+function groupByFolder(items: BacklinkRow[]): Map<string, BacklinkRow[]> {
+  const out = new Map<string, BacklinkRow[]>();
+  for (const item of items) {
+    const folder = item.from_path.includes('/')
+      ? item.from_path.slice(0, item.from_path.lastIndexOf('/'))
+      : '';
+    const bucket = out.get(folder) ?? [];
+    bucket.push(item);
+    out.set(folder, bucket);
+  }
+  return out;
+}
+
+function baseName(p: string): string {
+  const last = p.split('/').pop() ?? p;
+  return last.replace(/\.(md|canvas)$/i, '');
+}
+
+function encodePath(p: string): string {
+  return p.split('/').map(encodeURIComponent).join('/');
+}
+
+// Extract H1/H2/H3 outline from a stored ProseMirror JSON tree.
+export function extractOutline(content: unknown): OutlineItem[] {
+  const items: OutlineItem[] = [];
+  walk(content, items);
+  return items;
+}
+
+function walk(node: unknown, out: OutlineItem[]): void {
+  if (!node || typeof node !== 'object') return;
+  const n = node as { type?: unknown; content?: unknown; attrs?: { level?: unknown } };
+  if (n.type === 'heading' && Array.isArray(n.content)) {
+    const level = Number((n.attrs?.level as number | undefined) ?? 1);
+    const text = plain(n.content).trim();
+    if (text) out.push({ level, text });
+    return;
+  }
+  if (Array.isArray(n.content)) {
+    for (const c of n.content) walk(c, out);
+  }
+}
+
+function plain(nodes: unknown[]): string {
+  let s = '';
+  for (const n of nodes) {
+    if (!n || typeof n !== 'object') continue;
+    const x = n as { type?: unknown; text?: unknown; content?: unknown };
+    if (x.type === 'text' && typeof x.text === 'string') s += x.text;
+    else if (Array.isArray(x.content)) s += plain(x.content);
+  }
+  return s;
+}
