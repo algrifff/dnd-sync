@@ -14,6 +14,7 @@ import { CollaborationCaret } from '@tiptap/extension-collaboration-caret';
 import type { HocuspocusProvider } from '@hocuspocus/provider';
 import type * as Y from 'yjs';
 import { BASE_EXTENSIONS } from '@/lib/pm-schema';
+import { SlashMenu } from './SlashMenu';
 
 export type SurfaceUser = {
   displayName: string;
@@ -89,12 +90,15 @@ export function NoteSurface({
   }, [router]);
 
   return (
-    <article
-      ref={containerRef}
-      className="note-surface prose-parchment mt-6"
-      aria-label="Note content"
-    >
-      <EditorContent editor={editor} />
-    </article>
+    <>
+      <article
+        ref={containerRef}
+        className="note-surface prose-parchment mt-6"
+        aria-label="Note content"
+      >
+        <EditorContent editor={editor} />
+      </article>
+      {canEdit && <SlashMenu editor={editor} />}
+    </>
   );
 }
