@@ -189,7 +189,12 @@ export const TagMention = Node.create({
   },
   renderHTML({ node }) {
     const { tag } = node.attrs as Record<string, unknown>;
-    return ['a', { class: 'tag', 'data-tag': String(tag), href: '#' }, '#' + String(tag)];
+    const t = String(tag);
+    return [
+      'a',
+      { class: 'tag', 'data-tag': t, href: '/tags/' + encodeURIComponent(t) },
+      '#' + t,
+    ];
   },
 });
 

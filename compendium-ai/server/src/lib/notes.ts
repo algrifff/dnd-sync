@@ -76,6 +76,35 @@ export function loadTags(groupId: string, path: string): string[] {
     .map((r) => r.tag);
 }
 
+export function listAllTags(groupId: string): Array<{ tag: string; count: number }> {
+  return getDb()
+    .query<{ tag: string; count: number }, [string]>(
+      `SELECT tag, COUNT(*) AS count
+         FROM tags WHERE group_id = ?
+         GROUP BY tag
+         ORDER BY count DESC, tag ASC`,
+    )
+    .all(groupId);
+}
+
+export function listNotesByTag(
+  groupId: string,
+  tag: string,
+): Array<{ path: string; title: string; updatedAt: number }> {
+  return getDb()
+    .query<
+      { path: string; title: string; updatedAt: number },
+      [string, string]
+    >(
+      `SELECT n.path AS path, n.title AS title, n.updated_at AS updatedAt
+         FROM tags t
+         JOIN notes n ON n.group_id = t.group_id AND n.path = t.path
+        WHERE t.group_id = ? AND t.tag = ?
+        ORDER BY n.title COLLATE NOCASE ASC`,
+    )
+    .all(groupId, tag);
+}
+
 export function listAllPaths(groupId: string): Array<{ path: string; title: string; updatedAt: number }> {
   return getDb()
     .query<

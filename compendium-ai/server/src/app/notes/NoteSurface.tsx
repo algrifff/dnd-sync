@@ -75,11 +75,12 @@ export function NoteSurface({
     if (!el) return;
     const onClick = (evt: MouseEvent): void => {
       const target = evt.target as HTMLElement | null;
-      const link = target?.closest('a.wikilink') as HTMLAnchorElement | null;
+      const link = target?.closest('a.wikilink, a.tag') as HTMLAnchorElement | null;
       if (!link) return;
       if (evt.metaKey || evt.ctrlKey || evt.shiftKey || evt.button !== 0) return;
       const href = link.getAttribute('href');
-      if (!href || !href.startsWith('/notes/')) return;
+      if (!href) return;
+      if (!href.startsWith('/notes/') && !href.startsWith('/tags/')) return;
       evt.preventDefault();
       router.push(href);
     };

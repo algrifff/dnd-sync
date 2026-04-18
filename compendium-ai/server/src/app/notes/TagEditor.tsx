@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Plus, Tag, X } from 'lucide-react';
 
 export function TagEditor({
@@ -175,7 +176,12 @@ export function TagEditor({
 
       {tags.map((t) => (
         <Chip key={t} onRemove={canEdit ? () => void removeTag(t) : undefined}>
-          #{t}
+          <Link
+            href={'/tags/' + encodeURIComponent(t)}
+            className="transition hover:underline underline-offset-2"
+          >
+            #{t}
+          </Link>
         </Chip>
       ))}
 

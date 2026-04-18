@@ -32,6 +32,12 @@ export function SessionHeader({
           <a href="/" className="underline-offset-2 hover:underline">
             Home
           </a>
+          <span aria-hidden className="text-[#D4C7AE]">
+            ·
+          </span>
+          <a href="/tags" className="underline-offset-2 hover:underline">
+            Tags
+          </a>
           {role === 'admin' && (
             <>
               <span aria-hidden className="text-[#D4C7AE]">
