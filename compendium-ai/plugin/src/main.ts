@@ -20,6 +20,16 @@ import { PluginUpdater } from './sync/updater';
 import { VaultConfigSync } from './sync/vaultConfigSync';
 import { StatusBar } from './ui/statusBar';
 
+const EMPTY_COUNTS = {
+  total: 0,
+  handshaking: 0,
+  syncing: 0,
+  live: 0,
+  disconnected: 0,
+  totalReceived: 0,
+  totalSent: 0,
+} as const;
+
 export default class CompendiumPlugin extends Plugin {
   settings: CompendiumSettings = DEFAULT_SETTINGS;
   private registry: DocRegistry | null = null;
@@ -31,6 +41,9 @@ export default class CompendiumPlugin extends Plugin {
   private statusBar: StatusBar | null = null;
   private unsubscribe: (() => void) | null = null;
   private removeCursorStyles: (() => void) | null = null;
+  /** Interval that re-emits the registry's current state so the tooltip
+   *  traffic counters refresh while nothing structural changes. */
+  private tickHandle: ReturnType<typeof setInterval> | null = null;
 
   override async onload(): Promise<void> {
     await this.loadSettings();
@@ -38,6 +51,12 @@ export default class CompendiumPlugin extends Plugin {
 
     this.statusBar = new StatusBar(this.addStatusBarItem(), this.app);
     this.removeCursorStyles = injectCursorStyles();
+
+    this.addCommand({
+      id: 'compendium-copy-sync-report',
+      name: 'Compendium: Copy sync report',
+      callback: () => void this.copySyncReport(),
+    });
 
     if (!this.settings.serverUrl || !this.settings.authToken) {
       new Notice('Compendium: open Settings → Community plugins → Compendium to configure.');
@@ -114,9 +133,17 @@ export default class CompendiumPlugin extends Plugin {
       authToken: this.settings.authToken,
     };
     this.registry = new DocRegistry(cfg);
-    this.unsubscribe = this.registry.onStatusChange((status, count, errors) => {
-      this.statusBar?.render(status, count, errors);
+    this.unsubscribe = this.registry.onStatusChange((status, counts, errors) => {
+      this.statusBar?.render(status, counts, errors);
     });
+    // Refresh the tooltip every 2s so update counters reflect live traffic
+    // even when no structural state change is happening.
+    this.tickHandle = setInterval(() => {
+      const reg = this.registry;
+      if (!reg) return;
+      const snap = reg.snapshot();
+      this.statusBar?.render(snap.status, snap.counts, snap.errors);
+    }, 2000);
     const baselines = new BaselineStore(
       () => this.settings.baselines,
       // Persist directly via saveData to skip the display-identity side
@@ -148,6 +175,10 @@ export default class CompendiumPlugin extends Plugin {
   }
 
   private stopSync(): void {
+    if (this.tickHandle) {
+      clearInterval(this.tickHandle);
+      this.tickHandle = null;
+    }
     this.updater?.stop();
     this.updater = null;
     this.cmBinding?.stop();
@@ -162,6 +193,52 @@ export default class CompendiumPlugin extends Plugin {
     this.unsubscribe = null;
     this.registry?.destroyAll();
     this.registry = null;
-    this.statusBar?.render('idle', 0, []);
+    this.statusBar?.render('idle', { ...EMPTY_COUNTS }, []);
+  }
+
+  /** Build a diagnostic report and copy it to the clipboard so the user
+   *  can paste it back for troubleshooting. Contains only per-doc sync
+   *  state and error strings — no content, no token. */
+  private async copySyncReport(): Promise<void> {
+    if (!this.registry) {
+      new Notice('Compendium: not running. Configure in settings first.');
+      return;
+    }
+    const snap = this.registry.snapshot();
+    const docs = this.registry.report();
+    const lines: string[] = [];
+    lines.push(`Compendium sync report — ${new Date().toISOString()}`);
+    lines.push(`Status: ${snap.status}`);
+    lines.push(
+      `Counts: ${snap.counts.live} live / ${snap.counts.syncing} syncing / ${snap.counts.handshaking} handshaking / ${snap.counts.disconnected} disconnected (total ${snap.counts.total})`,
+    );
+    lines.push(`Traffic: ${snap.counts.totalSent} sent · ${snap.counts.totalReceived} received`);
+    if (snap.errors.length > 0) {
+      lines.push('');
+      lines.push('Errors:');
+      for (const e of snap.errors) lines.push('  · ' + e);
+    }
+    lines.push('');
+    lines.push('Per-doc:');
+    const sorted = [...docs].sort((a, b) => {
+      const order = { disconnected: 0, handshaking: 1, syncing: 2, live: 3 };
+      const d = order[a.phase] - order[b.phase];
+      return d !== 0 ? d : a.path.localeCompare(b.path);
+    });
+    for (const d of sorted) {
+      const since = (t: number | null): string =>
+        t === null ? 'never' : `${Math.round((Date.now() - t) / 1000)}s ago`;
+      lines.push(
+        `  [${d.phase}] ${d.path}  sent=${d.sent} recv=${d.received}  lastSent=${since(d.lastSentAt)} lastRecv=${since(d.lastReceivedAt)}${d.lastError ? '  err=' + d.lastError : ''}`,
+      );
+    }
+    const report = lines.join('\n');
+    try {
+      await navigator.clipboard.writeText(report);
+      new Notice(`Compendium: sync report copied (${docs.length} docs).`);
+    } catch {
+      console.info('[compendium] sync report:\n' + report);
+      new Notice('Compendium: sync report written to console (clipboard blocked).');
+    }
   }
 }

@@ -122,8 +122,9 @@ export function getFriendById(id: string): FriendWithToken | null {
 
 /** Bump last_seen_at for a friend token, if it matches one. Called on every
  *  successful WebSocket connection so the admin dashboard can show whether
- *  a paired friend has actually connected. Silently ignores the missing
- *  column/table cases so older deployments keep working. */
+ *  a paired friend has actually connected. This is a best-effort probe —
+ *  any error is logged and swallowed; a failed heartbeat must NEVER tear
+ *  down a healthy WebSocket connection. */
 export function touchFriendLastSeen(token: string | null): void {
   if (!token) return;
   try {
@@ -131,13 +132,13 @@ export function touchFriendLastSeen(token: string | null): void {
       .query('UPDATE friends SET last_seen_at = ? WHERE token = ? AND revoked_at IS NULL')
       .run(Date.now(), token);
   } catch (err) {
-    if (
-      err instanceof Error &&
-      /no such table: friends|no such column: last_seen_at/i.test(err.message)
-    ) {
-      return;
-    }
-    throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    // Expected when migration v5 hasn't run yet. Silent.
+    if (/no such table: friends|no such column: last_seen_at/i.test(msg)) return;
+    // Anything else: log but don't propagate — the caller is on the WS hot
+    // path and losing the connection over a heartbeat is far worse than a
+    // stale timestamp.
+    console.warn('[compendium] touchFriendLastSeen failed (ignored):', msg);
   }
 }
 

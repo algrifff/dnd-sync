@@ -1,12 +1,20 @@
 // One Y.Doc per vault path. Providers are created lazily and kept alive
 // until the plugin unloads. An aggregate status bubbles up to the status
-// bar: if any provider is disconnected/connecting (or hasn't completed
-// initial sync yet), the aggregate reflects the most degraded state.
+// bar with discrete lifecycle phases so the user can tell *what* the sync
+// is doing (not just "green / not green").
 //
-// "Connected" here is stricter than y-websocket's own 'connected' event: a
-// doc must have both WS status === 'connected' AND provider.synced === true
-// before it counts as green. This stops the status bar reporting 🟢 when
-// the WS handshake succeeded but no Yjs state has actually been exchanged.
+// Per-doc lifecycle:
+//   handshaking  — WebSocket TCP/TLS handshake in flight
+//   syncing      — WS up, Yjs sync step 1/2 handshake in flight
+//   live         — sync step 2 received; doc is ready for real-time ops
+//   disconnected — WS closed or errored; y-websocket will auto-reconnect
+//
+// Aggregate (across all docs):
+//   idle          — no config / no docs tracked
+//   handshaking   — ANY doc still handshaking (and none disconnected)
+//   syncing       — all WS up but at least one doc still doing Yjs sync
+//   live          — every doc is live
+//   disconnected  — any doc disconnected (most degraded state)
 
 import * as Y from 'yjs';
 import type { WebsocketProvider } from 'y-websocket';
@@ -14,31 +22,59 @@ import { buildProvider, type ConnectionStatus, type SyncConfig } from './provide
 
 const CONNECT_TIMEOUT_MS = 30_000;
 
+export type DocPhase = 'handshaking' | 'syncing' | 'live' | 'disconnected';
+export type AggregateStatus = 'idle' | 'handshaking' | 'syncing' | 'live' | 'disconnected';
+
+export type DocReport = {
+  path: string;
+  phase: DocPhase;
+  /** Count of Yjs updates we've BROADCAST from this client to the server. */
+  sent: number;
+  /** Count of Yjs updates we've RECEIVED from the server (other peers). */
+  received: number;
+  /** Millis since Unix epoch, or null if never. */
+  lastSentAt: number | null;
+  lastReceivedAt: number | null;
+  lastError: string | null;
+};
+
 type DocRecord = {
   path: string;
   doc: Y.Doc;
   provider: WebsocketProvider;
   status: ConnectionStatus;
-  /** Flipped true once the provider's 'sync' event fires with state=true.
-   *  Reset on every disconnect so reconnect flow waits for fresh sync. */
   synced: boolean;
-  /** Most recent user-facing failure reason for this doc, or null if healthy.
-   *  Surfaces in the status-bar tooltip. Never contains the auth token. */
   lastError: string | null;
-  /** Timer that escalates a stuck 'connecting' to 'disconnected'. Cleared
-   *  the moment the provider reports 'connected'. */
   connectTimer: ReturnType<typeof setTimeout> | null;
+  sent: number;
+  received: number;
+  lastSentAt: number | null;
+  lastReceivedAt: number | null;
 };
 
-type AggregateStatus = ConnectionStatus | 'idle';
-type Listener = (status: AggregateStatus, totalDocs: number, errors: string[]) => void;
+type Listener = (
+  status: AggregateStatus,
+  counts: AggregateCounts,
+  errors: string[],
+) => void;
+
+export type AggregateCounts = {
+  total: number;
+  handshaking: number;
+  syncing: number;
+  live: number;
+  disconnected: number;
+  /** Total Yjs updates received since registry creation. Rolling counter;
+   *  lets the status bar prove to the user that real-time traffic is
+   *  actually flowing. */
+  totalReceived: number;
+  totalSent: number;
+};
 
 export class DocRegistry {
   private readonly records = new Map<string, DocRecord>();
   private readonly listeners = new Set<Listener>();
   private emitting = true;
-  /** Non-doc-scoped error (e.g. "inventory retry 3/5"). Surfaced in the
-   *  same tooltip path as per-doc errors so the user sees one list. */
   private globalError: string | null = null;
 
   constructor(private readonly config: SyncConfig) {}
@@ -65,6 +101,10 @@ export class DocRegistry {
       synced: false,
       lastError: null,
       connectTimer: null,
+      sent: 0,
+      received: 0,
+      lastSentAt: null,
+      lastReceivedAt: null,
     };
     this.records.set(path, record);
 
@@ -87,13 +127,20 @@ export class DocRegistry {
         record.lastError = null;
       } else if (status === 'disconnected') {
         record.synced = false;
+        console.info(`[compendium] disconnected: ${path}${record.lastError ? ` (${record.lastError})` : ''}`);
       }
       this.emit();
     });
 
     provider.on('sync', (synced: boolean) => {
+      const wasSynced = record.synced;
       record.synced = synced;
-      if (synced) record.lastError = null;
+      if (synced) {
+        record.lastError = null;
+        if (!wasSynced) {
+          console.info(`[compendium] live: ${path}`);
+        }
+      }
       this.emit();
     });
 
@@ -104,14 +151,29 @@ export class DocRegistry {
 
     provider.on('connection-close', (event: CloseEvent | null) => {
       record.synced = false;
-      // 1008 = policy violation (our upgrade handler's missing-doc path).
-      // 4401 is a soft convention we may use for auth-specific closes.
       if (event && (event.code === 1008 || event.code === 4401)) {
         record.lastError = 'auth rejected';
       } else if (event && event.code !== 1000 && event.code !== 1001) {
         record.lastError = `ws closed (${event.code})`;
       }
       this.emit();
+    });
+
+    // Count updates. Origin === WebsocketProvider means "came from the
+    // server" (the provider sets itself as origin when applying remote
+    // sync messages). Anything else originated locally (yCollab edit,
+    // our own pushToYtext, etc).
+    doc.on('update', (_update: Uint8Array, origin: unknown) => {
+      const now = Date.now();
+      if (origin === provider) {
+        record.received++;
+        record.lastReceivedAt = now;
+      } else {
+        record.sent++;
+        record.lastSentAt = now;
+      }
+      // No emit here — updates are frequent; we don't want to spam
+      // listeners. The counters are read on demand via report().
     });
 
     this.emit();
@@ -129,8 +191,6 @@ export class DocRegistry {
   }
 
   destroyAll(): void {
-    // Suppress per-provider status churn so the status bar doesn't flicker
-    // through disconnected/connecting for every doc during teardown.
     this.emitting = false;
     for (const record of this.records.values()) {
       if (record.connectTimer) clearTimeout(record.connectTimer);
@@ -147,7 +207,6 @@ export class DocRegistry {
     return this.records.size;
   }
 
-  /** Surface a registry-wide error (e.g. inventory retry) in the tooltip. */
   setGlobalError(reason: string): void {
     this.globalError = reason;
     this.emit();
@@ -159,12 +218,17 @@ export class DocRegistry {
     this.emit();
   }
 
-  /** Subscribe to aggregate status changes. Returns an unsubscribe function. */
   onStatusChange(listener: Listener): () => void {
     this.listeners.add(listener);
-    // Push current state immediately so UI initialises correctly.
-    listener(this.aggregate(), this.records.size, this.errors());
+    listener(this.aggregate(), this.counts(), this.errors());
     return () => this.listeners.delete(listener);
+  }
+
+  /** Current status + counts + errors in one call. Used by the periodic
+   *  status-bar refresh so traffic counters stay current while nothing
+   *  structural is changing. */
+  snapshot(): { status: AggregateStatus; counts: AggregateCounts; errors: string[] } {
+    return { status: this.aggregate(), counts: this.counts(), errors: this.errors() };
   }
 
   errors(): string[] {
@@ -179,33 +243,86 @@ export class DocRegistry {
     return out;
   }
 
+  counts(): AggregateCounts {
+    const c: AggregateCounts = {
+      total: this.records.size,
+      handshaking: 0,
+      syncing: 0,
+      live: 0,
+      disconnected: 0,
+      totalReceived: 0,
+      totalSent: 0,
+    };
+    for (const r of this.records.values()) {
+      switch (phaseOf(r)) {
+        case 'handshaking':
+          c.handshaking++;
+          break;
+        case 'syncing':
+          c.syncing++;
+          break;
+        case 'live':
+          c.live++;
+          break;
+        case 'disconnected':
+          c.disconnected++;
+          break;
+      }
+      c.totalReceived += r.received;
+      c.totalSent += r.sent;
+    }
+    return c;
+  }
+
+  /** Snapshot of every tracked doc — used by the "copy sync report"
+   *  command so the user can paste a diagnostic blob when things go wrong. */
+  report(): DocReport[] {
+    return [...this.records.values()].map((r) => ({
+      path: r.path,
+      phase: phaseOf(r),
+      sent: r.sent,
+      received: r.received,
+      lastSentAt: r.lastSentAt,
+      lastReceivedAt: r.lastReceivedAt,
+      lastError: r.lastError,
+    }));
+  }
+
   private aggregate(): AggregateStatus {
     if (this.records.size === 0) return this.globalError ? 'disconnected' : 'idle';
     let anyDisconnected = false;
-    let anyPending = false;
-    for (const record of this.records.values()) {
-      if (record.status === 'disconnected') anyDisconnected = true;
-      else if (record.status === 'connecting' || !record.synced) anyPending = true;
+    let anyHandshaking = false;
+    let anySyncing = false;
+    for (const r of this.records.values()) {
+      const phase = phaseOf(r);
+      if (phase === 'disconnected') anyDisconnected = true;
+      else if (phase === 'handshaking') anyHandshaking = true;
+      else if (phase === 'syncing') anySyncing = true;
     }
     if (anyDisconnected) return 'disconnected';
-    if (anyPending) return 'connecting';
-    return 'connected';
+    if (anyHandshaking) return 'handshaking';
+    if (anySyncing) return 'syncing';
+    return 'live';
   }
 
   private emit(): void {
     if (!this.emitting) return;
     const status = this.aggregate();
-    const size = this.records.size;
+    const counts = this.counts();
     const errs = this.errors();
-    for (const listener of this.listeners) listener(status, size, errs);
+    for (const listener of this.listeners) listener(status, counts, errs);
   }
 }
 
-/** Best-effort extraction of a short, tokenless reason from a WS error event. */
+function phaseOf(r: DocRecord): DocPhase {
+  if (r.status === 'disconnected') return 'disconnected';
+  if (r.status === 'connecting') return 'handshaking';
+  // status === 'connected' below
+  if (!r.synced) return 'syncing';
+  return 'live';
+}
+
 function describeError(event: Event): string {
-  // Browser/Electron WebSocket Event objects don't expose error text for
-  // security reasons. The message property is only populated on ErrorEvent
-  // (rare on WebSocket). Fall back to the event type.
   const maybeMsg = (event as { message?: unknown }).message;
   if (typeof maybeMsg === 'string' && maybeMsg.length > 0) return maybeMsg;
   return event.type || 'connection error';

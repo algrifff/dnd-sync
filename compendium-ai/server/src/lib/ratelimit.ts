@@ -9,8 +9,13 @@ type Bucket = {
   notified: boolean;
 };
 
-const MAX_FAILS = 5;
-const LOCKOUT_MS = 60_000;
+// A real attacker can't brute-force a 48-char random token in any
+// realistic timeframe anyway, so we bias toward never punishing real
+// users. Y-websocket backs off exponentially on connection failure and
+// each plugin instance opens ~1 WS per tracked markdown file; a burst
+// of legitimate reconnects after a server restart must NOT trip this.
+const MAX_FAILS = 30;
+const LOCKOUT_MS = 5 * 60_000;
 const buckets = new Map<string, Bucket>();
 
 export type RateLimitDecision =
