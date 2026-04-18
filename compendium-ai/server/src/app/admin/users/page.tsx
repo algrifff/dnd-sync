@@ -9,7 +9,7 @@ import {
   listUsersInGroup,
   type UserWithRole,
 } from '@/lib/users';
-import { SessionHeader } from '../../SessionHeader';
+import { AppHeader } from '../../AppHeader';
 import { CreateUserForm } from './CreateUserForm';
 import { RevokeButton } from './RevokeButton';
 
@@ -29,11 +29,13 @@ export default async function AdminUsersPage(): Promise<ReactElement> {
 
   return (
     <div className="min-h-screen bg-[#F4EDE0] text-[#2A241E]">
-      <SessionHeader
-        displayName={session.displayName}
-        username={session.username}
+      <AppHeader
         role={session.role}
-        accentColor={session.accentColor}
+        user={{
+          displayName: session.displayName,
+          username: session.username,
+          accentColor: session.accentColor,
+        }}
       />
       <main className="mx-auto max-w-3xl space-y-6 px-6 py-8">
         <div>

@@ -13,7 +13,8 @@ import {
   loadTags,
 } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
-import { SessionHeader } from '../../SessionHeader';
+import { AppHeader } from '../../AppHeader';
+import { SidebarFooter } from '../../SidebarFooter';
 import { FileTree } from '../FileTree';
 import { NoteMenu } from '../NoteMenu';
 import { NoteWorkspace } from '../NoteWorkspace';
@@ -52,26 +53,28 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   const outline = extractOutline(contentJson);
 
   return (
-    <div className="min-h-screen bg-[#F4EDE0] text-[#2A241E]">
-      <SessionHeader
-        displayName={session.displayName}
-        username={session.username}
-        role={session.role}
-        accentColor={session.accentColor}
-      />
+    <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
+      <aside className="hidden h-full w-[260px] shrink-0 flex-col border-r border-[#D4C7AE] bg-[#EAE1CF]/60 md:flex">
+        <FileTree
+          tree={tree}
+          activePath={path}
+          groupId={session.currentGroupId}
+          csrfToken={session.csrfToken}
+          canCreate={session.role !== 'viewer'}
+        />
+        <SidebarFooter
+          displayName={session.displayName}
+          username={session.username}
+          role={session.role}
+          accentColor={session.accentColor}
+        />
+      </aside>
 
-      <div className="grid h-[calc(100vh-49px)] grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)_280px]">
-        <aside className="hidden md:block">
-          <FileTree
-            tree={tree}
-            activePath={path}
-            groupId={session.currentGroupId}
-            csrfToken={session.csrfToken}
-            canCreate={session.role !== 'viewer'}
-          />
-        </aside>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <AppHeader role={session.role} />
 
-        <main className="overflow-y-auto px-8 py-10" id="note-main">
+        <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,1fr)_280px]">
+          <main className="overflow-y-auto px-8 py-10" id="note-main">
           <div className="mx-auto max-w-[720px]">
             <header className="mb-4 flex items-center justify-between gap-3">
               <p className="text-xs text-[#5A4F42]">
@@ -96,9 +99,10 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
           </div>
         </main>
 
-        <aside className="hidden md:block">
-          <NoteSidebar backlinks={backlinks} tags={tags} outline={outline} />
-        </aside>
+          <aside className="hidden md:block">
+            <NoteSidebar backlinks={backlinks} tags={tags} outline={outline} />
+          </aside>
+        </div>
       </div>
     </div>
   );

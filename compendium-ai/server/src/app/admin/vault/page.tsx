@@ -5,7 +5,7 @@ import { cookies } from 'next/headers';
 import { readSession } from '@/lib/session';
 import { DEFAULT_GROUP_ID } from '@/lib/users';
 import { getDb } from '@/lib/db';
-import { SessionHeader } from '../../SessionHeader';
+import { AppHeader } from '../../AppHeader';
 import { UploadForm } from './UploadForm';
 
 export const dynamic = 'force-dynamic';
@@ -36,11 +36,13 @@ export default async function AdminVaultPage(): Promise<ReactElement> {
 
   return (
     <div className="min-h-screen bg-[#F4EDE0] text-[#2A241E]">
-      <SessionHeader
-        displayName={session.displayName}
-        username={session.username}
+      <AppHeader
         role={session.role}
-        accentColor={session.accentColor}
+        user={{
+          displayName: session.displayName,
+          username: session.username,
+          accentColor: session.accentColor,
+        }}
       />
       <main className="mx-auto max-w-2xl space-y-6 px-6 py-8">
         <div>

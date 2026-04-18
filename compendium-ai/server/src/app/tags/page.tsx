@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { listAllTags } from '@/lib/notes';
-import { SessionHeader } from '../SessionHeader';
+import { AppHeader } from '../AppHeader';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,11 +24,13 @@ export default async function TagsIndexPage(): Promise<ReactElement> {
 
   return (
     <div className="min-h-screen bg-[#F4EDE0] text-[#2A241E]">
-      <SessionHeader
-        displayName={session.displayName}
-        username={session.username}
+      <AppHeader
         role={session.role}
-        accentColor={session.accentColor}
+        user={{
+          displayName: session.displayName,
+          username: session.username,
+          accentColor: session.accentColor,
+        }}
       />
 
       <main className="mx-auto max-w-[960px] px-8 py-10">

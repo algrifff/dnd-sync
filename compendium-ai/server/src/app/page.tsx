@@ -11,7 +11,8 @@ import { DEFAULT_GROUP_ID } from '@/lib/users';
 import { getDb } from '@/lib/db';
 import { recentlyUpdated } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
-import { SessionHeader } from './SessionHeader';
+import { AppHeader } from './AppHeader';
+import { SidebarFooter } from './SidebarFooter';
 import { FileTree } from './notes/FileTree';
 
 export const dynamic = 'force-dynamic';
@@ -38,23 +39,25 @@ export default async function HomePage(): Promise<ReactElement> {
   const topFolders = tree.root.children.filter((c) => c.kind === 'dir').slice(0, 6);
 
   return (
-    <div className="min-h-screen bg-[#F4EDE0] text-[#2A241E]">
-      <SessionHeader
-        displayName={session.displayName}
-        username={session.username}
-        role={session.role}
-        accentColor={session.accentColor}
-      />
-      <div className="grid min-h-[calc(100vh-49px)] grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)]">
-        <aside className="hidden md:block">
-          <FileTree
-            tree={tree}
-            activePath=""
-            groupId={session.currentGroupId}
-            csrfToken={session.csrfToken}
-            canCreate={session.role !== 'viewer'}
-          />
-        </aside>
+    <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
+      <aside className="hidden h-full w-[260px] shrink-0 flex-col border-r border-[#D4C7AE] bg-[#EAE1CF]/60 md:flex">
+        <FileTree
+          tree={tree}
+          activePath=""
+          groupId={session.currentGroupId}
+          csrfToken={session.csrfToken}
+          canCreate={session.role !== 'viewer'}
+        />
+        <SidebarFooter
+          displayName={session.displayName}
+          username={session.username}
+          role={session.role}
+          accentColor={session.accentColor}
+        />
+      </aside>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <AppHeader role={session.role} />
+        <div className="flex-1 overflow-y-auto">
         <main className="surface-paper mx-auto w-full max-w-4xl px-6 py-10">
         <section className="mb-10">
           <h1
@@ -134,6 +137,7 @@ export default async function HomePage(): Promise<ReactElement> {
           </section>
         )}
       </main>
+        </div>
       </div>
     </div>
   );
