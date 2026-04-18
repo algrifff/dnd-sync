@@ -77,10 +77,19 @@ export class DocRegistry {
   private emitting = true;
   private globalError: string | null = null;
 
+  /** When true, each update/awareness change is logged to console so
+   *  live-sync failures can be diagnosed end-to-end. Toggleable from
+   *  settings; enabled by default while we stabilise the sync pipeline. */
+  debugLogs = true;
+
   constructor(private readonly config: SyncConfig) {}
 
   getConfig(): SyncConfig {
     return this.config;
+  }
+
+  setDebugLogs(enabled: boolean): void {
+    this.debugLogs = enabled;
   }
 
   has(path: string): boolean {
@@ -163,18 +172,40 @@ export class DocRegistry {
     // server" (the provider sets itself as origin when applying remote
     // sync messages). Anything else originated locally (yCollab edit,
     // our own pushToYtext, etc).
-    doc.on('update', (_update: Uint8Array, origin: unknown) => {
+    doc.on('update', (update: Uint8Array, origin: unknown) => {
       const now = Date.now();
       if (origin === provider) {
         record.received++;
         record.lastReceivedAt = now;
+        if (this.debugLogs) {
+          console.info(`[compendium] ← recv ${update.byteLength}b on ${path}`);
+        }
       } else {
         record.sent++;
         record.lastSentAt = now;
+        if (this.debugLogs) {
+          console.info(`[compendium] → send ${update.byteLength}b on ${path}`);
+        }
       }
       // No emit here — updates are frequent; we don't want to spam
-      // listeners. The counters are read on demand via report().
+      // status-bar listeners. The counters are read on demand via report().
     });
+
+    // Awareness updates flow independently of ytext updates; log them
+    // separately so cursor-sync problems are visible even when no text
+    // is changing. Cursor movement from other peers appears here as
+    // origin=provider; our own cursor movement appears as origin=null.
+    provider.awareness.on(
+      'update',
+      ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => {
+        if (!this.debugLogs) return;
+        const count = added.length + updated.length + removed.length;
+        if (count === 0) return;
+        const dir = origin === provider ? '←' : '→';
+        const kind = origin === provider ? 'recv' : 'send';
+        console.info(`[compendium] ${dir} awareness ${kind} ${count} states on ${path}`);
+      },
+    );
 
     this.emit();
     return record;
