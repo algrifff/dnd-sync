@@ -5,7 +5,8 @@
 
 import type { ReactElement } from 'react';
 import Link from 'next/link';
-import { Home, Tag, Archive, Users } from 'lucide-react';
+import { Home, Tag } from 'lucide-react';
+import { SettingsMenu } from './SettingsMenu';
 
 export function SidebarHeader({
   role,
@@ -16,20 +17,8 @@ export function SidebarHeader({
     <div className="flex shrink-0 items-center gap-1 border-b border-[#D4C7AE] bg-[#EAE1CF]/80 px-2 py-1.5">
       <IconLink href="/" label="Home" icon={<Home size={14} aria-hidden />} />
       <IconLink href="/tags" label="Tags" icon={<Tag size={14} aria-hidden />} />
-      {role === 'admin' && (
-        <>
-          <IconLink
-            href="/admin/vault"
-            label="Vault"
-            icon={<Archive size={14} aria-hidden />}
-          />
-          <IconLink
-            href="/admin/users"
-            label="Users"
-            icon={<Users size={14} aria-hidden />}
-          />
-        </>
-      )}
+      <div className="flex-1" />
+      {role === 'admin' && <SettingsMenu />}
     </div>
   );
 }

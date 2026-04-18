@@ -7,6 +7,7 @@ import type { ReactElement } from 'react';
 import Link from 'next/link';
 import { NoteTabs } from './NoteTabs';
 import { NewTabButton } from './NewTabButton';
+import { SettingsMenu } from './SettingsMenu';
 import { logoutAction } from './login/actions';
 
 export function AppHeader({
@@ -32,16 +33,7 @@ export function AppHeader({
           <Link href="/tags" className="underline-offset-2 hover:underline">
             Tags
           </Link>
-          {role === 'admin' && (
-            <>
-              <Link href="/admin/vault" className="underline-offset-2 hover:underline">
-                Vault
-              </Link>
-              <Link href="/admin/users" className="underline-offset-2 hover:underline">
-                Users
-              </Link>
-            </>
-          )}
+          {role === 'admin' && <SettingsMenu />}
           <span aria-hidden className="h-5 w-px bg-[#D4C7AE]" />
         </nav>
       )}
