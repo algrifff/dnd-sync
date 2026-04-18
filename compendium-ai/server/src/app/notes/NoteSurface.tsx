@@ -1,12 +1,9 @@
 'use client';
 
-// Tiptap-mounted note surface. Handles both read and edit modes:
-//
-//   read  — Collaboration extension mounted (receives live remote
-//           updates), editable:false, no caret extension.
-//   edit  — Collaboration + CollaborationCaret mounted, editable:true,
-//           awareness.user set from the signed-in user for visible
-//           remote cursors.
+// Notion-style always-editable note surface. Collaboration is always
+// mounted; CollaborationCaret is mounted when the user has edit
+// rights (role != viewer). Viewers see the surface read-only; everyone
+// else types straight into it. No mode switch.
 //
 // The HocuspocusProvider connects to ws://host/collab with the session
 // cookie (automatic — same origin). The server auth hook accepts the
@@ -27,23 +24,18 @@ export type SurfaceUser = {
   accentColor: string;
 };
 
-export type Mode = 'read' | 'edit';
-
 export function NoteSurface({
   path,
   initialContent,
   user,
-  defaultMode = 'read',
   canEdit = true,
 }: {
   path: string;
   initialContent: { type: string } & Record<string, unknown>;
   user: SurfaceUser;
-  defaultMode?: Mode;
   canEdit?: boolean;
 }): React.JSX.Element {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>(defaultMode);
 
   const ydoc = useMemo(() => new Y.Doc(), [path]);
   const provider = useMemo(
@@ -52,7 +44,6 @@ export function NoteSurface({
         url: buildCollabUrl(),
         name: path,
         document: ydoc,
-        // onAuthenticationFailed handled below via event
       }),
     [path, ydoc],
   );
@@ -84,13 +75,6 @@ export function NoteSurface({
     };
   }, [provider, ydoc]);
 
-  // Mount extensions ONCE per path/provider — toggling between read
-  // and edit imperatively via `editor.setEditable()` rather than
-  // re-mounting avoids a jarring remount flash and preserves the
-  // user's scroll + awareness state. CollaborationCaret is always
-  // present when the user can edit so remote cursors are visible
-  // in read mode too (you see where your co-DM is working without
-  // stealing typing from them).
   const extensions = useMemo(() => {
     const exts = [
       ...BASE_EXTENSIONS,
@@ -120,19 +104,11 @@ export function NoteSurface({
       // over after the server sync. This gives us an instant first
       // paint without waiting for the websocket to land.
       content: initialContent as object,
-      editable: defaultMode === 'edit',
+      editable: canEdit,
       immediatelyRender: false,
     },
     [path, ydoc, provider, canEdit],
   );
-
-  // Imperatively flip editable when the user toggles the segmented
-  // control. Tiptap's `editable` option is evaluated only at mount;
-  // without this, clicking "Edit" wouldn't actually unlock the editor.
-  useEffect(() => {
-    if (!editor) return;
-    editor.setEditable(mode === 'edit');
-  }, [editor, mode]);
 
   // Wikilink click → client navigation.
   const containerRef = useRef<HTMLDivElement>(null);
@@ -155,27 +131,13 @@ export function NoteSurface({
 
   return (
     <div className="relative">
-      <div className="absolute right-0 top-0 flex items-center gap-2">
+      <div className="absolute right-0 top-0">
         <StatusDot state={authFailed ? 'error' : connected} />
-        {canEdit && (
-          <div className="flex rounded-[8px] border border-[#D4C7AE] bg-[#FBF5E8]">
-            <ModeButton
-              label="Read"
-              active={mode === 'read'}
-              onClick={() => setMode('read')}
-            />
-            <ModeButton
-              label="Edit"
-              active={mode === 'edit'}
-              onClick={() => setMode('edit')}
-            />
-          </div>
-        )}
       </div>
 
       <article
         ref={containerRef}
-        className="note-surface prose-parchment mt-10"
+        className="note-surface prose-parchment mt-6"
         aria-label="Note content"
       >
         <EditorContent editor={editor} />
@@ -188,29 +150,6 @@ export function NoteSurface({
         </p>
       )}
     </div>
-  );
-}
-
-function ModeButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={
-        'px-3 py-1 text-xs font-medium transition ' +
-        (active ? 'bg-[#2A241E] text-[#F4EDE0]' : 'text-[#5A4F42] hover:bg-[#D4A85A]/10')
-      }
-    >
-      {label}
-    </button>
   );
 }
 

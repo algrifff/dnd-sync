@@ -61,7 +61,13 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
       <div className="grid h-[calc(100vh-49px)] grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)_280px]">
         <aside className="hidden md:block">
-          <FileTree tree={tree} activePath={path} groupId={session.currentGroupId} />
+          <FileTree
+            tree={tree}
+            activePath={path}
+            groupId={session.currentGroupId}
+            csrfToken={session.csrfToken}
+            canCreate={session.role !== 'viewer'}
+          />
         </aside>
 
         <main className="overflow-y-auto px-8 py-10" id="note-main">

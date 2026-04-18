@@ -12,6 +12,7 @@ import { getDb } from '@/lib/db';
 import { recentlyUpdated } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
 import { SessionHeader } from './SessionHeader';
+import { FileTree } from './notes/FileTree';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,9 +34,8 @@ export default async function HomePage(): Promise<ReactElement> {
     .get(DEFAULT_GROUP_ID, DEFAULT_GROUP_ID) ?? { notes: 0, assets: 0 };
 
   const recent = recentlyUpdated(DEFAULT_GROUP_ID, 12);
-  const topFolders = buildTree(DEFAULT_GROUP_ID)
-    .root.children.filter((c) => c.kind === 'dir')
-    .slice(0, 6);
+  const tree = buildTree(DEFAULT_GROUP_ID);
+  const topFolders = tree.root.children.filter((c) => c.kind === 'dir').slice(0, 6);
 
   return (
     <div className="min-h-screen bg-[#F4EDE0] text-[#2A241E]">
@@ -45,7 +45,17 @@ export default async function HomePage(): Promise<ReactElement> {
         role={session.role}
         accentColor={session.accentColor}
       />
-      <main className="surface-paper mx-auto max-w-5xl px-6 py-10">
+      <div className="grid min-h-[calc(100vh-49px)] grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)]">
+        <aside className="hidden md:block">
+          <FileTree
+            tree={tree}
+            activePath=""
+            groupId={session.currentGroupId}
+            csrfToken={session.csrfToken}
+            canCreate={session.role !== 'viewer'}
+          />
+        </aside>
+        <main className="surface-paper mx-auto w-full max-w-4xl px-6 py-10">
         <section className="mb-10">
           <h1
             className="text-4xl font-bold tracking-tight text-[#2A241E]"
@@ -124,6 +134,7 @@ export default async function HomePage(): Promise<ReactElement> {
           </section>
         )}
       </main>
+      </div>
     </div>
   );
 }
