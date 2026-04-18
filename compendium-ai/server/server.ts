@@ -9,17 +9,32 @@ import { WS_PATH } from '@compendium/shared';
 import { getDb } from '@/lib/db';
 import { parseBearer, verifyToken } from '@/lib/auth';
 import { ensureConfig } from '@/lib/config';
+import { getEnv } from '@/lib/env';
 import { checkAuthAttempt, recordAuthFailure, recordAuthSuccess } from '@/lib/ratelimit';
+import { cleanupExpiredSessions } from '@/lib/session';
+import { ensureDefaultAdmin, printAdminBanner } from '@/lib/users';
 import { handleConnection } from '@/ws/setup';
 
-const port = Number(process.env.PORT ?? 3000);
-const hostname = process.env.HOSTNAME ?? '0.0.0.0';
-const dev = process.env.NODE_ENV !== 'production';
+// Validate environment before touching anything else — fail fast on
+// misconfiguration rather than at the first request.
+const env = getEnv();
 
-// Open SQLite (runs migrations) then seed config so tokens auto-generate
-// on first boot. ensureConfig logs the admin token once if freshly created.
+const port = env.port;
+const hostname = process.env.HOSTNAME ?? '0.0.0.0';
+const dev = env.nodeEnv !== 'production';
+
+// Open SQLite (runs migrations) then seed config + admin user + prune
+// expired sessions. ensureConfig logs the plugin admin token if freshly
+// created; ensureDefaultAdmin logs the web-app admin password if it
+// generated one (new DB only).
 getDb();
 ensureConfig();
+{
+  const seed = await ensureDefaultAdmin();
+  printAdminBanner(seed);
+  const removed = cleanupExpiredSessions();
+  if (removed > 0) console.log(`[compendium-server] pruned ${removed} expired session(s)`);
+}
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();

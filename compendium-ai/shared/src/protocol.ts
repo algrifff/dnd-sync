@@ -37,6 +37,43 @@ export const FileMetadataSchema = z.object({
 });
 export type FileMetadata = z.infer<typeof FileMetadataSchema>;
 
+// ── Web-app auth (phase 1) ───────────────────────────────────────────────────
+
+export const UserRoleSchema = z.enum(['admin', 'editor', 'viewer']);
+export type UserRole = z.infer<typeof UserRoleSchema>;
+
+/** 3–32 chars, letters/digits/hyphen/underscore. Case-insensitive; stored
+ *  COLLATE NOCASE in SQLite. */
+export const UsernameSchema = z
+  .string()
+  .regex(/^[a-z0-9_-]{3,32}$/i, 'usernames are 3–32 chars of letters, digits, _ or -');
+
+export const PasswordSchema = z
+  .string()
+  .min(8, 'password must be at least 8 characters')
+  .max(256, 'password too long');
+
+export const LoginRequestSchema = z.object({
+  username: z.string().min(1).max(64),
+  password: z.string().min(1).max(256),
+});
+export type LoginRequest = z.infer<typeof LoginRequestSchema>;
+
+export const CreateUserRequestSchema = z.object({
+  username: UsernameSchema,
+  displayName: z.string().min(1).max(64),
+  password: PasswordSchema,
+  role: UserRoleSchema,
+  email: z.string().email().max(256).optional(),
+});
+export type CreateUserRequest = z.infer<typeof CreateUserRequestSchema>;
+
+export const ChangePasswordRequestSchema = z.object({
+  currentPassword: z.string().min(1).max(256),
+  newPassword: PasswordSchema,
+});
+export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequestSchema>;
+
 // ── Chat (Phase 3) ───────────────────────────────────────────────────────────
 
 export const ChatMessageSchema = z.object({

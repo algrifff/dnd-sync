@@ -1,7 +1,14 @@
-// In-memory per-IP failed-auth bucket. Used by the WS upgrade handler to
-// throttle brute-force token guessing without adding a DB dependency.
-// The bucket rebuilds on restart — acceptable for a self-hosted single-
-// admin deployment. Never stores tokens, just IPs and fail counts.
+// In-memory rate-limiting buckets keyed by IP (or any string key).
+// The store rebuilds on restart — acceptable for a self-hosted single-
+// admin deployment. Never stores passwords / tokens, just keys and fail
+// counts.
+//
+// Two named buckets are exported:
+//   - `wsAuth`     — used by the legacy WS upgrade handler
+//                    (30 fails / 5 min; plugin reconnect bursts must not trip)
+//   - `webLogin`   — used by the web /login Server Action
+//                    (10 fails / 5 min; tighter because a real user retries
+//                     the form slowly by hand)
 
 type Bucket = {
   fails: number;
@@ -9,58 +16,73 @@ type Bucket = {
   notified: boolean;
 };
 
-// A real attacker can't brute-force a 48-char random token in any
-// realistic timeframe anyway, so we bias toward never punishing real
-// users. Y-websocket backs off exponentially on connection failure and
-// each plugin instance opens ~1 WS per tracked markdown file; a burst
-// of legitimate reconnects after a server restart must NOT trip this.
-const MAX_FAILS = 30;
-const LOCKOUT_MS = 5 * 60_000;
-const buckets = new Map<string, Bucket>();
-
 export type RateLimitDecision =
   | { allowed: true }
   | { allowed: false; retryAfterMs: number };
 
-/** Call before verifying the token. `isLocalhost` should be true when the
- *  request originated on the same host and NODE_ENV !== 'production', so
- *  admins typing on their own box don't lock themselves out. */
+export type Limiter = {
+  check(key: string, exempt: boolean): RateLimitDecision;
+  recordFailure(key: string, exempt: boolean): boolean;
+  recordSuccess(key: string): void;
+};
+
+function createLimiter(maxFails: number, lockoutMs: number): Limiter {
+  const buckets = new Map<string, Bucket>();
+
+  return {
+    check(key, exempt) {
+      if (exempt) return { allowed: true };
+      const b = buckets.get(key);
+      if (!b) return { allowed: true };
+      const now = Date.now();
+      if (b.lockedUntil > now) return { allowed: false, retryAfterMs: b.lockedUntil - now };
+      return { allowed: true };
+    },
+    recordFailure(key, exempt) {
+      if (exempt) return false;
+      const now = Date.now();
+      const existing = buckets.get(key);
+      const b: Bucket = existing ?? { fails: 0, lockedUntil: 0, notified: false };
+      if (b.lockedUntil && b.lockedUntil <= now) {
+        b.fails = 0;
+        b.lockedUntil = 0;
+        b.notified = false;
+      }
+      b.fails += 1;
+      if (b.fails >= maxFails) {
+        b.lockedUntil = now + lockoutMs;
+        const firstNotice = !b.notified;
+        b.notified = true;
+        buckets.set(key, b);
+        return firstNotice;
+      }
+      buckets.set(key, b);
+      return false;
+    },
+    recordSuccess(key) {
+      buckets.delete(key);
+    },
+  };
+}
+
+// Existing WS-auth bucket. Kept at the same 30 / 5 min as before so the
+// plugin's burst-reconnect behaviour doesn't regress.
+export const wsAuthLimiter = createLimiter(30, 5 * 60_000);
+
+// Web-app login bucket. Tighter because humans retry the form slowly;
+// 10 fails in 5 minutes is still plenty of headroom for a typo spree.
+export const webLoginLimiter = createLimiter(10, 5 * 60_000);
+
+// ── Backwards-compatible shims for the WS upgrade handler ──────────────
+
 export function checkAuthAttempt(ip: string, isLocalhost: boolean): RateLimitDecision {
-  if (isLocalhost) return { allowed: true };
-  const b = buckets.get(ip);
-  if (!b) return { allowed: true };
-  const now = Date.now();
-  if (b.lockedUntil > now) return { allowed: false, retryAfterMs: b.lockedUntil - now };
-  return { allowed: true };
+  return wsAuthLimiter.check(ip, isLocalhost);
 }
 
-/** Record a failed auth attempt. Returns true if the caller should log a
- *  "rate-limited <ip>" line (first-time lockout only). */
 export function recordAuthFailure(ip: string, isLocalhost: boolean): boolean {
-  if (isLocalhost) return false;
-  const now = Date.now();
-  const existing = buckets.get(ip);
-  const b: Bucket = existing ?? { fails: 0, lockedUntil: 0, notified: false };
-  // Reset the fail counter if the previous lockout expired.
-  if (b.lockedUntil && b.lockedUntil <= now) {
-    b.fails = 0;
-    b.lockedUntil = 0;
-    b.notified = false;
-  }
-  b.fails += 1;
-  if (b.fails >= MAX_FAILS) {
-    b.lockedUntil = now + LOCKOUT_MS;
-    const firstNotice = !b.notified;
-    b.notified = true;
-    buckets.set(ip, b);
-    return firstNotice;
-  }
-  buckets.set(ip, b);
-  return false;
+  return wsAuthLimiter.recordFailure(ip, isLocalhost);
 }
 
-/** Clear a bucket after a successful auth so honest users never accumulate
- *  counter state from an earlier typo. */
 export function recordAuthSuccess(ip: string): void {
-  buckets.delete(ip);
+  wsAuthLimiter.recordSuccess(ip);
 }

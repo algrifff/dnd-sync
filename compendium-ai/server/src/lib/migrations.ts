@@ -93,6 +93,72 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE friends ADD COLUMN last_seen_at INTEGER;
     `,
   },
+  {
+    version: 6,
+    description: 'web app auth: users, sessions, groups, group_members, audit_log',
+    sql: `
+      -- Groups are tenant containers. v1 has one group ('default'); schema
+      -- is multi-tenant-ready so later groups only need a UI, not a
+      -- migration.
+      CREATE TABLE groups (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      INSERT INTO groups (id, name, created_at) VALUES ('default', 'Compendium', strftime('%s','now')*1000);
+
+      CREATE TABLE users (
+        id             TEXT PRIMARY KEY,
+        username       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        email          TEXT COLLATE NOCASE,
+        password_hash  TEXT NOT NULL,
+        display_name   TEXT NOT NULL,
+        accent_color   TEXT NOT NULL,
+        created_at     INTEGER NOT NULL,
+        last_login_at  INTEGER
+      );
+      CREATE UNIQUE INDEX users_username ON users(username);
+
+      CREATE TABLE group_members (
+        group_id  TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        user_id   TEXT NOT NULL REFERENCES users(id)  ON DELETE CASCADE,
+        role      TEXT NOT NULL CHECK (role IN ('admin','editor','viewer')),
+        joined_at INTEGER NOT NULL,
+        PRIMARY KEY (group_id, user_id)
+      ) WITHOUT ROWID;
+      CREATE INDEX group_members_user ON group_members(user_id);
+
+      -- Random 32-byte hex id is the primary identifier; we don't
+      -- encrypt/sign it because a successful DB lookup IS the proof.
+      CREATE TABLE sessions (
+        id               TEXT PRIMARY KEY,
+        user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        current_group_id TEXT NOT NULL REFERENCES groups(id),
+        csrf_token       TEXT NOT NULL,
+        created_at       INTEGER NOT NULL,
+        expires_at       INTEGER NOT NULL,
+        last_seen_at     INTEGER NOT NULL,
+        user_agent       TEXT,
+        ip               TEXT
+      );
+      CREATE INDEX sessions_user    ON sessions(user_id);
+      CREATE INDEX sessions_expires ON sessions(expires_at);
+
+      -- Append-only log of admin actions. details_json is free-form so
+      -- each action can annotate with non-PII context.
+      CREATE TABLE audit_log (
+        id           TEXT PRIMARY KEY,
+        group_id     TEXT NOT NULL REFERENCES groups(id),
+        actor_id     TEXT REFERENCES users(id),
+        action       TEXT NOT NULL,
+        target       TEXT,
+        details_json TEXT NOT NULL DEFAULT '{}',
+        at           INTEGER NOT NULL
+      );
+      CREATE INDEX audit_log_group_at ON audit_log(group_id, at DESC);
+      CREATE INDEX audit_log_action   ON audit_log(action);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {
