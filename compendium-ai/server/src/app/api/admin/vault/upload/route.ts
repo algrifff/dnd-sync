@@ -17,6 +17,8 @@ import { requireAdmin } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { adminUploadLimiter } from '@/lib/ratelimit';
 import { ingestZip } from '@/lib/ingest';
+import { closeDocumentConnections } from '@/collab/server';
+import { getDb } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,6 +70,13 @@ export async function POST(req: NextRequest): Promise<Response> {
   const bytes = new Uint8Array(await vault.arrayBuffer());
   writeFileSync(tmpPath, bytes);
 
+  // Snapshot every currently-stored path BEFORE ingest so we can
+  // disconnect live editors on anything the ingest touches.
+  const beforePaths = getDb()
+    .query<{ path: string }, [string]>('SELECT path FROM notes WHERE group_id = ?')
+    .all(authed.currentGroupId)
+    .map((r) => r.path);
+
   try {
     const summary = await ingestZip({
       zipPath: tmpPath,
@@ -75,6 +84,12 @@ export async function POST(req: NextRequest): Promise<Response> {
       actorId: authed.userId,
     });
     adminUploadLimiter.recordSuccess(authed.userId);
+
+    // Kick any live editors on paths that existed before so they
+    // reconnect and load the fresh server state rather than fighting
+    // it with their in-memory doc.
+    await Promise.all(beforePaths.map((p) => closeDocumentConnections(p)));
+
     return json({ ok: true, summary }, 200);
   } catch (err) {
     adminUploadLimiter.recordFailure(authed.userId, false);

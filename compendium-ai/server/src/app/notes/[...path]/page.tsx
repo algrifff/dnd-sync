@@ -15,7 +15,7 @@ import {
 import { buildTree } from '@/lib/tree';
 import { SessionHeader } from '../../SessionHeader';
 import { FileTree } from '../FileTree';
-import { NoteRenderer } from '../NoteRenderer';
+import { NoteSurface } from '../NoteSurface';
 import { NoteSidebar, extractOutline } from '../NoteSidebar';
 
 export const dynamic = 'force-dynamic';
@@ -78,7 +78,15 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
               </p>
             </header>
 
-            <NoteRenderer content={contentJson as { type: string }} />
+            <NoteSurface
+              path={path}
+              initialContent={contentJson as { type: string } & Record<string, unknown>}
+              user={{
+                displayName: session.displayName,
+                accentColor: session.accentColor,
+              }}
+              canEdit={session.role !== 'viewer'}
+            />
           </div>
         </main>
 

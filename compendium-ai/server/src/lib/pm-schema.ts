@@ -5,7 +5,7 @@
 // identical schema to mount Tiptap. They MUST match — otherwise the
 // server writes JSON the client can't render (or vice versa).
 
-import { getSchema, Node } from '@tiptap/core';
+import { getSchema, Node, type AnyExtension } from '@tiptap/core';
 import type { Schema } from 'prosemirror-model';
 import { StarterKit } from '@tiptap/starter-kit';
 import { Image } from '@tiptap/extension-image';
@@ -60,7 +60,9 @@ function encodePath(p: string): string {
   return p.split('/').map(encodeURIComponent).join('/');
 }
 
-/** Block-level embed for images, videos, PDFs, other binaries. */
+/** Block-level embed for images, videos, PDFs, other binaries. Renders
+ *  the appropriate media element driven by the node's mime attribute;
+ *  the src points at /api/assets/<id> which auth-gates the blob. */
 export const Embed = Node.create({
   name: 'embed',
   group: 'block',
@@ -78,11 +80,44 @@ export const Embed = Node.create({
     return [{ tag: 'figure[data-embed]' }];
   },
   renderHTML({ node }) {
-    const { assetId, mime } = node.attrs as Record<string, unknown>;
-    return [
-      'figure',
-      { 'data-embed': String(assetId), 'data-mime': String(mime), class: 'embed' },
-      0,
+    const assetId = String(node.attrs?.assetId ?? '');
+    const mime = String(node.attrs?.mime ?? 'application/octet-stream');
+    const caption = node.attrs?.caption ? String(node.attrs.caption) : '';
+    const name = node.attrs?.originalName ? String(node.attrs.originalName) : '';
+    const src = assetId ? `/api/assets/${encodeURIComponent(assetId)}` : '';
+    const alt = caption || name || '';
+
+    const figureAttrs = {
+      'data-embed': assetId,
+      'data-mime': mime,
+      class: 'embed',
+    };
+
+    let media: unknown[];
+    if (!src) {
+      media = ['div', { class: 'embed-missing' }, 'Missing asset'];
+    } else if (mime.startsWith('image/')) {
+      media = ['img', { src, alt, loading: 'lazy' }];
+    } else if (mime.startsWith('video/')) {
+      media = ['video', { src, controls: 'true', preload: 'metadata' }];
+    } else if (mime.startsWith('audio/')) {
+      media = ['audio', { src, controls: 'true', preload: 'metadata' }];
+    } else if (mime === 'application/pdf') {
+      media = ['iframe', { src, class: 'embed-pdf', title: name || 'PDF', loading: 'lazy' }];
+    } else {
+      media = [
+        'a',
+        { href: src, download: name || 'download', class: 'embed-download' },
+        name || 'Download file',
+      ];
+    }
+
+    const children = caption
+      ? [media, ['figcaption', {}, caption]]
+      : [media];
+    return ['figure', figureAttrs, ...children] as unknown as [
+      string,
+      Record<string, string>,
     ];
   },
 });
@@ -164,7 +199,7 @@ export const TagMention = Node.create({
  *  browser editor. Order matters for Tiptap: nodes defined later may
  *  extend or override earlier ones. Keep this in sync with Phase 4's
  *  editor-mount call. */
-export const BASE_EXTENSIONS = [
+export const BASE_EXTENSIONS: AnyExtension[] = [
   StarterKit.configure({
     // Yjs owns history; disable Tiptap's.
     undoRedo: false,

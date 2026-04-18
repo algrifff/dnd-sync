@@ -14,6 +14,7 @@ import { checkAuthAttempt, recordAuthFailure, recordAuthSuccess } from '@/lib/ra
 import { cleanupExpiredSessions } from '@/lib/session';
 import { ensureDefaultAdmin, printAdminBanner } from '@/lib/users';
 import { handleConnection } from '@/ws/setup';
+import { handleCollabConnection } from '@/collab/server';
 
 // Validate environment before touching anything else — fail fast on
 // misconfiguration rather than at the first request.
@@ -52,6 +53,7 @@ const server = createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ noServer: true });
+const collabWss = new WebSocketServer({ noServer: true });
 
 // Symbol-keyed stash so the upgrade handler can pass the verified token
 // into the 'connection' event handler without exposing it as a public
@@ -64,8 +66,23 @@ wss.on('connection', (ws, req) => {
   handleConnection(ws, req, token);
 });
 
+collabWss.on('connection', (ws, req) => {
+  handleCollabConnection(ws, req);
+});
+
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url ?? '/', `http://${hostname}`);
+
+  // Route 1: new hocuspocus /collab path. Auth happens inside hocuspocus's
+  // onAuthenticate hook (reads the session cookie from the request).
+  if (url.pathname === '/collab' || url.pathname.startsWith('/collab/')) {
+    collabWss.handleUpgrade(req, socket, head, (ws) => {
+      collabWss.emit('connection', ws, req);
+    });
+    return;
+  }
+
+  // Route 2: legacy plugin-era /sync path. Kept until Phase 8.
   if (!url.pathname.startsWith(`${WS_PATH}/`)) {
     // Let Next handle its own upgrades (e.g. HMR in dev).
     socket.destroy();

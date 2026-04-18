@@ -11,7 +11,13 @@
   },
   "dependencies": {
     "@compendium/shared": "workspace:*",
+    "@hocuspocus/extension-database": "^3.4.4",
+    "@hocuspocus/extension-logger": "^3.4.4",
+    "@hocuspocus/provider": "^3.4.4",
+    "@hocuspocus/server": "^3.4.4",
     "@tiptap/core": "^3.22.4",
+    "@tiptap/extension-collaboration": "^3.22.4",
+    "@tiptap/extension-collaboration-caret": "^3.22.4",
     "@tiptap/extension-highlight": "^3.22.4",
     "@tiptap/extension-image": "^3.22.4",
     "@tiptap/extension-link": "^3.22.4",
