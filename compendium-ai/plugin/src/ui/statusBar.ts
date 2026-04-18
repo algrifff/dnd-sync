@@ -1,5 +1,6 @@
 // Status bar indicator. Colored dot + short text; click opens the
-// plugin's settings tab.
+// plugin's settings tab. Hovering shows the most recent error reasons
+// when sync is unhealthy, so users know *why* the dot is yellow or red.
 
 import type { App } from 'obsidian';
 
@@ -20,12 +21,20 @@ export class StatusBar {
         'compendium',
       );
     };
-    this.render('idle', 0);
+    this.render('idle', 0, []);
   }
 
-  render(status: Status, docCount: number): void {
+  render(status: Status, docCount: number, errors: string[]): void {
     const { dot, label } = this.format(status, docCount);
     this.el.setText(`${dot} Compendium: ${label}`);
+    // Tooltip shows current errors so users can diagnose 🟡/🔴 without
+    // opening devtools. Never contains the auth token (see DocRegistry).
+    this.el.title =
+      errors.length > 0
+        ? errors.join('\n')
+        : status === 'connected'
+          ? 'All docs synced.'
+          : 'Compendium sync status.';
   }
 
   private format(status: Status, docCount: number): { dot: string; label: string } {

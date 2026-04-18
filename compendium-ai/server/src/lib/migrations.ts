@@ -86,6 +86,13 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE binary_files ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';
     `,
   },
+  {
+    version: 5,
+    description: 'friends: last_seen_at for verifiable pairing',
+    sql: `
+      ALTER TABLE friends ADD COLUMN last_seen_at INTEGER;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

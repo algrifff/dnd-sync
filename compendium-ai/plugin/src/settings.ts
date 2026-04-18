@@ -2,9 +2,10 @@
 // All free-form input runs through normalize* helpers so paste mishaps
 // (trailing whitespace, wrong scheme, leftover query string) self-correct.
 
-import { Notice, PluginSettingTab, Setting, requestUrl } from 'obsidian';
+import { Notice, PluginSettingTab, Setting } from 'obsidian';
 import type { App } from 'obsidian';
 import type CompendiumPlugin from './main';
+import { preflight } from './sync/preflight';
 
 export type CompendiumSettings = {
   serverUrl: string;
@@ -13,6 +14,11 @@ export type CompendiumSettings = {
   displayName: string;
   /** Hex '#rrggbb' for your cursor + selection highlight. Empty = derived from name. */
   displayColor: string;
+  /** Path → sha256 of the content we last observed as in-sync with the
+   *  server. Used at reconnect to decide whether divergence means "local
+   *  edits happened offline" (push), "we are stale" (pull), or "true
+   *  conflict" (CRDT merge with marker comment). */
+  baselines: Record<string, string>;
 };
 
 export const DEFAULT_SETTINGS: CompendiumSettings = {
@@ -20,6 +26,7 @@ export const DEFAULT_SETTINGS: CompendiumSettings = {
   authToken: '',
   displayName: '',
   displayColor: '',
+  baselines: {},
 };
 
 /**
@@ -196,22 +203,12 @@ export class CompendiumSettingTab extends PluginSettingTab {
     }
     btn.setButtonText('Testing…');
     try {
-      const res = await requestUrl({
-        url: `${serverUrl}/api/inventory`,
-        method: 'GET',
-        headers: { Authorization: `Bearer ${authToken}` },
-        throw: false,
-      });
-      if (res.status === 200) {
-        new Notice('Compendium: connection OK ✓');
-      } else if (res.status === 401) {
-        new Notice('Compendium: token rejected (401). Ask your DM for a fresh one.');
+      const result = await preflight({ serverUrl, authToken });
+      if (result.ok) {
+        new Notice('Compendium: connection OK ✓ (HTTP + WS + sync)');
       } else {
-        new Notice(`Compendium: unexpected status ${res.status}`);
+        new Notice(`Compendium: ${result.stage} check failed — ${result.reason}`);
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'unknown error';
-      new Notice(`Compendium: couldn't reach server (${msg})`);
     } finally {
       btn.setButtonText('Test');
     }

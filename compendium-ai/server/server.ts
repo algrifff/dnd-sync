@@ -9,6 +9,7 @@ import { WS_PATH } from '@compendium/shared';
 import { getDb } from '@/lib/db';
 import { parseBearer, verifyToken } from '@/lib/auth';
 import { ensureConfig } from '@/lib/config';
+import { checkAuthAttempt, recordAuthFailure, recordAuthSuccess } from '@/lib/ratelimit';
 import { handleConnection } from '@/ws/setup';
 
 const port = Number(process.env.PORT ?? 3000);
@@ -37,8 +38,15 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ noServer: true });
 
+// Symbol-keyed stash so the upgrade handler can pass the verified token
+// into the 'connection' event handler without exposing it as a public
+// field on the request. The token is never logged.
+const kToken = Symbol('compendium.wsToken');
+type TokenCarrier = { [kToken]?: string | null };
+
 wss.on('connection', (ws, req) => {
-  handleConnection(ws, req);
+  const token = (req as TokenCarrier)[kToken] ?? null;
+  handleConnection(ws, req, token);
 });
 
 server.on('upgrade', (req, socket, head) => {
@@ -49,15 +57,36 @@ server.on('upgrade', (req, socket, head) => {
     return;
   }
 
+  const remote = req.socket.remoteAddress ?? 'unknown';
+  const isLocalhost =
+    !dev
+      ? false
+      : remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+
+  const decision = checkAuthAttempt(remote, isLocalhost);
+  if (!decision.allowed) {
+    const retrySec = Math.ceil(decision.retryAfterMs / 1000);
+    socket.write(
+      `HTTP/1.1 429 Too Many Requests\r\nRetry-After: ${retrySec}\r\nConnection: close\r\n\r\n`,
+    );
+    socket.destroy();
+    return;
+  }
+
   const token =
     parseBearer(req.headers['authorization'] as string | undefined) ??
     url.searchParams.get('token');
   if (!verifyToken(token)) {
+    if (recordAuthFailure(remote, isLocalhost)) {
+      console.warn(`[auth] rate-limited ${remote}`);
+    }
     socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
     socket.destroy();
     return;
   }
 
+  recordAuthSuccess(remote);
+  (req as TokenCarrier)[kToken] = token;
   wss.handleUpgrade(req, socket, head, (ws) => {
     wss.emit('connection', ws, req);
   });

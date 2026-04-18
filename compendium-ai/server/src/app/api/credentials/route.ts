@@ -34,6 +34,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       name: f.name,
       token: f.token,
       createdAt: f.createdAt,
+      lastSeenAt: f.lastSeenAt,
     })),
   });
 }

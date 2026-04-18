@@ -8,8 +8,10 @@
 import { Notice, TFile } from 'obsidian';
 import type { App, EventRef, TAbstractFile } from 'obsidian';
 import { BINARY_EXTENSIONS } from '@compendium/shared';
+import type { DocRegistry } from './docRegistry';
 import { deleteBinary, fetchInventory, getBinary, putBinary } from './http';
 import type { HttpConfig } from './http';
+import { retryWithBackoff, shortError } from './retry';
 
 const MIME: Record<string, string> = {
   // images
@@ -61,6 +63,7 @@ export class BinarySync {
   constructor(
     private readonly app: App,
     private readonly cfg: HttpConfig,
+    private readonly registry: DocRegistry,
   ) {}
 
   async start(): Promise<void> {
@@ -105,11 +108,17 @@ export class BinarySync {
   private async reconcile(): Promise<void> {
     let inventory;
     try {
-      inventory = await fetchInventory(this.cfg);
+      inventory = await retryWithBackoff(() => fetchInventory(this.cfg), {
+        onAttempt: (n, err) => {
+          this.registry.setGlobalError(`binary inventory retry ${n}/5: ${shortError(err)}`);
+        },
+      });
     } catch (err) {
-      console.error('[compendium] inventory fetch failed', err);
+      this.registry.setGlobalError(`binary inventory failed: ${shortError(err)}`);
+      console.error('[compendium] binary inventory fetch failed after retries', err);
       return;
     }
+    this.registry.clearGlobalError();
 
     const serverPaths = new Set(inventory.binaryFiles.map((f) => f.path));
 

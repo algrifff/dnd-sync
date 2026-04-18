@@ -37,8 +37,15 @@ function persistNow(docName: string, doc: Y.Doc): void {
     .run(docName, state, textContent, now);
 }
 
-/** Load persisted state into `doc`, then subscribe for future persists. */
+/** Subscribe for future persists, then apply any stored state. Subscribing
+ *  first is defensive: Y.applyUpdate can synchronously fire 'update' events
+ *  during replay, and we want those captured even though replaying existing
+ *  state into a fresh doc is a no-op persist. */
 export function bindState(docName: string, doc: Y.Doc): void {
+  doc.on('update', () => {
+    schedulePersist(docName, doc);
+  });
+
   const row = getDb()
     .query<{ yjs_state: Uint8Array }, [string]>('SELECT yjs_state FROM text_docs WHERE path = ?')
     .get(docName);
@@ -46,10 +53,6 @@ export function bindState(docName: string, doc: Y.Doc): void {
   if (row?.yjs_state) {
     Y.applyUpdate(doc, new Uint8Array(row.yjs_state));
   }
-
-  doc.on('update', () => {
-    schedulePersist(docName, doc);
-  });
 }
 
 /** Force an immediate synchronous persist — used on connection close. */

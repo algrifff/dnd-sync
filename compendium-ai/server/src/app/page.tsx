@@ -208,8 +208,22 @@ type Credentials = {
   serverUrl: string;
   installerKey: string;
   shared: { playerToken: string };
-  friends: Array<{ id: string; name: string; token: string; createdAt: number }>;
+  friends: Array<{
+    id: string;
+    name: string;
+    token: string;
+    createdAt: number;
+    lastSeenAt: number | null;
+  }>;
 };
+
+function lastSeenBadge(lastSeenAt: number | null): { text: string; tone: 'green' | 'yellow' | 'grey' } {
+  if (lastSeenAt === null) return { text: 'never connected', tone: 'grey' };
+  const delta = Date.now() - lastSeenAt;
+  if (delta < 5 * 60_000) return { text: `seen ${fmtAgo(lastSeenAt)}`, tone: 'green' };
+  if (delta < 24 * 3_600_000) return { text: `seen ${fmtAgo(lastSeenAt)}`, tone: 'yellow' };
+  return { text: `seen ${fmtAgo(lastSeenAt)}`, tone: 'grey' };
+}
 
 function InstallersSection({ token }: { token: string }) {
   const [creds, setCreds] = useState<Credentials | null>(null);
@@ -406,7 +420,7 @@ function FriendsPanel({
               <li key={f.id} className="py-2">
                 <div className="flex items-center gap-3">
                   <span className="flex-1 text-sm">{f.name}</span>
-                  <span className="text-xs text-neutral-500">{fmtAgo(f.createdAt)}</span>
+                  <FriendStatusBadge lastSeenAt={f.lastSeenAt} />
                   <button
                     onClick={() => onToggleExpanded(isOpen ? null : f.id)}
                     className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-amber-500 hover:text-amber-400"
@@ -444,6 +458,24 @@ function FriendsPanel({
         </ul>
       )}
     </section>
+  );
+}
+
+function FriendStatusBadge({ lastSeenAt }: { lastSeenAt: number | null }) {
+  const { text, tone } = lastSeenBadge(lastSeenAt);
+  const colour =
+    tone === 'green'
+      ? 'text-emerald-400 border-emerald-900 bg-emerald-950/40'
+      : tone === 'yellow'
+        ? 'text-amber-400 border-amber-900 bg-amber-950/40'
+        : 'text-neutral-500 border-neutral-800 bg-neutral-950/60';
+  return (
+    <span
+      className={`text-xs px-2 py-0.5 rounded-full border ${colour}`}
+      title={lastSeenAt ? new Date(lastSeenAt).toLocaleString() : 'token not yet used'}
+    >
+      {text}
+    </span>
   );
 }
 

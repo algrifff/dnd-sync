@@ -69,6 +69,16 @@ export async function deleteBinary(cfg: HttpConfig, path: string): Promise<void>
   }
 }
 
+export async function deleteDoc(cfg: HttpConfig, path: string): Promise<void> {
+  const res = await doRequest(cfg, {
+    url: `${normalizeBase(cfg.serverUrl)}/api/docs/${encodePath(path)}`,
+    method: 'DELETE',
+  });
+  if (res.status !== 200 && res.status !== 404) {
+    throw new Error(`doc delete failed: ${res.status}`);
+  }
+}
+
 export async function fetchPluginVersion(cfg: HttpConfig): Promise<{ hash: string }> {
   const res = await doRequest(cfg, {
     url: `${normalizeBase(cfg.serverUrl)}/api/plugin/version`,

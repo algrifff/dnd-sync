@@ -15,6 +15,7 @@ import * as awarenessProtocol from 'y-protocols/awareness';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import { WS_PATH } from '@compendium/shared';
+import { touchFriendLastSeen } from '@/lib/friends';
 import { bindState, writeStateNow } from '@/lib/yjs-persistence';
 import { registerStatsProbe } from './stats';
 
@@ -106,10 +107,51 @@ function extractDocName(req: IncomingMessage): string | null {
   }
 }
 
-export function handleConnection(ws: WebSocket, req: IncomingMessage): void {
+/** Drop a SharedDoc that lives in memory (if any), closing the WS of every
+ *  connected client for that path. Idempotent. Called by the DELETE route so
+ *  a delete doesn't race with in-flight edits on surviving peers. */
+export function destroyDoc(docName: string): void {
+  const shared = docs.get(docName);
+  if (!shared) return;
+  for (const conn of shared.conns) {
+    try {
+      conn.close(1000, 'doc deleted');
+    } catch {
+      /* already closed */
+    }
+  }
+  shared.conns.clear();
+  if (shared.gcTimer) clearTimeout(shared.gcTimer);
+  shared.doc.destroy();
+  docs.delete(docName);
+}
+
+export function handleConnection(ws: WebSocket, req: IncomingMessage, token: string | null): void {
   const docName = extractDocName(req);
   if (!docName) {
     ws.close(1008, 'missing doc name in path');
+    return;
+  }
+
+  // Record heartbeat for friend-token dashboards. Cheap UPDATE — no-op if
+  // the token is the admin or shared player token. Must come after
+  // extractDocName so malformed URLs don't pollute the last-seen column.
+  touchFriendLastSeen(token);
+
+  // Preflight probe: the plugin opens this during connection tests to verify
+  // the full pipeline (HTTP + WS + Yjs handshake) rather than just the HTTP
+  // layer. Auth is already enforced at the upgrade handler in server.ts.
+  // Respond with one sync-step-1 frame from a throwaway doc, then close.
+  if (docName === '.preflight') {
+    ws.binaryType = 'arraybuffer';
+    const encoder = encoding.createEncoder();
+    encoding.writeVarUint(encoder, MESSAGE_SYNC);
+    syncProtocol.writeSyncStep1(encoder, new Y.Doc());
+    try {
+      ws.send(encoding.toUint8Array(encoder));
+    } finally {
+      ws.close(1000, 'preflight ok');
+    }
     return;
   }
 

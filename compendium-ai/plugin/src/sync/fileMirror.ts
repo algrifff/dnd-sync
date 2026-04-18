@@ -11,13 +11,22 @@
 //
 // Remote updates are debounced per path (150 ms) so rapid-fire character
 // edits from a typing peer don't translate to a write-per-keystroke on disk.
+//
+// Reconciliation at reconnect uses a per-path baseline hash stored in plugin
+// settings. The baseline is the SHA-256 of the content we last observed as
+// in-sync with the server. When local and server diverge we use it to
+// classify the divergence as push / pull / merge rather than silently
+// overwriting local content.
 
 import { MarkdownView, Notice, TFile } from 'obsidian';
 import type { App, EventRef, TAbstractFile } from 'obsidian';
 import type * as Y from 'yjs';
 import { MARKDOWN_EXTENSIONS } from '@compendium/shared';
+import type { BaselineStore } from './baselines';
 import type { DocRegistry } from './docRegistry';
-import { fetchInventory, type HttpConfig } from './http';
+import { sha256 } from './hash';
+import { deleteDoc, fetchInventory, type HttpConfig } from './http';
+import { retryWithBackoff, shortError } from './retry';
 
 const LOCAL_ORIGIN = Symbol('compendium.local');
 const WRITE_DEBOUNCE_MS = 150;
@@ -30,6 +39,11 @@ function isMarkdown(path: string): boolean {
 type Tracked = {
   observer: (e: Y.YTextEvent, tx: Y.Transaction) => void;
   ytext: Y.Text;
+};
+
+type ProviderSyncHandle = {
+  once(ev: 'sync', cb: (synced: boolean) => void): void;
+  synced: boolean;
 };
 
 export class FileMirror {
@@ -47,6 +61,8 @@ export class FileMirror {
     private readonly app: App,
     private readonly registry: DocRegistry,
     private readonly cfg: HttpConfig,
+    private readonly baselines: BaselineStore,
+    private readonly displayName: () => string,
   ) {}
 
   async start(): Promise<void> {
@@ -79,12 +95,22 @@ export class FileMirror {
 
   private async syncInventory(): Promise<void> {
     try {
-      const inventory = await fetchInventory(this.cfg);
+      const inventory = await retryWithBackoff(() => fetchInventory(this.cfg), {
+        onAttempt: (n, err) => {
+          this.registry.setGlobalError(`inventory retry ${n}/5: ${shortError(err)}`);
+        },
+      });
+      this.registry.clearGlobalError();
       for (const entry of inventory.textDocs) {
         if (!this.tracked.has(entry.path)) void this.track(entry.path);
       }
     } catch (err) {
-      console.error('[compendium] inventory fetch failed', err);
+      const reason = shortError(err);
+      this.registry.setGlobalError(`inventory failed: ${reason}`);
+      console.error('[compendium] inventory fetch failed after retries', err);
+      new Notice(
+        'Compendium: could not fetch server inventory. Hover the status bar for detail.',
+      );
     }
   }
 
@@ -123,22 +149,58 @@ export class FileMirror {
     void this.reconcileAfterSync(path, provider, ytext);
   }
 
-  private reconcileAfterSync(path: string, provider: { once(ev: 'sync', cb: (synced: boolean) => void): void; synced: boolean }, ytext: Y.Text): Promise<void> {
+  private reconcileAfterSync(
+    path: string,
+    provider: ProviderSyncHandle,
+    ytext: Y.Text,
+  ): Promise<void> {
     const run = async (): Promise<void> => {
       const file = this.app.vault.getAbstractFileByPath(path);
       const localText = file instanceof TFile ? await this.app.vault.read(file) : '';
       const serverText = ytext.toString();
 
-      if (serverText === '' && localText !== '') {
-        // Server hasn't seen this file — push local content up.
-        const doc = this.registry.get(path).doc;
-        doc.transact(() => {
-          ytext.insert(0, localText);
-        }, LOCAL_ORIGIN);
-      } else if (serverText !== localText) {
-        // Server is canonical — overwrite local.
-        await this.writeLocal(path, serverText);
+      if (localText === serverText) {
+        // Already aligned. Stamp the baseline so future reconciles are cheap.
+        await this.baselines.set(path, await sha256(localText));
+        return;
       }
+
+      const baseline = this.baselines.get(path);
+      const [localHash, serverHash] = await Promise.all([sha256(localText), sha256(serverText)]);
+
+      // Server is empty and we've never baselined → this path is ours.
+      // Push any local content up and record it as the baseline.
+      if (serverText === '' && baseline === null) {
+        if (localText !== '') this.pushToYtext(path, ytext, localText);
+        await this.baselines.set(path, localHash);
+        return;
+      }
+
+      // Local diverged from the last baseline; server is still at it → we
+      // have offline local edits. Push them up.
+      if (baseline !== null && baseline === serverHash && baseline !== localHash) {
+        this.pushToYtext(path, ytext, localText);
+        await this.baselines.set(path, localHash);
+        return;
+      }
+
+      // Server moved on while we were unchanged → pull server down.
+      if (baseline !== null && baseline === localHash && baseline !== serverHash) {
+        await this.writeLocal(path, serverText);
+        await this.baselines.set(path, serverHash);
+        return;
+      }
+
+      // True conflict: no baseline, or both sides diverged from it. Yjs
+      // itself will CRDT-merge whatever we put into ytext with incoming
+      // remote updates; our job is to make sure the user's local content
+      // survives. Keep server content on top and append local under a
+      // marker comment so the result is readable and lossless.
+      const merged = this.mergeMarker(serverText, localText);
+      this.pushToYtext(path, ytext, merged);
+      await this.writeLocal(path, merged);
+      await this.baselines.set(path, await sha256(merged));
+      new Notice(`Compendium: merged offline edits for ${path}.`);
     };
 
     if (provider.synced) return run();
@@ -148,6 +210,19 @@ export class FileMirror {
         else resolve();
       });
     });
+  }
+
+  private pushToYtext(path: string, ytext: Y.Text, content: string): void {
+    const doc = this.registry.get(path).doc;
+    doc.transact(() => {
+      if (ytext.length > 0) ytext.delete(0, ytext.length);
+      ytext.insert(0, content);
+    }, LOCAL_ORIGIN);
+  }
+
+  private mergeMarker(serverText: string, localText: string): string {
+    const who = this.displayName().trim() || 'anonymous';
+    return `${serverText}\n\n<!-- compendium: offline edits from ${who} -->\n${localText}`;
   }
 
   // ── Vault event handlers ────────────────────────────────────────────────
@@ -167,17 +242,12 @@ export class FileMirror {
 
     // Echo check: if the file's content matches what we most recently wrote
     // from a remote update, this modify event is our own write coming back.
-    // Safe to ignore — survives overlapping writes because we compare actual
-    // bytes rather than consuming a one-shot flag.
     if (this.lastWritten.get(file.path) === content) return;
 
     // Local content truly differs from ytext → push the change up.
     if (t.ytext.toString() === content) return;
-    const doc = this.registry.get(file.path).doc;
-    doc.transact(() => {
-      t.ytext.delete(0, t.ytext.length);
-      t.ytext.insert(0, content);
-    }, LOCAL_ORIGIN);
+    this.pushToYtext(file.path, t.ytext, content);
+    await this.baselines.set(file.path, await sha256(content));
   }
 
   private isFileOpen(path: string): boolean {
@@ -200,10 +270,12 @@ export class FileMirror {
       t.ytext.unobserve(t.observer);
       this.tracked.delete(path);
     }
+    this.lastWritten.delete(path);
+    void this.baselines.delete(path);
     this.registry.delete(path);
-    // Server-side text_docs rows linger after local deletion — the server
-    // doesn't yet expose a DELETE endpoint for text docs. Low-priority
-    // correctness gap: orphans add DB size but don't misbehave.
+    void deleteDoc(this.cfg, path).catch((err) => {
+      console.error('[compendium] server doc delete failed', path, err);
+    });
   }
 
   private async onLocalRename(file: TFile, oldPath: string): Promise<void> {
@@ -243,6 +315,7 @@ export class FileMirror {
         await this.ensureFolderFor(path);
         await this.app.vault.create(path, content);
       }
+      await this.baselines.set(path, await sha256(content));
     } catch (err) {
       this.lastWritten.delete(path);
       new Notice(`Compendium: failed to write ${path}`);

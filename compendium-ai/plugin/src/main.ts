@@ -12,6 +12,7 @@ import {
 import { CmBinding } from './editor/cmBinding';
 import { injectCursorStyles } from './editor/cursorStyles';
 import { makeIdentity } from './editor/identity';
+import { BaselineStore } from './sync/baselines';
 import { BinarySync } from './sync/binarySync';
 import { DocRegistry } from './sync/docRegistry';
 import { FileMirror } from './sync/fileMirror';
@@ -56,6 +57,16 @@ export default class CompendiumPlugin extends Plugin {
   async loadSettings(): Promise<void> {
     const raw = (await this.loadData()) as Partial<CompendiumSettings> | null;
     this.settings = { ...DEFAULT_SETTINGS, ...(raw ?? {}) };
+
+    // Guard against corrupted or legacy data.json where baselines was null
+    // or the wrong shape — treat anything non-object as empty.
+    if (
+      !this.settings.baselines ||
+      typeof this.settings.baselines !== 'object' ||
+      Array.isArray(this.settings.baselines)
+    ) {
+      this.settings.baselines = {};
+    }
 
     // Self-heal messy values from past-me's bugs or human paste mistakes.
     const healedUrl = normalizeServerUrl(this.settings.serverUrl);
@@ -103,11 +114,21 @@ export default class CompendiumPlugin extends Plugin {
       authToken: this.settings.authToken,
     };
     this.registry = new DocRegistry(cfg);
-    this.unsubscribe = this.registry.onStatusChange((status, count) => {
-      this.statusBar?.render(status, count);
+    this.unsubscribe = this.registry.onStatusChange((status, count, errors) => {
+      this.statusBar?.render(status, count, errors);
     });
-    this.mirror = new FileMirror(this.app, this.registry, cfg);
-    this.binary = new BinarySync(this.app, cfg);
+    const baselines = new BaselineStore(
+      () => this.settings.baselines,
+      () => this.saveSettings(),
+    );
+    this.mirror = new FileMirror(
+      this.app,
+      this.registry,
+      cfg,
+      baselines,
+      () => this.settings.displayName,
+    );
+    this.binary = new BinarySync(this.app, cfg, this.registry);
     this.vaultConfig = new VaultConfigSync(this.app, cfg);
     this.cmBinding = new CmBinding(this.app, this.registry, makeIdentity(this.settings.displayName, this.settings.displayColor));
     this.updater = new PluginUpdater(this.app, this, cfg);
@@ -137,6 +158,6 @@ export default class CompendiumPlugin extends Plugin {
     this.unsubscribe = null;
     this.registry?.destroyAll();
     this.registry = null;
-    this.statusBar?.render('idle', 0);
+    this.statusBar?.render('idle', 0, []);
   }
 }

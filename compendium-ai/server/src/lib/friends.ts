@@ -9,6 +9,7 @@ export type Friend = {
   name: string;
   createdAt: number;
   revokedAt: number | null;
+  lastSeenAt: number | null;
 };
 
 export type FriendWithToken = Friend & { token: string };
@@ -22,22 +23,30 @@ function friendFromRow(row: {
   name: string;
   created_at: number;
   revoked_at: number | null;
+  last_seen_at: number | null;
 }): Friend {
   return {
     id: row.id,
     name: row.name,
     createdAt: row.created_at,
     revokedAt: row.revoked_at,
+    lastSeenAt: row.last_seen_at,
   };
 }
 
 export function listFriends(): Friend[] {
   return getDb()
     .query<
-      { id: string; name: string; created_at: number; revoked_at: number | null },
+      {
+        id: string;
+        name: string;
+        created_at: number;
+        revoked_at: number | null;
+        last_seen_at: number | null;
+      },
       []
     >(
-      `SELECT id, name, created_at, revoked_at
+      `SELECT id, name, created_at, revoked_at, last_seen_at
          FROM friends
          ORDER BY revoked_at IS NULL DESC, created_at DESC`,
     )
@@ -56,10 +65,11 @@ export function listActiveFriendsWithTokens(): FriendWithToken[] {
         token: string;
         created_at: number;
         revoked_at: number | null;
+        last_seen_at: number | null;
       },
       []
     >(
-      `SELECT id, name, token, created_at, revoked_at
+      `SELECT id, name, token, created_at, revoked_at, last_seen_at
          FROM friends
          WHERE revoked_at IS NULL
          ORDER BY created_at DESC`,
@@ -79,7 +89,7 @@ export function createFriend(name: string): FriendWithToken {
       'INSERT INTO friends (id, name, token, created_at, revoked_at) VALUES (?, ?, ?, ?, NULL)',
     )
     .run(id, trimmed, token, now);
-  return { id, name: trimmed, token, createdAt: now, revokedAt: null };
+  return { id, name: trimmed, token, createdAt: now, revokedAt: null, lastSeenAt: null };
 }
 
 export function revokeFriend(id: string): boolean {
@@ -98,15 +108,37 @@ export function getFriendById(id: string): FriendWithToken | null {
         token: string;
         created_at: number;
         revoked_at: number | null;
+        last_seen_at: number | null;
       },
       [string]
     >(
-      `SELECT id, name, token, created_at, revoked_at
+      `SELECT id, name, token, created_at, revoked_at, last_seen_at
          FROM friends WHERE id = ? AND revoked_at IS NULL`,
     )
     .get(id);
   if (!row) return null;
   return { ...friendFromRow(row), token: row.token };
+}
+
+/** Bump last_seen_at for a friend token, if it matches one. Called on every
+ *  successful WebSocket connection so the admin dashboard can show whether
+ *  a paired friend has actually connected. Silently ignores the missing
+ *  column/table cases so older deployments keep working. */
+export function touchFriendLastSeen(token: string | null): void {
+  if (!token) return;
+  try {
+    getDb()
+      .query('UPDATE friends SET last_seen_at = ? WHERE token = ? AND revoked_at IS NULL')
+      .run(Date.now(), token);
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      /no such table: friends|no such column: last_seen_at/i.test(err.message)
+    ) {
+      return;
+    }
+    throw err;
+  }
 }
 
 /**
