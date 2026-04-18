@@ -90,14 +90,14 @@ export function NoteTabs(): React.JSX.Element {
   );
 
   if (!mounted || tabs.length === 0) {
-    return <div className="flex min-w-0 flex-1 items-center" aria-hidden />;
+    return <div className="flex min-w-0 flex-1 items-end" aria-hidden />;
   }
 
   return (
     <div
       role="tablist"
       aria-label="Open notes"
-      className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+      className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto"
     >
       {tabs.map((t) => {
         const isActive = t.path === activePath;
@@ -112,10 +112,13 @@ export function NoteTabs(): React.JSX.Element {
               router.push(noteHref(t.path));
             }}
             className={
-              'group flex max-w-[220px] min-w-0 shrink-0 items-center gap-1.5 rounded-t-[8px] border-b-2 px-3 py-1.5 text-xs transition ' +
+              'group relative flex max-w-[220px] min-w-0 shrink-0 items-center gap-1.5 rounded-t-[8px] px-3 py-1.5 text-xs transition ' +
               (isActive
-                ? 'border-[#8B4A52] bg-[#FBF5E8] text-[#2A241E]'
-                : 'border-transparent text-[#5A4F42] hover:bg-[#FBF5E8]/60 hover:text-[#2A241E]')
+                ? // Active: bg matches content pane, tab spills 1px into
+                  // the content area so the header's bottom border is
+                  // visually interrupted — the tab "connects" to the page.
+                  'z-10 -mb-px border border-b-0 border-[#D4C7AE] bg-[#F4EDE0] text-[#2A241E]'
+                : 'border border-transparent text-[#5A4F42] hover:bg-[#FBF5E8]/70 hover:text-[#2A241E]')
             }
           >
             <FileText size={12} aria-hidden className="shrink-0" />

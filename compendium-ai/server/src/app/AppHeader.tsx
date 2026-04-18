@@ -1,50 +1,57 @@
-// Thin top bar on every authenticated page: nav links on the left,
-// NoteTabs filling the rest. User / sign-out lives in SidebarFooter so
-// the top bar stays lean. Rendered as a server component; the tab
-// strip itself is a tiny client island.
+// Thin top bar above the main content pane. Hosts the tab strip and a
+// "+" affordance that spawns a new blank note. Nav (Home/Tags/...) has
+// moved to SidebarHeader; pages that render without a sidebar ask for
+// `includeNav` and get a compact inline nav here instead.
 
 import type { ReactElement } from 'react';
 import Link from 'next/link';
 import { NoteTabs } from './NoteTabs';
+import { NewTabButton } from './NewTabButton';
 import { logoutAction } from './login/actions';
 
 export function AppHeader({
   role,
   user,
+  csrfToken,
+  canCreate,
+  includeNav = false,
 }: {
   role: 'admin' | 'editor' | 'viewer';
-  // Provided only on pages that do NOT render the left sidebar (where
-  // SidebarFooter would otherwise host it). On sidebar pages, leave
-  // undefined so the tab strip owns the full header width.
   user?: { displayName: string; username: string; accentColor: string };
+  csrfToken?: string;
+  canCreate?: boolean;
+  includeNav?: boolean;
 }): ReactElement {
   return (
-    <header className="flex min-h-[42px] items-center gap-4 border-b border-[#D4C7AE] bg-[#EAE1CF]/80 px-4">
-      <nav className="flex shrink-0 items-center gap-3 text-sm text-[#5A4F42]">
-        <Link href="/" className="underline-offset-2 hover:underline">
-          Home
-        </Link>
-        <Link href="/tags" className="underline-offset-2 hover:underline">
-          Tags
-        </Link>
-        {role === 'admin' && (
-          <>
-            <Link href="/admin/vault" className="underline-offset-2 hover:underline">
-              Vault
-            </Link>
-            <Link href="/admin/users" className="underline-offset-2 hover:underline">
-              Users
-            </Link>
-          </>
-        )}
-      </nav>
-
-      <span aria-hidden className="h-5 w-px shrink-0 bg-[#D4C7AE]" />
+    <header className="flex min-h-[38px] items-end gap-1 border-b border-[#D4C7AE] bg-[#EAE1CF]/60 pl-2 pr-3 pt-1.5">
+      {includeNav && (
+        <nav className="mb-1.5 flex shrink-0 items-center gap-3 pr-3 text-sm text-[#5A4F42]">
+          <Link href="/" className="underline-offset-2 hover:underline">
+            Home
+          </Link>
+          <Link href="/tags" className="underline-offset-2 hover:underline">
+            Tags
+          </Link>
+          {role === 'admin' && (
+            <>
+              <Link href="/admin/vault" className="underline-offset-2 hover:underline">
+                Vault
+              </Link>
+              <Link href="/admin/users" className="underline-offset-2 hover:underline">
+                Users
+              </Link>
+            </>
+          )}
+          <span aria-hidden className="h-5 w-px bg-[#D4C7AE]" />
+        </nav>
+      )}
 
       <NoteTabs />
 
+      {canCreate && csrfToken && <NewTabButton csrfToken={csrfToken} />}
+
       {user && (
-        <div className="flex shrink-0 items-center gap-2 pl-2">
+        <div className="mb-1.5 flex shrink-0 items-center gap-2 pl-3">
           <span
             aria-hidden
             className="inline-block h-2.5 w-2.5 rounded-full"

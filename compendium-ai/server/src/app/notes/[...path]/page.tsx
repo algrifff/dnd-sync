@@ -14,6 +14,7 @@ import {
 } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
 import { AppHeader } from '../../AppHeader';
+import { SidebarHeader } from '../../SidebarHeader';
 import { SidebarFooter } from '../../SidebarFooter';
 import { FileTree } from '../FileTree';
 import { NoteMenu } from '../NoteMenu';
@@ -55,6 +56,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   return (
     <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
       <aside className="hidden h-full w-[260px] shrink-0 flex-col border-r border-[#D4C7AE] bg-[#EAE1CF]/60 md:flex">
+        <SidebarHeader role={session.role} />
         <FileTree
           tree={tree}
           activePath={path}
@@ -71,7 +73,11 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <AppHeader role={session.role} />
+        <AppHeader
+          role={session.role}
+          csrfToken={session.csrfToken}
+          canCreate={session.role !== 'viewer'}
+        />
 
         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,1fr)_280px]">
           <main className="overflow-y-auto px-8 py-10" id="note-main">

@@ -31,6 +31,7 @@ export default async function AdminUsersPage(): Promise<ReactElement> {
     <div className="min-h-screen bg-[#F4EDE0] text-[#2A241E]">
       <AppHeader
         role={session.role}
+        includeNav
         user={{
           displayName: session.displayName,
           username: session.username,

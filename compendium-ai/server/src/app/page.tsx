@@ -12,6 +12,7 @@ import { getDb } from '@/lib/db';
 import { recentlyUpdated } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
 import { AppHeader } from './AppHeader';
+import { SidebarHeader } from './SidebarHeader';
 import { SidebarFooter } from './SidebarFooter';
 import { FileTree } from './notes/FileTree';
 
@@ -41,6 +42,7 @@ export default async function HomePage(): Promise<ReactElement> {
   return (
     <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
       <aside className="hidden h-full w-[260px] shrink-0 flex-col border-r border-[#D4C7AE] bg-[#EAE1CF]/60 md:flex">
+        <SidebarHeader role={session.role} />
         <FileTree
           tree={tree}
           activePath=""
@@ -56,7 +58,11 @@ export default async function HomePage(): Promise<ReactElement> {
         />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <AppHeader role={session.role} />
+        <AppHeader
+          role={session.role}
+          csrfToken={session.csrfToken}
+          canCreate={session.role !== 'viewer'}
+        />
         <div className="flex-1 overflow-y-auto">
         <main className="surface-paper mx-auto w-full max-w-4xl px-6 py-10">
         <section className="mb-10">
