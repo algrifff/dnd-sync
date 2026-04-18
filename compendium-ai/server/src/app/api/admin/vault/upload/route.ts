@@ -60,15 +60,29 @@ export async function POST(req: NextRequest): Promise<Response> {
     return json({ error: 'payload_too_large', maxBytes: UPLOAD_CAP }, 413);
   }
 
-  // Write the blob to /data/tmp so adm-zip can open by path rather
-  // than forcing us to hold it all in memory (node-adm-zip has a
-  // Buffer constructor but the file-path path is friendlier for larger
-  // archives).
+  // Write the blob to $DATA_DIR/tmp so adm-zip can open by path rather
+  // than forcing us to hold it all in memory. Wrap setup in the same
+  // try/catch as the ingest itself so any EACCES on the volume mount
+  // surfaces as structured JSON instead of Next's generic HTML 500.
   const tmpDir = resolve(process.env.DATA_DIR ?? './.data', 'tmp');
-  mkdirSync(tmpDir, { recursive: true });
-  const tmpPath = join(tmpDir, `upload-${randomUUID()}.zip`);
-  const bytes = new Uint8Array(await vault.arrayBuffer());
-  writeFileSync(tmpPath, bytes);
+  let tmpPath = '';
+  try {
+    mkdirSync(tmpDir, { recursive: true });
+    tmpPath = join(tmpDir, `upload-${randomUUID()}.zip`);
+    const bytes = new Uint8Array(await vault.arrayBuffer());
+    writeFileSync(tmpPath, bytes);
+  } catch (err) {
+    adminUploadLimiter.recordFailure(authed.userId, false);
+    console.error('[vault.upload] tmp write failed:', err);
+    return json(
+      {
+        error: 'tmp_write_failed',
+        message: err instanceof Error ? err.message : 'unknown',
+        tmpDir,
+      },
+      500,
+    );
+  }
 
   // Snapshot every currently-stored path BEFORE ingest so we can
   // disconnect live editors on anything the ingest touches.
@@ -103,7 +117,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   } finally {
     try {
-      rmSync(tmpPath, { force: true });
+      if (tmpPath) rmSync(tmpPath, { force: true });
     } catch {
       /* best-effort */
     }
