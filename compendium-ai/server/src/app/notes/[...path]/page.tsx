@@ -102,6 +102,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
               initialContent={contentJson as { type: string } & Record<string, unknown>}
               initialTags={tags}
               user={{
+                userId: session.userId,
                 displayName: session.displayName,
                 accentColor: session.accentColor,
               }}
