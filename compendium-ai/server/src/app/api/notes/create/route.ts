@@ -60,11 +60,20 @@ export async function POST(req: NextRequest): Promise<Response> {
     return json({ error: 'exists', path }, 409);
   }
 
-  // Seed a Y.Doc with a single empty paragraph so clients that load it
-  // via hocuspocus see a valid doc. Title defaults to the filename.
+  // Seed a Y.Doc with the title as an H1 + an empty paragraph so the
+  // note shows a visible title the moment it opens. deriveAndPersist
+  // picks up the H1 as notes.title on every save, so typing into that
+  // H1 is exactly how the user renames.
   const emptyDoc = {
     type: 'doc',
-    content: [{ type: 'paragraph' }],
+    content: [
+      {
+        type: 'heading',
+        attrs: { level: 1 },
+        content: [{ type: 'text', text: cleanName }],
+      },
+      { type: 'paragraph' },
+    ],
   };
   const schema = getPmSchema();
   const ydoc = prosemirrorJSONToYDoc(schema, emptyDoc, 'default');

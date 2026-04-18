@@ -15,6 +15,7 @@ import {
 import { buildTree } from '@/lib/tree';
 import { SessionHeader } from '../../SessionHeader';
 import { FileTree } from '../FileTree';
+import { NoteMenu } from '../NoteMenu';
 import { NoteSurface } from '../NoteSurface';
 import { NoteSidebar, extractOutline } from '../NoteSidebar';
 
@@ -72,16 +73,13 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
         <main className="overflow-y-auto px-8 py-10" id="note-main">
           <div className="mx-auto max-w-[720px]">
-            <header className="mb-6">
-              <h1
-                className="text-4xl font-bold text-[#2A241E]"
-                style={{ fontFamily: '"Fraunces", Georgia, serif' }}
-              >
-                {note.title || baseName(path)}
-              </h1>
-              <p className="mt-1 text-xs text-[#5A4F42]">
+            <header className="mb-4 flex items-center justify-between gap-3">
+              <p className="text-xs text-[#5A4F42]">
                 <code>{path}</code>
               </p>
+              {session.role !== 'viewer' && (
+                <NoteMenu path={path} csrfToken={session.csrfToken} />
+              )}
             </header>
 
             <NoteSurface
@@ -104,7 +102,3 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   );
 }
 
-function baseName(p: string): string {
-  const last = p.split('/').pop() ?? p;
-  return last.replace(/\.(md|canvas)$/i, '');
-}

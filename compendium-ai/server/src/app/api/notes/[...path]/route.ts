@@ -1,8 +1,13 @@
-// GET /api/notes/<path...> — returns a note's render-ready payload.
+// GET  /api/notes/<path...> — returns a note's render-ready payload.
+// DELETE /api/notes/<path...> — removes the note + cascaded rows.
 
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
+import { verifyCsrf } from '@/lib/csrf';
+import { getDb } from '@/lib/db';
 import { decodePath, loadNote, loadTags } from '@/lib/notes';
+import { logAudit } from '@/lib/audit';
+import { closeDocumentConnections } from '@/collab/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,6 +48,42 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
     byteSize: note.byte_size,
     updatedAt: note.updated_at,
   });
+}
+
+export async function DELETE(req: NextRequest, ctx: RouteCtx): Promise<Response> {
+  const session = requireSession(req);
+  if (session instanceof Response) return session;
+  if (session.role === 'viewer') {
+    return json({ error: 'forbidden', reason: 'viewers cannot delete notes' }, 403);
+  }
+  const csrf = verifyCsrf(req, session);
+  if (csrf) return csrf;
+
+  const { path: segments } = await ctx.params;
+  const path = decodePath(segments);
+  if (!path) return json({ error: 'invalid_path' }, 400);
+
+  const db = getDb();
+  db.transaction(() => {
+    db.query('DELETE FROM note_links WHERE group_id = ? AND (from_path = ? OR to_path = ?)')
+      .run(session.currentGroupId, path, path);
+    db.query('DELETE FROM tags WHERE group_id = ? AND path = ?').run(session.currentGroupId, path);
+    db.query('DELETE FROM aliases WHERE group_id = ? AND path = ?').run(session.currentGroupId, path);
+    db.query('DELETE FROM notes WHERE group_id = ? AND path = ?').run(session.currentGroupId, path);
+  })();
+
+  // Kick any live editors so they disconnect instead of trying to
+  // persist updates against a row that no longer exists.
+  await closeDocumentConnections(path);
+
+  logAudit({
+    action: 'note.destroy',
+    actorId: session.userId,
+    groupId: session.currentGroupId,
+    target: path,
+  });
+
+  return json({ ok: true, path });
 }
 
 function json(body: unknown, status = 200): Response {
