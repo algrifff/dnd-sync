@@ -73,6 +73,14 @@ export const wsAuthLimiter = createLimiter(30, 5 * 60_000);
 // 10 fails in 5 minutes is still plenty of headroom for a typo spree.
 export const webLoginLimiter = createLimiter(10, 5 * 60_000);
 
+// Admin vault upload. 5 full ingests per hour is far more than a
+// reasonable admin workflow requires; anything faster is a script.
+export const adminUploadLimiter = createLimiter(5, 60 * 60_000);
+
+// Asset upload from the editor. 30 per minute per user covers bulk
+// drag-drop of session images without tripping.
+export const assetUploadLimiter = createLimiter(30, 60_000);
+
 // ── Backwards-compatible shims for the WS upgrade handler ──────────────
 
 export function checkAuthAttempt(ip: string, isLocalhost: boolean): RateLimitDecision {

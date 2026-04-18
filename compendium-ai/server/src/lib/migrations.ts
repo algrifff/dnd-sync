@@ -159,6 +159,85 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX audit_log_action   ON audit_log(action);
     `,
   },
+  {
+    version: 7,
+    description: 'web app vault: notes, assets, aliases, note_links, tags, notes_fts',
+    sql: `
+      CREATE TABLE notes (
+        id               TEXT PRIMARY KEY,
+        group_id         TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        path             TEXT NOT NULL,
+        title            TEXT NOT NULL DEFAULT '',
+        content_json     TEXT NOT NULL,
+        content_text     TEXT NOT NULL DEFAULT '',
+        content_md       TEXT NOT NULL DEFAULT '',
+        yjs_state        BLOB,
+        frontmatter_json TEXT NOT NULL DEFAULT '{}',
+        byte_size        INTEGER NOT NULL DEFAULT 0,
+        updated_at       INTEGER NOT NULL,
+        updated_by       TEXT REFERENCES users(id),
+        UNIQUE (group_id, path)
+      );
+      CREATE INDEX notes_group_path ON notes(group_id, path);
+      CREATE INDEX notes_updated_at ON notes(group_id, updated_at DESC);
+
+      CREATE TABLE aliases (
+        group_id TEXT NOT NULL,
+        alias    TEXT NOT NULL COLLATE NOCASE,
+        path     TEXT NOT NULL,
+        PRIMARY KEY (group_id, alias)
+      ) WITHOUT ROWID;
+      CREATE INDEX aliases_path ON aliases(group_id, path);
+
+      CREATE TABLE assets (
+        id            TEXT PRIMARY KEY,
+        group_id      TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        hash          TEXT NOT NULL,
+        mime          TEXT NOT NULL,
+        size          INTEGER NOT NULL,
+        original_name TEXT NOT NULL,
+        uploaded_by   TEXT REFERENCES users(id),
+        uploaded_at   INTEGER NOT NULL,
+        UNIQUE (group_id, hash)
+      );
+      CREATE INDEX assets_hash ON assets(group_id, hash);
+
+      CREATE TABLE note_links (
+        group_id  TEXT NOT NULL,
+        from_path TEXT NOT NULL,
+        to_path   TEXT NOT NULL,
+        PRIMARY KEY (group_id, from_path, to_path)
+      ) WITHOUT ROWID;
+      CREATE INDEX note_links_to ON note_links(group_id, to_path);
+
+      CREATE TABLE tags (
+        group_id TEXT NOT NULL,
+        path     TEXT NOT NULL,
+        tag      TEXT NOT NULL,
+        PRIMARY KEY (group_id, path, tag)
+      ) WITHOUT ROWID;
+      CREATE INDEX tags_tag ON tags(group_id, tag);
+
+      -- FTS5 over title + plaintext. Mirrored from notes via triggers.
+      CREATE VIRTUAL TABLE notes_fts USING fts5(
+        path UNINDEXED, title, content,
+        tokenize = 'porter unicode61'
+      );
+
+      CREATE TRIGGER notes_ai AFTER INSERT ON notes BEGIN
+        INSERT INTO notes_fts(path, title, content)
+          VALUES (new.path, new.title, new.content_text);
+      END;
+      CREATE TRIGGER notes_au AFTER UPDATE OF title, content_text ON notes BEGIN
+        DELETE FROM notes_fts WHERE path = old.path;
+        INSERT INTO notes_fts(path, title, content)
+          VALUES (new.path, new.title, new.content_text);
+      END;
+      CREATE TRIGGER notes_ad AFTER DELETE ON notes BEGIN
+        DELETE FROM notes_fts WHERE path = old.path;
+      END;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

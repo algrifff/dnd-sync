@@ -38,12 +38,20 @@ export function SessionHeader({
       </div>
       <div className="flex items-center gap-3">
         {role === 'admin' && (
-          <a
-            href="/admin/users"
-            className="text-sm text-[#5A4F42] underline-offset-2 hover:underline"
-          >
-            Users
-          </a>
+          <>
+            <a
+              href="/admin/vault"
+              className="text-sm text-[#5A4F42] underline-offset-2 hover:underline"
+            >
+              Vault
+            </a>
+            <a
+              href="/admin/users"
+              className="text-sm text-[#5A4F42] underline-offset-2 hover:underline"
+            >
+              Users
+            </a>
+          </>
         )}
         <form action={logoutAction}>
           <button
