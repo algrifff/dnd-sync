@@ -44,7 +44,6 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const db = getDb();
   const groupId = session.currentGroupId;
-  const fromPrefix = from + '/';
 
   // Every note that lives at or under the folder. We'll need their
   // post-move paths for FTS reseed + collision checking.

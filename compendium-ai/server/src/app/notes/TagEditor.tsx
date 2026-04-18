@@ -58,6 +58,13 @@ export function TagEditor({
     if (adding) inputRef.current?.focus();
   }, [adding]);
 
+  const closeAdd = useCallback(() => {
+    setAdding(false);
+    setQuery('');
+    setHighlight(0);
+    setError(null);
+  }, []);
+
   // Dismiss popover on outside click / Escape.
   useEffect(() => {
     if (!adding) return;
@@ -66,8 +73,7 @@ export function TagEditor({
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adding]);
+  }, [adding, closeAdd]);
 
   const commit = useCallback(
     async (next: string[]) => {
@@ -128,13 +134,6 @@ export function TagEditor({
     },
     [tags, commit],
   );
-
-  const closeAdd = useCallback(() => {
-    setAdding(false);
-    setQuery('');
-    setHighlight(0);
-    setError(null);
-  }, []);
 
   const filtered = knownTags
     .map((k) => k.tag)
