@@ -8,16 +8,19 @@ import Link from 'next/link';
 import { NoteTabs } from './NoteTabs';
 import { NewTabButton } from './NewTabButton';
 import { SettingsMenu } from './SettingsMenu';
+import { PresenceClient, type Me } from './PresenceClient';
 import { logoutAction } from './login/actions';
 
 export function AppHeader({
   role,
+  me,
   user,
   csrfToken,
   canCreate,
   includeNav = false,
 }: {
   role: 'admin' | 'editor' | 'viewer';
+  me: Me;
   user?: { displayName: string; username: string; accentColor: string };
   csrfToken?: string;
   canCreate?: boolean;
@@ -41,6 +44,8 @@ export function AppHeader({
       <NoteTabs />
 
       {canCreate && csrfToken && <NewTabButton csrfToken={csrfToken} />}
+
+      <PresenceClient me={me} />
 
       {user && (
         <div className="mb-1.5 flex shrink-0 items-center gap-2 pl-3">

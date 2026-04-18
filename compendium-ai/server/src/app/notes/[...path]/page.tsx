@@ -75,6 +75,12 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
       <div className="flex min-w-0 flex-1 flex-col">
         <AppHeader
           role={session.role}
+          me={{
+            userId: session.userId,
+            displayName: session.displayName,
+            username: session.username,
+            accentColor: session.accentColor,
+          }}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
         />

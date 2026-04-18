@@ -56,6 +56,9 @@ export const collabServer = new Hocuspocus({
     new Database({
       fetch: async ({ documentName, context }): Promise<Uint8Array | null> => {
         if (!isAuthContext(context)) return null;
+        // Doc names starting with "." are reserved awareness-only
+        // channels (e.g. ".presence"). They don't back onto any row.
+        if (documentName.startsWith('.')) return null;
         const row = getDb()
           .query<{ yjs_state: Uint8Array | null }, [string, string]>(
             'SELECT yjs_state FROM notes WHERE group_id = ? AND path = ?',
@@ -66,6 +69,7 @@ export const collabServer = new Hocuspocus({
       },
       store: async ({ documentName, state, document, context }): Promise<void> => {
         if (!isAuthContext(context)) return;
+        if (documentName.startsWith('.')) return;
         getDb()
           .query(
             'UPDATE notes SET yjs_state = ?, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',

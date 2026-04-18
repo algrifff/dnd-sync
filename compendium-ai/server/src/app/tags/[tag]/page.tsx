@@ -34,6 +34,12 @@ export default async function TagDetailPage({ params }: Ctx): Promise<ReactEleme
       <AppHeader
         role={session.role}
         includeNav
+        me={{
+          userId: session.userId,
+          displayName: session.displayName,
+          username: session.username,
+          accentColor: session.accentColor,
+        }}
         user={{
           displayName: session.displayName,
           username: session.username,

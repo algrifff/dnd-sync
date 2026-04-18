@@ -39,6 +39,12 @@ export default async function AdminVaultPage(): Promise<ReactElement> {
       <AppHeader
         role={session.role}
         includeNav
+        me={{
+          userId: session.userId,
+          displayName: session.displayName,
+          username: session.username,
+          accentColor: session.accentColor,
+        }}
         user={{
           displayName: session.displayName,
           username: session.username,
