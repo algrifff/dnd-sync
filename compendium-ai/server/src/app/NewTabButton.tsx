@@ -9,6 +9,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
+import { broadcastTreeChange } from '@/lib/tree-sync';
 
 export function NewTabButton({ csrfToken }: { csrfToken: string }): React.JSX.Element {
   const router = useRouter();
@@ -37,6 +38,7 @@ export function NewTabButton({ csrfToken }: { csrfToken: string }): React.JSX.El
         }
         router.push('/notes/' + body.path.split('/').map(encodeURIComponent).join('/'));
         router.refresh();
+        broadcastTreeChange();
         return;
       }
       alert('Could not find a free Untitled slot (checked 50).');

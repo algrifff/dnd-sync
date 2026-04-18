@@ -1,14 +1,20 @@
 'use client';
 
-// Remote mouse pointers layered over the note body. Coordinates are
-// *document-relative* (fractions of scrollWidth/scrollHeight) so a
-// remote peer pointing at "line 30" stays visually anchored to line 30
-// regardless of how either of us has scrolled. When a remote pointer
-// sits outside the current viewport, an edge chip renders at the
-// scroll host's top or bottom; clicking it scrolls the pointer into
-// view.
+// Remote mouse pointers layered over the note's main content pane. The
+// listener attaches to `#note-main` (the scrolling host for note pages)
+// and coordinates are normalised to that element's scrollWidth /
+// scrollHeight so a remote peer pointing at a document position stays
+// anchored there regardless of either peer's scroll.
+//
+// The overlay DOM is rendered via a Portal into `#note-main` so its
+// reach is the full width of the document pane — not just the centred
+// article. It deliberately stops at the main column (header and
+// sidebars are excluded). When a remote pointer sits outside the
+// scroll viewport, an edge chip renders at the top or bottom of main;
+// clicking scrolls the pointer into view.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { HocuspocusProvider } from '@hocuspocus/provider';
 
 type Remote = {
@@ -22,21 +28,40 @@ type Remote = {
 
 export function PointerOverlay({
   provider,
-  containerRef,
   user,
-  scrollHostId = 'note-main',
+  scopeElementId = 'note-main',
 }: {
   provider: HocuspocusProvider;
-  containerRef: React.RefObject<HTMLElement | null>;
   user: { userId: string; name: string; color: string };
-  scrollHostId?: string;
-}): React.JSX.Element {
+  scopeElementId?: string;
+}): React.JSX.Element | null {
   const [remotes, setRemotes] = useState<Remote[]>([]);
-  const [tick, setTick] = useState<number>(0); // bump on scroll/resize to re-evaluate visibility
+  const [scope, setScope] = useState<HTMLElement | null>(null);
+  const [tick, setTick] = useState<number>(0); // bump on scroll/resize
 
-  // Make sure awareness carries our identity — CollaborationCaret sets
-  // this when mounted, but viewers don't mount it, and we still want
-  // their pointer to be labelled for peers.
+  // Resolve the scope element on mount and whenever the node id might
+  // change between navigations. Next may swap the DOM in place so
+  // poll briefly for the first render.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    let raf = 0;
+    const tryResolve = (): void => {
+      const el = document.getElementById(scopeElementId) as HTMLElement | null;
+      if (el) {
+        setScope(el);
+        return;
+      }
+      raf = requestAnimationFrame(tryResolve);
+    };
+    tryResolve();
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [scopeElementId]);
+
+  // Seed awareness.user — CollaborationCaret also does this for
+  // editors, but viewers don't mount it, and we still want their
+  // pointer to be labelled for peers.
   useEffect(() => {
     const aw = provider.awareness;
     if (!aw) return;
@@ -47,12 +72,14 @@ export function PointerOverlay({
     });
   }, [provider, user.userId, user.name, user.color]);
 
-  // Broadcast local pointer, rAF-throttled.
+  // Broadcast local pointer, rAF-throttled. Listener is on the scope
+  // element so the full middle column is active, not just the centred
+  // article.
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+    if (!scope) return;
     const aw = provider.awareness;
     if (!aw) return;
+
     let rafHandle = 0;
     let last: { xRel: number; yRel: number } | null = null;
 
@@ -62,31 +89,29 @@ export function PointerOverlay({
       aw.setLocalStateField('pointer', last);
     };
     const onMove = (e: MouseEvent): void => {
-      const rect = el.getBoundingClientRect();
-      const w = el.scrollWidth;
-      const h = el.scrollHeight;
+      const rect = scope.getBoundingClientRect();
+      const w = scope.scrollWidth;
+      const h = scope.scrollHeight;
       if (w <= 0 || h <= 0) return;
-      const xInside = e.clientX - rect.left;
-      const yInside = e.clientY - rect.top;
-      last = {
-        xRel: clamp01(xInside / w),
-        yRel: clamp01(yInside / h),
-      };
+      // Convert screen coords to scope-local scroll coords.
+      const xInside = e.clientX - rect.left + scope.scrollLeft;
+      const yInside = e.clientY - rect.top + scope.scrollTop;
+      last = { xRel: clamp01(xInside / w), yRel: clamp01(yInside / h) };
       if (!rafHandle) rafHandle = requestAnimationFrame(flush);
     };
     const onLeave = (): void => {
       last = null;
       aw.setLocalStateField('pointer', null);
     };
-    el.addEventListener('mousemove', onMove);
-    el.addEventListener('mouseleave', onLeave);
+    scope.addEventListener('mousemove', onMove);
+    scope.addEventListener('mouseleave', onLeave);
     return () => {
-      el.removeEventListener('mousemove', onMove);
-      el.removeEventListener('mouseleave', onLeave);
+      scope.removeEventListener('mousemove', onMove);
+      scope.removeEventListener('mouseleave', onLeave);
       if (rafHandle) cancelAnimationFrame(rafHandle);
       aw.setLocalStateField('pointer', null);
     };
-  }, [provider, containerRef]);
+  }, [provider, scope]);
 
   // Read remote awareness.
   useEffect(() => {
@@ -117,67 +142,62 @@ export function PointerOverlay({
   }, [provider]);
 
   // Rerender on scroll / resize so the edge-chip logic reflects the
-  // current viewport. The actual pointer positions are CSS-driven and
-  // don't need this — but visibility does.
+  // current viewport.
   useEffect(() => {
-    const host = document.getElementById(scrollHostId) ?? document.scrollingElement;
+    if (!scope) return;
     const bump = (): void => setTick((t) => t + 1);
-    host?.addEventListener('scroll', bump);
+    scope.addEventListener('scroll', bump);
     window.addEventListener('resize', bump);
     return () => {
-      host?.removeEventListener('scroll', bump);
+      scope.removeEventListener('scroll', bump);
       window.removeEventListener('resize', bump);
     };
-  }, [scrollHostId]);
+  }, [scope]);
 
-  // Invisible marker: `tick` is read here purely to trigger re-renders
-  // so eslint/react-hooks doesn't flag the dep as unused.
   void tick;
 
-  const scrollHost = useMemo(
-    () =>
-      typeof document === 'undefined'
-        ? null
-        : (document.getElementById(scrollHostId) as HTMLElement | null),
-    [scrollHostId, tick],
-  );
+  if (!scope) return null;
 
-  const container = containerRef.current;
-  const contentW = container?.scrollWidth ?? 0;
-  const contentH = container?.scrollHeight ?? 0;
+  const contentW = scope.scrollWidth;
+  const contentH = scope.scrollHeight;
+  const viewTop = scope.scrollTop;
+  const viewBottom = viewTop + scope.clientHeight;
 
-  return (
-    <div
-      aria-hidden
-      className="pointer-events-none absolute inset-0"
-      style={{ zIndex: 5 }}
-    >
+  return createPortal(
+    <div aria-hidden className="pointer-events-none absolute inset-0" style={{ zIndex: 5 }}>
       {remotes.map((r) => {
         const xAbs = r.xRel * contentW;
         const yAbs = r.yRel * contentH;
-        const visibility = classify(container, scrollHost, yAbs);
-        if (visibility === 'visible' || !scrollHost) {
+        if (yAbs < viewTop) {
           return (
-            <PointerDot
+            <EdgeChip
               key={r.clientId}
-              xAbs={xAbs}
-              yAbs={yAbs}
+              direction="above"
               color={r.color}
               name={r.name}
+              onClick={() => scrollTo(scope, yAbs)}
+              top={viewTop + 8}
+            />
+          );
+        }
+        if (yAbs > viewBottom) {
+          return (
+            <EdgeChip
+              key={r.clientId}
+              direction="below"
+              color={r.color}
+              name={r.name}
+              onClick={() => scrollTo(scope, yAbs)}
+              top={viewBottom - 22}
             />
           );
         }
         return (
-          <EdgeChip
-            key={r.clientId}
-            direction={visibility}
-            color={r.color}
-            name={r.name}
-            onClick={() => scrollIntoView(scrollHost, container, yAbs)}
-          />
+          <PointerDot key={r.clientId} xAbs={xAbs} yAbs={yAbs} color={r.color} name={r.name} />
         );
       })}
-    </div>
+    </div>,
+    scope,
   );
 }
 
@@ -199,7 +219,7 @@ function PointerDot({
 }): React.JSX.Element {
   return (
     <div
-      className="absolute flex -translate-x-0 -translate-y-0 items-start gap-1"
+      className="absolute flex items-start gap-1"
       style={{ left: xAbs, top: yAbs, color }}
     >
       <svg
@@ -226,11 +246,13 @@ function EdgeChip({
   direction,
   color,
   name,
+  top,
   onClick,
 }: {
   direction: 'above' | 'below';
   color: string;
   name: string;
+  top: number;
   onClick: () => void;
 }): React.JSX.Element {
   const arrow = direction === 'above' ? '↑' : '↓';
@@ -239,11 +261,7 @@ function EdgeChip({
       type="button"
       onClick={onClick}
       className="pointer-events-auto absolute left-1/2 -translate-x-1/2 rounded-full border px-2 py-0.5 text-[10px] font-medium text-[#2A241E] shadow-[0_4px_12px_rgba(42,36,30,0.12)] transition hover:scale-[1.03]"
-      style={{
-        [direction === 'above' ? 'top' : 'bottom']: 8,
-        backgroundColor: '#FBF5E8',
-        borderColor: color,
-      }}
+      style={{ top, backgroundColor: '#FBF5E8', borderColor: color }}
     >
       <span aria-hidden className="mr-1" style={{ color }}>
         {arrow}
@@ -253,34 +271,9 @@ function EdgeChip({
   );
 }
 
-// Is the pointer's y-position inside the scroll host's current viewport?
-function classify(
-  container: HTMLElement | null,
-  scrollHost: HTMLElement | null,
-  yAbsInContainer: number,
-): 'above' | 'below' | 'visible' {
-  if (!container || !scrollHost) return 'visible';
-  const cRect = container.getBoundingClientRect();
-  const hRect = scrollHost.getBoundingClientRect();
-  // Pointer's screen-Y:
-  const screenY = cRect.top + yAbsInContainer;
-  if (screenY < hRect.top) return 'above';
-  if (screenY > hRect.bottom) return 'below';
-  return 'visible';
-}
-
-function scrollIntoView(
-  scrollHost: HTMLElement,
-  container: HTMLElement | null,
-  yAbsInContainer: number,
-): void {
-  if (!container) return;
-  const cRect = container.getBoundingClientRect();
-  const hRect = scrollHost.getBoundingClientRect();
-  // Target scrollTop that places the pointer roughly 30% down the viewport.
-  const offsetInHost = cRect.top - hRect.top + scrollHost.scrollTop + yAbsInContainer;
-  scrollHost.scrollTo({
-    top: Math.max(0, offsetInHost - scrollHost.clientHeight * 0.3),
+function scrollTo(scope: HTMLElement, yAbs: number): void {
+  scope.scrollTo({
+    top: Math.max(0, yAbs - scope.clientHeight * 0.3),
     behavior: 'smooth',
   });
 }

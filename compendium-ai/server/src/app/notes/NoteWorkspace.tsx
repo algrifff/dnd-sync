@@ -11,6 +11,7 @@ import * as Y from 'yjs';
 import { TitleEditor } from './TitleEditor';
 import { TagEditor } from './TagEditor';
 import { NoteSurface, type SurfaceUser } from './NoteSurface';
+import { PointerOverlay } from './PointerOverlay';
 
 export function NoteWorkspace({
   path,
@@ -89,6 +90,15 @@ export function NoteWorkspace({
         initialContent={initialContent}
         user={user}
         canEdit={canEdit}
+      />
+
+      <PointerOverlay
+        provider={provider}
+        user={{
+          userId: user.userId,
+          name: user.displayName || 'Anonymous',
+          color: user.accentColor,
+        }}
       />
 
       {authFailed && (

@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { MoreHorizontal, Copy, Trash2 } from 'lucide-react';
+import { broadcastTreeChange } from '@/lib/tree-sync';
 
 export function NoteMenu({
   path,
@@ -56,6 +57,7 @@ export function NoteMenu({
         }
         router.push('/notes/' + body.path.split('/').map(encodeURIComponent).join('/'));
         router.refresh();
+        broadcastTreeChange();
       } catch (err) {
         alert(err instanceof Error ? err.message : 'network error');
       }
@@ -81,6 +83,7 @@ export function NoteMenu({
         }
         router.push('/');
         router.refresh();
+        broadcastTreeChange();
       } catch (err) {
         alert(err instanceof Error ? err.message : 'network error');
       }

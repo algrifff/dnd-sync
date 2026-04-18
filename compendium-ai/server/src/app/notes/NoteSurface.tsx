@@ -16,7 +16,6 @@ import type * as Y from 'yjs';
 import { BASE_EXTENSIONS } from '@/lib/pm-schema';
 import { SlashMenu } from './SlashMenu';
 import { TableToolbar } from './TableToolbar';
-import { PointerOverlay } from './PointerOverlay';
 
 export type SurfaceUser = {
   userId: string;
@@ -126,19 +125,10 @@ export function NoteSurface({
     <>
       <article
         ref={containerRef}
-        className="note-surface prose-parchment relative mt-6"
+        className="note-surface prose-parchment mt-6"
         aria-label="Note content"
       >
         <EditorContent editor={editor} />
-        <PointerOverlay
-          provider={provider}
-          containerRef={containerRef}
-          user={{
-            userId: user.userId,
-            name: user.displayName || 'Anonymous',
-            color: user.accentColor,
-          }}
-        />
       </article>
       {canEdit && <SlashMenu editor={editor} />}
       {canEdit && <TableToolbar editor={editor} />}

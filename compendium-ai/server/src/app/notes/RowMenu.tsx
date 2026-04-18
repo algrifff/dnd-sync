@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MoreHorizontal, Pencil, Copy, Trash2 } from 'lucide-react';
+import { broadcastTreeChange } from '@/lib/tree-sync';
 
 type Props = {
   kind: 'file' | 'folder';
@@ -61,6 +62,7 @@ export function RowMenu({
         return;
       }
       router.refresh();
+      broadcastTreeChange();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'network error');
     }
@@ -84,6 +86,7 @@ export function RowMenu({
           return;
         }
         router.refresh();
+        broadcastTreeChange();
       } catch (err) {
         alert(err instanceof Error ? err.message : 'network error');
       }
@@ -110,6 +113,7 @@ export function RowMenu({
           return;
         }
         router.refresh();
+        broadcastTreeChange();
       } catch (err) {
         alert(err instanceof Error ? err.message : 'network error');
       }

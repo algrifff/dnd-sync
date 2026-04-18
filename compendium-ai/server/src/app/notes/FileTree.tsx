@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ChevronRight, Plus, FolderPlus } from 'lucide-react';
 import type { Tree, TreeDir } from '@/lib/tree';
+import { broadcastTreeChange } from '@/lib/tree-sync';
 import { RowMenu } from './RowMenu';
 
 const STORAGE_KEY = 'compendium.tree.open';
@@ -127,6 +128,7 @@ export function FileTree({
         setCreatingIn(null);
         router.push('/notes/' + body.path.split('/').map(encodeURIComponent).join('/'));
         router.refresh();
+        broadcastTreeChange();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'network error');
       } finally {
@@ -162,6 +164,7 @@ export function FileTree({
         setCreatingIn(null);
         setOpen((prev) => new Set(prev).add(body.path));
         router.refresh();
+        broadcastTreeChange();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'network error');
       } finally {
@@ -213,6 +216,7 @@ export function FileTree({
           router.push('/notes/' + to.split('/').map(encodeURIComponent).join('/'));
         }
         router.refresh();
+        broadcastTreeChange();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'network error');
       } finally {
@@ -266,6 +270,7 @@ export function FileTree({
           router.push('/notes/' + to.split('/').map(encodeURIComponent).join('/'));
         }
         router.refresh();
+        broadcastTreeChange();
       } catch (err) {
         alert(err instanceof Error ? err.message : 'network error');
       }

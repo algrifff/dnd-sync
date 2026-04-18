@@ -15,6 +15,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import * as Y from 'yjs';
 import { PresencePanel, type PresencePeer } from './PresencePanel';
+import { TREE_CHANGE_EVENT } from '@/lib/tree-sync';
 
 export type Me = {
   userId: string;
@@ -91,6 +92,42 @@ export function PresenceClient({ me }: { me: Me }): React.JSX.Element {
     aw.setLocalStateField('viewing', viewing);
     aw.setLocalStateField('viewingTitle', title);
   }, [pathname]);
+
+  // Live tree sync: mutating clients fire broadcastTreeChange(), which
+  // bumps our local awareness.treeVersion. Peers observe the change
+  // and router.refresh() their server-rendered sidebar. Self-bumps
+  // are ignored so the mutating client doesn't double-refresh.
+  useEffect(() => {
+    const aw = providerRef.current.awareness;
+    if (!aw) return;
+
+    const onLocalChange = (): void => {
+      aw.setLocalStateField('treeVersion', Date.now());
+    };
+    document.addEventListener(TREE_CHANGE_EVENT, onLocalChange);
+
+    const lastSeen = new Map<number, number>();
+    const onRemoteChange = (): void => {
+      let shouldRefresh = false;
+      for (const [clientId, state] of aw.getStates().entries()) {
+        if (clientId === aw.clientID) continue;
+        const raw = (state as { treeVersion?: unknown } | undefined)?.treeVersion;
+        if (typeof raw !== 'number') continue;
+        const prev = lastSeen.get(clientId) ?? 0;
+        if (raw > prev) {
+          lastSeen.set(clientId, raw);
+          shouldRefresh = true;
+        }
+      }
+      if (shouldRefresh) router.refresh();
+    };
+    aw.on('change', onRemoteChange);
+
+    return () => {
+      document.removeEventListener(TREE_CHANGE_EVENT, onLocalChange);
+      aw.off('change', onRemoteChange);
+    };
+  }, [router]);
 
   // Tear down on unmount.
   useEffect(() => {
