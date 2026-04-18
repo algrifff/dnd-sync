@@ -84,6 +84,13 @@ export function NoteSurface({
     };
   }, [provider, ydoc]);
 
+  // Mount extensions ONCE per path/provider — toggling between read
+  // and edit imperatively via `editor.setEditable()` rather than
+  // re-mounting avoids a jarring remount flash and preserves the
+  // user's scroll + awareness state. CollaborationCaret is always
+  // present when the user can edit so remote cursors are visible
+  // in read mode too (you see where your co-DM is working without
+  // stealing typing from them).
   const extensions = useMemo(() => {
     const exts = [
       ...BASE_EXTENSIONS,
@@ -92,7 +99,7 @@ export function NoteSurface({
         field: 'default',
       }),
     ];
-    if (mode === 'edit') {
+    if (canEdit) {
       exts.push(
         CollaborationCaret.configure({
           provider,
@@ -104,7 +111,7 @@ export function NoteSurface({
       );
     }
     return exts;
-  }, [ydoc, mode, provider, user.displayName, user.accentColor]);
+  }, [ydoc, provider, canEdit, user.displayName, user.accentColor]);
 
   const editor = useEditor(
     {
@@ -113,11 +120,19 @@ export function NoteSurface({
       // over after the server sync. This gives us an instant first
       // paint without waiting for the websocket to land.
       content: initialContent as object,
-      editable: mode === 'edit',
+      editable: defaultMode === 'edit',
       immediatelyRender: false,
     },
-    [path, mode, ydoc, provider],
+    [path, ydoc, provider, canEdit],
   );
+
+  // Imperatively flip editable when the user toggles the segmented
+  // control. Tiptap's `editable` option is evaluated only at mount;
+  // without this, clicking "Edit" wouldn't actually unlock the editor.
+  useEffect(() => {
+    if (!editor) return;
+    editor.setEditable(mode === 'edit');
+  }, [editor, mode]);
 
   // Wikilink click → client navigation.
   const containerRef = useRef<HTMLDivElement>(null);

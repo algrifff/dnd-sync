@@ -53,9 +53,9 @@ export function NoteSidebar({
               <li key={t}>
                 <Link
                   href={'/tags/' + encodeURIComponent(t)}
-                  className="inline-block rounded-full border border-[#D4A85A]/40 bg-[#D4A85A]/15 px-2 py-0.5 text-xs text-[#5A4F42] hover:bg-[#D4A85A]/25"
+                  className="inline-block rounded-full border border-[#8B4A52]/40 bg-[#8B4A52]/10 px-2.5 py-0.5 text-xs font-medium text-[#5E3A3F] transition hover:-translate-y-px hover:bg-[#8B4A52]/20 hover:text-[#4A2E32]"
                 >
-                  {t}
+                  #{t}
                 </Link>
               </li>
             ))}

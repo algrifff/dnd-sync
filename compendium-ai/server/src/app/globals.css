@@ -139,48 +139,79 @@ html, body {
   font-weight: 600;
 }
 
+/* External / plain markdown links — D&D wine so they read as
+   clickable at first glance without looking like web-era blue. */
 .note-surface .ProseMirror a {
-  color: var(--ink);
+  color: var(--wine);
   text-decoration: underline;
-  text-underline-offset: 2px;
-  text-decoration-color: rgba(42, 36, 30, 0.35);
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: rgba(139, 74, 82, 0.55);
+  text-underline-offset: 3px;
+  transition: color 120ms ease, text-decoration-color 120ms ease,
+    background-color 120ms ease;
 }
 .note-surface .ProseMirror a:hover {
-  text-decoration-color: var(--ink);
+  color: #6f3a41;
+  text-decoration-color: var(--wine);
+  background-color: rgba(139, 74, 82, 0.08);
+  border-radius: 2px;
 }
 
 /* ── Wikilinks ─────────────────────────────────────────────────────── */
 .note-surface .ProseMirror a.wikilink {
-  color: var(--ink);
-  text-decoration: none;
-  background-image: linear-gradient(to right, var(--candlelight) 0%, var(--candlelight) 100%);
-  background-size: 100% 1.5px;
-  background-position: 0 100%;
-  background-repeat: no-repeat;
-  padding-bottom: 1px;
-  transition: background-size 120ms ease;
+  color: var(--wine);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-thickness: 1.75px;
+  text-decoration-color: rgba(139, 74, 82, 0.65);
+  text-underline-offset: 3px;
+  padding: 0 1px;
+  border-radius: 2px;
+  transition: background-color 120ms ease, text-decoration-color 120ms ease;
+}
+.note-surface .ProseMirror a.wikilink::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--wine);
+  vertical-align: middle;
+  margin-right: 4px;
+  opacity: 0.55;
 }
 .note-surface .ProseMirror a.wikilink:hover {
-  background-size: 100% 100%;
-  background-color: rgba(212, 168, 90, 0.25);
+  background-color: rgba(139, 74, 82, 0.12);
+  text-decoration-color: var(--wine);
 }
 .note-surface .ProseMirror a.wikilink-orphan {
   color: var(--ink-soft);
   font-style: italic;
-  background: none;
+  text-decoration: underline dotted rgba(139, 74, 82, 0.4) 1.5px;
+}
+.note-surface .ProseMirror a.wikilink-orphan::before {
+  background: var(--ink-soft);
+  opacity: 0.4;
 }
 
 /* ── Tag mentions ──────────────────────────────────────────────────── */
 .note-surface .ProseMirror a.tag {
   display: inline-block;
   font-size: 0.85em;
-  color: var(--ink-soft);
-  background: rgba(212, 168, 90, 0.15);
-  border: 1px solid rgba(212, 168, 90, 0.4);
+  font-weight: 500;
+  color: #5E3A3F;
+  background: rgba(139, 74, 82, 0.12);
+  border: 1px solid rgba(139, 74, 82, 0.35);
   border-radius: 999px;
-  padding: 0 8px;
+  padding: 1px 10px;
   text-decoration: none;
   line-height: 1.6;
+  transition: background-color 120ms ease, transform 120ms ease, color 120ms ease;
+}
+.note-surface .ProseMirror a.tag:hover {
+  background: rgba(139, 74, 82, 0.22);
+  color: #4A2E32;
+  transform: translateY(-1px);
 }
 
 /* ── Embeds ───────────────────────────────────────────────────────── */
