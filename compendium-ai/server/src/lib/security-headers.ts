@@ -5,6 +5,10 @@
 // the nonce plumbing. Tightening to nonces ('strict-dynamic' + per-
 // request nonce) is a Phase-8 polish item and does not block shipping.
 //
+// Dev mode additionally allows 'unsafe-eval' because Next.js's React
+// Fast Refresh runtime calls eval() to hot-swap modules. The production
+// bundle does not use eval, so prod stays on the tighter policy.
+//
 // NB: `connect-src` explicitly allows ws: + wss: so the hocuspocus
 // WebSocket connection in Phase 4 works. `frame-src 'self'` keeps PDF
 // iframes working. `object-src 'none'` defence-in-depth against Flash/
@@ -13,9 +17,19 @@
 /** Default security-header set. Safe to apply to every response,
  *  including static assets, since none of them interact with the values. */
 export function securityHeaders(): Record<string, string> {
+  const dev = process.env.NODE_ENV !== 'production';
+
+  const scriptSrc = [
+    "'self'",
+    "'unsafe-inline'",
+    "'wasm-unsafe-eval'",
+    // Next dev Fast Refresh + react-refresh-runtime use eval()
+    ...(dev ? ["'unsafe-eval'"] : []),
+  ].join(' ');
+
   const csp = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
+    `script-src ${scriptSrc}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' blob: data:",
     "media-src 'self' blob:",
