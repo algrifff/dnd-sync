@@ -1,6 +1,6 @@
 # Build context is the `compendium-ai/` folder (set via railway.toml).
 
-FROM oven/bun:1.1 AS build
+FROM oven/bun:1.1.45 AS build
 WORKDIR /app
 
 # Workspace manifests first so bun install caches when only source changes.
@@ -24,7 +24,7 @@ WORKDIR /app/server
 ENV NODE_ENV=production
 RUN bun run build
 
-FROM oven/bun:1.1 AS runtime
+FROM oven/bun:1.1.45 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
