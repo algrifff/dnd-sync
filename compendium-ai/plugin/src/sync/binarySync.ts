@@ -122,16 +122,21 @@ export class BinarySync {
 
     const serverPaths = new Set(inventory.binaryFiles.map((f) => f.path));
 
-    // Server → local: pull anything the server knows about that's missing here.
+    // Server → local: pull anything the server knows about that's missing
+    // here. Obsidian's getAbstractFileByPath hides dotfiles like
+    // `.obsidian/**`, so it returns null even when the file exists on
+    // disk — using it as an existence check caused "File already exists"
+    // crashes when we tried to createBinary. Use the raw adapter instead,
+    // and swallow the race on createBinary as defence-in-depth.
     for (const entry of inventory.binaryFiles) {
-      const existing = this.app.vault.getAbstractFileByPath(entry.path);
-      if (existing) continue;
       try {
+        if (await this.app.vault.adapter.exists(entry.path)) continue;
         const data = await getBinary(this.cfg, entry.path);
         if (!data) continue;
         await this.ensureFolderFor(entry.path);
-        await this.app.vault.createBinary(entry.path, data);
+        await this.app.vault.adapter.writeBinary(entry.path, data);
       } catch (err) {
+        if (err instanceof Error && /already exists/i.test(err.message)) continue;
         console.error('[compendium] failed to pull binary', entry.path, err);
       }
     }

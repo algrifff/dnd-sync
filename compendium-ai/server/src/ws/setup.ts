@@ -147,11 +147,17 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, token: str
     const encoder = encoding.createEncoder();
     encoding.writeVarUint(encoder, MESSAGE_SYNC);
     syncProtocol.writeSyncStep1(encoder, new Y.Doc());
-    try {
-      ws.send(encoding.toUint8Array(encoder));
-    } finally {
-      ws.close(1000, 'preflight ok');
-    }
+    // Close only after the sync-step-1 frame is flushed. Closing in a
+    // synchronous finally races ahead of the client's 'open' event and
+    // Chromium logs "WebSocket is closed before the connection is
+    // established" — harmless but noisy.
+    ws.send(encoding.toUint8Array(encoder), () => {
+      try {
+        ws.close(1000, 'preflight ok');
+      } catch {
+        /* already closed */
+      }
+    });
     return;
   }
 

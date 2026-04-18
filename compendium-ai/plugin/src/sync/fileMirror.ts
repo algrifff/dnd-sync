@@ -204,11 +204,28 @@ export class FileMirror {
         return;
       }
 
-      // True conflict: no baseline, or both sides diverged from it. Yjs
-      // itself will CRDT-merge whatever we put into ytext with incoming
-      // remote updates; our job is to make sure the user's local content
-      // survives. Keep server content on top and append local under a
-      // marker comment so the result is readable and lossless.
+      // No baseline AND server has content AND local differs → this is the
+      // first reconcile on this path. We have no evidence the local copy
+      // represents offline edits (vs. stale content from a previous
+      // install), and merging server+local here compounds across clients:
+      // if two fresh clients both did this against the same server, the
+      // server would end up with every local variant appended in turn.
+      // Default to "server is canonical" — the same rule that existed
+      // before baselines. Future reconciles will have a baseline and can
+      // detect real offline divergence.
+      if (baseline === null) {
+        await this.writeLocal(path, serverText);
+        await this.baselines.set(path, serverHash);
+        if (localText !== '') {
+          new Notice(`Compendium: replaced local ${path} with server version.`);
+        }
+        return;
+      }
+
+      // Baseline exists and both sides diverged from it → genuine
+      // three-way conflict. Keep server on top, append local under a
+      // marker so nothing is silently lost. Runs at most once per file
+      // since the baseline advances to the merged hash afterwards.
       const merged = this.mergeMarker(serverText, localText);
       this.pushToYtext(path, ytext, merged);
       await this.writeLocal(path, merged);
