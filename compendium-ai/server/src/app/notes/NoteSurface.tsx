@@ -15,6 +15,7 @@ import type { HocuspocusProvider } from '@hocuspocus/provider';
 import type * as Y from 'yjs';
 import { BASE_EXTENSIONS } from '@/lib/pm-schema';
 import { SlashMenu } from './SlashMenu';
+import { TableToolbar } from './TableToolbar';
 
 export type SurfaceUser = {
   displayName: string;
@@ -99,6 +100,7 @@ export function NoteSurface({
         <EditorContent editor={editor} />
       </article>
       {canEdit && <SlashMenu editor={editor} />}
+      {canEdit && <TableToolbar editor={editor} />}
     </>
   );
 }

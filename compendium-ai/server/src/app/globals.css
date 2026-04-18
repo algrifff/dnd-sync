@@ -43,6 +43,20 @@ html, body {
   margin-top: 0.95em;
 }
 
+/* Notion-style empty-line hint (injected by pm-placeholder). */
+.note-surface .ProseMirror p.is-empty {
+  position: relative;
+}
+.note-surface .ProseMirror p.is-empty::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: rgba(90, 79, 66, 0.55);
+  pointer-events: none;
+  user-select: none;
+}
+
 .note-surface .ProseMirror h1,
 .note-surface .ProseMirror h2,
 .note-surface .ProseMirror h3,

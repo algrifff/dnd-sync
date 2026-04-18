@@ -17,6 +17,7 @@ import { TableHeader } from '@tiptap/extension-table-header';
 import { TaskList } from '@tiptap/extension-task-list';
 import { TaskItem } from '@tiptap/extension-task-item';
 import { Highlight } from '@tiptap/extension-highlight';
+import { Placeholder } from './pm-placeholder';
 
 // ── Custom nodes ───────────────────────────────────────────────────────
 
@@ -220,6 +221,7 @@ export const BASE_EXTENSIONS: AnyExtension[] = [
   TaskList,
   TaskItem.configure({ nested: true }),
   Highlight,
+  Placeholder,
   WikiLink,
   Embed,
   EmbedNote,
