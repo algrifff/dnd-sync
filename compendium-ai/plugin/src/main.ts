@@ -119,7 +119,11 @@ export default class CompendiumPlugin extends Plugin {
     });
     const baselines = new BaselineStore(
       () => this.settings.baselines,
-      () => this.saveSettings(),
+      // Persist directly via saveData to skip the display-identity side
+      // effect in saveSettings(). Baseline writes happen on every reconcile
+      // and every modified keystroke batch; we don't want to rebroadcast
+      // awareness every time a hash changes.
+      () => this.saveData(this.settings),
     );
     this.mirror = new FileMirror(
       this.app,

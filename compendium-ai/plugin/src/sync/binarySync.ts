@@ -153,8 +153,18 @@ export class BinarySync {
     const lastSlash = path.lastIndexOf('/');
     if (lastSlash <= 0) return;
     const dir = path.slice(0, lastSlash);
-    if (this.app.vault.getAbstractFileByPath(dir)) return;
-    await this.app.vault.createFolder(dir);
+    // Dotfolders like `.obsidian/` live on disk but are not tracked in
+    // Obsidian's abstract-file tree, so getAbstractFileByPath returns null
+    // while createFolder throws "Folder already exists". Check the raw
+    // adapter first; swallow the race on the createFolder path as a
+    // defence-in-depth.
+    if (await this.app.vault.adapter.exists(dir)) return;
+    try {
+      await this.app.vault.createFolder(dir);
+    } catch (err) {
+      if (err instanceof Error && /already exists/i.test(err.message)) return;
+      throw err;
+    }
   }
 
   // ── Pushes ──────────────────────────────────────────────────────────────

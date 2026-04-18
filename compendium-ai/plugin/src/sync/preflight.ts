@@ -16,8 +16,11 @@ export type PreflightResult =
   | { ok: true }
   | { ok: false; stage: PreflightStage; reason: string };
 
-const WS_OPEN_TIMEOUT_MS = 3000;
-const WS_FIRST_MESSAGE_TIMEOUT_MS = 2000;
+// Railway free-tier cold starts can take 5-10s. Give the WS handshake
+// enough headroom that a cold start doesn't look like a proxy that drops
+// upgrades — false negatives there waste a DM's evening.
+const WS_OPEN_TIMEOUT_MS = 8000;
+const WS_FIRST_MESSAGE_TIMEOUT_MS = 4000;
 
 function httpBase(cfg: HttpConfig): string {
   return cfg.serverUrl.replace(/\/+$/, '');

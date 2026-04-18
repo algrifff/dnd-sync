@@ -156,8 +156,21 @@ export class FileMirror {
   ): Promise<void> {
     const run = async (): Promise<void> => {
       const file = this.app.vault.getAbstractFileByPath(path);
-      const localText = file instanceof TFile ? await this.app.vault.read(file) : '';
       const serverText = ytext.toString();
+
+      // If the file is currently open in an editor, yCollab is attached to
+      // ytext and is mid-transaction on nearly every keystroke. Doing a
+      // coarse ytext.delete+insert here would race with its position
+      // mapping and can throw "Cannot read properties of null (parent)"
+      // when yjs tries to mutate a type whose events are still iterating.
+      // Trust yCollab to have aligned ytext with the editor; record the
+      // current server content as the baseline and get out of its way.
+      if (this.isFileOpen(path)) {
+        await this.baselines.set(path, await sha256(serverText));
+        return;
+      }
+
+      const localText = file instanceof TFile ? await this.app.vault.read(file) : '';
 
       if (localText === serverText) {
         // Already aligned. Stamp the baseline so future reconciles are cheap.
@@ -327,8 +340,15 @@ export class FileMirror {
     const lastSlash = path.lastIndexOf('/');
     if (lastSlash <= 0) return;
     const dir = path.slice(0, lastSlash);
-    if (!this.app.vault.getAbstractFileByPath(dir)) {
+    // Dotfolders and anything not in Obsidian's abstract-file tree return
+    // null from getAbstractFileByPath even when they exist on disk. Fall
+    // back to the raw adapter, and swallow the race on createFolder.
+    if (await this.app.vault.adapter.exists(dir)) return;
+    try {
       await this.app.vault.createFolder(dir);
+    } catch (err) {
+      if (err instanceof Error && /already exists/i.test(err.message)) return;
+      throw err;
     }
   }
 }

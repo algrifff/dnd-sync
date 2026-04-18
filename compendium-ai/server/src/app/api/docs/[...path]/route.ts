@@ -13,14 +13,14 @@ import { destroyDoc } from '@/ws/setup';
 
 export const dynamic = 'force-dynamic';
 
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: { path: string[] } },
-): Promise<Response> {
+type RouteCtx = { params: Promise<{ path: string[] }> };
+
+export async function DELETE(req: NextRequest, ctx: RouteCtx): Promise<Response> {
   const auth = requireRequestAuth(req);
   if (auth instanceof Response) return auth;
 
-  const path = params.path.map(decodeURIComponent).join('/');
+  const { path: segments } = await ctx.params;
+  const path = segments.map(decodeURIComponent).join('/');
   if (!path) {
     return Response.json(
       { code: 'invalid_path', message: 'path segment is required' },
