@@ -238,6 +238,18 @@ const MIGRATIONS: readonly Migration[] = [
       END;
     `,
   },
+  {
+    version: 8,
+    description: 'folder_markers: explicit empty folders',
+    sql: `
+      CREATE TABLE folder_markers (
+        group_id   TEXT NOT NULL,
+        path       TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (group_id, path)
+      ) WITHOUT ROWID;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

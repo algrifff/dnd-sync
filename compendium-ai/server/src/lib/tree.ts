@@ -30,6 +30,15 @@ export function buildTree(groupId: string): Tree {
     >(`SELECT path, title, updated_at FROM notes WHERE group_id = ? ORDER BY path`)
     .all(groupId);
 
+  // Explicit empty-folder markers; rendered alongside folders derived
+  // from file paths so user-created organisation survives even when a
+  // folder has no notes yet.
+  const markers = getDb()
+    .query<{ path: string }, [string]>(
+      `SELECT path FROM folder_markers WHERE group_id = ? ORDER BY path`,
+    )
+    .all(groupId);
+
   const root: TreeDir = { kind: 'dir', name: '', path: '', children: [] };
   let maxUpdated = 0;
 
@@ -37,9 +46,36 @@ export function buildTree(groupId: string): Tree {
     if (row.updated_at > maxUpdated) maxUpdated = row.updated_at;
     insert(root, row.path.split('/'), row.path, row.title);
   }
+  for (const { path } of markers) {
+    ensureFolder(root, path);
+  }
 
   sortTree(root);
   return { root, updatedAt: maxUpdated };
+}
+
+function ensureFolder(root: TreeDir, path: string): void {
+  if (!path) return;
+  const segments = path.split('/');
+  let dir = root;
+  for (let i = 0; i < segments.length; i++) {
+    const name = segments[i]!;
+    const existing = dir.children.find(
+      (c): c is TreeDir => c.kind === 'dir' && c.name === name,
+    );
+    if (existing) {
+      dir = existing;
+      continue;
+    }
+    const child: TreeDir = {
+      kind: 'dir',
+      name,
+      path: segments.slice(0, i + 1).join('/'),
+      children: [],
+    };
+    dir.children.push(child);
+    dir = child;
+  }
 }
 
 function insert(dir: TreeDir, segments: string[], fullPath: string, title: string): void {

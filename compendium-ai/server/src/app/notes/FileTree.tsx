@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ChevronRight, Plus } from 'lucide-react';
+import { ChevronRight, Plus, FolderPlus } from 'lucide-react';
 import type { Tree, TreeDir } from '@/lib/tree';
 
 const STORAGE_KEY = 'compendium.tree.open';
@@ -30,7 +30,9 @@ export function FileTree({
   const router = useRouter();
   const storageKey = `${STORAGE_KEY}.${groupId}`;
   const [open, setOpen] = useState<Set<string>>(() => new Set());
-  const [creatingIn, setCreatingIn] = useState<string | null>(null);
+  const [creatingIn, setCreatingIn] = useState<
+    { parent: string; kind: 'page' | 'folder' } | null
+  >(null);
   const [creating, setCreating] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,13 +78,13 @@ export function FileTree({
   );
 
   const startCreate = useCallback(
-    (folder: string) => {
+    (parent: string, kind: 'page' | 'folder') => {
       setError(null);
-      setCreatingIn(folder);
+      setCreatingIn({ parent, kind });
       // Ensure the target folder is expanded so the inline row is
       // visible immediately.
-      if (folder) {
-        setOpen((prev) => new Set(prev).add(folder));
+      if (parent) {
+        setOpen((prev) => new Set(prev).add(parent));
       }
     },
     [],
@@ -124,6 +126,41 @@ export function FileTree({
     [csrfToken, router],
   );
 
+  const createFolder = useCallback(
+    async (parent: string, name: string) => {
+      if (!name.trim()) return;
+      setCreating(true);
+      setError(null);
+      try {
+        const res = await fetch('/api/folders/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
+          },
+          body: JSON.stringify({ parent, name: name.trim() }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !body.ok) {
+          setError(
+            body.error === 'exists'
+              ? 'A folder with that name already exists.'
+              : (body.error ?? `HTTP ${res.status}`),
+          );
+          return;
+        }
+        setCreatingIn(null);
+        setOpen((prev) => new Set(prev).add(body.path));
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'network error');
+      } finally {
+        setCreating(false);
+      }
+    },
+    [csrfToken, router],
+  );
+
   const items = useMemo(() => flatten(tree.root, open, 0), [tree.root, open]);
 
   return (
@@ -132,26 +169,40 @@ export function FileTree({
       className="min-h-0 flex-1 overflow-y-auto py-3 text-sm"
     >
       {canCreate && (
-        <div className="mb-1 px-2">
+        <div className="mb-1 flex items-center gap-1 px-2">
           <button
             type="button"
-            onClick={() => startCreate('')}
-            className="flex w-full items-center gap-1.5 rounded-[6px] px-2 py-1 text-left text-[#5A4F42] transition hover:bg-[#D4A85A]/15 hover:text-[#2A241E]"
+            onClick={() => startCreate('', 'page')}
+            className="flex flex-1 items-center gap-1.5 rounded-[6px] px-2 py-1 text-left text-[#5A4F42] transition hover:bg-[#D4A85A]/15 hover:text-[#2A241E]"
           >
             <Plus size={14} aria-hidden />
             <span>New page</span>
           </button>
+          <button
+            type="button"
+            onClick={() => startCreate('', 'folder')}
+            title="New folder"
+            aria-label="New folder"
+            className="rounded-[6px] p-1.5 text-[#5A4F42] transition hover:bg-[#D4A85A]/15 hover:text-[#2A241E]"
+          >
+            <FolderPlus size={14} aria-hidden />
+          </button>
         </div>
       )}
 
-      {creatingIn === '' && (
+      {creatingIn?.parent === '' && (
         <div className="mb-1 px-2">
-          <NewPageRow
+          <NewEntryRow
+            kind={creatingIn.kind}
             depth={0}
             disabled={creating}
             error={error}
             onCancel={cancelCreate}
-            onSubmit={(name) => createNote('', name)}
+            onSubmit={(name) =>
+              creatingIn.kind === 'page'
+                ? createNote('', name)
+                : createFolder('', name)
+            }
           />
         </div>
       )}
@@ -166,13 +217,18 @@ export function FileTree({
             onToggle={toggle}
             onStartCreate={startCreate}
           >
-            {item.kind === 'dir' && creatingIn === item.path ? (
-              <NewPageRow
+            {item.kind === 'dir' && creatingIn?.parent === item.path ? (
+              <NewEntryRow
+                kind={creatingIn.kind}
                 depth={item.depth + 1}
                 disabled={creating}
                 error={error}
                 onCancel={cancelCreate}
-                onSubmit={(name) => createNote(item.path, name)}
+                onSubmit={(name) =>
+                  creatingIn.kind === 'page'
+                    ? createNote(item.path, name)
+                    : createFolder(item.path, name)
+                }
               />
             ) : null}
           </TreeRow>
@@ -231,7 +287,7 @@ function TreeRow({
   activePath: string;
   canCreate: boolean;
   onToggle: (path: string) => void;
-  onStartCreate: (folder: string) => void;
+  onStartCreate: (folder: string, kind: 'page' | 'folder') => void;
   children?: React.ReactNode;
 }): React.JSX.Element {
   const padding = 8 + item.depth * 14;
@@ -255,18 +311,32 @@ function TreeRow({
             <span className="truncate font-medium">{item.name}</span>
           </button>
           {canCreate && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onStartCreate(item.path);
-              }}
-              className="mr-1 hidden rounded-[4px] p-1 text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E] group-hover:block"
-              title={`New page in ${item.name}`}
-              aria-label={`New page in ${item.name}`}
-            >
-              <Plus size={14} aria-hidden />
-            </button>
+            <div className="mr-1 hidden items-center gap-0.5 group-hover:flex">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStartCreate(item.path, 'page');
+                }}
+                className="rounded-[4px] p-1 text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]"
+                title={`New page in ${item.name}`}
+                aria-label={`New page in ${item.name}`}
+              >
+                <Plus size={14} aria-hidden />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStartCreate(item.path, 'folder');
+                }}
+                className="rounded-[4px] p-1 text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]"
+                title={`New folder in ${item.name}`}
+                aria-label={`New folder in ${item.name}`}
+              >
+                <FolderPlus size={14} aria-hidden />
+              </button>
+            </div>
           )}
         </div>
         {children}
@@ -293,13 +363,15 @@ function TreeRow({
   );
 }
 
-function NewPageRow({
+function NewEntryRow({
+  kind,
   depth,
   disabled,
   error,
   onSubmit,
   onCancel,
 }: {
+  kind: 'page' | 'folder';
   depth: number;
   disabled: boolean;
   error: string | null;
@@ -307,7 +379,9 @@ function NewPageRow({
   onCancel: () => void;
 }): React.JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [value, setValue] = useState<string>('Untitled');
+  const [value, setValue] = useState<string>(
+    kind === 'page' ? 'Untitled' : 'New folder',
+  );
 
   useEffect(() => {
     // Focus + select the default "Untitled" on mount so the user can
@@ -339,7 +413,7 @@ function NewPageRow({
             }
           }}
           disabled={disabled}
-          placeholder="Untitled"
+          placeholder={kind === 'page' ? 'Untitled' : 'New folder'}
           className="flex-1 border-0 bg-transparent px-0 text-sm text-[#2A241E] outline-none placeholder:text-[#5A4F42]/60 disabled:opacity-60"
         />
       </form>
