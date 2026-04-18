@@ -1,9 +1,13 @@
 // Post-store derive step. Every time hocuspocus persists a new Y state
 // for a note, we regenerate the server-side caches (content_json for
 // renderers, content_md for FTS + export, content_text for FTS, links
-// for the graph, tags for the index). Synchronous inside the
-// transaction — correctness matters more than throughput here; if it
-// ever becomes a bottleneck we can debounce per path.
+// for the graph, tags for the index).
+//
+// Title source is Y.Text('title') on the same Y.Doc — live-collab
+// rename from the TitleEditor. Fallbacks are first-H1 (legacy ingest)
+// and filename. Tags are the union of inline #mentions and the note's
+// frontmatter.tags so explicit edits via the tag editor survive body
+// saves.
 
 import type * as Y from 'yjs';
 import { yDocToProsemirrorJSON } from 'y-prosemirror';
@@ -19,10 +23,19 @@ export function deriveAndPersist(opts: {
 }): void {
   const pmJson = yDocToProsemirrorJSON(opts.doc, 'default') as unknown as PmNode;
 
-  const title = extractTitle(pmJson) ?? filenameTitle(opts.path);
+  const yTitle = opts.doc.getText('title').toString().trim();
+  const title = yTitle || extractTitle(pmJson) || filenameTitle(opts.path);
   const contentText = extractPlaintext(pmJson);
   const contentMd = pmToMarkdown(pmJson);
-  const { wikilinks, tags } = collectLinksAndTags(pmJson);
+  const { wikilinks, tags: inlineTags } = collectLinksAndTags(pmJson);
+
+  const fmRow = getDb()
+    .query<{ frontmatter_json: string }, [string, string]>(
+      'SELECT frontmatter_json FROM notes WHERE group_id = ? AND path = ?',
+    )
+    .get(opts.groupId, opts.path);
+  const frontmatterTags = readFrontmatterTags(fmRow?.frontmatter_json ?? '{}');
+  const allTags = [...new Set([...inlineTags, ...frontmatterTags])];
 
   const now = Date.now();
   const db = getDb();
@@ -61,16 +74,12 @@ export function deriveAndPersist(opts: {
     const insertLink = db.query(
       `INSERT OR IGNORE INTO note_links (group_id, from_path, to_path) VALUES (?, ?, ?)`,
     );
-    for (const link of wikilinks) {
-      insertLink.run(opts.groupId, opts.path, link);
-    }
+    for (const link of wikilinks) insertLink.run(opts.groupId, opts.path, link);
 
     const insertTag = db.query(
       `INSERT OR IGNORE INTO tags (group_id, path, tag) VALUES (?, ?, ?)`,
     );
-    for (const tag of tags) {
-      insertTag.run(opts.groupId, opts.path, tag);
-    }
+    for (const tag of allTags) insertTag.run(opts.groupId, opts.path, tag);
   })();
 }
 
@@ -97,6 +106,19 @@ function plainOfInline(nodes: PmNode[]): string {
 function filenameTitle(path: string): string {
   const last = path.split('/').pop() ?? path;
   return last.replace(/\.(md|canvas)$/i, '');
+}
+
+function readFrontmatterTags(fmJson: string): string[] {
+  try {
+    const fm = JSON.parse(fmJson) as { tags?: unknown };
+    if (!Array.isArray(fm.tags)) return [];
+    return fm.tags
+      .filter((t): t is string => typeof t === 'string')
+      .map((t) => t.replace(/^#/, '').toLowerCase())
+      .filter((t) => t.length > 0);
+  } catch {
+    return [];
+  }
 }
 
 function collectLinksAndTags(doc: PmNode): { wikilinks: string[]; tags: string[] } {

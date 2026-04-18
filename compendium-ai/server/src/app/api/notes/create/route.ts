@@ -60,23 +60,17 @@ export async function POST(req: NextRequest): Promise<Response> {
     return json({ error: 'exists', path }, 409);
   }
 
-  // Seed a Y.Doc with the title as an H1 + an empty paragraph so the
-  // note shows a visible title the moment it opens. deriveAndPersist
-  // picks up the H1 as notes.title on every save, so typing into that
-  // H1 is exactly how the user renames.
+  // Title lives on a dedicated Y.Text so the TitleEditor can subscribe
+  // to it independently. Body starts as an empty paragraph — the
+  // slash menu (Phase 4 polish) and keyboard shortcuts give users
+  // everything they need to build the page.
   const emptyDoc = {
     type: 'doc',
-    content: [
-      {
-        type: 'heading',
-        attrs: { level: 1 },
-        content: [{ type: 'text', text: cleanName }],
-      },
-      { type: 'paragraph' },
-    ],
+    content: [{ type: 'paragraph' }],
   };
   const schema = getPmSchema();
   const ydoc = prosemirrorJSONToYDoc(schema, emptyDoc, 'default');
+  ydoc.getText('title').insert(0, cleanName);
   const state = Y.encodeStateAsUpdate(ydoc);
 
   const id = randomUUID();

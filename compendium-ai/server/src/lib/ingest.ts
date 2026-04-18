@@ -192,6 +192,12 @@ export async function ingestZip(opts: IngestOptions): Promise<IngestSummary> {
       // Build Y.Doc (fragment name 'default' matches Tiptap defaults).
       const schema = getPmSchema();
       const ydoc = prosemirrorJSONToYDoc(schema, ingest.contentJson, 'default');
+      // Seed the collaborative title field with the parsed title so the
+      // TitleEditor renders the right name without round-tripping a
+      // rename on first load.
+      if (ingest.title) {
+        ydoc.getText('title').insert(0, ingest.title);
+      }
       const yjsState = Y.encodeStateAsUpdate(ydoc);
       prepared.push({
         ingest,
