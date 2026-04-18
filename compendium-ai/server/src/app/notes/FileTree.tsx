@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ChevronRight, Plus, FolderPlus } from 'lucide-react';
 import type { Tree, TreeDir } from '@/lib/tree';
+import { RowMenu } from './RowMenu';
 
 const STORAGE_KEY = 'compendium.tree.open';
 
@@ -34,6 +35,8 @@ export function FileTree({
     { parent: string; kind: 'page' | 'folder' } | null
   >(null);
   const [creating, setCreating] = useState<boolean>(false);
+  const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -161,6 +164,57 @@ export function FileTree({
     [csrfToken, router],
   );
 
+  const submitRename = useCallback(
+    async (kind: 'file' | 'folder', from: string, newName: string) => {
+      const clean = newName.trim();
+      if (!clean) return;
+      const parent = from.includes('/') ? from.slice(0, from.lastIndexOf('/')) : '';
+      const to =
+        kind === 'file'
+          ? (parent ? parent + '/' : '') +
+            clean.replace(/\.(md|canvas)$/i, '') +
+            '.md'
+          : (parent ? parent + '/' : '') + clean;
+      if (to === from) {
+        setRenamingPath(null);
+        return;
+      }
+      setRenaming(true);
+      setError(null);
+      try {
+        const url = kind === 'file' ? '/api/notes/move' : '/api/folders/move';
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
+          },
+          body: JSON.stringify({ from, to }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !body.ok) {
+          setError(
+            body.error === 'exists'
+              ? 'That name is already taken.'
+              : (body.error ?? `HTTP ${res.status}`),
+          );
+          return;
+        }
+        setRenamingPath(null);
+        // If the rename targeted the currently-open note, route there.
+        if (kind === 'file' && activePath === from) {
+          router.push('/notes/' + to.split('/').map(encodeURIComponent).join('/'));
+        }
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'network error');
+      } finally {
+        setRenaming(false);
+      }
+    },
+    [activePath, csrfToken, router],
+  );
+
   const items = useMemo(() => flatten(tree.root, open, 0), [tree.root, open]);
 
   return (
@@ -214,8 +268,23 @@ export function FileTree({
             item={item}
             activePath={activePath}
             canCreate={canCreate}
+            csrfToken={csrfToken}
+            isRenaming={renamingPath === item.path}
+            renameDisabled={renaming}
+            renameError={renamingPath === item.path ? error : null}
             onToggle={toggle}
             onStartCreate={startCreate}
+            onStartRename={() => {
+              setError(null);
+              setRenamingPath(item.path);
+            }}
+            onCancelRename={() => {
+              setRenamingPath(null);
+              setError(null);
+            }}
+            onSubmitRename={(name) =>
+              submitRename(item.kind === 'dir' ? 'folder' : 'file', item.path, name)
+            }
           >
             {item.kind === 'dir' && creatingIn?.parent === item.path ? (
               <NewEntryRow
@@ -279,20 +348,50 @@ function TreeRow({
   item,
   activePath,
   canCreate,
+  csrfToken,
+  isRenaming,
+  renameDisabled,
+  renameError,
   onToggle,
   onStartCreate,
+  onStartRename,
+  onCancelRename,
+  onSubmitRename,
   children,
 }: {
   item: FlatRow;
   activePath: string;
   canCreate: boolean;
+  csrfToken: string;
+  isRenaming: boolean;
+  renameDisabled: boolean;
+  renameError: string | null;
   onToggle: (path: string) => void;
   onStartCreate: (folder: string, kind: 'page' | 'folder') => void;
+  onStartRename: () => void;
+  onCancelRename: () => void;
+  onSubmitRename: (name: string) => void;
   children?: React.ReactNode;
 }): React.JSX.Element {
   const padding = 8 + item.depth * 14;
 
   if (item.kind === 'dir') {
+    if (isRenaming) {
+      return (
+        <li role="treeitem" className="list-none">
+          <NewEntryRow
+            kind="folder"
+            depth={item.depth}
+            disabled={renameDisabled}
+            error={renameError}
+            initialValue={item.name}
+            onCancel={onCancelRename}
+            onSubmit={onSubmitRename}
+          />
+          {children}
+        </li>
+      );
+    }
     return (
       <li role="treeitem" aria-expanded={item.open} className="list-none">
         <div className="group flex items-center rounded-[6px] transition hover:bg-[#D4A85A]/15">
@@ -336,6 +435,12 @@ function TreeRow({
               >
                 <FolderPlus size={14} aria-hidden />
               </button>
+              <RowMenu
+                kind="folder"
+                path={item.path}
+                csrfToken={csrfToken}
+                onStartRename={onStartRename}
+              />
             </div>
           )}
         </div>
@@ -343,22 +448,52 @@ function TreeRow({
       </li>
     );
   }
+  if (isRenaming) {
+    return (
+      <li role="treeitem" className="list-none">
+        <NewEntryRow
+          kind="page"
+          depth={item.depth}
+          disabled={renameDisabled}
+          error={renameError}
+          initialValue={item.title || item.name}
+          onCancel={onCancelRename}
+          onSubmit={onSubmitRename}
+        />
+      </li>
+    );
+  }
   const isActive = item.path === activePath;
   const href = '/notes/' + item.path.split('/').map(encodeURIComponent).join('/');
   return (
     <li role="treeitem" className="list-none">
-      <Link
-        href={href}
+      <div
         className={
-          'flex items-center gap-1 rounded-[6px] px-2 py-1 transition ' +
-          (isActive
-            ? 'bg-[#D4A85A]/25 text-[#2A241E]'
-            : 'text-[#5A4F42] hover:bg-[#D4A85A]/10')
+          'group flex items-center rounded-[6px] transition ' +
+          (isActive ? 'bg-[#D4A85A]/25' : 'hover:bg-[#D4A85A]/10')
         }
-        style={{ paddingLeft: padding + 14 }}
       >
-        <span className="truncate">{item.title || item.name}</span>
-      </Link>
+        <Link
+          href={href}
+          className={
+            'flex min-w-0 flex-1 items-center gap-1 px-2 py-1 ' +
+            (isActive ? 'text-[#2A241E]' : 'text-[#5A4F42]')
+          }
+          style={{ paddingLeft: padding + 14 }}
+        >
+          <span className="truncate">{item.title || item.name}</span>
+        </Link>
+        {canCreate && (
+          <div className="mr-1 hidden items-center group-hover:flex">
+            <RowMenu
+              kind="file"
+              path={item.path}
+              csrfToken={csrfToken}
+              onStartRename={onStartRename}
+            />
+          </div>
+        )}
+      </div>
     </li>
   );
 }
@@ -368,6 +503,7 @@ function NewEntryRow({
   depth,
   disabled,
   error,
+  initialValue,
   onSubmit,
   onCancel,
 }: {
@@ -375,12 +511,13 @@ function NewEntryRow({
   depth: number;
   disabled: boolean;
   error: string | null;
+  initialValue?: string;
   onSubmit: (name: string) => void;
   onCancel: () => void;
 }): React.JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState<string>(
-    kind === 'page' ? 'Untitled' : 'New folder',
+    initialValue ?? (kind === 'page' ? 'Untitled' : 'New folder'),
   );
 
   useEffect(() => {

@@ -19,7 +19,10 @@ export type AuditAction =
   | 'asset.delete'
   | 'note.create'
   | 'note.destroy'
+  | 'note.rename'
   | 'folder.create'
+  | 'folder.rename'
+  | 'folder.destroy'
   | 'session.rotate';
 
 export type AuditEntry = {
