@@ -24,6 +24,35 @@ export type SurfaceUser = {
   accentColor: string;
 };
 
+// Custom caret DOM so the label can fade via CSS animation — each
+// selection update replaces the element, which restarts the animation
+// from the start (2 s visible, then fades; caret stays).
+function renderCaret(user: { name?: string | null; color?: string | null }): HTMLElement {
+  const color = user.color ?? '#5A4F42';
+  const name = user.name ?? 'Anonymous';
+  const caret = document.createElement('span');
+  caret.className = 'collab-caret';
+  caret.style.setProperty('--caret-color', color);
+  caret.style.setProperty('--caret-color-light', withAlpha(color, 0.35));
+
+  const label = document.createElement('span');
+  label.className = 'collab-caret__label';
+  label.textContent = name;
+  caret.appendChild(label);
+  return caret;
+}
+
+function withAlpha(hex: string, alpha: number): string {
+  const m = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!m) return hex;
+  let body = m[1]!;
+  if (body.length === 3) body = body.split('').map((c) => c + c).join('');
+  const r = parseInt(body.slice(0, 2), 16);
+  const g = parseInt(body.slice(2, 4), 16);
+  const b = parseInt(body.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, alpha))})`;
+}
+
 export function NoteSurface({
   path,
   ydoc,
@@ -57,6 +86,7 @@ export function NoteSurface({
             name: user.displayName || 'Anonymous',
             color: user.accentColor,
           },
+          render: renderCaret,
         }),
       );
     }

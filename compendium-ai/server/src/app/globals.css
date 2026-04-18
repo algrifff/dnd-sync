@@ -43,6 +43,41 @@ html, body {
   margin-top: 0.95em;
 }
 
+/* Collaboration caret (our CustomRender under @tiptap/extension-
+ * collaboration-caret). The label is visible for 2s after the caret
+ * is placed, then fades — the caret itself stays full-opacity. Each
+ * selection update replaces the caret DOM which restarts the
+ * animation naturally. */
+.note-surface .ProseMirror .collab-caret {
+  position: relative;
+  border-left: 2px solid var(--caret-color, #5A4F42);
+  border-right: 0;
+  margin-left: -1px;
+  margin-right: -1px;
+  word-break: normal;
+  pointer-events: none;
+}
+.note-surface .ProseMirror .collab-caret__label {
+  position: absolute;
+  top: -1.15em;
+  left: -2px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #2A241E;
+  background-color: var(--caret-color-light, rgba(90, 79, 66, 0.35));
+  border: 1px solid var(--caret-color, #5A4F42);
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+  animation: collab-caret-label-fade 0.5s ease 2s forwards;
+}
+@keyframes collab-caret-label-fade {
+  to { opacity: 0; }
+}
+
 /* Notion-style empty-line hint (injected by pm-placeholder). */
 .note-surface .ProseMirror p.is-empty {
   position: relative;
