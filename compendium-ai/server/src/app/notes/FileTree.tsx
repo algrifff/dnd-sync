@@ -39,6 +39,13 @@ export function FileTree({
   const [renaming, setRenaming] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  // HTML5 DnD. dragging = the source row; dragOver = the folder path
+  // currently being hovered, or '' for the implicit root drop zone.
+  const [dragging, setDragging] = useState<
+    { kind: 'file' | 'folder'; path: string } | null
+  >(null);
+  const [dragOver, setDragOver] = useState<string | null>(null);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(storageKey);
@@ -215,6 +222,57 @@ export function FileTree({
     [activePath, csrfToken, router],
   );
 
+  const moveEntry = useCallback(
+    async (
+      src: { kind: 'file' | 'folder'; path: string },
+      destFolder: string,
+    ): Promise<void> => {
+      const basename = src.path.includes('/')
+        ? src.path.slice(src.path.lastIndexOf('/') + 1)
+        : src.path;
+      const to = (destFolder ? destFolder + '/' : '') + basename;
+      if (to === src.path) return;
+
+      // Can't move a folder into itself or one of its own descendants.
+      if (src.kind === 'folder') {
+        if (destFolder === src.path) return;
+        if (destFolder.startsWith(src.path + '/')) return;
+      }
+
+      const url = src.kind === 'file' ? '/api/notes/move' : '/api/folders/move';
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
+          },
+          body: JSON.stringify({ from: src.path, to }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !body.ok) {
+          alert(
+            body.error === 'exists'
+              ? `"${basename}" already exists in that folder.`
+              : (body.error ?? `Move failed (HTTP ${res.status})`),
+          );
+          return;
+        }
+        // Expand the destination so the user sees where things landed.
+        if (destFolder) {
+          setOpen((prev) => new Set(prev).add(destFolder));
+        }
+        if (src.kind === 'file' && activePath === src.path) {
+          router.push('/notes/' + to.split('/').map(encodeURIComponent).join('/'));
+        }
+        router.refresh();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'network error');
+      }
+    },
+    [activePath, csrfToken, router],
+  );
+
   const items = useMemo(() => flatten(tree.root, open, 0), [tree.root, open]);
 
   return (
@@ -261,7 +319,35 @@ export function FileTree({
         </div>
       )}
 
-      <ul role="tree" className="px-2">
+      <ul
+        role="tree"
+        className={
+          'px-2 ' +
+          (dragging && dragOver === '' ? 'rounded-[6px] bg-[#D4A85A]/10' : '')
+        }
+        onDragOver={(e) => {
+          if (!dragging) return;
+          // A child (folder row) may have already set a more-specific
+          // target; only claim root when no one's consumed it yet.
+          if (e.defaultPrevented) return;
+          e.preventDefault();
+          setDragOver('');
+        }}
+        onDragLeave={(e) => {
+          // Only clear when leaving the ul entirely.
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setDragOver(null);
+          }
+        }}
+        onDrop={(e) => {
+          if (!dragging) return;
+          if (e.defaultPrevented) return;
+          e.preventDefault();
+          void moveEntry(dragging, '');
+          setDragging(null);
+          setDragOver(null);
+        }}
+      >
         {items.map((item) => (
           <TreeRow
             key={item.key}
@@ -272,6 +358,20 @@ export function FileTree({
             isRenaming={renamingPath === item.path}
             renameDisabled={renaming}
             renameError={renamingPath === item.path ? error : null}
+            dragging={dragging}
+            isDropTarget={item.kind === 'dir' && dragOver === item.path}
+            onDragStartRow={(src) => setDragging(src)}
+            onDragEndRow={() => {
+              setDragging(null);
+              setDragOver(null);
+            }}
+            onDragOverDir={(dirPath) => setDragOver(dirPath)}
+            onDropDir={(dirPath) => {
+              if (!dragging) return;
+              void moveEntry(dragging, dirPath);
+              setDragging(null);
+              setDragOver(null);
+            }}
             onToggle={toggle}
             onStartCreate={startCreate}
             onStartRename={() => {
@@ -352,6 +452,12 @@ function TreeRow({
   isRenaming,
   renameDisabled,
   renameError,
+  dragging,
+  isDropTarget,
+  onDragStartRow,
+  onDragEndRow,
+  onDragOverDir,
+  onDropDir,
   onToggle,
   onStartCreate,
   onStartRename,
@@ -366,6 +472,12 @@ function TreeRow({
   isRenaming: boolean;
   renameDisabled: boolean;
   renameError: string | null;
+  dragging: { kind: 'file' | 'folder'; path: string } | null;
+  isDropTarget: boolean;
+  onDragStartRow: (src: { kind: 'file' | 'folder'; path: string }) => void;
+  onDragEndRow: () => void;
+  onDragOverDir: (dirPath: string) => void;
+  onDropDir: (dirPath: string) => void;
   onToggle: (path: string) => void;
   onStartCreate: (folder: string, kind: 'page' | 'folder') => void;
   onStartRename: () => void;
@@ -373,6 +485,46 @@ function TreeRow({
   onSubmitRename: (name: string) => void;
   children?: React.ReactNode;
 }): React.JSX.Element {
+  const rowDragProps = canCreate
+    ? {
+        draggable: true,
+        onDragStart: (e: React.DragEvent) => {
+          e.dataTransfer.effectAllowed = 'move';
+          // Some browsers require setData to initiate a drag.
+          e.dataTransfer.setData('text/plain', item.path);
+          onDragStartRow({
+            kind: item.kind === 'dir' ? 'folder' : 'file',
+            path: item.path,
+          });
+        },
+        onDragEnd: () => onDragEndRow(),
+      }
+    : {};
+
+  const isInvalidDrop =
+    !dragging ||
+    item.kind !== 'dir' ||
+    (dragging.kind === 'folder' &&
+      (dragging.path === item.path ||
+        item.path.startsWith(dragging.path + '/') ||
+        dragging.path === item.path));
+  const dirDropProps =
+    item.kind === 'dir'
+      ? {
+          onDragOver: (e: React.DragEvent) => {
+            if (isInvalidDrop) return;
+            e.preventDefault();
+            e.stopPropagation();
+            onDragOverDir(item.path);
+          },
+          onDrop: (e: React.DragEvent) => {
+            if (isInvalidDrop) return;
+            e.preventDefault();
+            e.stopPropagation();
+            onDropDir(item.path);
+          },
+        }
+      : {};
   const padding = 8 + item.depth * 14;
 
   if (item.kind === 'dir') {
@@ -394,7 +546,16 @@ function TreeRow({
     }
     return (
       <li role="treeitem" aria-expanded={item.open} className="list-none">
-        <div className="group flex items-center rounded-[6px] transition hover:bg-[#D4A85A]/15">
+        <div
+          {...rowDragProps}
+          {...dirDropProps}
+          className={
+            'group flex items-center rounded-[6px] transition ' +
+            (isDropTarget
+              ? 'bg-[#8B4A52]/15 ring-1 ring-[#8B4A52]/40'
+              : 'hover:bg-[#D4A85A]/15')
+          }
+        >
           <button
             type="button"
             onClick={() => onToggle(item.path)}
@@ -468,6 +629,7 @@ function TreeRow({
   return (
     <li role="treeitem" className="list-none">
       <div
+        {...rowDragProps}
         className={
           'group flex items-center rounded-[6px] transition ' +
           (isActive ? 'bg-[#D4A85A]/25' : 'hover:bg-[#D4A85A]/10')
