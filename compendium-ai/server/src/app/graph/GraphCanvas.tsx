@@ -31,6 +31,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import * as Y from 'yjs';
+import { HocuspocusProvider } from '@hocuspocus/provider';
 import Graph from 'graphology';
 import Sigma from 'sigma';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
@@ -47,9 +49,14 @@ type Scope =
 
 type LabelMode = 'none' | 'some' | 'all';
 
-const PIN_STORAGE_PREFIX = 'compendium.graph.pins.';
-const COLOUR_STORAGE_PREFIX = 'compendium.graph.tagColors.';
+// Label mode stays local per viewer (personal preference). Pins +
+// tag colours now sync across every connected user via a shared
+// Y.Doc on the reserved `.graph-state` hocuspocus channel — the
+// server short-circuits persistence for `.`-prefixed docs, so state
+// lives only while someone's connected and resets when the last
+// client leaves. Tradeoff: cheap live collab, no disk.
 const LABEL_STORAGE_PREFIX = 'compendium.graph.labels.';
+const GRAPH_STATE_DOC = '.graph-state';
 
 export function GraphCanvas({
   groupId,
@@ -80,6 +87,30 @@ export function GraphCanvas({
   const [palette, setPalette] = useState<boolean>(false);
   const [nodesPayload, setNodesPayload] = useState<GraphPayload['nodes']>([]);
 
+  // ── shared graph state (synced across connected peers) ─────────────
+  const ydoc = useMemo(() => new Y.Doc(), []);
+  const provider = useMemo(
+    () =>
+      new HocuspocusProvider({
+        url: buildCollabUrl(),
+        name: GRAPH_STATE_DOC,
+        document: ydoc,
+      }),
+    [ydoc],
+  );
+  const pinsMap = useMemo(
+    () => ydoc.getMap<{ x: number; y: number }>('pins'),
+    [ydoc],
+  );
+  const coloursMap = useMemo(() => ydoc.getMap<string>('colours'), [ydoc]);
+
+  useEffect(() => {
+    return () => {
+      provider.destroy();
+      ydoc.destroy();
+    };
+  }, [provider, ydoc]);
+
   const scopeParam = useMemo(() => {
     if (scope.kind === 'tag') return `tag:${scope.tag}`;
     return 'all';
@@ -98,30 +129,8 @@ export function GraphCanvas({
     [tagColors],
   );
 
-  // ── one-time localStorage load for pins + overrides + label mode ───
+  // Label mode: personal preference, local to this viewer.
   useEffect(() => {
-    try {
-      const pinsRaw = localStorage.getItem(PIN_STORAGE_PREFIX + groupId);
-      if (pinsRaw) {
-        const parsed = JSON.parse(pinsRaw) as unknown;
-        if (parsed && typeof parsed === 'object') {
-          pinsRef.current = parsed as Record<string, { x: number; y: number }>;
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-    try {
-      const coloursRaw = localStorage.getItem(COLOUR_STORAGE_PREFIX + groupId);
-      if (coloursRaw) {
-        const parsed = JSON.parse(coloursRaw) as unknown;
-        if (parsed && typeof parsed === 'object') {
-          setTagColors(parsed as Record<string, string>);
-        }
-      }
-    } catch {
-      /* ignore */
-    }
     try {
       const mode = localStorage.getItem(LABEL_STORAGE_PREFIX + groupId) as LabelMode | null;
       if (mode === 'none' || mode === 'some' || mode === 'all') setLabelMode(mode);
@@ -129,15 +138,6 @@ export function GraphCanvas({
       /* ignore */
     }
   }, [groupId]);
-
-  // Persist colour + label preferences.
-  useEffect(() => {
-    try {
-      localStorage.setItem(COLOUR_STORAGE_PREFIX + groupId, JSON.stringify(tagColors));
-    } catch {
-      /* ignore */
-    }
-  }, [tagColors, groupId]);
   useEffect(() => {
     try {
       localStorage.setItem(LABEL_STORAGE_PREFIX + groupId, labelMode);
@@ -145,6 +145,37 @@ export function GraphCanvas({
       /* ignore */
     }
   }, [labelMode, groupId]);
+
+  // Pins: shared via Y.Map. Mirror into a ref for the physics loop
+  // (fast read without round-tripping through Y on every frame).
+  useEffect(() => {
+    const apply = (): void => {
+      const next: Record<string, { x: number; y: number }> = {};
+      pinsMap.forEach((value, key) => {
+        next[key] = value;
+      });
+      pinsRef.current = next;
+    };
+    apply();
+    pinsMap.observe(apply);
+    return () => pinsMap.unobserve(apply);
+  }, [pinsMap]);
+
+  // Colours: shared via Y.Map. State holds a mirror that React
+  // re-renders against so the palette UI + node-colour effect pick
+  // up remote changes.
+  useEffect(() => {
+    const apply = (): void => {
+      const next: Record<string, string> = {};
+      coloursMap.forEach((value, key) => {
+        next[key] = value;
+      });
+      setTagColors(next);
+    };
+    apply();
+    coloursMap.observe(apply);
+    return () => coloursMap.unobserve(apply);
+  }, [coloursMap]);
 
   // ── main load + render cycle ────────────────────────────────────────
   useEffect(() => {
@@ -314,15 +345,10 @@ export function GraphCanvas({
           const dragged = draggedRef.current;
           if (!dragged) return;
           if (shiftHeld) {
-            pinsRef.current[dragged.node] = { x: dragged.x, y: dragged.y };
-            try {
-              localStorage.setItem(
-                PIN_STORAGE_PREFIX + groupId,
-                JSON.stringify(pinsRef.current),
-              );
-            } catch {
-              /* ignore */
-            }
+            // Share the pin with every connected peer. The Y.Map
+            // observer will also update our own pinsRef on the next
+            // tick so the physics loop keeps holding it in place.
+            pinsMap.set(dragged.node, { x: dragged.x, y: dragged.y });
           }
           draggedRef.current = null;
           shiftHeld = false;
@@ -382,13 +408,8 @@ export function GraphCanvas({
   }, []);
 
   const clearPins = useCallback(() => {
-    pinsRef.current = {};
-    try {
-      localStorage.removeItem(PIN_STORAGE_PREFIX + groupId);
-    } catch {
-      /* ignore */
-    }
-  }, [groupId]);
+    pinsMap.clear();
+  }, [pinsMap]);
 
   // Tags surfaced in the palette panel: include every tag present on
   // at least one node in the current scope, even if unused by the
@@ -481,22 +502,14 @@ export function GraphCanvas({
                       <input
                         type="color"
                         value={current}
-                        onChange={(e) =>
-                          setTagColors((prev) => ({ ...prev, [t]: e.target.value }))
-                        }
+                        onChange={(e) => coloursMap.set(t, e.target.value)}
                         className="h-6 w-6 cursor-pointer rounded-[4px] border border-[#D4C7AE] bg-transparent p-0"
                       />
                       <span className="flex-1 truncate text-xs text-[#2A241E]">#{t}</span>
                       {isOverride && (
                         <button
                           type="button"
-                          onClick={() =>
-                            setTagColors((prev) => {
-                              const next = { ...prev };
-                              delete next[t];
-                              return next;
-                            })
-                          }
+                          onClick={() => coloursMap.delete(t)}
                           title="Reset"
                           aria-label={`Reset colour for #${t}`}
                           className="rounded-[4px] px-1 text-xs text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]"
@@ -574,4 +587,10 @@ function labelModeLabel(mode: LabelMode): string {
   if (mode === 'none') return 'None';
   if (mode === 'all') return 'All';
   return 'Some';
+}
+
+function buildCollabUrl(): string {
+  if (typeof window === 'undefined') return 'ws://localhost/collab';
+  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${scheme}//${location.host}/collab`;
 }
