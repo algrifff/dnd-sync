@@ -388,50 +388,61 @@ export function DrawingOverlay({
                   }}
                 />
               ))}
-              <button
-                type="button"
-                aria-label="Custom colour"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  colorInputRef.current?.click();
-                }}
-                className="h-5 w-5 rounded-full border border-[#D4C7AE] bg-gradient-to-br from-[#8B4A52] via-[#D4A85A] to-[#7B8A5F] transition hover:scale-110"
-              />
-              <input
-                ref={colorInputRef}
-                type="color"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-                className="absolute h-0 w-0 opacity-0"
-              />
+              {/* The gradient swatch is purely decorative; the real
+                  <input type="color"> lives on top of it with zero
+                  opacity so browsers open their native picker on
+                  click (hidden inputs off-screen don't trigger the
+                  picker reliably in every browser). */}
+              <div
+                className="relative h-5 w-5 overflow-hidden rounded-full border border-[#D4C7AE] bg-gradient-to-br from-[#8B4A52] via-[#D4A85A] to-[#7B8A5F] transition hover:scale-110"
+                onClick={(e) => e.stopPropagation()}
+                title="Custom colour"
+              >
+                <input
+                  ref={colorInputRef}
+                  type="color"
+                  value={color}
+                  onChange={(e) => setColor(e.target.value)}
+                  aria-label="Custom colour"
+                  className="absolute inset-0 h-full w-full cursor-pointer appearance-none border-0 bg-transparent p-0 opacity-0"
+                />
+              </div>
             </div>
           )}
         </div>
       )}
 
-      <div className="mt-1 flex flex-col items-center gap-1 rounded-full border border-[#D4C7AE] bg-[#FBF5E8] p-1 shadow-[0_4px_12px_rgba(42,36,30,0.12)]">
-        <ToolButton
-          icon={<ZoomIn size={14} aria-hidden />}
-          title="Zoom in"
-          onClick={zoomIn}
-          small
-        />
-        <button
-          type="button"
-          onClick={zoomReset}
-          title={`Zoom ${Math.round(zoom * 100)}% — click to reset`}
-          aria-label="Reset zoom"
-          className="rounded-full px-1 text-[10px] font-medium text-[#5A4F42] transition hover:text-[#2A241E]"
-        >
-          {Math.round(zoom * 100)}%
-        </button>
-        <ToolButton
-          icon={<ZoomOut size={14} aria-hidden />}
-          title="Zoom out"
-          onClick={zoomOut}
-          small
-        />
-      </div>
+    </div>,
+    toolsAnchor,
+  );
+
+  const zoomPortal = createPortal(
+    <div
+      aria-label="Drawing zoom"
+      className="absolute bottom-4 left-4 flex flex-col items-center gap-1 rounded-full border border-[#D4C7AE] bg-[#FBF5E8] p-1 shadow-[0_4px_12px_rgba(42,36,30,0.12)]"
+      style={{ zIndex: 6, pointerEvents: 'auto' }}
+    >
+      <ToolButton
+        icon={<ZoomIn size={14} aria-hidden />}
+        title="Zoom in"
+        onClick={zoomIn}
+        small
+      />
+      <button
+        type="button"
+        onClick={zoomReset}
+        title={`Zoom ${Math.round(zoom * 100)}% — click to reset`}
+        aria-label="Reset zoom"
+        className="rounded-full px-1 text-[10px] font-medium text-[#5A4F42] transition hover:text-[#2A241E]"
+      >
+        {Math.round(zoom * 100)}%
+      </button>
+      <ToolButton
+        icon={<ZoomOut size={14} aria-hidden />}
+        title="Zoom out"
+        onClick={zoomOut}
+        small
+      />
     </div>,
     toolsAnchor,
   );
@@ -440,6 +451,7 @@ export function DrawingOverlay({
     <>
       {svgPortal}
       {toolsPortal}
+      {zoomPortal}
     </>
   );
 }
