@@ -59,7 +59,15 @@ export default async function GraphPage(): Promise<ReactElement> {
           canCreate={session.role !== 'viewer'}
         />
         <div className="relative flex-1 overflow-hidden">
-          <GraphCanvas groupId={session.currentGroupId} allTags={allTags} />
+          <GraphCanvas
+            groupId={session.currentGroupId}
+            allTags={allTags}
+            me={{
+              userId: session.userId,
+              displayName: session.displayName,
+              accentColor: session.accentColor,
+            }}
+          />
         </div>
       </div>
     </div>

@@ -37,6 +37,7 @@ import Graph from 'graphology';
 import Sigma from 'sigma';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
 import { colorForTags, radiusForDegree } from './graphStyle';
+import { PointerOverlay } from '../notes/PointerOverlay';
 
 type GraphPayload = {
   nodes: Array<{ id: string; title: string; tags: string[]; degree: number }>;
@@ -58,12 +59,16 @@ type LabelMode = 'none' | 'some' | 'all';
 const LABEL_STORAGE_PREFIX = 'compendium.graph.labels.';
 const GRAPH_STATE_DOC = '.graph-state';
 
+const GRAPH_SCOPE_ID = 'graph-canvas-scope';
+
 export function GraphCanvas({
   groupId,
   allTags,
+  me,
 }: {
   groupId: string;
   allTags: string[];
+  me: { userId: string; displayName: string; accentColor: string };
 }): React.JSX.Element {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -292,10 +297,17 @@ export function GraphCanvas({
         rafRef.current = requestAnimationFrame(tick);
 
         // ── Interactions ─────────────────────────────────────────────
+        // Disambiguate click vs drag by comparing the pointerdown
+        // position against pointerup; only navigate when the user
+        // barely moved.
+        let downScreenPos: { x: number; y: number } | null = null;
         renderer.on('clickNode', ({ node, event }) => {
-          // If the click is the tail of a drag, don't navigate.
           const ev = event?.original as MouseEvent | undefined;
-          if (ev && Math.hypot(ev.movementX ?? 0, ev.movementY ?? 0) > 3) return;
+          if (downScreenPos && ev) {
+            const dx = ev.clientX - downScreenPos.x;
+            const dy = ev.clientY - downScreenPos.y;
+            if (Math.hypot(dx, dy) > 5) return;
+          }
           router.push('/notes/' + node.split('/').map(encodeURIComponent).join('/'));
         });
 
@@ -319,13 +331,14 @@ export function GraphCanvas({
           renderer.setSetting('edgeReducer', null);
         });
 
-        // Drag handling. Plain drag holds the node at cursor while
-        // physics keeps running (Obsidian feel). Shift-drag persists
-        // the final position as a pin.
-        let shiftHeld = false;
+        // Drag handling. Every drop pins the dropped position —
+        // positions now propagate to every connected peer via the
+        // shared pinsMap so the graph layout reads the same for
+        // everyone after any interaction. Physics keeps running for
+        // nodes nobody has touched yet.
         renderer.on('downNode', ({ node, event }) => {
           const ev = event?.original as MouseEvent | undefined;
-          shiftHeld = !!ev?.shiftKey;
+          downScreenPos = ev ? { x: ev.clientX, y: ev.clientY } : null;
           const { x, y } = g.getNodeAttributes(node) as { x: number; y: number };
           draggedRef.current = { node, x, y };
           event?.preventSigmaDefault?.();
@@ -341,19 +354,27 @@ export function GraphCanvas({
           e.original.preventDefault();
           e.original.stopPropagation();
         });
-        const stopDrag = (): void => {
+        stage.on('mouseup', (upEvent) => {
           const dragged = draggedRef.current;
-          if (!dragged) return;
-          if (shiftHeld) {
-            // Share the pin with every connected peer. The Y.Map
-            // observer will also update our own pinsRef on the next
-            // tick so the physics loop keeps holding it in place.
-            pinsMap.set(dragged.node, { x: dragged.x, y: dragged.y });
-          }
           draggedRef.current = null;
-          shiftHeld = false;
-        };
-        stage.on('mouseup', stopDrag);
+          if (!dragged) return;
+          // Was this a bare click (pointer barely moved)? Leave the
+          // node alone — clickNode will fire its own navigate. Only
+          // commit a pin when the user actually dragged it.
+          const orig = upEvent.original;
+          const clientX = 'clientX' in orig ? orig.clientX : undefined;
+          const clientY = 'clientY' in orig ? orig.clientY : undefined;
+          if (
+            downScreenPos &&
+            typeof clientX === 'number' &&
+            typeof clientY === 'number'
+          ) {
+            const dx = clientX - downScreenPos.x;
+            const dy = clientY - downScreenPos.y;
+            if (Math.hypot(dx, dy) <= 5) return;
+          }
+          pinsMap.set(dragged.node, { x: dragged.x, y: dragged.y });
+        });
 
         setStatus('ready');
       } catch (err) {
@@ -423,7 +444,25 @@ export function GraphCanvas({
 
   return (
     <>
-      <div ref={containerRef} className="absolute inset-0 bg-[#F4EDE0]" />
+      <div
+        ref={containerRef}
+        id={GRAPH_SCOPE_ID}
+        className="absolute inset-0 bg-[#F4EDE0]"
+      />
+
+      {/* Live mouse cursors for other viewers of the graph. Uses the
+          `.graph-state` provider's awareness so these pointers are
+          only visible to people looking at the graph, not to note
+          viewers. */}
+      <PointerOverlay
+        provider={provider}
+        user={{
+          userId: me.userId,
+          name: me.displayName || 'Anonymous',
+          color: me.accentColor,
+        }}
+        scopeElementId={GRAPH_SCOPE_ID}
+      />
 
       <div className="pointer-events-none absolute left-4 top-4 w-64 space-y-2 text-sm">
         <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
