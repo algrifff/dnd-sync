@@ -12,6 +12,7 @@ import { TitleEditor } from './TitleEditor';
 import { TagEditor } from './TagEditor';
 import { NoteSurface, type SurfaceUser } from './NoteSurface';
 import { PointerOverlay } from './PointerOverlay';
+import { DrawingOverlay } from './DrawingOverlay';
 
 export function NoteWorkspace({
   path,
@@ -101,6 +102,8 @@ export function NoteWorkspace({
           color: user.accentColor,
         }}
       />
+
+      <DrawingOverlay provider={provider} user={{ userId: user.userId }} />
 
       {authFailed && (
         <p className="mt-4 rounded-[8px] border border-[#8B4A52]/40 bg-[#8B4A52]/10 px-3 py-2 text-sm text-[#8B4A52]">
