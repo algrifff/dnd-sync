@@ -10,8 +10,10 @@ import { adminUploadLimiter } from '@/lib/ratelimit';
 import {
   createImportJob,
   listOpenJobsForUser,
+  updateImportJob,
   writeJobZip,
 } from '@/lib/imports';
+import { parseImportZip } from '@/lib/import-parse';
 import { randomUUID } from 'node:crypto';
 
 export const dynamic = 'force-dynamic';
@@ -112,12 +114,40 @@ async function handleUpload(req: NextRequest): Promise<Response> {
   // the two stay aligned operationally even without a FK on id.
   // (Callers downstream never need the file-system id; they use the
   // row id.)
-  const job = createImportJob({
+  let job = createImportJob({
     groupId: session.currentGroupId,
     createdBy: session.userId,
     rawZipPath: tmpPath,
   });
   adminUploadLimiter.recordSuccess(session.userId);
+
+  // Classical parse pass runs inline. Fast enough that the chat can
+  // show the parsed totals without waiting for the async analyse
+  // step. Failures drop the job into 'failed' so the client can
+  // surface the reason without the server hanging.
+  try {
+    const plan = parseImportZip(tmpPath);
+    updateImportJob(job.id, { plan, status: 'uploaded' });
+    job = {
+      ...job,
+      plan,
+    };
+  } catch (err) {
+    updateImportJob(job.id, {
+      status: 'failed',
+      stats: {
+        parseError: err instanceof Error ? err.message : String(err),
+      },
+    });
+    return json(
+      {
+        error: 'parse_failed',
+        jobId: job.id,
+        message: err instanceof Error ? err.message : String(err),
+      },
+      400,
+    );
+  }
 
   // Consumer-friendly shape for the chat UI: return the just-created
   // job + the same shape /api/import/:id will return on poll.
