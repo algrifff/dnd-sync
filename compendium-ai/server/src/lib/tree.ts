@@ -32,15 +32,19 @@ const DEFAULT_FOLDERS: readonly string[] = [
  *  previous run doesn't see it come back on restart. */
 export function ensureDefaultFolders(groupId: string): void {
   const db = getDb();
-  const hasContent = db
-    .query<{ n: number }, [string, string]>(
-      `SELECT
-         (SELECT COUNT(*) FROM notes WHERE group_id = ?1)
-         +
-         (SELECT COUNT(*) FROM folder_markers WHERE group_id = ?2) AS n`,
-    )
-    .get(groupId, groupId);
-  if ((hasContent?.n ?? 0) > 0) return;
+  const noteCount =
+    db
+      .query<{ n: number }, [string]>(
+        'SELECT COUNT(*) AS n FROM notes WHERE group_id = ?',
+      )
+      .get(groupId)?.n ?? 0;
+  const folderCount =
+    db
+      .query<{ n: number }, [string]>(
+        'SELECT COUNT(*) AS n FROM folder_markers WHERE group_id = ?',
+      )
+      .get(groupId)?.n ?? 0;
+  if (noteCount + folderCount > 0) return;
 
   const now = Date.now();
   const insertFolder = db.query(
