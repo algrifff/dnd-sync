@@ -26,7 +26,7 @@ export function AppHeader({
   includeNav?: boolean;
 }): ReactElement {
   return (
-    <header className="flex min-h-[38px] items-end gap-1 border-b border-[#D4C7AE] bg-[#EAE1CF]/60 pl-2 pr-3 pt-1.5">
+    <header className="flex h-[42px] items-end gap-1 border-b border-[#D4C7AE] bg-[#EAE1CF] pl-2 pr-3">
       {includeNav && (
         <nav className="mb-1.5 flex shrink-0 items-center gap-3 pr-3 text-sm text-[#5A4F42]">
           <Link href="/" className="underline-offset-2 hover:underline">

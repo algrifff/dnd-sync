@@ -43,7 +43,7 @@ export function TitleEditor({
       placeholder={placeholder}
       aria-label="Note title"
       spellCheck
-      className="w-full border-0 bg-transparent px-0 py-2 text-4xl font-bold tracking-tight text-[#2A241E] outline-none placeholder:text-[#5A4F42]/40"
+      className="w-full border-0 bg-transparent px-0 py-3 text-4xl font-bold leading-[1.3] tracking-tight text-[#2A241E] outline-none placeholder:text-[#5A4F42]/40"
       style={{ fontFamily: '"Fraunces", Georgia, serif' }}
     />
   );

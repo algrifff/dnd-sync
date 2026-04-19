@@ -28,6 +28,25 @@ export function TagEditor({
 }): React.JSX.Element {
   const router = useRouter();
   const [tags, setTags] = useState<string[]>(initialTags);
+
+  // Reconcile local chip state with the server snapshot that feeds
+  // initialTags each render. useState only honours initialTags on
+  // first mount, so without this a peer's add/remove/pick-existing
+  // wouldn't land in our chip row until the client unmounted. Skip
+  // the update when content matches to avoid stomping on our own
+  // optimistic setTags after a local commit.
+  useEffect(() => {
+    setTags((prev) => {
+      if (
+        prev.length === initialTags.length &&
+        prev.every((t, i) => t === initialTags[i])
+      ) {
+        return prev;
+      }
+      return initialTags;
+    });
+  }, [initialTags]);
+
   const [adding, setAdding] = useState<boolean>(false);
   const [query, setQuery] = useState<string>('');
   const [knownTags, setKnownTags] = useState<Array<{ tag: string; count: number }>>([]);

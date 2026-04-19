@@ -41,7 +41,7 @@ export default async function HomePage(): Promise<ReactElement> {
 
   return (
     <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
-      <aside className="hidden h-full w-[260px] shrink-0 flex-col border-r border-[#D4C7AE] bg-[#EAE1CF]/60 md:flex">
+      <aside className="hidden h-full w-[260px] shrink-0 flex-col bg-[#EAE1CF]/60 md:flex">
         <SidebarHeader role={session.role} />
         <FileTree
           tree={tree}

@@ -19,7 +19,7 @@ export function SidebarFooter({
   accentColor: string;
 }): ReactElement {
   return (
-    <div className="shrink-0 border-t border-[#D4C7AE] bg-[#EAE1CF]/40 px-3 py-2">
+    <div className="shrink-0 border-r border-t border-[#D4C7AE] bg-[#EAE1CF]/40 px-3 py-2">
       <div className="flex items-center gap-2">
         <span
           aria-hidden

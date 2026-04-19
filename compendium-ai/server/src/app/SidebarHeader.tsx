@@ -13,7 +13,7 @@ export function SidebarHeader({
   role: 'admin' | 'editor' | 'viewer';
 }): ReactElement {
   return (
-    <div className="flex shrink-0 items-center gap-1 border-b border-[#D4C7AE] bg-[#EAE1CF]/80 px-2 py-1.5">
+    <div className="flex h-[42px] shrink-0 items-center gap-1 border-b border-[#D4C7AE] bg-[#EAE1CF] px-2">
       <IconLink href="/" label="Home" icon={<Home size={14} aria-hidden />} />
       <IconLink href="/tags" label="Tags" icon={<Tag size={14} aria-hidden />} />
     </div>

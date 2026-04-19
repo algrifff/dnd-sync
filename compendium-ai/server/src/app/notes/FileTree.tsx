@@ -284,7 +284,7 @@ export function FileTree({
   return (
     <nav
       aria-label="Note tree"
-      className="min-h-0 flex-1 overflow-y-auto py-3 text-sm"
+      className="min-h-0 flex-1 overflow-y-auto border-r border-[#D4C7AE] py-3 text-sm"
     >
       {canCreate && (
         <div className="mb-1 flex items-center gap-1 px-2">
