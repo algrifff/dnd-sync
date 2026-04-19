@@ -21,8 +21,19 @@ import { closeDocumentConnections } from '@/collab/server';
 import { getDb } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const maxDuration = 300;
 
 const UPLOAD_CAP = 500 * 1024 * 1024;
+
+// Liveness ping — if this 200s but POST 500s, the route module loads
+// fine and the failure is in body parsing or the handler body.
+export async function GET(): Promise<Response> {
+  return new Response(
+    JSON.stringify({ ok: true, route: '/api/admin/vault/upload', method: 'GET' }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  );
+}
 
 export async function POST(req: NextRequest): Promise<Response> {
   // Outer safety net: no matter where a throw happens, respond with JSON
