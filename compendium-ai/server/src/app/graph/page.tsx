@@ -12,6 +12,7 @@ import { AppHeader } from '../AppHeader';
 import { SidebarHeader } from '../SidebarHeader';
 import { SidebarFooter } from '../SidebarFooter';
 import { FileTree } from '../notes/FileTree';
+import { ActiveCharacterBlock } from '../notes/ActiveCharacterBlock';
 import { GraphCanvas } from './GraphCanvas';
 
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,10 @@ export default async function GraphPage(): Promise<ReactElement> {
     <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
       <aside className="hidden h-full w-[260px] shrink-0 flex-col bg-[#EAE1CF]/60 md:flex">
         <SidebarHeader role={session.role} />
+        <ActiveCharacterBlock
+          csrfToken={session.csrfToken}
+          initialActivePath={session.activeCharacterPath}
+        />
         <FileTree
           tree={tree}
           activePath=""

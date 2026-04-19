@@ -177,10 +177,11 @@ export function updateUserProfile(
     displayName?: string | undefined;
     accentColor?: string | undefined;
     cursorMode?: 'color' | 'image' | undefined;
+    activeCharacterPath?: string | null | undefined;
   },
 ): void {
   const sets: string[] = [];
-  const values: unknown[] = [];
+  const values: Array<string | number | null> = [];
   if (typeof patch.displayName === 'string') {
     sets.push('display_name = ?');
     values.push(patch.displayName);
@@ -193,11 +194,15 @@ export function updateUserProfile(
     sets.push('cursor_mode = ?');
     values.push(patch.cursorMode);
   }
+  if (patch.activeCharacterPath !== undefined) {
+    sets.push('active_character_path = ?');
+    values.push(patch.activeCharacterPath);
+  }
   if (sets.length === 0) return;
   values.push(userId);
   getDb()
     .query(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`)
-    .run(...(values as [string | number, ...Array<string | number>]));
+    .run(...values);
 }
 
 /** Overwrite the user's avatar. `blob` is already sized/compressed

@@ -24,12 +24,18 @@ const Body = z
       .regex(HEX_COLOR, 'accentColor must be #RRGGBB or #RGB')
       .optional(),
     cursorMode: z.enum(['color', 'image']).optional(),
+    // null clears the active character pin; undefined leaves it
+    // untouched. Any string is accepted — we don't verify the path
+    // exists so an admin can pre-set a character the user will
+    // create in a future session.
+    activeCharacterPath: z.string().min(1).max(512).nullable().optional(),
   })
   .refine(
     (o) =>
       o.displayName !== undefined ||
       o.accentColor !== undefined ||
-      o.cursorMode !== undefined,
+      o.cursorMode !== undefined ||
+      o.activeCharacterPath !== undefined,
     { message: 'nothing to update' },
   );
 

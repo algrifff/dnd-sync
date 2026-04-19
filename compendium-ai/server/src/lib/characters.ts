@@ -167,6 +167,114 @@ export function ensureCampaignForPath(
   ).run(groupId, slug, name, folder, Date.now());
 }
 
+// ── Reads ──────────────────────────────────────────────────────────────
+
+export type CharacterListRow = {
+  notePath: string;
+  kind: CharacterKind;
+  playerUserId: string | null;
+  displayName: string;
+  portraitPath: string | null;
+  level: number | null;
+  class: string | null;
+  race: string | null;
+  campaigns: string[];
+  updatedAt: number;
+};
+
+type CharacterDbRow = {
+  note_path: string;
+  kind: string;
+  player_user_id: string | null;
+  display_name: string;
+  portrait_path: string | null;
+  level: number | null;
+  class: string | null;
+  race: string | null;
+  updated_at: number;
+};
+
+function rowToListEntry(
+  r: CharacterDbRow,
+  campaigns: string[],
+): CharacterListRow {
+  return {
+    notePath: r.note_path,
+    kind: r.kind as CharacterKind,
+    playerUserId: r.player_user_id,
+    displayName: r.display_name,
+    portraitPath: r.portrait_path,
+    level: r.level,
+    class: r.class,
+    race: r.race,
+    campaigns,
+    updatedAt: r.updated_at,
+  };
+}
+
+/** All characters in the group. Use for dashboards and pickers. */
+export function listCharacters(
+  groupId: string,
+  filter?: { playerUserId?: string; kind?: CharacterKind },
+): CharacterListRow[] {
+  const db = getDb();
+  const wheres: string[] = ['group_id = ?'];
+  const args: string[] = [groupId];
+  if (filter?.playerUserId) {
+    wheres.push('player_user_id = ?');
+    args.push(filter.playerUserId);
+  }
+  if (filter?.kind) {
+    wheres.push('kind = ?');
+    args.push(filter.kind);
+  }
+  const rows = db
+    .query<CharacterDbRow, string[]>(
+      `SELECT note_path, kind, player_user_id, display_name, portrait_path,
+              level, class, race, updated_at
+         FROM characters
+        WHERE ${wheres.join(' AND ')}
+        ORDER BY display_name COLLATE NOCASE`,
+    )
+    .all(...args);
+  if (rows.length === 0) return [];
+  const campaignsByPath = new Map<string, string[]>();
+  const ccRows = db
+    .query<{ note_path: string; campaign_slug: string }, [string]>(
+      `SELECT note_path, campaign_slug
+         FROM character_campaigns
+        WHERE group_id = ?`,
+    )
+    .all(groupId);
+  for (const cc of ccRows) {
+    const list = campaignsByPath.get(cc.note_path) ?? [];
+    list.push(cc.campaign_slug);
+    campaignsByPath.set(cc.note_path, list);
+  }
+  return rows.map((r) => rowToListEntry(r, campaignsByPath.get(r.note_path) ?? []));
+}
+
+export type CampaignRow = {
+  slug: string;
+  name: string;
+  folderPath: string;
+};
+
+export function listCampaigns(groupId: string): CampaignRow[] {
+  return getDb()
+    .query<
+      { slug: string; name: string; folder_path: string },
+      [string]
+    >(
+      `SELECT slug, name, folder_path
+         FROM campaigns
+        WHERE group_id = ?
+        ORDER BY name COLLATE NOCASE`,
+    )
+    .all(groupId)
+    .map((r) => ({ slug: r.slug, name: r.name, folderPath: r.folder_path }));
+}
+
 // ── Permission helper ──────────────────────────────────────────────────
 
 /** True when a viewer-role user owns this character via frontmatter

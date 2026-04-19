@@ -24,6 +24,7 @@ const sessionWithToken: Session = {
   expiresAt: Date.now() + 60_000,
   cursorMode: 'color',
   avatarVersion: 0,
+  activeCharacterPath: null,
 };
 
 describe('verifyCsrf', () => {

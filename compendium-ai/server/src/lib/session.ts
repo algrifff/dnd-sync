@@ -48,6 +48,10 @@ export type Session = {
   // as a cache-buster when loading /api/users/:id/avatar?v=<n> and
   // also as a "has avatar?" flag (0 = no avatar uploaded).
   avatarVersion: number;
+  // The user's pinned PC (null if none). Surfaced in the left
+  // sidebar's active-character block; writes persist via PATCH
+  // /api/profile with an activeCharacterPath field.
+  activeCharacterPath: string | null;
 };
 
 export type NewSessionInput = {
@@ -150,6 +154,7 @@ type SessionJoinRow = {
   role: UserRole | null;
   cursor_mode: string;
   avatar_updated_at: number;
+  active_character_path: string | null;
 };
 
 /** Create a new session row and return the full Session shape, including
@@ -251,6 +256,7 @@ function loadSessionRowById(id: string): SessionJoinRow | null {
         `SELECT s.id, s.user_id, s.current_group_id, s.csrf_token, s.expires_at,
                 u.username, u.display_name, u.accent_color,
                 u.cursor_mode, u.avatar_updated_at,
+                u.active_character_path,
                 gm.role AS role
            FROM sessions s
            JOIN users u ON u.id = s.user_id
@@ -275,6 +281,7 @@ function shapeSession(row: SessionJoinRow): Session {
     expiresAt: row.expires_at,
     cursorMode: (row.cursor_mode === 'image' ? 'image' : 'color') as CursorMode,
     avatarVersion: row.avatar_updated_at,
+    activeCharacterPath: row.active_character_path,
   };
 }
 
