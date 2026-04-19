@@ -56,19 +56,82 @@ CREATE TABLE import_jobs (
 
 ## 4. AI provider
 
-**OpenAI**, default model `gpt-4o-mini`. Env:
+**OpenAI**, default model `gpt-5-mini`. GPT-5.x models use the newer
+**Responses API** (`POST /v1/responses`) with a different request/response
+shape and parameter set than Chat Completions, so the client wrapper has
+to dispatch on model family rather than hard-coding one shape.
+
+### Env
 
 ```
 OPENAI_API_KEY=sk-…               required
-OPENAI_MODEL=gpt-4o-mini          optional override
-IMPORT_MAX_AI_CALLS=500           hard cap per job (env-configurable)
+OPENAI_MODEL=gpt-5-mini           optional override; see family dispatch below
+OPENAI_REASONING_EFFORT=minimal   minimal | low | medium | high (GPT-5 only)
+IMPORT_MAX_AI_CALLS=500           hard cap per job
 IMPORT_MAX_MONTHLY_COST_USD=20    soft monthly cap across jobs; job fails
                                    if the running total would exceed it
 ```
 
-We use OpenAI's **structured outputs** (`response_format: { type: "json_schema", json_schema: ... }`) so the model returns JSON that's already schema-valid. One retry on validation failure; then the note is marked `unclassified` and defaults to `kind: plain` in its original folder so nothing is lost.
+### Family dispatch
 
-Token accounting goes into `stats_json` on every job and is summed per month for the soft cap check.
+The client wrapper (`lib/ai/openai.ts`) exposes one method —
+`generateStructured({ model, system, user, schema, ... })` — and
+dispatches internally by model prefix:
+
+| Prefix                                  | Endpoint                  | Shape |
+|-----------------------------------------|---------------------------|-------|
+| `gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `o3`, `o4` | `/v1/responses`   | Responses API |
+| `gpt-4o`, `gpt-4o-mini`, `gpt-4.1`      | `/v1/chat/completions`    | Chat Completions |
+
+Rules baked into the Responses path:
+
+- **No `temperature`** — reasoning models reject it. We don't set one.
+- **`reasoning: { effort: <env> }`** passed per call; default `minimal`
+  because classification is pattern-matching, not chain-of-thought.
+  (Effort creeps up cost + latency fast; we guard it behind the env.)
+- **Structured output** via
+  `text: { format: { type: "json_schema", name: "…", strict: true, schema: … } }`
+  — the Responses-API equivalent of Chat Completions'
+  `response_format: { type: "json_schema", … }`.
+- Request body uses `input: [{ role, content: [{ type: "input_text", text }] }]`
+  instead of Chat's `messages: [{ role, content }]`.
+- Output comes back in `output[]` items; we pick the first item of type
+  `message` and read its `content[0].text` which is the JSON string our
+  schema guarantees.
+
+For the Chat-Completions path (if the DM swaps to a 4.x model) the
+wrapper uses the traditional `response_format: { type: "json_schema", … }`
+with `strict: true`. Same `generateStructured` call site.
+
+### Token + cost accounting
+
+Usage comes back with three counters on the Responses API:
+
+- `input_tokens`
+- `output_tokens` — user-visible tokens the model produced
+- `output_tokens_details.reasoning_tokens` — billed like output but
+  not returned to us; we must count them toward cost to not undershoot
+
+We record all three in `stats_json` and compute cost as:
+
+```
+cost = input_tokens      × input_price_per_mtok
+     + output_tokens     × output_price_per_mtok     // includes reasoning_tokens
+```
+
+Per-model pricing sits in a small table in `lib/ai/pricing.ts` keyed by
+model name, updated when OpenAI's pricing page moves. Unknown models
+fall back to the GPT-5-mini rate with a warning in the job log — we'd
+rather over-estimate than silently under-count.
+
+### Retry + fallback
+
+- One retry on schema-validation failure (very rare with `strict: true`
+  but not zero).
+- On consistent failure a note is marked `unclassified` and ships as
+  `kind: plain` in its original folder — nothing is lost.
+- If the Responses API returns a 400 because `reasoning.effort` isn't
+  supported for a given model, we drop the reasoning field and retry.
 
 ---
 
@@ -134,12 +197,20 @@ Single responsibility: **classify and extract one note at a time**, aware of the
 
 ## 6. Cost guardrails
 
-- Hard cap per job: **500 AI calls or 500k tokens**, whichever first. Env-configurable.
-- Soft monthly cap across all jobs for the group.
-- One retry on JSON-schema failure; then the note goes to `unclassified`.
-- Job status + plan include running token / call counts so the DM sees what each import spent.
+- Hard cap per job: **500 AI calls or 500k tokens** (input + output +
+  reasoning), whichever first. Env-configurable.
+- Soft monthly cap summed from `stats_json` across all jobs in the group.
+- One retry on schema-validation failure; then the note goes to
+  `unclassified`.
+- Job status + plan include running call / token / cost counts so the
+  DM sees what each import is spending mid-run and can cancel.
 
-Rough cost on `gpt-4o-mini` at list price: **~$0.03–0.15 per typical 100-note vault**. Negligible for a hobby deployment.
+Rough cost on `gpt-5-mini` at `reasoning.effort: minimal` and list
+price: **≈$0.05–0.30 per 100-note vault** (cost scales roughly with
+total markdown size, not raw note count). Still negligible for a hobby
+deployment — but if the DM cranks `OPENAI_REASONING_EFFORT` up to
+`medium`, the per-call bill can 2–5× because reasoning tokens add up
+fast. The running-cost display makes that visible.
 
 ---
 
@@ -268,7 +339,12 @@ v2 (deferred):
 
 ## 14. Decisions locked in
 
-1. **AI provider**: **OpenAI**, `gpt-4o-mini`, via `OPENAI_API_KEY` env. Swap to GPT-4o or any future model by setting `OPENAI_MODEL`.
+1. **AI provider**: **OpenAI**, default model `gpt-5-mini` via the
+   **Responses API** with `reasoning.effort: minimal` by default. The
+   client wrapper dispatches on model family (§4) so swapping to
+   GPT-4o-family reverts to Chat Completions transparently. Env:
+   `OPENAI_API_KEY`, optional `OPENAI_MODEL`,
+   `OPENAI_REASONING_EFFORT`.
 2. **Review is mandatory**, but `Accept all` is one click.
 3. **Target campaign** chosen at job level unless the drop's folder layout already names a campaign.
 4. **Destination world** is always the currently-active world — switch worlds first to import elsewhere.
