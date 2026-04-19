@@ -6,6 +6,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { cancelImportJob, getImportJob } from '@/lib/imports';
+import { abortAnalyse } from '@/lib/import-analyse';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,6 +52,11 @@ export async function DELETE(req: NextRequest, ctx: Ctx): Promise<Response> {
     return json({ error: 'already_applied' }, 409);
   }
 
+  // Kill any in-flight AI worker first so its abortable fetch calls
+  // bail out cleanly. The worker observes the signal and updates the
+  // job to cancelled; cancelImportJob below handles the terminal
+  // flip + temp-file cleanup for jobs that never started analysing.
+  abortAnalyse(id);
   cancelImportJob(id);
   return json({ ok: true });
 }
