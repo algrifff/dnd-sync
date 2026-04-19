@@ -8,8 +8,10 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Star, StarOff } from 'lucide-react';
+import { Plus, Star, StarOff, X } from 'lucide-react';
 import type { CharacterListRow } from '@/lib/characters';
+
+type Role = 'pc' | 'npc' | 'ally' | 'villain';
 
 export function CharactersDashboard({
   csrfToken,
@@ -31,6 +33,7 @@ export function CharactersDashboard({
     activeCharacterPath,
   );
   const [saving, setSaving] = useState<boolean>(false);
+  const [creatorOpen, setCreatorOpen] = useState<boolean>(false);
 
   const setActive = async (path: string | null): Promise<void> => {
     if (saving) return;
@@ -56,9 +59,37 @@ export function CharactersDashboard({
   };
 
   const mineByCampaign = groupByCampaign(mine);
+  const campaignSlugs = Object.keys(campaignNames).sort((a, b) =>
+    (campaignNames[a] ?? '').localeCompare(campaignNames[b] ?? ''),
+  );
 
   return (
     <div className="space-y-8">
+      <div className="flex items-center justify-between">
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={() => setCreatorOpen(true)}
+          className="flex items-center gap-1 rounded-[8px] bg-[#2A241E] px-3 py-2 text-sm font-medium text-[#F4EDE0] transition hover:bg-[#3A342E]"
+        >
+          <Plus size={14} aria-hidden /> New character
+        </button>
+      </div>
+
+      {creatorOpen && (
+        <NewCharacterDialog
+          csrfToken={csrfToken}
+          isAdmin={isAdmin}
+          campaignSlugs={campaignSlugs}
+          campaignNames={campaignNames}
+          onClose={() => setCreatorOpen(false)}
+          onCreated={(path) => {
+            setCreatorOpen(false);
+            router.push('/notes/' + path.split('/').map(encodeURIComponent).join('/'));
+          }}
+        />
+      )}
+
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[#5A4F42]">
           Your characters
@@ -248,3 +279,186 @@ const KIND_LABELS: Record<string, string> = {
   ally: 'Ally',
   villain: 'Villain',
 };
+
+function NewCharacterDialog({
+  csrfToken,
+  isAdmin,
+  campaignSlugs,
+  campaignNames,
+  onClose,
+  onCreated,
+}: {
+  csrfToken: string;
+  isAdmin: boolean;
+  campaignSlugs: string[];
+  campaignNames: Record<string, string>;
+  onClose: () => void;
+  onCreated: (path: string) => void;
+}): React.JSX.Element {
+  const [name, setName] = useState<string>('');
+  const [role, setRole] = useState<Role>('pc');
+  const [campaignSlug, setCampaignSlug] = useState<string>(
+    campaignSlugs[0] ?? '',
+  );
+  const [pending, setPending] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
+    e.preventDefault();
+    if (pending) return;
+    const cleanName = name.trim();
+    if (!cleanName) {
+      setError('Name is required.');
+      return;
+    }
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/characters/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+        body: JSON.stringify({
+          role,
+          name: cleanName,
+          campaignSlug: campaignSlug || undefined,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        path?: string;
+        error?: string;
+        detail?: string;
+      };
+      if (!res.ok || !body.ok || !body.path) {
+        setError(body.detail ?? body.error ?? `create failed (${res.status})`);
+        return;
+      }
+      onCreated(body.path);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'network error');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  // Players can only create PCs. Admins + editors can create any role.
+  const allowedRoles: Role[] = isAdmin
+    ? ['pc', 'npc', 'ally', 'villain']
+    : ['pc'];
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#2A241E]/40 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <form
+        onSubmit={submit}
+        className="w-full max-w-sm rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-4 shadow-[0_16px_48px_rgba(42,36,30,0.25)]"
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-[#2A241E]">
+            Create character
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-[6px] p-1 text-[#5A4F42] transition hover:bg-[#F4EDE0]"
+          >
+            <X size={14} aria-hidden />
+          </button>
+        </div>
+
+        <label className="mb-3 block">
+          <span className="mb-1 block text-xs font-medium text-[#5A4F42]">
+            Name
+          </span>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+            className="w-full rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1.5 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
+          />
+        </label>
+
+        <fieldset className="mb-3">
+          <legend className="mb-1 block text-xs font-medium text-[#5A4F42]">
+            Role
+          </legend>
+          <div className="flex flex-wrap gap-1">
+            {allowedRoles.map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setRole(r)}
+                aria-pressed={role === r}
+                className={
+                  'rounded-[6px] border px-2 py-1 text-xs transition ' +
+                  (role === r
+                    ? 'border-[#2A241E] bg-[#2A241E] text-[#F4EDE0]'
+                    : 'border-[#D4C7AE] bg-[#F4EDE0] text-[#2A241E] hover:bg-[#EAE1CF]')
+                }
+              >
+                {KIND_LABELS[r]}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+
+        <label className="mb-3 block">
+          <span className="mb-1 block text-xs font-medium text-[#5A4F42]">
+            Campaign{role !== 'pc' && ' (optional)'}
+          </span>
+          <select
+            value={campaignSlug}
+            onChange={(e) => setCampaignSlug(e.target.value)}
+            className="w-full rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1.5 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
+          >
+            {role !== 'pc' && <option value="">No campaign</option>}
+            {campaignSlugs.length === 0 ? (
+              <option value="" disabled>
+                No campaigns detected — create a note under
+                Campaigns/&lt;name&gt;/ first.
+              </option>
+            ) : (
+              campaignSlugs.map((slug) => (
+                <option key={slug} value={slug}>
+                  {campaignNames[slug] ?? slug}
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+
+        {error && (
+          <p className="mb-3 text-xs text-[#8B4A52]">{error}</p>
+        )}
+
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-[6px] px-3 py-1.5 text-xs font-medium text-[#5A4F42] transition hover:text-[#2A241E]"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={pending || !name.trim() || (role === 'pc' && !campaignSlug)}
+            className="rounded-[6px] bg-[#2A241E] px-3 py-1.5 text-xs font-medium text-[#F4EDE0] transition hover:bg-[#3A342E] disabled:opacity-50"
+          >
+            {pending ? 'Creating…' : 'Create'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
