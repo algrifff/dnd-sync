@@ -1,25 +1,28 @@
 # Characters, templates, campaigns — plan
 
-> Draft plan for the D&D-specific structure layered over the generic vault.
-> Four open questions at the bottom need a decision before implementation.
+> Plan for the D&D-specific structure layered over the generic vault.
+> Decisions locked in §7; implementation proceeds in phases from §6.
 
 ---
 
 ## 1. The shape of the world
 
 ```
+server                              (global scope)
+ └── note_templates                 (one per kind, shared across all worlds)
+
 group (= vault = world)
  ├── users           (players + admins)
  ├── campaigns       (auto-discovered from folder structure)
- ├── templates       (one per kind: pc, npc, ally, villain)
- ├── notes           (all pages — characters are notes with structured frontmatter)
- └── characters      (derived index, queried for lists/dashboards)
+ ├── notes           (all pages — structured notes carry typed frontmatter)
+ ├── characters      (derived index of character-kind notes)
+ └── sessions        (derived index of session-kind notes — Phase 2)
 ```
 
 - **World** = vault (existing `groups` row).
 - **Campaign** = first-class entity, auto-discovered from `Campaigns/<n>/…` paths. Editable display name, but the slug is driven by the folder.
-- **Character** = a note whose frontmatter declares `kind: character`. The note body stays the backstory / free-form prose. The frontmatter holds structured fields whose shape comes from a **template**.
-- **Template** = admin-owned schema definition. Declares what fields exist on a character sheet. Players never see or edit it.
+- **Structured note** = a note whose frontmatter declares `kind:` (`character` with a `role:` sub-kind, or `session`). The body stays free-form prose; the frontmatter carries the typed fields. Covers PCs, NPCs, Allies, Villains, Sessions, and future kinds (Locations, Items, Quests).
+- **Template** = admin-owned schema definition. Declares what fields exist for a given kind. Shared **across all worlds on the server** — many campaigns will want the same 5e PC sheet or the same session-log shape, and admins shouldn't have to re-seed per world. Players never see or edit templates.
 
 ### Why "character is a note + index table"
 
@@ -32,17 +35,16 @@ The note is the source of truth — that way file moves (NPC → Villain), colla
 ### New tables (migration v13)
 
 ```sql
--- Schema definitions. One per (group, kind). Admin-only write.
-character_templates (
-  id TEXT PRIMARY KEY,              -- uuid
-  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL,               -- 'pc' | 'npc' | 'ally' | 'villain'
+-- Schema definitions. Global — shared across every world. Admin-only
+-- write (any admin in any group can CRUD; small self-hosted
+-- deployment with one DM is the usual shape).
+note_templates (
+  kind TEXT PRIMARY KEY,            -- 'pc' | 'npc' | 'ally' | 'villain' | 'session'
   name TEXT NOT NULL,               -- "D&D 5e PC"
   schema_json TEXT NOT NULL,        -- sections + fields (see §3)
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  updated_by TEXT REFERENCES users(id),
-  UNIQUE (group_id, kind)
+  updated_by TEXT REFERENCES users(id)
 );
 
 -- Campaigns. Auto-created when a note is saved under Campaigns/<name>/.
@@ -59,8 +61,7 @@ campaigns (
 characters (
   group_id TEXT NOT NULL,
   note_path TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  template_id TEXT REFERENCES character_templates(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL,                        -- 'pc' | 'npc' | 'ally' | 'villain'
   player_user_id TEXT REFERENCES users(id),  -- null for NPC/ally/villain
   display_name TEXT NOT NULL,
   portrait_path TEXT,                        -- vault path to portrait asset
@@ -87,6 +88,12 @@ character_campaigns (
 -- Per-user pin.
 ALTER TABLE users ADD COLUMN active_character_path TEXT;
 ```
+
+**Sessions (migration v14, Phase 2):** a mirror of the characters
+index, keyed by note path, with `session_date`, `campaign_slug`,
+`attendees` (json), and `summary`. Same derive-on-save pattern. The
+session template lives in `note_templates` from day one so admins
+can shape it before the UI lands.
 
 ### Frontmatter contract (what a character note looks like on disk)
 
@@ -136,10 +143,10 @@ When a note is saved:
 
 ```
 <vault>/
-  PCs/                              ← cross-campaign player characters
   Campaigns/
     Campaign 3/
       Characters/
+        PCs/                        ← player characters for this campaign
         NPCs/
         Allies/
         Villains/
@@ -148,6 +155,8 @@ When a note is saved:
   Recurring/
     Characters/                     ← villains etc. reused across campaigns
 ```
+
+PCs live under their campaign folder. If a player wants the same PC in two campaigns (rare), either duplicate the note or add `campaigns: [c2, c3]` frontmatter and pick one canonical folder.
 
 Admins can organise differently; `campaigns:` frontmatter is what actually binds. The folder convention is what the "+ New character" button and the kind-inference fallbacks assume.
 
@@ -220,28 +229,39 @@ When an admin edits a template:
 - **Rename `id`**: treated as remove + add. User intervention needed for the rename. (We can add an explicit "rename" op later.)
 - **Change type**: value preserved; sheet shows "incompatible value" with a "reset to default" button.
 
-### Seed on group creation
+### Seed on server first boot
 
-First boot: each group gets a minimal 5e PC template, plus empty NPC / Ally / Villain templates. Admin customises from there.
+Templates are server-global, so seeding runs once at startup, not per group. On first boot (when the `note_templates` table is empty) we insert:
+
+- **PC** — the minimal 5e sheet above (basics, abilities, combat)
+- **NPC** — name, role tagline, portrait, notes (+ optional stat block subset)
+- **Ally** — NPC + disposition, trust
+- **Villain** — NPC + ambitions, resources
+- **Session** — date, attendees, locations visited, summary, outcomes
+
+Any admin can tailor any of these from `/settings/templates`. Edits affect every world on the server.
 
 ---
 
 ## 4. Permissions
 
-| Action | Admin | Editor | Viewer | Player (self's PC) |
-|--|--|--|--|--|
-| View any character | ✓ | ✓ | ✓ | ✓ |
-| Edit any character | ✓ | ✓ | | |
-| Edit own PC's sheet | ✓ | ✓ | | ✓ |
-| Edit another player's PC | ✓ | | | |
-| Edit `playerEditable` fields on any sheet | ✓ | ✓ | | ✓ |
-| CRUD templates | ✓ | | | |
-| See `/settings/templates` | ✓ | | | |
-| Create campaign | ✓ | ✓ | | |
+The existing three roles stay — `admin` (DM), `editor` (co-DM), `viewer` (player) — but viewers pick up a creator-ownership overlay that lets them edit what they make.
 
-"Own PC" = frontmatter `player:` matches your username. This is enforced **server-side** in the collab save hook, not just in the UI — a player editing raw yaml can't bypass it because save rejects.
+| Action | Admin | Editor | Viewer (player) |
+|--|--|--|--|
+| View any note / character | ✓ | ✓ | ✓ |
+| Edit any note / character | ✓ | ✓ | |
+| Edit notes they created (`created_by` match) | ✓ | ✓ | ✓ |
+| Edit their own PC (HP, items, inventory, backstory) | ✓ | ✓ | ✓ |
+| Edit another player's PC | ✓ | ✓ | |
+| Edit `playerEditable` fields on any character (e.g. HP) | ✓ | ✓ | ✓ |
+| CRUD templates | ✓ | | |
+| See `/settings/templates` | ✓ | | |
+| Create / rename campaign | ✓ | ✓ | |
 
-HP current is a common exception: you want players to update their own HP during a session. Solution: template fields can carry `playerEditable: true`, which opens that specific field to edits by any player (regardless of PC ownership). HP-current, conditions, death saves are the usual suspects.
+"Own PC" = frontmatter `player:` matches your username. All of the above is enforced **server-side** in the collab save hook, not just in the UI — a player editing raw yaml can't bypass it because save rejects.
+
+HP current, conditions, death saves etc. are common shared-write fields during a session. Template fields carry `playerEditable: true` to open them to edits by any authenticated user regardless of PC ownership.
 
 ---
 
@@ -272,11 +292,14 @@ HP current is a common exception: you want players to update their own HP during
 - Below the sheet: normal markdown prose editor for backstory.
 - Bottom of sheet: "orphaned fields" block if the template changed under you.
 
-### Top nav: active-character chip
+### Left sidebar: active-character block (top, above the file tree)
 
-- Portrait + name of your active character.
-- Click → open the sheet.
-- Dropdown → switch active; quick-link to `/characters`.
+- Dedicated section at the top of the left sidebar (above the file tree, below the sidebar header).
+- Shows portrait + name/class of your active character.
+- Dropdown lists all your PCs across campaigns; picking one sets it as active and persists to `users.active_character_path`.
+- Clicking the block opens the active character's sheet.
+- "None" option clears the active character.
+- State is per-user and persists across sessions.
 
 ### File tree
 
@@ -292,35 +315,48 @@ HP current is a common exception: you want players to update their own HP during
 
 ## 6. Phased delivery
 
-One commit per bullet:
+One commit per bullet.
+
+### Phase 1 — Player characters
 
 | # | Title | What lands |
 |--|--|--|
-| **1a** | Schema + defaults | Migration v13, seed default 5e PC template on group create, seed other empty kinds |
-| **1b** | Derive pipeline | Hook into the existing save-derive path: parse frontmatter, maintain `characters` + `character_campaigns` + `campaigns` tables |
-| **1c** | Admin template editor | `/settings/templates` page, CRUD UI, live preview |
-| **1d** | Character sheet on note page | Detect `kind: character`, render sheet above prose, form binds to frontmatter via Y.Doc, permissions enforced |
-| **1e** | `/characters` dashboard + active-chip | Per-user listing, active pin, quick switcher |
-| **1f** | Creation flow + folder niceties | "+ New character" buttons, folder inference, file-tree kind icons |
+| **1a** | Schema + defaults | Migration v13, global `note_templates` table, seed PC / NPC / Ally / Villain / Session templates on first boot |
+| **1b** | Derive pipeline + permission overlay | Hook into the existing save-derive path: parse frontmatter, maintain `characters` + `character_campaigns` + `campaigns` tables; apply the creator-ownership + PC-ownership + `playerEditable` checks in the collab save hook |
+| **1c** | Admin template editor | `/settings/templates` page, CRUD UI, live preview. Visible only to `admin` role. |
+| **1d** | Character sheet on note page | Detect `kind: character`, render sheet above prose, form binds to frontmatter via Y.Doc, per-field permissions enforced |
+| **1e** | Sidebar active-character block + `/characters` dashboard | Dedicated block at the top of the left sidebar with dropdown switcher; `/characters` page listing your PCs grouped by campaign |
+| **1f** | Creation flow + folder niceties | "+ New character" buttons inside `Characters/*` folders, folder inference, file-tree kind icons |
 
 1b through 1f each depend on 1a + 1b. 1c–1f can be done in sequence but reviewed independently.
 
-NPC / Ally / Villain sheets beyond Phase 1, the assets gallery, session-run mode, and the DM-only layer all come after.
+### Phase 2 — Sessions
+
+Session notes get their own index (`sessions` table, migration v14), their own kind-icon treatment, and a `/sessions` per-campaign dashboard (chronological list, "+ New session" seeded from today's date). Template already exists from Phase 1a seed so admins can shape the schema before the UI lands.
+
+### Phase 3 — Assets gallery
+
+`/assets` grid with filters (portraits, tokens, maps), click-through to embedding notes.
+
+### Phase 4 — DM layer + session-run mode
+
+DM-only visibility flag on notes, initiative tracker, HP board, quick-access NPC cards during a live session.
 
 ---
 
-## 7. Open questions — need a decision
+## 7. Decisions (locked in)
 
-1. **One template per kind, or multiple?**
-   Simpler: one per kind, admin-editable. More flexible: admins create N templates per kind (e.g., "5e PC", "Homebrew PC", "One-shot PC") and each character picks one. Recommendation: **start with one per kind**; grow if needed.
+1. **One template per kind.** Admin edits it; grows to multi-template-per-kind only if a real need surfaces.
 
-2. **PCs folder location.**
-   `/PCs/` at the vault root (cross-campaign, easy to find) or `/Campaigns/<n>/PCs/` (clearly scoped)?
-   Recommendation: **root-level `/PCs/`** with `campaigns:` frontmatter doing the binding — matches the crossover-character case better.
+2. **PCs live under their campaign** at `Campaigns/<name>/Characters/PCs/<player>.md`. Active character is surfaced in a dedicated block at the top of the left sidebar (above the file tree), with a dropdown to switch, persisted to `users.active_character_path`. This replaces the top-nav chip idea.
 
-3. **Player-writable fields on others' sheets.**
-   Players will want to mark each other's HP during combat. OK to add a `playerEditable: true` flag per field (defaults false)? HP-current, conditions, death saves are the usual suspects.
+3. **Player (`viewer` role) can edit:**
+   - Any note they created (`created_by` match)
+   - Their own PC fully — HP, items, inventory, backstory prose
+   - `playerEditable` fields on any character (shared combat state like HP-current, conditions)
 
-4. **Per-group templates vs global.**
-   Per-group (each world has its own) or global (one shared "5e PC" template across all worlds on the server)?
-   Recommendation: **per-group**, so each world can diverge. Admins can share by copying schema JSON if they want.
+   Enforced server-side in the collab save hook. No raw-yaml bypass.
+
+4. **Templates are server-global, not per-world.** Different campaigns on the same server will usually want the same 5e PC sheet / the same session-log shape; admins shouldn't have to re-seed per world. Any `admin`-role user on any world can CRUD them. If a single deployment ever hosts truly divergent game systems we can introduce per-group overrides later without breaking the global default.
+
+5. **Sessions are in the same system.** `session` is a seeded kind from day one so admins can shape its template alongside the character kinds; the UI and dedicated `sessions` index table land in Phase 2.
