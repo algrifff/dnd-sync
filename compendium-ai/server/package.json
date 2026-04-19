@@ -31,6 +31,8 @@
     "@tiptap/starter-kit": "^3.22.4",
     "@types/adm-zip": "^0.5.8",
     "adm-zip": "^0.5.17",
+    "argon2": "^0.44.0",
+    "better-sqlite3": "^12.9.0",
     "lib0": "^0.2.117",
     "lucide-react": "^1.8.0",
     "next": "^15.1.0",
@@ -50,11 +52,13 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.5.13",
     "postcss": "^8.4.49",
     "tailwindcss": "^4.0.0",
+    "tsx": "^4.21.0",
     "y-websocket": "^3.0.0"
   }
 }

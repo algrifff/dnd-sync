@@ -2,7 +2,7 @@
 // schema_version and applies anything that hasn't run yet. Each migration
 // is wrapped in a transaction.
 
-import type { Database } from 'bun:sqlite';
+import type { Database } from './db';
 
 type Migration = {
   readonly version: number;

@@ -3,7 +3,9 @@
 // efficient. Cache is private because the asset is scoped to the user's
 // group; hash-based id makes it safe to cache forever (immutable).
 
+import { createReadStream, existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
+import { Readable } from 'node:stream';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { getAssetById, assetPath } from '@/lib/assets';
@@ -25,8 +27,7 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
   if (!asset) return new Response('not_found', { status: 404 });
 
   const filePath = assetPath(asset.hash, asset.mime);
-  const file = Bun.file(filePath);
-  if (!(await file.exists())) {
+  if (!existsSync(filePath)) {
     return new Response('asset_missing_from_disk', { status: 410 });
   }
 
@@ -52,8 +53,8 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
       });
     }
     const [start, end] = parsed;
-    const chunk = file.slice(start, end + 1);
-    return new Response(chunk.stream(), {
+    const chunk = createReadStream(filePath, { start, end });
+    return new Response(toWebStream(chunk), {
       status: 206,
       headers: {
         ...baseHeaders,
@@ -63,13 +64,20 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
     });
   }
 
-  return new Response(file.stream(), {
+  return new Response(toWebStream(createReadStream(filePath)), {
     status: 200,
     headers: {
       ...baseHeaders,
       'Content-Length': String(diskSize),
     },
   });
+}
+
+// Adapter from Node's stream.Readable to the Web Streams API's
+// ReadableStream that the fetch Response constructor expects.
+// Node 18+ supports Readable.toWeb natively.
+function toWebStream(node: Readable): ReadableStream {
+  return Readable.toWeb(node) as unknown as ReadableStream;
 }
 
 function parseRange(header: string, size: number): [number, number] | null {

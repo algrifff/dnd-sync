@@ -1,42 +1,45 @@
 # Build context is the `compendium-ai/` folder (set via railway.toml).
 #
-# Three stages, each using the tool that's native to its phase:
-#   1. deps    — Bun installs from bun.lockb (fast, honours the lockfile)
-#   2. build   — Node compiles Next (Next is Node-first; running next
-#                build under Bun's node-compat layer caused worker-IPC
-#                failures on Railway that don't repro locally)
-#   3. runtime — Bun serves (we use Bun.file + bun:sqlite natively,
-#                so the serving image has to be Bun)
-# The build output from stage 2 is platform-agnostic JS; Bun runs it
-# identically whether Node or Bun compiled it.
+# Previously this was Bun-install + Node-build + Bun-runtime. The
+# Bun runtime worked for simple routes but blew up with opaque
+# "SyntaxError: Unexpected token ','" on anything that pulled the
+# heavy ingest/collab/Tiptap import chain at module load. Running
+# Next 15's production server under Bun's Node-compat layer has
+# sharp edges we can't paper over without giving up reliability.
+#
+# Node is Next's native target. Running the whole pipeline under
+# Node eliminates the entire class of Bun↔Next boundary issues.
+# We give up Bun.file (swapped to fs.createReadStream) and
+# bun:sqlite (swapped to better-sqlite3) — both Node-native and
+# equivalent in semantics for our use.
+#
+# Two stages:
+#   1. build   — Node installs + builds plugin + builds Next
+#   2. runtime — Node runs server.ts via tsx's ESM loader
 
-# --- Stage 1: install dependencies with Bun -----------------------------
-FROM oven/bun:1.1.45 AS deps
-WORKDIR /app
-COPY package.json bun.lockb tsconfig.base.json ./
-COPY shared/package.json ./shared/
-COPY server/package.json ./server/
-COPY plugin/package.json ./plugin/
-RUN bun install --frozen-lockfile
-
-
-# --- Stage 2: build with Node -------------------------------------------
+# --- Stage 1: install + build on Node ----------------------------------
 FROM node:20-slim AS build
 WORKDIR /app
 
-# Bun-installed node_modules uses the standard npm layout; Node reads
-# it without modification. Workspace packages come through as symlinks
-# which Node resolves natively.
-COPY --from=deps /app/node_modules      ./node_modules
-COPY --from=deps /app/package.json      ./package.json
-COPY --from=deps /app/bun.lockb         ./bun.lockb
-COPY --from=deps /app/tsconfig.base.json ./tsconfig.base.json
+# Build tools for the native modules we depend on (better-sqlite3,
+# argon2). Both ship prebuilt binaries for common platforms, but
+# falling back to a local compile keeps the build deterministic even
+# when the prebuild cache misses.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package.json tsconfig.base.json ./
+COPY shared/package.json ./shared/
+COPY server/package.json ./server/
+COPY plugin/package.json ./plugin/
+RUN npm install --no-audit --no-fund
+
 COPY shared ./shared
 COPY plugin ./plugin
 COPY server ./server
 
-# Plugin bundle. Invoke esbuild.config.mjs directly under Node so the
-# plugin's package-script (which calls "bun run ...") is bypassed.
+# Plugin bundle.
 WORKDIR /app/plugin
 RUN node esbuild.config.mjs --production
 
@@ -46,8 +49,8 @@ ENV NODE_ENV=production
 RUN npm run build
 
 
-# --- Stage 3: runtime on Bun --------------------------------------------
-FROM oven/bun:1.1.45 AS runtime
+# --- Stage 2: runtime on Node ------------------------------------------
+FROM node:20-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
@@ -67,4 +70,7 @@ COPY --from=build /app/plugin/manifest.json         ./plugin-bundle/manifest.jso
 
 WORKDIR /app/server
 EXPOSE 3000
-CMD ["bun", "run", "server.ts"]
+# tsx's ESM loader transforms TypeScript on import so server.ts can
+# run under Node without a prior compile step. Avoids maintaining a
+# separate tsc emit just for the custom server entry.
+CMD ["node", "--import", "tsx/esm", "server.ts"]

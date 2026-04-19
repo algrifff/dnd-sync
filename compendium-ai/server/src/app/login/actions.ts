@@ -17,6 +17,7 @@ import {
   destroySession,
   readSession,
   rotateSession,
+  hashPassword,
   sessionCookieName,
   verifyPassword,
 } from '@/lib/session';
@@ -31,7 +32,7 @@ const GENERIC_ERROR = 'Unknown username or password.';
 // no user row was found. Lazily computed once; reused thereafter.
 let dummyHashPromise: Promise<string> | null = null;
 function getDummyHash(): Promise<string> {
-  dummyHashPromise ??= Bun.password.hash('never-real-user', { algorithm: 'argon2id' });
+  dummyHashPromise ??= hashPassword('never-real-user');
   return dummyHashPromise;
 }
 
