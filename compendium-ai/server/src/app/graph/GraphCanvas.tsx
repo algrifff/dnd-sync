@@ -90,6 +90,9 @@ export function GraphCanvas({
   const graphRef = useRef<Graph | null>(null);
   const rafRef = useRef<number>(0);
   const pinsRef = useRef<Record<string, { x: number; y: number }>>({});
+  const tempPinsRef = useRef<
+    Record<string, { x: number; y: number; expireAt: number }>
+  >({});
   const draggedRef = useRef<{ node: string; x: number; y: number } | null>(null);
 
   const [scope, setScope] = useState<Scope>({ kind: 'all' });
@@ -120,6 +123,15 @@ export function GraphCanvas({
   );
   const pinsMap = useMemo(
     () => ydoc.getMap<{ x: number; y: number }>('pins'),
+    [ydoc],
+  );
+  // Transient pins — plain-drag release writes an entry here with an
+  // expiry timestamp. Everyone holds the node at that position while
+  // unexpired so peers see the sticky-drop too (neighbours settle
+  // around it), then physics takes over on all sides.
+  const tempPinsMap = useMemo(
+    () =>
+      ydoc.getMap<{ x: number; y: number; expireAt: number }>('temp-pins'),
     [ydoc],
   );
   const coloursMap = useMemo(() => ydoc.getMap<string>('colours'), [ydoc]);
@@ -180,6 +192,9 @@ export function GraphCanvas({
 
   // Pins: shared via Y.Map. Mirror into a ref for the physics loop
   // (fast read without round-tripping through Y on every frame).
+  // Also mark pinned nodes as `highlighted` so sigma renders them
+  // with a subtle emphasis — the only discoverable cue that a node
+  // is pinned and thus behaving differently from its neighbours.
   useEffect(() => {
     const apply = (): void => {
       const next: Record<string, { x: number; y: number }> = {};
@@ -187,11 +202,46 @@ export function GraphCanvas({
         next[key] = value;
       });
       pinsRef.current = next;
+      const g = graphRef.current;
+      if (g) {
+        g.forEachNode((id) => {
+          g.setNodeAttribute(id, 'highlighted', next[id] != null);
+        });
+      }
     };
     apply();
     pinsMap.observe(apply);
     return () => pinsMap.unobserve(apply);
   }, [pinsMap]);
+
+  // Temp pins: same treatment. The tick reads from the ref and
+  // checks expireAt against the current clock.
+  useEffect(() => {
+    const apply = (): void => {
+      const next: Record<string, { x: number; y: number; expireAt: number }> = {};
+      tempPinsMap.forEach((value, key) => {
+        if (value && typeof value === 'object') next[key] = value;
+      });
+      tempPinsRef.current = next;
+    };
+    apply();
+    tempPinsMap.observe(apply);
+    return () => tempPinsMap.unobserve(apply);
+  }, [tempPinsMap]);
+
+  // Garbage-collect expired temp pins. Only the peer that placed the
+  // pin deletes it (avoids races), so we sweep every 500 ms for
+  // entries we wrote that are past their TTL. Entries from gone
+  // peers get cleaned up whenever any peer notices them expired.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      tempPinsMap.forEach((value, key) => {
+        if (value && value.expireAt < now) tempPinsMap.delete(key);
+      });
+    }, 500);
+    return () => clearInterval(interval);
+  }, [tempPinsMap]);
 
   // Colours: shared via Y.Map. State holds a mirror that React
   // re-renders against so the palette UI + node-colour effect pick
@@ -283,14 +333,19 @@ export function GraphCanvas({
         const pins = pinsRef.current;
         for (const n of payload.nodes) {
           const pin = pins[n.id];
+          // Deterministic seed so every peer starts from the same
+          // layout. Random seeding produced wildly different
+          // burned-in graphs across connected users.
+          const seed = seedPosition(n.id);
           g.addNode(n.id, {
             label: n.title,
             size: radiusForDegree(n.degree),
             color: colorFor(n.id, n.tags),
-            x: pin?.x ?? (Math.random() * 2 - 1),
-            y: pin?.y ?? (Math.random() * 2 - 1),
+            x: pin?.x ?? seed.x,
+            y: pin?.y ?? seed.y,
             tags: n.tags,
             degree: n.degree,
+            highlighted: !!pin,
           });
         }
         for (const e of payload.edges) {
@@ -311,7 +366,7 @@ export function GraphCanvas({
             iterations: Math.min(150, Math.max(30, Math.floor(300 / Math.max(1, Math.sqrt(g.order))))),
             settings: {
               ...settings,
-              gravity: 1,
+              gravity: 0.3,
               scalingRatio: 10,
               slowDown: 5,
               barnesHutOptimize: g.order > 500,
@@ -355,6 +410,17 @@ export function GraphCanvas({
               if (g.hasNode(id)) {
                 g.setNodeAttribute(id, 'x', pos.x);
                 g.setNodeAttribute(id, 'y', pos.y);
+              }
+            }
+            // Temporary pins — sticky-drop after plain drag release,
+            // held on all peers so everyone watches neighbours
+            // settle around the drop point before physics resumes.
+            const now = Date.now();
+            for (const [id, tp] of Object.entries(tempPinsRef.current)) {
+              if (tp.expireAt <= now) continue;
+              if (g.hasNode(id)) {
+                g.setNodeAttribute(id, 'x', tp.x);
+                g.setNodeAttribute(id, 'y', tp.y);
               }
             }
             // Local drag in progress — hold the node at the cursor.
@@ -480,11 +546,35 @@ export function GraphCanvas({
           }
           if (shiftHeld) {
             pinsMap.set(dragged.node, { x: dragged.x, y: dragged.y });
+          } else {
+            // Plain drag: sticky drop. Temp pin holds the node at
+            // drop position for STICKY_MS on every peer so
+            // neighbours settle around it, then physics resumes on
+            // all sides.
+            const STICKY_MS = 1500;
+            const expireAt = Date.now() + STICKY_MS;
+            const nodeId = dragged.node;
+            tempPinsMap.set(nodeId, {
+              x: dragged.x,
+              y: dragged.y,
+              expireAt,
+            });
+            setTimeout(() => {
+              const current = tempPinsMap.get(nodeId);
+              if (current && current.expireAt === expireAt) {
+                tempPinsMap.delete(nodeId);
+              }
+            }, STICKY_MS + 50);
           }
-          // Plain drag: no pin — physics next tick picks the node up
-          // from its dropped position and reshapes the surrounding
-          // layout around it.
           shiftHeld = false;
+        });
+
+        // Double-click a pinned node to unpin it. Match Obsidian —
+        // discoverable once you've pinned with shift-drag.
+        renderer.on('doubleClickNode', ({ node, event }) => {
+          if (!pinsMap.has(node)) return;
+          pinsMap.delete(node);
+          event?.preventSigmaDefault?.();
         });
 
         setStatus('ready');
@@ -503,7 +593,7 @@ export function GraphCanvas({
       sigmaRef.current = null;
       graphRef.current = null;
     };
-  }, [scopeParam, groupId, router, colorFor, labelMode, provider, pinsMap]);
+  }, [scopeParam, groupId, router, colorFor, labelMode, provider, pinsMap, tempPinsMap]);
 
   // Live re-colour when tag overrides change without rebuilding the
   // graph (keeps physics running; feels instant).
@@ -731,8 +821,8 @@ export function GraphCanvas({
           {status === 'ready' && (
             <>
               {counts.nodes} node{counts.nodes === 1 ? '' : 's'} ·{' '}
-              {counts.edges} edge{counts.edges === 1 ? '' : 's'} · drag-drop
-              pins (synced)
+              {counts.edges} edge{counts.edges === 1 ? '' : 's'} · shift-drag
+              to pin · double-click to unpin
             </>
           )}
           {status === 'error' && <span className="text-[#8B4A52]">Error: {error}</span>}
@@ -945,6 +1035,25 @@ function labelModeLabel(mode: LabelMode): string {
   if (mode === 'none') return 'None';
   if (mode === 'all') return 'All';
   return 'Some';
+}
+
+// Deterministic per-node seed. Maps a node id to a point in roughly
+// [-1, 1] × [-1, 1] via a simple string hash. Two peers hashing the
+// same id land on identical coordinates, so the burned-in layout
+// matches on both sides. The quality isn't cryptographic — just
+// enough to spread the initial cloud so forceatlas2 has useful
+// gradients to work with.
+function seedPosition(id: string): { x: number; y: number } {
+  let h1 = 0x811c9dc5;
+  let h2 = 0xdeadbeef;
+  for (let i = 0; i < id.length; i++) {
+    const c = id.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ c, 0x85ebca6b) >>> 0;
+  }
+  const fx = (h1 & 0xffff) / 0xffff; // [0, 1]
+  const fy = (h2 & 0xffff) / 0xffff;
+  return { x: fx * 2 - 1, y: fy * 2 - 1 };
 }
 
 function buildCollabUrl(): string {
