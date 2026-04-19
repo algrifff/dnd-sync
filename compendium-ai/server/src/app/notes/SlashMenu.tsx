@@ -25,13 +25,16 @@ import {
   ShieldAlert,
   Table as TableIcon,
   Image as ImageIcon,
+  Link2 as LinkIcon,
 } from 'lucide-react';
 import { uploadImageAsset } from '@/lib/image-upload';
+import { NotePicker } from './NotePicker';
 
 type Range = { from: number; to: number };
 type CmdOpts = {
   csrfToken: string;
   pickImage: () => Promise<File | null>;
+  pickNote: (anchor: { left: number; top: number }) => Promise<string | null>;
 };
 
 type Cmd = {
@@ -196,6 +199,40 @@ function buildCommands(opts: CmdOpts): Cmd[] {
       })();
     },
   },
+  {
+    id: 'link',
+    label: 'Link to note',
+    hint: 'Pick a note to wikilink',
+    icon: <LinkIcon size={16} aria-hidden />,
+    keywords: ['link', 'wikilink', 'connect', 'reference', 'mention'],
+    run: (e, r) => {
+      // Capture the caret position in viewport coords BEFORE
+      // deleting the trigger range — once the range disappears the
+      // coords would shift by a few pixels as surrounding text
+      // reflows.
+      let anchor = { left: 0, top: 0 };
+      try {
+        const coords = e.view.coordsAtPos(r.from);
+        anchor = { left: coords.left, top: coords.bottom + 4 };
+      } catch {
+        /* ignore — picker falls back to viewport origin */
+      }
+      e.chain().focus().deleteRange(r).run();
+      void (async () => {
+        const path = await opts.pickNote(anchor);
+        if (!path) return;
+        const target = path.replace(/\.(md|canvas)$/i, '');
+        e.chain()
+          .focus()
+          .insertContent({
+            type: 'wikilink',
+            attrs: { target, label: '', orphan: false },
+          })
+          .insertContent(' ')
+          .run();
+      })();
+    },
+  },
   ];
 }
 
@@ -235,6 +272,10 @@ export function SlashMenu({
   const popoverRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickResolverRef = useRef<((file: File | null) => void) | null>(null);
+  const [notePicker, setNotePicker] = useState<{
+    anchor: { left: number; top: number };
+  } | null>(null);
+  const notePickResolverRef = useRef<((path: string | null) => void) | null>(null);
 
   // Opens the hidden <input type="file"> and resolves once the user
   // either picks a file or dismisses the dialog (detected via focus
@@ -249,7 +290,31 @@ export function SlashMenu({
     });
   }, []);
 
-  const commands = buildCommands({ csrfToken, pickImage });
+  // Opens a NotePicker popover at the given anchor and resolves with
+  // the selected note path (or null if dismissed).
+  const pickNote = useCallback(
+    (anchor: { left: number; top: number }): Promise<string | null> => {
+      setNotePicker({ anchor });
+      return new Promise<string | null>((resolve) => {
+        notePickResolverRef.current = resolve;
+      });
+    },
+    [],
+  );
+
+  const closeNotePicker = useCallback(() => {
+    notePickResolverRef.current?.(null);
+    notePickResolverRef.current = null;
+    setNotePicker(null);
+  }, []);
+
+  const selectNote = useCallback((path: string) => {
+    notePickResolverRef.current?.(path);
+    notePickResolverRef.current = null;
+    setNotePicker(null);
+  }, []);
+
+  const commands = buildCommands({ csrfToken, pickImage, pickNote });
 
   // Detect the trigger on each editor update.
   useEffect(() => {
@@ -333,12 +398,28 @@ export function SlashMenu({
     />
   );
 
-  if (!trigger) return hiddenFileInput;
+  const notePickerEl = notePicker ? (
+    <NotePicker
+      anchor={notePicker.anchor}
+      onSelect={selectNote}
+      onClose={closeNotePicker}
+    />
+  ) : null;
+
+  if (!trigger) {
+    return (
+      <>
+        {hiddenFileInput}
+        {notePickerEl}
+      </>
+    );
+  }
 
   const { rect } = trigger;
   return (
     <>
       {hiddenFileInput}
+      {notePickerEl}
       <div
         ref={popoverRef}
         role="listbox"

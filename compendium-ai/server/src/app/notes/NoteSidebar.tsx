@@ -1,10 +1,12 @@
-// Right-rail sidebar: backlinks (grouped by folder), tags, outline.
-// Server component; purely static rendering driven by the DB payload.
+// Right-rail sidebar: backlinks (flat list), tags, outline, mini-graph.
+// Server component for everything data-driven; the Add-link affordance
+// + mini-graph are tiny client islands.
 
 import type { ReactElement } from 'react';
 import Link from 'next/link';
 import type { BacklinkRow } from '@/lib/notes';
 import { MiniGraph } from './MiniGraph';
+import { AddBacklink } from './AddBacklink';
 
 export type OutlineItem = { level: number; text: string };
 
@@ -19,33 +21,27 @@ export function NoteSidebar({
   tags: string[];
   outline: OutlineItem[];
 }): ReactElement {
-  const grouped = groupByFolder(backlinks);
-
   return (
     <aside className="h-full overflow-y-auto border-l border-[#D4C7AE] bg-[#EAE1CF]/40 px-4 py-4 text-sm">
-      <Section title="Backlinks" empty="No backlinks yet.">
-        {grouped.size === 0 ? null : (
-          <div className="space-y-3">
-            {[...grouped.entries()].map(([folder, items]) => (
-              <div key={folder}>
-                <div className="mb-1 text-xs uppercase tracking-wide text-[#5A4F42]">
-                  {folder || 'Root'}
-                </div>
-                <ul className="space-y-0.5">
-                  {items.map((b) => (
-                    <li key={b.from_path}>
-                      <Link
-                        href={'/notes/' + encodePath(b.from_path)}
-                        className="block truncate rounded-[4px] px-1 py-0.5 text-[#2A241E] transition hover:bg-[#D4A85A]/15"
-                      >
-                        {b.title || baseName(b.from_path)}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+      <Section
+        title="Backlinks"
+        empty="No backlinks yet."
+        actions={<AddBacklink currentPath={path} />}
+      >
+        {backlinks.length > 0 && (
+          <ul className="flex flex-wrap gap-1.5">
+            {backlinks.map((b) => (
+              <li key={b.from_path}>
+                <Link
+                  href={'/notes/' + encodePath(b.from_path)}
+                  title={b.from_path}
+                  className="inline-block max-w-full truncate rounded-full border border-[#D4C7AE] bg-[#FBF5E8] px-2.5 py-0.5 text-xs text-[#2A241E] transition hover:-translate-y-px hover:border-[#D4A85A] hover:bg-[#F4EDE0]"
+                >
+                  {b.title || baseName(b.from_path)}
+                </Link>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
       </Section>
 
@@ -98,33 +94,25 @@ export function NoteSidebar({
 function Section({
   title,
   empty,
+  actions,
   children,
 }: {
   title: string;
   empty?: string;
+  actions?: React.ReactNode;
   children?: React.ReactNode;
 }): ReactElement {
   return (
     <section className="mb-6">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
-        {title}
-      </h3>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+          {title}
+        </h3>
+        {actions}
+      </div>
       {children ?? (empty ? <p className="text-xs text-[#5A4F42]/80">{empty}</p> : null)}
     </section>
   );
-}
-
-function groupByFolder(items: BacklinkRow[]): Map<string, BacklinkRow[]> {
-  const out = new Map<string, BacklinkRow[]>();
-  for (const item of items) {
-    const folder = item.from_path.includes('/')
-      ? item.from_path.slice(0, item.from_path.lastIndexOf('/'))
-      : '';
-    const bucket = out.get(folder) ?? [];
-    bucket.push(item);
-    out.set(folder, bucket);
-  }
-  return out;
 }
 
 function baseName(p: string): string {
