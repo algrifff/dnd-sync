@@ -391,6 +391,27 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX notes_dm_only ON notes(group_id, dm_only);
     `,
   },
+  {
+    version: 16,
+    description: 'import_jobs: AI-assisted import pipeline state',
+    sql: `
+      CREATE TABLE import_jobs (
+        id           TEXT PRIMARY KEY,
+        group_id     TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        created_by   TEXT NOT NULL REFERENCES users(id),
+        status       TEXT NOT NULL,  -- uploaded | parsing | analysing | ready | applied | cancelled | failed
+        raw_zip_path TEXT,           -- temp file under DATA_DIR; cleared on apply/cancel
+        plan_json    TEXT,           -- full classical parse + AI plan + review state
+        stats_json   TEXT,           -- counts, token usage, cost, errors
+        created_at   INTEGER NOT NULL,
+        updated_at   INTEGER NOT NULL
+      ) WITHOUT ROWID;
+      CREATE INDEX import_jobs_group_status
+        ON import_jobs(group_id, status);
+      CREATE INDEX import_jobs_user_status
+        ON import_jobs(created_by, status);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {
