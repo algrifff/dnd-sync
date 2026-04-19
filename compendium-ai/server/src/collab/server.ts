@@ -30,6 +30,17 @@ function isAuthContext(x: unknown): x is AuthContext {
   );
 }
 
+/** Meta docs are graph-wide state (currently only groups). Naming
+ *  convention: `graph-groups:<groupId>`. Returning non-null means
+ *  this doc goes to the graph_groups table, not the notes table. */
+function parseMetaDocName(
+  documentName: string,
+): { kind: 'groups'; groupId: string } | null {
+  const m = documentName.match(/^graph-groups:(.+)$/);
+  if (!m) return null;
+  return { kind: 'groups', groupId: m[1]! };
+}
+
 export const collabServer = new Hocuspocus({
   async onAuthenticate(data): Promise<AuthContext> {
     const session = readSessionFromIncoming({
@@ -57,8 +68,19 @@ export const collabServer = new Hocuspocus({
       fetch: async ({ documentName, context }): Promise<Uint8Array | null> => {
         if (!isAuthContext(context)) return null;
         // Doc names starting with "." are reserved awareness-only
-        // channels (e.g. ".presence"). They don't back onto any row.
+        // channels (e.g. ".presence", ".graph-state:<groupId>"). They
+        // don't back onto any row.
         if (documentName.startsWith('.')) return null;
+        const meta = parseMetaDocName(documentName);
+        if (meta) {
+          if (meta.groupId !== context.groupId) return null;
+          const row = getDb()
+            .query<{ yjs_state: Uint8Array | null }, [string]>(
+              'SELECT yjs_state FROM graph_groups WHERE group_id = ?',
+            )
+            .get(meta.groupId);
+          return row?.yjs_state ? new Uint8Array(row.yjs_state) : null;
+        }
         const row = getDb()
           .query<{ yjs_state: Uint8Array | null }, [string, string]>(
             'SELECT yjs_state FROM notes WHERE group_id = ? AND path = ?',
@@ -70,6 +92,20 @@ export const collabServer = new Hocuspocus({
       store: async ({ documentName, state, document, context }): Promise<void> => {
         if (!isAuthContext(context)) return;
         if (documentName.startsWith('.')) return;
+        const meta = parseMetaDocName(documentName);
+        if (meta) {
+          if (meta.groupId !== context.groupId) return;
+          getDb()
+            .query(
+              `INSERT INTO graph_groups (group_id, yjs_state, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(group_id) DO UPDATE SET
+                 yjs_state = excluded.yjs_state,
+                 updated_at = excluded.updated_at`,
+            )
+            .run(meta.groupId, state, Date.now());
+          return;
+        }
         getDb()
           .query(
             'UPDATE notes SET yjs_state = ?, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',

@@ -36,6 +36,8 @@ type Remote = {
   // In virtual mode these are virtual-px; in fraction mode, 0..1.
   x: number;
   y: number;
+  cursorMode: 'color' | 'image';
+  avatarVersion: number;
 };
 
 export function PointerOverlay({
@@ -47,7 +49,13 @@ export function PointerOverlay({
   virtualWidth,
 }: {
   provider: HocuspocusProvider;
-  user: { userId: string; name: string; color: string };
+  user: {
+    userId: string;
+    name: string;
+    color: string;
+    cursorMode?: 'color' | 'image';
+    avatarVersion?: number;
+  };
   /** Element whose local coord space we broadcast in. Defaults to the
    *  fixed-width note column in virtual mode. */
   coordScopeId?: string;
@@ -96,8 +104,17 @@ export function PointerOverlay({
       userId: user.userId,
       name: user.name,
       color: user.color,
+      cursorMode: user.cursorMode ?? 'color',
+      avatarVersion: user.avatarVersion ?? 0,
     });
-  }, [provider, user.userId, user.name, user.color]);
+  }, [
+    provider,
+    user.userId,
+    user.name,
+    user.color,
+    user.cursorMode,
+    user.avatarVersion,
+  ]);
 
   // Broadcast local pointer. Listen on the viewport scope so moves
   // anywhere in the column register, but convert into the coord
@@ -188,6 +205,11 @@ export function PointerOverlay({
           color: s.user.color ?? '#5A4F42',
           x,
           y,
+          cursorMode: s.user.cursorMode === 'image' ? 'image' : 'color',
+          avatarVersion:
+            typeof s.user.avatarVersion === 'number'
+              ? s.user.avatarVersion
+              : 0,
         });
       }
       setRemotes(list);
@@ -247,6 +269,11 @@ export function PointerOverlay({
           y={r.y}
           color={r.color}
           name={r.name}
+          avatarUrl={
+            r.cursorMode === 'image' && r.avatarVersion > 0 && r.userId
+              ? `/api/users/${r.userId}/avatar?v=${r.avatarVersion}`
+              : null
+          }
         />
       ))}
     </div>,
@@ -320,7 +347,13 @@ export function PointerOverlay({
 }
 
 type PeerState = {
-  user: { userId: string; name: string; color: string };
+  user: {
+    userId: string;
+    name: string;
+    color: string;
+    cursorMode?: 'color' | 'image';
+    avatarVersion?: number;
+  };
   pointer?: (Partial<VirtualPointer> & Partial<FractionPointer>) | null;
 };
 
@@ -329,27 +362,38 @@ function PointerDot({
   y,
   color,
   name,
+  avatarUrl,
 }: {
   x: number;
   y: number;
   color: string;
   name: string;
+  avatarUrl: string | null;
 }): React.JSX.Element {
   return (
     <div
       className="absolute flex items-start gap-1"
       style={{ left: x, top: y, color }}
     >
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 14 14"
-        fill={color}
-        stroke="#FBF5E8"
-        strokeWidth="1"
-      >
-        <path d="M1 1 L1 11 L4 8 L6.5 13 L8.5 12.2 L6 7.3 L11 7.3 Z" />
-      </svg>
+      {avatarUrl ? (
+        <img
+          src={avatarUrl}
+          alt=""
+          className="h-5 w-5 rounded-full border-2 object-cover shadow-[0_2px_6px_rgba(42,36,30,0.3)]"
+          style={{ borderColor: color }}
+        />
+      ) : (
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill={color}
+          stroke="#FBF5E8"
+          strokeWidth="1"
+        >
+          <path d="M1 1 L1 11 L4 8 L6.5 13 L8.5 12.2 L6 7.3 L11 7.3 Z" />
+        </svg>
+      )}
       <span
         className="mt-2 whitespace-nowrap rounded-[4px] px-1 text-[10px] font-medium text-[#2A241E]"
         style={{ backgroundColor: color }}

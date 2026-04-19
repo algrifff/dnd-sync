@@ -7,23 +7,31 @@ import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { ACCENT_PALETTE, updateUserProfile } from '@/lib/users';
+import { updateUserProfile } from '@/lib/users';
 
 export const dynamic = 'force-dynamic';
+
+// Accent color can now be any #RRGGBB hex (or #RGB short form).
+// Users pick either a preset swatch or a custom value from the
+// native colour picker; both path through here.
+const HEX_COLOR = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
 const Body = z
   .object({
     displayName: z.string().trim().min(1).max(80).optional(),
     accentColor: z
       .string()
-      .refine((v) => (ACCENT_PALETTE as readonly string[]).includes(v), {
-        message: 'accentColor must be one of the palette values',
-      })
+      .regex(HEX_COLOR, 'accentColor must be #RRGGBB or #RGB')
       .optional(),
+    cursorMode: z.enum(['color', 'image']).optional(),
   })
-  .refine((o) => o.displayName !== undefined || o.accentColor !== undefined, {
-    message: 'nothing to update',
-  });
+  .refine(
+    (o) =>
+      o.displayName !== undefined ||
+      o.accentColor !== undefined ||
+      o.cursorMode !== undefined,
+    { message: 'nothing to update' },
+  );
 
 export async function PATCH(req: NextRequest): Promise<Response> {
   const session = requireSession(req);

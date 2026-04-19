@@ -31,6 +31,8 @@ const LAST_SEEN_DEBOUNCE_MS = 60 * 1000; // only touch last_seen_at once a minut
 
 export type UserRole = 'admin' | 'editor' | 'viewer';
 
+export type CursorMode = 'color' | 'image';
+
 export type Session = {
   id: string;
   userId: string;
@@ -41,6 +43,11 @@ export type Session = {
   role: UserRole;
   csrfToken: string;
   expiresAt: number;
+  cursorMode: CursorMode;
+  // Monotonic counter bumped each time the avatar blob changes. Used
+  // as a cache-buster when loading /api/users/:id/avatar?v=<n> and
+  // also as a "has avatar?" flag (0 = no avatar uploaded).
+  avatarVersion: number;
 };
 
 export type NewSessionInput = {
@@ -141,6 +148,8 @@ type SessionJoinRow = {
   display_name: string;
   accent_color: string;
   role: UserRole | null;
+  cursor_mode: string;
+  avatar_updated_at: number;
 };
 
 /** Create a new session row and return the full Session shape, including
@@ -241,6 +250,7 @@ function loadSessionRowById(id: string): SessionJoinRow | null {
       .query<SessionJoinRow, [string]>(
         `SELECT s.id, s.user_id, s.current_group_id, s.csrf_token, s.expires_at,
                 u.username, u.display_name, u.accent_color,
+                u.cursor_mode, u.avatar_updated_at,
                 gm.role AS role
            FROM sessions s
            JOIN users u ON u.id = s.user_id
@@ -263,6 +273,8 @@ function shapeSession(row: SessionJoinRow): Session {
     role: (row.role ?? 'viewer') as UserRole,
     csrfToken: row.csrf_token,
     expiresAt: row.expires_at,
+    cursorMode: (row.cursor_mode === 'image' ? 'image' : 'color') as CursorMode,
+    avatarVersion: row.avatar_updated_at,
   };
 }
 

@@ -22,6 +22,8 @@ const sessionWithToken: Session = {
   role: 'admin',
   csrfToken: 'a'.repeat(64),
   expiresAt: Date.now() + 60_000,
+  cursorMode: 'color',
+  avatarVersion: 0,
 };
 
 describe('verifyCsrf', () => {

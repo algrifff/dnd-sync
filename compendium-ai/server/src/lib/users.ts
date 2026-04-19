@@ -168,12 +168,16 @@ export async function createUser(input: CreateUserInput): Promise<User> {
   };
 }
 
-/** Self-service profile update: display name + accent color. Callers
- *  enforce auth/ownership. No audit entry — a name tweak isn't worth
- *  the row and shows up in updated_at on the user record anyway. */
+/** Self-service profile update: display name, accent color, cursor
+ *  mode. Callers enforce auth/ownership. No audit entry — these are
+ *  presentation tweaks and show up in the session row immediately. */
 export function updateUserProfile(
   userId: string,
-  patch: { displayName?: string | undefined; accentColor?: string | undefined },
+  patch: {
+    displayName?: string | undefined;
+    accentColor?: string | undefined;
+    cursorMode?: 'color' | 'image' | undefined;
+  },
 ): void {
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -185,11 +189,68 @@ export function updateUserProfile(
     sets.push('accent_color = ?');
     values.push(patch.accentColor);
   }
+  if (patch.cursorMode === 'color' || patch.cursorMode === 'image') {
+    sets.push('cursor_mode = ?');
+    values.push(patch.cursorMode);
+  }
   if (sets.length === 0) return;
   values.push(userId);
   getDb()
     .query(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`)
     .run(...(values as [string | number, ...Array<string | number>]));
+}
+
+/** Overwrite the user's avatar. `blob` is already sized/compressed
+ *  client-side before reaching this function (see the profile form
+ *  uploader). avatar_updated_at doubles as a cache-buster for the
+ *  public serve endpoint — peer cursors include it in their img URL. */
+export function setUserAvatar(
+  userId: string,
+  blob: Uint8Array,
+  mime: string,
+): number {
+  const now = Date.now();
+  getDb()
+    .query(
+      `UPDATE users SET avatar_blob = ?, avatar_mime = ?, avatar_updated_at = ?
+         WHERE id = ?`,
+    )
+    .run(blob, mime, now, userId);
+  return now;
+}
+
+export function clearUserAvatar(userId: string): void {
+  getDb()
+    .query(
+      `UPDATE users SET avatar_blob = NULL, avatar_mime = NULL,
+                        avatar_updated_at = 0
+         WHERE id = ?`,
+    )
+    .run(userId);
+}
+
+export function loadUserAvatar(
+  userId: string,
+): { blob: Uint8Array; mime: string; updatedAt: number } | null {
+  const row = getDb()
+    .query<
+      {
+        avatar_blob: Uint8Array | null;
+        avatar_mime: string | null;
+        avatar_updated_at: number;
+      },
+      [string]
+    >(
+      `SELECT avatar_blob, avatar_mime, avatar_updated_at
+         FROM users WHERE id = ?`,
+    )
+    .get(userId);
+  if (!row || !row.avatar_blob || !row.avatar_mime) return null;
+  return {
+    blob: new Uint8Array(row.avatar_blob),
+    mime: row.avatar_mime,
+    updatedAt: row.avatar_updated_at,
+  };
 }
 
 export async function changeUserPassword(

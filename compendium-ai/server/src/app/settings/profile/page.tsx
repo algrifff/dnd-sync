@@ -29,8 +29,11 @@ export default async function ProfilePage(): Promise<ReactElement> {
           presence panel.
         </p>
         <ProfileForm
+          userId={session.userId}
           initialDisplayName={session.displayName}
           initialAccentColor={session.accentColor}
+          initialCursorMode={session.cursorMode}
+          initialAvatarVersion={session.avatarVersion}
           username={session.username}
           csrfToken={session.csrfToken}
           palette={[...ACCENT_PALETTE]}

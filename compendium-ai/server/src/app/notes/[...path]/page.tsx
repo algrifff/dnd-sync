@@ -117,6 +117,8 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                 userId: session.userId,
                 displayName: session.displayName,
                 accentColor: session.accentColor,
+                cursorMode: session.cursorMode,
+                avatarVersion: session.avatarVersion,
               }}
               canEdit={session.role !== 'viewer'}
               csrfToken={session.csrfToken}

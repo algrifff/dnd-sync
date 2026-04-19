@@ -26,6 +26,8 @@ export type SurfaceUser = {
   userId: string;
   displayName: string;
   accentColor: string;
+  cursorMode: 'color' | 'image';
+  avatarVersion: number;
 };
 
 // Custom caret DOM so the label can fade via CSS animation — each

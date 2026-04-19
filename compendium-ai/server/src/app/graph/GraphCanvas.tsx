@@ -41,8 +41,11 @@ import { NotePicker } from '../notes/NotePicker';
 
 type RemoteGraphCursor = {
   clientId: number;
+  userId: string;
   name: string;
   color: string;
+  cursorMode: 'color' | 'image';
+  avatarVersion: number;
   // Graph-space coordinates (sigma's internal system). Converted to
   // viewport pixels each frame via renderer.graphToViewport.
   gx: number;
@@ -73,14 +76,21 @@ type Group = {
   notes: string[];
 };
 
-// Label mode stays local per viewer (personal preference). Pins +
-// tag colours now sync across every connected user via a shared
-// Y.Doc on the reserved `.graph-state` hocuspocus channel — the
-// server short-circuits persistence for `.`-prefixed docs, so state
-// lives only while someone's connected and resets when the last
-// client leaves. Tradeoff: cheap live collab, no disk.
+// Label mode stays local per viewer (personal preference). Two
+// shared Y.Docs back the live collaboration:
+//
+//   * Ephemeral: `.graph-state:<groupId>` — pins, colours, anchors,
+//     and awareness (cursors, drags). The `.`-prefix makes hocuspocus
+//     skip persistence, so this Y.Doc lives only while at least one
+//     peer has the graph open and resets when the last one leaves.
+//
+//   * Persistent: `graph-groups:<groupId>` — user-defined colour
+//     groups. These are saved to the graph_groups table so they
+//     survive across sessions and reloads.
+//
+// Both doc names include the groupId so different vaults don't
+// share state.
 const LABEL_STORAGE_PREFIX = 'compendium.graph.labels.';
-const GRAPH_STATE_DOC = '.graph-state';
 
 const GRAPH_SCOPE_ID = 'graph-canvas-scope';
 
@@ -91,7 +101,13 @@ export function GraphCanvas({
 }: {
   groupId: string;
   allTags: string[];
-  me: { userId: string; displayName: string; accentColor: string };
+  me: {
+    userId: string;
+    displayName: string;
+    accentColor: string;
+    cursorMode: 'color' | 'image';
+    avatarVersion: number;
+  };
 }): React.JSX.Element {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -124,15 +140,27 @@ export function GraphCanvas({
   const [renderTick, setRenderTick] = useState<number>(0);
 
   // ── shared graph state (synced across connected peers) ─────────────
+  // Two providers: one ephemeral (pins/colours/anchors/awareness),
+  // one persistent (groups). See the comment above LABEL_STORAGE_PREFIX.
   const ydoc = useMemo(() => new Y.Doc(), []);
   const provider = useMemo(
     () =>
       new HocuspocusProvider({
         url: buildCollabUrl(),
-        name: GRAPH_STATE_DOC,
+        name: `.graph-state:${groupId}`,
         document: ydoc,
       }),
-    [ydoc],
+    [ydoc, groupId],
+  );
+  const groupsYdoc = useMemo(() => new Y.Doc(), [groupId]);
+  const groupsProvider = useMemo(
+    () =>
+      new HocuspocusProvider({
+        url: buildCollabUrl(),
+        name: `graph-groups:${groupId}`,
+        document: groupsYdoc,
+      }),
+    [groupsYdoc, groupId],
   );
   const pinsMap = useMemo(
     () => ydoc.getMap<{ x: number; y: number }>('pins'),
@@ -149,14 +177,19 @@ export function GraphCanvas({
     [ydoc],
   );
   const coloursMap = useMemo(() => ydoc.getMap<string>('colours'), [ydoc]);
-  const groupsMap = useMemo(() => ydoc.getMap<Group>('groups'), [ydoc]);
+  const groupsMap = useMemo(
+    () => groupsYdoc.getMap<Group>('groups'),
+    [groupsYdoc],
+  );
 
   useEffect(() => {
     return () => {
       provider.destroy();
       ydoc.destroy();
+      groupsProvider.destroy();
+      groupsYdoc.destroy();
     };
-  }, [provider, ydoc]);
+  }, [provider, ydoc, groupsProvider, groupsYdoc]);
 
   const scopeParam = useMemo(() => {
     if (scope.kind === 'tag') return `tag:${scope.tag}`;
@@ -395,6 +428,8 @@ export function GraphCanvas({
           userId: me.userId,
           name: me.displayName || 'Anonymous',
           color: me.accentColor,
+          cursorMode: me.cursorMode,
+          avatarVersion: me.avatarVersion,
         });
 
         // Broadcast the local cursor in GRAPH coordinates (not
@@ -426,7 +461,13 @@ export function GraphCanvas({
             if (clientId === aw.clientID) continue;
             const s = state as
               | {
-                  user?: { userId?: string; name?: string; color?: string };
+                  user?: {
+                    userId?: string;
+                    name?: string;
+                    color?: string;
+                    cursorMode?: 'color' | 'image';
+                    avatarVersion?: number;
+                  };
                   graphPointer?: { x: number; y: number } | null;
                 }
               | undefined;
@@ -435,8 +476,14 @@ export function GraphCanvas({
             if (typeof gp.x !== 'number' || typeof gp.y !== 'number') continue;
             list.push({
               clientId,
+              userId: s.user.userId ?? '',
               name: s.user.name ?? 'Anonymous',
               color: s.user.color ?? '#5A4F42',
+              cursorMode: s.user.cursorMode === 'image' ? 'image' : 'color',
+              avatarVersion:
+                typeof s.user.avatarVersion === 'number'
+                  ? s.user.avatarVersion
+                  : 0,
               gx: gp.x,
               gy: gp.y,
             });
@@ -697,6 +744,8 @@ export function GraphCanvas({
     me.userId,
     me.displayName,
     me.accentColor,
+    me.cursorMode,
+    me.avatarVersion,
   ]);
 
   // Live re-colour when tag overrides change without rebuilding the
@@ -1155,22 +1204,35 @@ function GraphCursors({
       {renderer
         ? remotes.map((r) => {
             const vp = renderer.graphToViewport({ x: r.gx, y: r.gy });
+            const avatarUrl =
+              r.cursorMode === 'image' && r.avatarVersion > 0 && r.userId
+                ? `/api/users/${r.userId}/avatar?v=${r.avatarVersion}`
+                : null;
             return (
               <div
                 key={r.clientId}
                 className="absolute flex items-start gap-1"
                 style={{ left: vp.x, top: vp.y, color: r.color }}
               >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 14 14"
-                  fill={r.color}
-                  stroke="#FBF5E8"
-                  strokeWidth="1"
-                >
-                  <path d="M1 1 L1 11 L4 8 L6.5 13 L8.5 12.2 L6 7.3 L11 7.3 Z" />
-                </svg>
+                {avatarUrl ? (
+                  <img
+                    src={avatarUrl}
+                    alt=""
+                    className="h-5 w-5 rounded-full border-2 object-cover shadow-[0_2px_6px_rgba(42,36,30,0.3)]"
+                    style={{ borderColor: r.color }}
+                  />
+                ) : (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 14 14"
+                    fill={r.color}
+                    stroke="#FBF5E8"
+                    strokeWidth="1"
+                  >
+                    <path d="M1 1 L1 11 L4 8 L6.5 13 L8.5 12.2 L6 7.3 L11 7.3 Z" />
+                  </svg>
+                )}
                 <span
                   className="mt-2 whitespace-nowrap rounded-[4px] px-1 text-[10px] font-medium text-[#2A241E]"
                   style={{ backgroundColor: r.color }}

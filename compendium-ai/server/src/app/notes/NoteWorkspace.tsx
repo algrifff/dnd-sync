@@ -114,6 +114,8 @@ export function NoteWorkspace({
           userId: user.userId,
           name: user.displayName || 'Anonymous',
           color: user.accentColor,
+          cursorMode: user.cursorMode,
+          avatarVersion: user.avatarVersion,
         }}
         coordScopeId="note-scroll-body"
         viewportScopeId="note-main"

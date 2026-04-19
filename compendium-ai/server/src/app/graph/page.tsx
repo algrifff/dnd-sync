@@ -66,6 +66,8 @@ export default async function GraphPage(): Promise<ReactElement> {
               userId: session.userId,
               displayName: session.displayName,
               accentColor: session.accentColor,
+              cursorMode: session.cursorMode,
+              avatarVersion: session.avatarVersion,
             }}
           />
         </div>

@@ -260,6 +260,27 @@ const MIGRATIONS: readonly Migration[] = [
       UPDATE notes SET created_by = updated_by WHERE created_by IS NULL;
     `,
   },
+  {
+    version: 10,
+    description: 'graph_groups: persistent graph-view groups per vault',
+    sql: `
+      CREATE TABLE graph_groups (
+        group_id   TEXT PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE,
+        yjs_state  BLOB,
+        updated_at INTEGER NOT NULL
+      );
+    `,
+  },
+  {
+    version: 11,
+    description: 'users: avatar blob + cursor mode for live cursors',
+    sql: `
+      ALTER TABLE users ADD COLUMN avatar_blob BLOB;
+      ALTER TABLE users ADD COLUMN avatar_mime TEXT;
+      ALTER TABLE users ADD COLUMN avatar_updated_at INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE users ADD COLUMN cursor_mode TEXT NOT NULL DEFAULT 'color';
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {
