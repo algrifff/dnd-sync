@@ -82,6 +82,16 @@ const config: NextConfig = {
     '@tiptap/extension-table-row',
     '@tiptap/extension-task-item',
     '@tiptap/extension-task-list',
+
+    // Graph rendering — browser-only (touches WebGL2RenderingContext
+    // at module scope). Externalising keeps it out of the server
+    // bundle so RSC never tries to evaluate its GL-touching code
+    // when rendering the graph/note pages. The client island
+    // (GraphCanvas / MiniGraph) imports them normally from
+    // node_modules at runtime in the browser.
+    'sigma',
+    'graphology',
+    'graphology-layout-forceatlas2',
   ],
   webpack: (cfg) => {
     cfg.externals = cfg.externals ?? [];
