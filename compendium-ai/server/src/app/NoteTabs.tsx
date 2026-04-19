@@ -8,9 +8,10 @@
 // Non-note routes (home, /tags, /admin/...) just render the tab strip as
 // a passive preview — the "active" dot moves off, but the tabs stay.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { X, FileText } from 'lucide-react';
+import { TREE_CHANGE_EVENT, TREE_CHANGE_REMOTE_EVENT } from '@/lib/tree-sync';
 
 const STORAGE_KEY = 'compendium.tabs.v1';
 
@@ -69,6 +70,51 @@ export function NoteTabs(): React.JSX.Element {
       /* ignore */
     }
   }, [tabs, mounted]);
+
+  // Prune tabs whose notes no longer exist. Runs on mount (catches
+  // stale tabs carried across sessions) and whenever a tree-change
+  // event fires locally — covers the "someone else deleted this note
+  // while the tab is in my background list" case that would otherwise
+  // only self-heal when the user clicks the tab.
+  const activePathRef = useRef<string>(activePath);
+  activePathRef.current = activePath;
+  useEffect(() => {
+    if (!mounted) return;
+    let cancelled = false;
+    const validate = async (): Promise<void> => {
+      try {
+        const res = await fetch('/api/tree', { cache: 'no-store' });
+        if (!res.ok || cancelled) return;
+        const body = (await res.json()) as { root?: unknown };
+        const existing = new Set<string>();
+        walkTree(body.root, existing);
+        setTabs((prev) => {
+          const next = prev.filter((t) => existing.has(t.path));
+          if (next.length === prev.length) return prev;
+          const current = activePathRef.current;
+          if (current && !existing.has(current)) {
+            // The active tab's note no longer exists — route to a
+            // surviving neighbour, falling back to home.
+            const neighbour = next[0] ?? null;
+            if (neighbour) router.push(noteHref(neighbour.path));
+            else router.push('/');
+          }
+          return next;
+        });
+      } catch {
+        /* ignore — stale tabs will self-heal on next event */
+      }
+    };
+    void validate();
+    const onTreeChange = (): void => void validate();
+    document.addEventListener(TREE_CHANGE_EVENT, onTreeChange);
+    document.addEventListener(TREE_CHANGE_REMOTE_EVENT, onTreeChange);
+    return () => {
+      cancelled = true;
+      document.removeEventListener(TREE_CHANGE_EVENT, onTreeChange);
+      document.removeEventListener(TREE_CHANGE_REMOTE_EVENT, onTreeChange);
+    };
+  }, [mounted, router]);
 
   const close = useCallback(
     (path: string, e: React.MouseEvent) => {
@@ -163,4 +209,21 @@ function decodeNotePath(pathname: string): string {
 function prettyTitle(path: string): string {
   const last = path.split('/').pop() ?? path;
   return last.replace(/\.(md|canvas)$/i, '');
+}
+
+// Recurse the tree JSON dump from /api/tree, collecting every file
+// path. The server module defines this shape; we only care about
+// `path` and whether it's a file vs dir.
+function walkTree(node: unknown, out: Set<string>): void {
+  if (!node || typeof node !== 'object') return;
+  const n = node as {
+    kind?: unknown;
+    path?: unknown;
+    children?: unknown;
+  };
+  if (n.kind === 'file' && typeof n.path === 'string') {
+    out.add(n.path);
+    return;
+  }
+  if (Array.isArray(n.children)) for (const c of n.children) walkTree(c, out);
 }

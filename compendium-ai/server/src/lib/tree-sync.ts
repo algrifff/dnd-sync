@@ -10,6 +10,11 @@
 // server is a no-op.
 
 export const TREE_CHANGE_EVENT = 'compendium:tree-change';
+// Fired on peers (not the mutating client) when a remote tree-change
+// lands via awareness. Kept distinct from TREE_CHANGE_EVENT so
+// PresenceClient's local listener doesn't re-broadcast into
+// awareness, which would loop back to the originator.
+export const TREE_CHANGE_REMOTE_EVENT = 'compendium:tree-change-remote';
 
 export function broadcastTreeChange(): void {
   if (typeof document === 'undefined') return;

@@ -15,7 +15,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import * as Y from 'yjs';
 import { PresencePanel, type PresencePeer } from './PresencePanel';
-import { TREE_CHANGE_EVENT } from '@/lib/tree-sync';
+import { TREE_CHANGE_EVENT, TREE_CHANGE_REMOTE_EVENT } from '@/lib/tree-sync';
 import {
   notePathFromPathname,
   setPresencePeers,
@@ -138,7 +138,15 @@ export function PresenceClient({ me }: { me: Me }): React.JSX.Element {
           shouldRefresh = true;
         }
       }
-      if (shouldRefresh) router.refresh();
+      if (shouldRefresh) {
+        router.refresh();
+        // Fan out to local listeners that care about tree changes
+        // (e.g. NoteTabs' stale-tab pruner) — separate event so
+        // PresenceClient's own local listener above doesn't pick it
+        // up and re-broadcast into awareness, which would loop back
+        // to the originator.
+        document.dispatchEvent(new CustomEvent(TREE_CHANGE_REMOTE_EVENT));
+      }
     };
     aw.on('change', onRemoteChange);
 
