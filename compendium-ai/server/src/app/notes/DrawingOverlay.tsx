@@ -2,50 +2,62 @@
 
 // Multiplayer freehand drawing on the note body.
 //
-// Canvas covers the entire scroll host (note-main), but stroke points
-// are stored as fractions of the ARTICLE element (max-w-720). That
-// way a stroke drawn over a word stays anchored to the same word on
-// every peer's screen regardless of viewport width; points outside
-// the article (in the padding) go negative or >1 and still render in
-// consistent pixel-distance from the article across screens. The SVG
-// portals into the scope and renders each stroke translated through
-// the article's offset within the scope — no clamping.
+// Coordinate model: the note column is forced to a fixed
+// VIRTUAL_WIDTH (720 px) on every screen and text inside it reflows
+// identically, so stroke points stored in raw virtual pixels land on
+// the same word for every peer. The SVG overlay is a child of the
+// 720-px column (#note-scroll-body) and covers its full scroll
+// height — title + tags + body — so annotations can sit anywhere in
+// the note.
+//
+// Zoom: purely local, applied via CSS `zoom` on the column element.
+// One user may view at 150 % on a big monitor while another works at
+// 100 % on a laptop; both draw and render strokes in the same
+// virtual-px space, so annotations land identically regardless of
+// each viewer's zoom.
 //
 // Ownership: each stroke carries the author's userId. Eraser only
-// removes strokes you authored (by-id filter in the mutator); "Clear
-// all" wipes only your own. You can see everyone else's strokes but
-// can't touch them.
+// removes strokes you authored; "Clear your drawings" wipes only
+// your own. You can see everyone else's but can't touch them.
 //
 // Live streaming: strokes live in a Y.Map<strokeId, StrokeData>
-// instead of a Y.Array so each ongoing stroke can be rewritten
-// atomically as points accumulate. Local draws flush at ~50 ms
-// intervals while the pointer's down so peers see the stroke build
-// up in real time; a final flush on pointerup guarantees the
-// complete stroke lands.
+// (keyed so each in-progress stroke can be rewritten atomically as
+// points accumulate). Local draws flush at ~50 ms intervals while
+// the pointer's down so peers see each stroke build in real time; a
+// final flush on pointerup guarantees the complete stroke lands.
 //
-// Controls: three floating circular buttons top-left of the scroll
-// host (brush / eraser / clear), portalled into the scope so they
-// don't scroll away with the article. Colour swatch appears when
-// brush is active.
+// Data shape is not backwards compatible with the old fraction-based
+// overlay; a v2 Y.Map key keeps old drawings out of sight while we
+// seed the new coord system.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { HocuspocusProvider } from '@hocuspocus/provider';
 import type * as Y from 'yjs';
-import { Brush, Eraser, Trash2 } from 'lucide-react';
+import { Brush, Eraser, Trash2, ZoomIn, ZoomOut } from 'lucide-react';
 
 type Stroke = {
   id: string;
   userId: string;
   color: string;
-  // Points are fractions of the article's scrollWidth / scrollHeight.
-  // Unclamped — a point at (-0.1, 0.5) renders 10% of article-width
-  // to the left of the article, which is the same pixel offset from
-  // the article on every screen (article width is 720 px everywhere).
+  // Points are virtual pixels inside the fixed 720-px column.
+  // Horizontal range: [0, 720]. Vertical: [0, columnScrollHeight].
   points: Array<[number, number]>;
 };
 
 type Mode = 'none' | 'brush' | 'eraser';
+
+const VIRTUAL_WIDTH = 720;
+// Eraser radius in virtual px (same scale as stroke coords).
+const ERASER_RADIUS = 10;
+// Throttle interval for mid-draw Y flushes. 50 ms = 20 Hz, enough
+// for peers to see smooth stroke growth without spamming sync.
+const FLUSH_INTERVAL_MS = 50;
+const STROKE_WIDTH = 2;
+
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2;
+const ZOOM_STEP = 0.1;
 
 const PRESET_COLORS = [
   '#2A241E', // ink
@@ -56,58 +68,53 @@ const PRESET_COLORS = [
   '#D4A85A', // candlelight
 ];
 
-const STROKE_WIDTH = 2;
-// Eraser radius as a fraction of the article width. ~8 px at 720 px.
-const ERASER_RADIUS = 0.012;
-// Throttle interval for mid-draw Y flushes. 50 ms = 20 Hz, enough for
-// peers to see smooth stroke growth without spamming the sync layer.
-const FLUSH_INTERVAL_MS = 50;
-
 export function DrawingOverlay({
   provider,
   user,
   scopeElementId = 'note-main',
-  articleElementId = 'note-article',
+  columnElementId = 'note-scroll-body',
 }: {
   provider: HocuspocusProvider;
   user: { userId: string };
   scopeElementId?: string;
-  articleElementId?: string;
+  columnElementId?: string;
 }): React.JSX.Element | null {
   const [scope, setScope] = useState<HTMLElement | null>(null);
-  const [article, setArticle] = useState<HTMLElement | null>(null);
-  const [scopeDims, setScopeDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
-  const [articleDims, setArticleDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
-  const [articleOffset, setArticleOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [column, setColumn] = useState<HTMLElement | null>(null);
+  const [columnHeight, setColumnHeight] = useState<number>(0);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [mode, setMode] = useState<Mode>('none');
   const [color, setColor] = useState<string>(PRESET_COLORS[0]!);
   const [swatchOpen, setSwatchOpen] = useState<boolean>(false);
+  const [zoom, setZoom] = useState<number>(1);
   const colorInputRef = useRef<HTMLInputElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
 
-  // Active-draw bookkeeping. Keeping the in-flight stroke in a ref
-  // (plus a mirrored state for local render) lets event handlers and
-  // the flush timer both append to the same object without React
-  // update latency.
+  // Live-draw bookkeeping. Keeping the in-flight stroke in a ref
+  // (plus a tick to re-render the preview) lets handlers and the
+  // flush timer append to the same object without React latency.
   const drawingRef = useRef<Stroke | null>(null);
   const [drawingTick, setDrawingTick] = useState<number>(0);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // v2 key — the old `drawing-strokes` map held fraction-based points
+  // that are meaningless under the new coord system. Fresh map, clean
+  // break.
   const strokesYMap = useMemo(
-    () => provider.document.getMap<Stroke>('drawing-strokes'),
+    () => provider.document.getMap<Stroke>('drawing-strokes-v2'),
     [provider],
   );
 
-  // Resolve the two host elements.
+  // Resolve host elements.
   useEffect(() => {
     let raf = 0;
     const tryResolve = (): void => {
       if (typeof document === 'undefined') return;
       const s = document.getElementById(scopeElementId) as HTMLElement | null;
-      const a = document.getElementById(articleElementId) as HTMLElement | null;
-      if (s && a) {
+      const c = document.getElementById(columnElementId) as HTMLElement | null;
+      if (s && c) {
         setScope(s);
-        setArticle(a);
+        setColumn(c);
         return;
       }
       raf = requestAnimationFrame(tryResolve);
@@ -116,38 +123,36 @@ export function DrawingOverlay({
     return () => {
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [scopeElementId, articleElementId]);
+  }, [scopeElementId, columnElementId]);
 
-  // Track scope + article dims and the article's offset within the
-  // scope. Recomputed on resize + scroll so the render + event coords
-  // stay consistent as the document grows.
+  // Track column height so the SVG grows as content is added. Width
+  // is fixed at VIRTUAL_WIDTH — no observation needed.
   useEffect(() => {
-    if (!scope || !article) return;
-    const update = (): void => {
-      setScopeDims({ w: scope.scrollWidth, h: scope.scrollHeight });
-      setArticleDims({ w: article.scrollWidth, h: article.scrollHeight });
-      // article.offsetLeft/Top is relative to its offsetParent, which
-      // is the positioned scope (main has position:relative). That
-      // gives us the article's x/y within scope's scroll coordinate
-      // system — exactly what the SVG needs to translate points.
-      setArticleOffset({ x: article.offsetLeft, y: article.offsetTop });
-    };
+    if (!column) return;
+    const update = (): void => setColumnHeight(column.scrollHeight);
     update();
     const ro = new ResizeObserver(update);
-    ro.observe(scope);
-    ro.observe(article);
-    const onScroll = (): void => update();
-    scope.addEventListener('scroll', onScroll);
-    window.addEventListener('resize', onScroll);
+    ro.observe(column);
+    const mo = new MutationObserver(update);
+    mo.observe(column, { subtree: true, childList: true, characterData: true });
     return () => {
       ro.disconnect();
-      scope.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
+      mo.disconnect();
     };
-  }, [scope, article]);
+  }, [column]);
 
-  // Observe the shared Y.Map — remote add / update / delete reflows
-  // the local strokes snapshot.
+  // Apply zoom to the column. Using CSS `zoom` (not transform:scale)
+  // so layout reserves the scaled space and the browser scroll host
+  // behaves naturally.
+  useEffect(() => {
+    if (!column) return;
+    column.style.zoom = String(zoom);
+    return () => {
+      column.style.zoom = '';
+    };
+  }, [column, zoom]);
+
+  // Observe the shared Y.Map.
   useEffect(() => {
     const apply = (): void => {
       const next: Stroke[] = [];
@@ -161,18 +166,22 @@ export function DrawingOverlay({
     return () => strokesYMap.unobserve(apply);
   }, [strokesYMap]);
 
-  // Convert viewport coords to article-local normalised fractions.
-  // NOT clamped — strokes can extend outside the article.
+  // Convert viewport coords to virtual-px. The SVG's bounding rect is
+  // post-zoom, so rect.width / VIRTUAL_WIDTH yields the effective
+  // scale to invert.
   const coordsFromEvent = useCallback(
     (e: PointerEvent | React.PointerEvent): [number, number] | null => {
-      if (!article) return null;
-      const rect = article.getBoundingClientRect();
-      const w = article.scrollWidth;
-      const h = article.scrollHeight;
-      if (w <= 0 || h <= 0) return null;
-      return [(e.clientX - rect.left) / w, (e.clientY - rect.top) / h];
+      const svg = svgRef.current;
+      if (!svg) return null;
+      const rect = svg.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return null;
+      const scale = rect.width / VIRTUAL_WIDTH;
+      return [
+        (e.clientX - rect.left) / scale,
+        (e.clientY - rect.top) / scale,
+      ];
     },
-    [article],
+    [],
   );
 
   const scheduleFlush = useCallback(() => {
@@ -181,9 +190,6 @@ export function DrawingOverlay({
       flushTimerRef.current = null;
       const stroke = drawingRef.current;
       if (!stroke) return;
-      // Set the stroke every flush. Y.Map replaces by key atomically;
-      // peers' observers fire and their local strokes refresh with
-      // the longer point list.
       strokesYMap.set(stroke.id, {
         id: stroke.id,
         userId: stroke.userId,
@@ -208,7 +214,6 @@ export function DrawingOverlay({
         };
         drawingRef.current = stroke;
         setDrawingTick((t) => t + 1);
-        // First flush immediately so peers see the starting dot.
         strokesYMap.set(stroke.id, { ...stroke });
       } else if (mode === 'eraser') {
         eraseAt(strokesYMap, user.userId, pt[0], pt[1]);
@@ -247,8 +252,6 @@ export function DrawingOverlay({
     if (stroke && stroke.points.length > 1) {
       strokesYMap.set(stroke.id, { ...stroke });
     } else if (stroke) {
-      // A single-point "stroke" is really a dud click. Remove it if
-      // it made it into the map via the initial flush.
       strokesYMap.delete(stroke.id);
     }
   }, [strokesYMap]);
@@ -263,24 +266,20 @@ export function DrawingOverlay({
     setDrawingTick((t) => t + 1);
   }, [strokesYMap, user.userId]);
 
-  if (!scope || !article) return null;
-  if (scopeDims.w === 0 || articleDims.w === 0) return null;
+  if (!scope || !column) return null;
+  const svgHeight = Math.max(columnHeight, 1);
 
-  // Merge the live in-flight stroke on top of the synced list so the
-  // drawer sees pen-down feedback without waiting for the next flush.
   const drawing = drawingRef.current;
-  void drawingTick; // ensure React rerenders when the ref mutates
+  void drawingTick;
   const renderable = drawing
     ? [...strokes.filter((s) => s.id !== drawing.id), drawing]
     : strokes;
 
-  const toPixel = (x: number, y: number): [number, number] => [
-    articleOffset.x + x * articleDims.w,
-    articleOffset.y + y * articleDims.h,
-  ];
-
+  // SVG sits inside the column (which carries zoom), so it scales
+  // with the column. viewBox matches the virtual canvas exactly.
   const svgPortal = createPortal(
     <svg
+      ref={svgRef}
       aria-label="Drawings"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -288,23 +287,18 @@ export function DrawingOverlay({
       onPointerCancel={onPointerUp}
       className="absolute inset-0"
       style={{
-        width: scopeDims.w,
-        height: scopeDims.h,
+        width: VIRTUAL_WIDTH,
+        height: svgHeight,
         pointerEvents: mode === 'none' ? 'none' : 'auto',
         cursor: mode === 'brush' ? 'crosshair' : mode === 'eraser' ? 'cell' : 'auto',
         zIndex: 4,
       }}
-      viewBox={`0 0 ${scopeDims.w} ${scopeDims.h}`}
+      viewBox={`0 0 ${VIRTUAL_WIDTH} ${svgHeight}`}
     >
       {renderable.map((s) => (
         <polyline
           key={s.id}
-          points={s.points
-            .map(([x, y]) => {
-              const [px, py] = toPixel(x, y);
-              return `${px},${py}`;
-            })
-            .join(' ')}
+          points={s.points.map(([x, y]) => `${x},${y}`).join(' ')}
           fill="none"
           stroke={s.color}
           strokeWidth={STROKE_WIDTH}
@@ -314,96 +308,124 @@ export function DrawingOverlay({
         />
       ))}
     </svg>,
-    scope,
+    column,
   );
 
-  const toolsPortal = createPortal(
-    <>
-      <div
-        aria-label="Drawing tools"
-        className="absolute left-4 top-4 flex flex-col gap-2"
-        style={{ zIndex: 6, pointerEvents: 'auto' }}
-      >
-        <ToolButton
-          icon={<Brush size={16} aria-hidden />}
-          title={mode === 'brush' ? 'Stop drawing' : 'Draw'}
-          active={mode === 'brush'}
-          activeColor={color}
-          onClick={() => {
-            setMode((m) => (m === 'brush' ? 'none' : 'brush'));
-            setSwatchOpen(false);
-          }}
-        />
-        <ToolButton
-          icon={<Eraser size={16} aria-hidden />}
-          title={mode === 'eraser' ? 'Stop erasing' : 'Erase (your strokes)'}
-          active={mode === 'eraser'}
-          onClick={() => {
-            setMode((m) => (m === 'eraser' ? 'none' : 'eraser'));
-            setSwatchOpen(false);
-          }}
-        />
-        <ToolButton
-          icon={<Trash2 size={16} aria-hidden />}
-          title="Clear your drawings"
-          onClick={() => {
-            if (confirm('Clear all your drawings on this note?')) clearMine();
-          }}
-        />
+  const zoomOut = (): void =>
+    setZoom((z) => Math.max(MIN_ZOOM, Math.round((z - ZOOM_STEP) * 100) / 100));
+  const zoomIn = (): void =>
+    setZoom((z) => Math.min(MAX_ZOOM, Math.round((z + ZOOM_STEP) * 100) / 100));
+  const zoomReset = (): void => setZoom(1);
 
-        {mode === 'brush' && (
-          <div
-            className="mt-1 flex flex-col items-center gap-1 rounded-full border border-[#D4C7AE] bg-[#FBF5E8] p-1.5 shadow-[0_4px_12px_rgba(42,36,30,0.12)]"
-            onClick={() => setSwatchOpen((o) => !o)}
-          >
-            <button
-              type="button"
-              aria-label="Active colour"
-              title="Pick colour"
-              className="h-6 w-6 rounded-full border border-[#D4C7AE]"
-              style={{ backgroundColor: color }}
-            />
-            {swatchOpen && (
-              <div className="mt-1 flex flex-col gap-1">
-                {PRESET_COLORS.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    aria-label={`Colour ${c}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setColor(c);
-                      setSwatchOpen(false);
-                    }}
-                    className="h-5 w-5 rounded-full border transition hover:scale-110"
-                    style={{
-                      backgroundColor: c,
-                      borderColor: c === color ? '#2A241E' : '#D4C7AE',
-                    }}
-                  />
-                ))}
+  const toolsPortal = createPortal(
+    <div
+      aria-label="Drawing tools"
+      className="absolute left-4 top-4 flex flex-col gap-2"
+      style={{ zIndex: 6, pointerEvents: 'auto' }}
+    >
+      <ToolButton
+        icon={<Brush size={16} aria-hidden />}
+        title={mode === 'brush' ? 'Stop drawing' : 'Draw'}
+        active={mode === 'brush'}
+        activeColor={color}
+        onClick={() => {
+          setMode((m) => (m === 'brush' ? 'none' : 'brush'));
+          setSwatchOpen(false);
+        }}
+      />
+      <ToolButton
+        icon={<Eraser size={16} aria-hidden />}
+        title={mode === 'eraser' ? 'Stop erasing' : 'Erase (your strokes)'}
+        active={mode === 'eraser'}
+        onClick={() => {
+          setMode((m) => (m === 'eraser' ? 'none' : 'eraser'));
+          setSwatchOpen(false);
+        }}
+      />
+      <ToolButton
+        icon={<Trash2 size={16} aria-hidden />}
+        title="Clear your drawings"
+        onClick={() => {
+          if (confirm('Clear all your drawings on this note?')) clearMine();
+        }}
+      />
+
+      {mode === 'brush' && (
+        <div
+          className="mt-1 flex flex-col items-center gap-1 rounded-full border border-[#D4C7AE] bg-[#FBF5E8] p-1.5 shadow-[0_4px_12px_rgba(42,36,30,0.12)]"
+          onClick={() => setSwatchOpen((o) => !o)}
+        >
+          <button
+            type="button"
+            aria-label="Active colour"
+            title="Pick colour"
+            className="h-6 w-6 rounded-full border border-[#D4C7AE]"
+            style={{ backgroundColor: color }}
+          />
+          {swatchOpen && (
+            <div className="mt-1 flex flex-col gap-1">
+              {PRESET_COLORS.map((c) => (
                 <button
+                  key={c}
                   type="button"
-                  aria-label="Custom colour"
+                  aria-label={`Colour ${c}`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    colorInputRef.current?.click();
+                    setColor(c);
+                    setSwatchOpen(false);
                   }}
-                  className="h-5 w-5 rounded-full border border-[#D4C7AE] bg-gradient-to-br from-[#8B4A52] via-[#D4A85A] to-[#7B8A5F] transition hover:scale-110"
+                  className="h-5 w-5 rounded-full border transition hover:scale-110"
+                  style={{
+                    backgroundColor: c,
+                    borderColor: c === color ? '#2A241E' : '#D4C7AE',
+                  }}
                 />
-                <input
-                  ref={colorInputRef}
-                  type="color"
-                  value={color}
-                  onChange={(e) => setColor(e.target.value)}
-                  className="absolute h-0 w-0 opacity-0"
-                />
-              </div>
-            )}
-          </div>
-        )}
+              ))}
+              <button
+                type="button"
+                aria-label="Custom colour"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  colorInputRef.current?.click();
+                }}
+                className="h-5 w-5 rounded-full border border-[#D4C7AE] bg-gradient-to-br from-[#8B4A52] via-[#D4A85A] to-[#7B8A5F] transition hover:scale-110"
+              />
+              <input
+                ref={colorInputRef}
+                type="color"
+                value={color}
+                onChange={(e) => setColor(e.target.value)}
+                className="absolute h-0 w-0 opacity-0"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="mt-1 flex flex-col items-center gap-1 rounded-full border border-[#D4C7AE] bg-[#FBF5E8] p-1 shadow-[0_4px_12px_rgba(42,36,30,0.12)]">
+        <ToolButton
+          icon={<ZoomIn size={14} aria-hidden />}
+          title="Zoom in"
+          onClick={zoomIn}
+          small
+        />
+        <button
+          type="button"
+          onClick={zoomReset}
+          title={`Zoom ${Math.round(zoom * 100)}% — click to reset`}
+          aria-label="Reset zoom"
+          className="rounded-full px-1 text-[10px] font-medium text-[#5A4F42] transition hover:text-[#2A241E]"
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+        <ToolButton
+          icon={<ZoomOut size={14} aria-hidden />}
+          title="Zoom out"
+          onClick={zoomOut}
+          small
+        />
       </div>
-    </>,
+    </div>,
     scope,
   );
 
@@ -440,13 +462,16 @@ function ToolButton({
   onClick,
   active = false,
   activeColor,
+  small = false,
 }: {
   icon: React.ReactNode;
   title: string;
   onClick: () => void;
   active?: boolean;
   activeColor?: string;
+  small?: boolean;
 }): React.JSX.Element {
+  const size = small ? 'h-7 w-7' : 'h-10 w-10';
   return (
     <button
       type="button"
@@ -455,7 +480,7 @@ function ToolButton({
       aria-label={title}
       aria-pressed={active}
       className={
-        'flex h-10 w-10 items-center justify-center rounded-full border shadow-[0_4px_12px_rgba(42,36,30,0.12)] transition hover:scale-105 ' +
+        `flex ${size} items-center justify-center rounded-full border shadow-[0_4px_12px_rgba(42,36,30,0.12)] transition hover:scale-105 ` +
         (active
           ? 'border-[#2A241E] bg-[#F4EDE0] text-[#2A241E]'
           : 'border-[#D4C7AE] bg-[#FBF5E8] text-[#5A4F42] hover:text-[#2A241E]')
