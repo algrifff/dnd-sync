@@ -1,43 +1,50 @@
 # Build context is the `compendium-ai/` folder (set via railway.toml).
 #
-# Previously this was Bun-install + Node-build + Bun-runtime. The
-# Bun runtime worked for simple routes but blew up with opaque
-# "SyntaxError: Unexpected token ','" on anything that pulled the
-# heavy ingest/collab/Tiptap import chain at module load. Running
-# Next 15's production server under Bun's Node-compat layer has
-# sharp edges we can't paper over without giving up reliability.
+# Previously this was Bun-install + Node-build + Bun-runtime. The Bun
+# runtime worked for simple routes but blew up with opaque
+# "SyntaxError: Unexpected token ','" on any route that loaded the
+# heavy ingest/collab/Tiptap import chain — an unserialisable failure
+# inside Bun's native request handling that we couldn't catch.
 #
-# Node is Next's native target. Running the whole pipeline under
-# Node eliminates the entire class of Bun↔Next boundary issues.
-# We give up Bun.file (swapped to fs.createReadStream) and
-# bun:sqlite (swapped to better-sqlite3) — both Node-native and
-# equivalent in semantics for our use.
-#
-# Two stages:
-#   1. build   — Node installs + builds plugin + builds Next
-#   2. runtime — Node runs server.ts via tsx's ESM loader
+# Node is Next's native target. Run everything on Node; keep Bun only
+# for the install step because the workspace manifests use the
+# `workspace:*` protocol that bun.lockb tracks natively (npm 10 chokes
+# on it). Bun install produces a plain node_modules layout Node reads
+# directly.
 
-# --- Stage 1: install + build on Node ----------------------------------
+# --- Stage 1: install with Bun (resolves workspace:* + honours lockfile) ---
+FROM oven/bun:1.1.45 AS deps
+WORKDIR /app
+COPY package.json bun.lockb tsconfig.base.json ./
+COPY shared/package.json ./shared/
+COPY server/package.json ./server/
+COPY plugin/package.json ./plugin/
+RUN bun install --frozen-lockfile
+
+
+# --- Stage 2: build on Node ------------------------------------------
 FROM node:20-slim AS build
 WORKDIR /app
 
-# Build tools for the native modules we depend on (better-sqlite3,
-# argon2). Both ship prebuilt binaries for common platforms, but
-# falling back to a local compile keeps the build deterministic even
-# when the prebuild cache misses.
+# Build tools so Node's `npm rebuild` can fall back to a local compile
+# if better-sqlite3 / argon2 prebuilds don't match the Node ABI.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-COPY package.json tsconfig.base.json ./
-COPY shared/package.json ./shared/
-COPY server/package.json ./server/
-COPY plugin/package.json ./plugin/
-RUN npm install --no-audit --no-fund
-
+COPY --from=deps /app/node_modules      ./node_modules
+COPY --from=deps /app/package.json      ./package.json
+COPY --from=deps /app/bun.lockb         ./bun.lockb
+COPY --from=deps /app/tsconfig.base.json ./tsconfig.base.json
 COPY shared ./shared
 COPY plugin ./plugin
 COPY server ./server
+
+# Rebuild the native modules against Node's ABI. Most of the time the
+# prebuilt binary Bun install downloaded already matches (N-API is
+# ABI-stable), but this is the cheap safety net that catches the rare
+# miss rather than finding out at request time.
+RUN npm rebuild better-sqlite3 argon2
 
 # Plugin bundle.
 WORKDIR /app/plugin
@@ -49,7 +56,7 @@ ENV NODE_ENV=production
 RUN npm run build
 
 
-# --- Stage 2: runtime on Node ------------------------------------------
+# --- Stage 3: runtime on Node ----------------------------------------
 FROM node:20-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
@@ -71,6 +78,5 @@ COPY --from=build /app/plugin/manifest.json         ./plugin-bundle/manifest.jso
 WORKDIR /app/server
 EXPOSE 3000
 # tsx's ESM loader transforms TypeScript on import so server.ts can
-# run under Node without a prior compile step. Avoids maintaining a
-# separate tsc emit just for the custom server entry.
+# run under Node without a prior compile step.
 CMD ["node", "--import", "tsx/esm", "server.ts"]
