@@ -16,6 +16,7 @@ import type * as Y from 'yjs';
 import { BASE_EXTENSIONS } from '@/lib/pm-schema';
 import { SlashMenu } from './SlashMenu';
 import { TableToolbar } from './TableToolbar';
+import { imageFilesFromDataTransfer, uploadImageAsset } from '@/lib/image-upload';
 
 export type SurfaceUser = {
   userId: string;
@@ -59,6 +60,7 @@ export function NoteSurface({
   initialContent,
   user,
   canEdit = true,
+  csrfToken,
 }: {
   path: string;
   ydoc: Y.Doc;
@@ -66,6 +68,7 @@ export function NoteSurface({
   initialContent: { type: string } & Record<string, unknown>;
   user: SurfaceUser;
   canEdit?: boolean;
+  csrfToken: string;
 }): React.JSX.Element {
   const router = useRouter();
 
@@ -121,6 +124,79 @@ export function NoteSurface({
     return () => el.removeEventListener('click', onClick);
   }, [router]);
 
+  // Drag-drop image upload. Intercepts file drops on the note body,
+  // uploads each image, and inserts an embed at the ProseMirror
+  // position under the cursor. Runs only when the user can edit; for
+  // non-image drops (text, URLs, PM-internal moves) we let the event
+  // fall through to Tiptap's own handler.
+  useEffect(() => {
+    if (!canEdit || !editor) return;
+    const el = containerRef.current;
+    if (!el) return;
+
+    const onDragOver = (evt: DragEvent): void => {
+      if (!evt.dataTransfer) return;
+      const hasFiles = Array.from(evt.dataTransfer.types).includes('Files');
+      if (!hasFiles) return;
+      evt.preventDefault();
+      evt.dataTransfer.dropEffect = 'copy';
+    };
+
+    const onDrop = (evt: DragEvent): void => {
+      if (!evt.dataTransfer) return;
+      const images = imageFilesFromDataTransfer(evt.dataTransfer);
+      if (images.length === 0) return;
+      evt.preventDefault();
+      evt.stopPropagation();
+
+      // Find the PM position closest to the drop point so the embed
+      // lands where the user aimed, not at the end of the doc.
+      const coords = editor.view.posAtCoords({
+        left: evt.clientX,
+        top: evt.clientY,
+      });
+      const dropPos = coords?.pos ?? editor.state.doc.content.size;
+
+      void (async () => {
+        for (let i = 0; i < images.length; i++) {
+          const file = images[i]!;
+          try {
+            const asset = await uploadImageAsset(file, csrfToken);
+            // Inserting at the same pos each time naturally stacks
+            // uploads in the correct order (the embed pushes the
+            // following content forward, but `dropPos` is captured
+            // from the initial drop coord).
+            editor
+              .chain()
+              .focus()
+              .insertContentAt(dropPos + i, {
+                type: 'embed',
+                attrs: {
+                  assetId: asset.id,
+                  mime: asset.mime,
+                  originalName: asset.originalName,
+                },
+              })
+              .run();
+          } catch (err) {
+            alert(
+              err instanceof Error
+                ? `Image upload failed: ${err.message}`
+                : 'Image upload failed',
+            );
+          }
+        }
+      })();
+    };
+
+    el.addEventListener('dragover', onDragOver);
+    el.addEventListener('drop', onDrop);
+    return () => {
+      el.removeEventListener('dragover', onDragOver);
+      el.removeEventListener('drop', onDrop);
+    };
+  }, [canEdit, editor, csrfToken]);
+
   return (
     <>
       <article
@@ -130,7 +206,7 @@ export function NoteSurface({
       >
         <EditorContent editor={editor} />
       </article>
-      {canEdit && <SlashMenu editor={editor} />}
+      {canEdit && <SlashMenu editor={editor} csrfToken={csrfToken} />}
       {canEdit && <TableToolbar editor={editor} />}
     </>
   );

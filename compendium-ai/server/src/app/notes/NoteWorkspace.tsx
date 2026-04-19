@@ -90,6 +90,7 @@ export function NoteWorkspace({
         initialContent={initialContent}
         user={user}
         canEdit={canEdit}
+        csrfToken={csrfToken}
       />
 
       <PointerOverlay

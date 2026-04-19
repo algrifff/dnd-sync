@@ -341,13 +341,21 @@ function walkOneInline(n: Mdast, ctx: IngestContext, coll: Collected, marks: Mar
       return walkInline(n.children ?? [], ctx, coll, mergeMark(marks, linkMark));
     }
     case 'image': {
-      // External URL image → emit inline image node. Asset-style
-      // `![[foo.png]]` is handled in textToInline as an embed.
+      // Standard markdown `![alt](cat.png)` or `![alt](Attachments/cat.png)`
+      // — the URL is a vault-relative path referring to a ZIP-ingested
+      // asset. Resolve it against the filename index and rewrite src
+      // to our /api/assets/<id> endpoint so the rendered <img> hits
+      // the authed content-addressed store instead of a dead relative
+      // path. External URLs (http/https/data/blob/absolute) pass
+      // through unchanged. `![[foo.png]]` wikilink form is handled
+      // separately in textToInline as a block embed.
+      const rawUrl = n.url ?? '';
+      const src = resolveImageUrl(rawUrl, ctx);
       return [
         {
           type: 'image',
           attrs: {
-            src: n.url ?? '',
+            src,
             alt: n.alt ?? null,
             title: n.title ?? null,
           },
@@ -580,6 +588,24 @@ function resolveAsset(
 ): { id: string; mime: string } | null {
   const name = target.split('/').pop() ?? target;
   return ctx.assetsByName.get(name) ?? ctx.assetsByName.get(name.toLowerCase()) ?? null;
+}
+
+/** Rewrite a markdown image URL. Vault-relative paths that resolve to
+ *  an ingested asset get remapped to the /api/assets/<id> endpoint;
+ *  external (http/https/data/blob/absolute) URLs pass through; an
+ *  unresolved relative path is returned as-is so the broken-image
+ *  symptom is visible and fixable rather than silently hidden. */
+function resolveImageUrl(url: string, ctx: IngestContext): string {
+  if (!url) return '';
+  if (/^(https?:|data:|blob:|\/)/i.test(url)) return url;
+  let basename = url.split('/').pop() ?? url;
+  try {
+    basename = decodeURIComponent(basename);
+  } catch {
+    /* leave encoded */
+  }
+  const asset = resolveAsset(basename, ctx);
+  return asset ? `/api/assets/${encodeURIComponent(asset.id)}` : url;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

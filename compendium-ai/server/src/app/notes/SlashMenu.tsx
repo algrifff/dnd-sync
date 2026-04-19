@@ -24,7 +24,15 @@ import {
   AlertTriangle,
   ShieldAlert,
   Table as TableIcon,
+  Image as ImageIcon,
 } from 'lucide-react';
+import { uploadImageAsset } from '@/lib/image-upload';
+
+type Range = { from: number; to: number };
+type CmdOpts = {
+  csrfToken: string;
+  pickImage: () => Promise<File | null>;
+};
 
 type Cmd = {
   id: string;
@@ -32,10 +40,11 @@ type Cmd = {
   hint: string;
   icon: React.ReactNode;
   keywords: string[];
-  run: (editor: Editor, range: { from: number; to: number }) => void;
+  run: (editor: Editor, range: Range) => void;
 };
 
-const COMMANDS: Cmd[] = [
+function buildCommands(opts: CmdOpts): Cmd[] {
+  return [
   {
     id: 'h1',
     label: 'Heading 1',
@@ -154,7 +163,41 @@ const COMMANDS: Cmd[] = [
         .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
         .run(),
   },
-];
+  {
+    id: 'image',
+    label: 'Image',
+    hint: 'Upload and embed an image',
+    icon: <ImageIcon size={16} aria-hidden />,
+    keywords: ['image', 'img', 'photo', 'picture', 'upload', 'file'],
+    run: (e, r) => {
+      // Delete the `/query` text immediately so the trigger doesn't
+      // linger on screen while the file picker / upload run. If the
+      // user cancels the picker we're left with a clean caret.
+      e.chain().focus().deleteRange(r).run();
+      void (async () => {
+        const file = await opts.pickImage();
+        if (!file) return;
+        try {
+          const asset = await uploadImageAsset(file, opts.csrfToken);
+          e.chain()
+            .focus()
+            .insertContent({
+              type: 'embed',
+              attrs: {
+                assetId: asset.id,
+                mime: asset.mime,
+                originalName: asset.originalName,
+              },
+            })
+            .run();
+        } catch (err) {
+          alert(err instanceof Error ? err.message : 'image upload failed');
+        }
+      })();
+    },
+  },
+  ];
+}
 
 function insertCallout(
   editor: Editor,
@@ -180,10 +223,33 @@ type Trigger = {
   rect: { left: number; top: number; bottom: number };
 };
 
-export function SlashMenu({ editor }: { editor: Editor | null }): React.JSX.Element | null {
+export function SlashMenu({
+  editor,
+  csrfToken,
+}: {
+  editor: Editor | null;
+  csrfToken: string;
+}): React.JSX.Element | null {
   const [trigger, setTrigger] = useState<Trigger | null>(null);
   const [highlight, setHighlight] = useState<number>(0);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pickResolverRef = useRef<((file: File | null) => void) | null>(null);
+
+  // Opens the hidden <input type="file"> and resolves once the user
+  // either picks a file or dismisses the dialog (detected via focus
+  // returning to the window without a change event).
+  const pickImage = useCallback((): Promise<File | null> => {
+    const input = fileInputRef.current;
+    if (!input) return Promise.resolve(null);
+    input.value = ''; // allow re-selecting the same file twice in a row
+    return new Promise<File | null>((resolve) => {
+      pickResolverRef.current = resolve;
+      input.click();
+    });
+  }, []);
+
+  const commands = buildCommands({ csrfToken, pickImage });
 
   // Detect the trigger on each editor update.
   useEffect(() => {
@@ -205,7 +271,7 @@ export function SlashMenu({ editor }: { editor: Editor | null }): React.JSX.Elem
     setHighlight(0);
   }, [trigger?.query]);
 
-  const options = trigger ? filterCommands(trigger.query) : [];
+  const options = trigger ? filterCommands(commands, trigger.query) : [];
 
   const close = useCallback(() => setTrigger(null), []);
 
@@ -248,52 +314,74 @@ export function SlashMenu({ editor }: { editor: Editor | null }): React.JSX.Elem
     return () => el.removeEventListener('keydown', onKey, true);
   }, [editor, trigger, options, highlight, run, close]);
 
-  if (!trigger) return null;
+  // Hidden file input for the Image slash command. Mounted always so
+  // it outlives the popover: the picker resolves AFTER the menu
+  // closes (the command selection dismisses the popover, then the
+  // user interacts with the native file dialog).
+  const hiddenFileInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept="image/*"
+      hidden
+      onChange={(e) => {
+        const file = e.target.files?.[0] ?? null;
+        const resolve = pickResolverRef.current;
+        pickResolverRef.current = null;
+        resolve?.(file);
+      }}
+    />
+  );
+
+  if (!trigger) return hiddenFileInput;
 
   const { rect } = trigger;
   return (
-    <div
-      ref={popoverRef}
-      role="listbox"
-      aria-label="Slash commands"
-      className="fixed z-30 w-72 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_12px_32px_rgba(42,36,30,0.18)]"
-      style={{ left: rect.left, top: rect.bottom + 6 }}
-    >
-      {options.length === 0 ? (
-        <div className="px-3 py-2 text-xs text-[#5A4F42]">No matches</div>
-      ) : (
-        <ul className="max-h-80 overflow-y-auto py-1">
-          {options.map((cmd, i) => (
-            <li key={cmd.id}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={i === highlight}
-                onMouseEnter={() => setHighlight(i)}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  run(cmd);
-                }}
-                className={
-                  'flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition ' +
-                  (i === highlight
-                    ? 'bg-[#D4A85A]/20 text-[#2A241E]'
-                    : 'text-[#2A241E] hover:bg-[#D4A85A]/10')
-                }
-              >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] text-[#5A4F42]">
-                  {cmd.icon}
-                </span>
-                <span className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium">{cmd.label}</span>
-                  <span className="truncate text-xs text-[#5A4F42]">{cmd.hint}</span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+    <>
+      {hiddenFileInput}
+      <div
+        ref={popoverRef}
+        role="listbox"
+        aria-label="Slash commands"
+        className="fixed z-30 w-72 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_12px_32px_rgba(42,36,30,0.18)]"
+        style={{ left: rect.left, top: rect.bottom + 6 }}
+      >
+        {options.length === 0 ? (
+          <div className="px-3 py-2 text-xs text-[#5A4F42]">No matches</div>
+        ) : (
+          <ul className="max-h-80 overflow-y-auto py-1">
+            {options.map((cmd, i) => (
+              <li key={cmd.id}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={i === highlight}
+                  onMouseEnter={() => setHighlight(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    run(cmd);
+                  }}
+                  className={
+                    'flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition ' +
+                    (i === highlight
+                      ? 'bg-[#D4A85A]/20 text-[#2A241E]'
+                      : 'text-[#2A241E] hover:bg-[#D4A85A]/10')
+                  }
+                >
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] text-[#5A4F42]">
+                    {cmd.icon}
+                  </span>
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate font-medium">{cmd.label}</span>
+                    <span className="truncate text-xs text-[#5A4F42]">{cmd.hint}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -336,10 +424,10 @@ function detectTrigger(editor: Editor): Trigger | null {
   return { from, to, query, rect };
 }
 
-function filterCommands(query: string): Cmd[] {
+function filterCommands(commands: Cmd[], query: string): Cmd[] {
   const q = query.toLowerCase();
-  if (!q) return COMMANDS;
-  return COMMANDS.filter((c) => {
+  if (!q) return commands;
+  return commands.filter((c) => {
     if (c.id.includes(q)) return true;
     if (c.label.toLowerCase().includes(q)) return true;
     return c.keywords.some((k) => k.includes(q));
