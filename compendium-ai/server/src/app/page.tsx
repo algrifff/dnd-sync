@@ -38,7 +38,9 @@ export default async function HomePage(): Promise<ReactElement> {
     .get(DEFAULT_GROUP_ID, DEFAULT_GROUP_ID) ?? { notes: 0, assets: 0 };
 
   const recent = recentlyUpdated(DEFAULT_GROUP_ID, 12);
-  const tree = buildTree(DEFAULT_GROUP_ID);
+  const tree = buildTree(DEFAULT_GROUP_ID, {
+    hideDmOnly: session.role === 'viewer',
+  });
   const kindMap = Object.fromEntries(listNoteKinds(DEFAULT_GROUP_ID));
   const topFolders = tree.root.children.filter((c) => c.kind === 'dir').slice(0, 6);
 

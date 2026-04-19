@@ -30,7 +30,9 @@ export default async function SessionsPage(): Promise<ReactElement> {
   const session = readSession(cookieHeader);
   if (!session) redirect('/login?next=/sessions');
 
-  const tree = buildTree(session.currentGroupId);
+  const tree = buildTree(session.currentGroupId, {
+    hideDmOnly: session.role === 'viewer',
+  });
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
   const campaigns = listCampaigns(session.currentGroupId);
   const sessions = listSessions(session.currentGroupId);

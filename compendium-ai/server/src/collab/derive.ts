@@ -39,6 +39,7 @@ export function deriveAndPersist(opts: {
       'SELECT frontmatter_json FROM notes WHERE group_id = ? AND path = ?',
     )
     .get(opts.groupId, opts.path);
+  const dmOnly = isDmOnly(fmRow?.frontmatter_json ?? '{}');
   const frontmatterTags = readFrontmatterTags(fmRow?.frontmatter_json ?? '{}');
   const allTags = [...new Set([...inlineTags, ...frontmatterTags])];
 
@@ -53,7 +54,8 @@ export function deriveAndPersist(opts: {
               content_md = ?,
               byte_size = ?,
               updated_at = ?,
-              updated_by = COALESCE(?, updated_by)
+              updated_by = COALESCE(?, updated_by),
+              dm_only = ?
         WHERE group_id = ? AND path = ?`,
     ).run(
       title,
@@ -63,6 +65,7 @@ export function deriveAndPersist(opts: {
       contentMd.length,
       now,
       opts.userId,
+      dmOnly ? 1 : 0,
       opts.groupId,
       opts.path,
     );
@@ -143,6 +146,15 @@ function readFrontmatterTags(fmJson: string): string[] {
       .filter((t) => t.length > 0);
   } catch {
     return [];
+  }
+}
+
+function isDmOnly(fmJson: string): boolean {
+  try {
+    const fm = JSON.parse(fmJson) as { dmOnly?: unknown; dm_only?: unknown };
+    return fm?.dmOnly === true || fm?.dm_only === true;
+  } catch {
+    return false;
   }
 }
 

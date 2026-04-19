@@ -44,10 +44,16 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
   const note = loadNote(session.currentGroupId, path);
   if (!note) notFound();
+  // DM-only notes are invisible to viewers. notFound() keeps them
+  // indistinguishable from "no such note" to avoid leaking the path.
+  const hideDm = session.role === 'viewer';
+  if (hideDm && note.dm_only === 1) notFound();
 
-  const tree = buildTree(session.currentGroupId);
+  const tree = buildTree(session.currentGroupId, { hideDmOnly: hideDm });
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
-  const backlinks = loadBacklinks(session.currentGroupId, path);
+  const backlinks = loadBacklinks(session.currentGroupId, path, {
+    hideDmOnly: hideDm,
+  });
   const tags = loadTags(session.currentGroupId, path);
   const creator = note.created_by ? loadUser(note.created_by) : null;
 
@@ -131,7 +137,23 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                 userId: session.userId,
                 createdBy: note.created_by,
                 character,
-              }) && <NoteMenu path={path} csrfToken={session.csrfToken} />}
+              }) && (
+                <div className="flex items-center gap-2">
+                  {note.dm_only === 1 && (
+                    <span
+                      className="rounded-full border border-[#8B4A52]/40 bg-[#8B4A52]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#8B4A52]"
+                      title="Only admins and editors can see this note"
+                    >
+                      DM only
+                    </span>
+                  )}
+                  <NoteMenu
+                    path={path}
+                    csrfToken={session.csrfToken}
+                    dmOnly={note.dm_only === 1}
+                  />
+                </div>
+              )}
             </header>
 
             <NoteWorkspace

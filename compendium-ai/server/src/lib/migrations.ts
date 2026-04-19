@@ -381,6 +381,14 @@ const MIGRATIONS: readonly Migration[] = [
         ON sessions(group_id, campaign_slug, session_date DESC);
     `,
   },
+  {
+    version: 15,
+    description: 'notes.dm_only flag for DM-hidden content',
+    sql: `
+      ALTER TABLE notes ADD COLUMN dm_only INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX notes_dm_only ON notes(group_id, dm_only);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

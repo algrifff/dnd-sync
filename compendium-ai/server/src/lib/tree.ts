@@ -22,12 +22,20 @@ export type Tree = {
   updatedAt: number;
 };
 
-export function buildTree(groupId: string): Tree {
+export function buildTree(
+  groupId: string,
+  opts?: { hideDmOnly?: boolean },
+): Tree {
+  const where = opts?.hideDmOnly
+    ? 'WHERE group_id = ? AND dm_only = 0'
+    : 'WHERE group_id = ?';
   const rows = getDb()
     .query<
       { path: string; title: string; updated_at: number },
       [string]
-    >(`SELECT path, title, updated_at FROM notes WHERE group_id = ? ORDER BY path`)
+    >(
+      `SELECT path, title, updated_at FROM notes ${where} ORDER BY path`,
+    )
     .all(groupId);
 
   // Explicit empty-folder markers; rendered alongside folders derived

@@ -31,7 +31,9 @@ export default async function SettingsLayout({
   const session = readSession(cookieHeader);
   if (!session) redirect('/login?next=/settings');
 
-  const tree = buildTree(session.currentGroupId);
+  const tree = buildTree(session.currentGroupId, {
+    hideDmOnly: session.role === 'viewer',
+  });
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
 
   return (

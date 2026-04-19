@@ -16,6 +16,7 @@ export type NoteRow = {
   updated_by: string | null;
   created_at: number;
   created_by: string | null;
+  dm_only: number;
 };
 
 export type NoteAuthor = {
@@ -46,7 +47,7 @@ export function loadNote(groupId: string, path: string): NoteRow | null {
       .query<NoteRow, [string, string]>(
         `SELECT id, path, title, content_json, content_md, content_text,
                 frontmatter_json, byte_size, updated_at, updated_by,
-                created_at, created_by
+                created_at, created_by, dm_only
            FROM notes WHERE group_id = ? AND path = ?`,
       )
       .get(groupId, path) ?? null
@@ -75,13 +76,20 @@ export function loadPreview(groupId: string, path: string): NotePreview | null {
   return { path, title: row.title, excerpt };
 }
 
-export function loadBacklinks(groupId: string, path: string): BacklinkRow[] {
+export function loadBacklinks(
+  groupId: string,
+  path: string,
+  opts?: { hideDmOnly?: boolean },
+): BacklinkRow[] {
+  const dmFilter = opts?.hideDmOnly
+    ? ' AND (n.dm_only IS NULL OR n.dm_only = 0)'
+    : '';
   return getDb()
     .query<BacklinkRow, [string, string]>(
       `SELECT nl.from_path AS from_path, COALESCE(n.title, nl.from_path) AS title
          FROM note_links nl
          LEFT JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.from_path
-        WHERE nl.group_id = ? AND nl.to_path = ?
+        WHERE nl.group_id = ? AND nl.to_path = ?${dmFilter}
         ORDER BY nl.from_path`,
     )
     .all(groupId, path);

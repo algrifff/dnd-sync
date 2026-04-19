@@ -7,19 +7,22 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { MoreHorizontal, Copy, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Copy, Trash2, EyeOff, Eye } from 'lucide-react';
 import { broadcastTreeChange } from '@/lib/tree-sync';
 
 export function NoteMenu({
   path,
   csrfToken,
+  dmOnly,
 }: {
   path: string;
   csrfToken: string;
+  dmOnly: boolean;
 }): React.JSX.Element {
   const router = useRouter();
   const [open, setOpen] = useState<boolean>(false);
   const [pending, startTransition] = useTransition();
+  const [dmState, setDmState] = useState<boolean>(dmOnly);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -63,6 +66,35 @@ export function NoteMenu({
       }
     });
   }, [csrfToken, path, router]);
+
+  const toggleDm = useCallback(() => {
+    setOpen(false);
+    const next = !dmState;
+    setDmState(next);
+    startTransition(async () => {
+      try {
+        const res = await fetch('/api/notes/visibility', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
+          },
+          body: JSON.stringify({ path, dmOnly: next }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !body.ok) {
+          setDmState(dmState);
+          alert(body.error ?? `Visibility toggle failed (HTTP ${res.status})`);
+          return;
+        }
+        router.refresh();
+        broadcastTreeChange();
+      } catch (err) {
+        setDmState(dmState);
+        alert(err instanceof Error ? err.message : 'network error');
+      }
+    });
+  }, [csrfToken, path, router, dmState]);
 
   const destroy = useCallback(() => {
     setOpen(false);
@@ -110,6 +142,18 @@ export function NoteMenu({
         >
           <MenuItem onClick={duplicate} icon={<Copy size={14} aria-hidden />}>
             Duplicate
+          </MenuItem>
+          <MenuItem
+            onClick={toggleDm}
+            icon={
+              dmState ? (
+                <Eye size={14} aria-hidden />
+              ) : (
+                <EyeOff size={14} aria-hidden />
+              )
+            }
+          >
+            {dmState ? 'Unmark DM-only' : 'Mark DM-only'}
           </MenuItem>
           <div className="h-px bg-[#D4C7AE]" />
           <MenuItem

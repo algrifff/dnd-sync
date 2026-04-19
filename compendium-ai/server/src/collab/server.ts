@@ -56,6 +56,15 @@ function parseMetaDocName(
  *    - `graph-groups:<id>`: editor/admin only — it's DM-configured
  *      colour grouping, not a per-user thing.
  */
+function isNoteDmOnly(groupId: string, documentName: string): boolean {
+  const row = getDb()
+    .query<{ dm_only: number }, [string, string]>(
+      'SELECT dm_only FROM notes WHERE group_id = ? AND path = ?',
+    )
+    .get(groupId, documentName);
+  return !!row && row.dm_only === 1;
+}
+
 function canEditDoc(documentName: string, session: Session): boolean {
   if (session.role === 'admin' || session.role === 'editor') return true;
 
@@ -83,6 +92,18 @@ export const collabServer = new Hocuspocus({
       headers: { cookie: data.request.headers.cookie },
     });
     if (!session) throw new Error('Unauthorized');
+
+    // DM-only gate: block viewers from any note marked dm_only
+    // entirely (they get no connection, so no live updates and no
+    // awareness). Admins + editors see everything.
+    if (
+      session.role === 'viewer' &&
+      !data.documentName.startsWith('.') &&
+      !data.documentName.startsWith('graph-groups:') &&
+      isNoteDmOnly(session.currentGroupId, data.documentName)
+    ) {
+      throw new Error('Unauthorized');
+    }
 
     // Flip viewers to read-only for docs they don't own. They still
     // connect, still receive live updates from peers, just can't
