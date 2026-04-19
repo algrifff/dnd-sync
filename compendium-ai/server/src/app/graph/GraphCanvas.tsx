@@ -237,8 +237,34 @@ export function GraphCanvas({
     setStatus('loading');
     setError(null);
 
+    const waitForSync = (): Promise<void> =>
+      new Promise((resolve) => {
+        if (provider.synced) {
+          resolve();
+          return;
+        }
+        const onSynced = (): void => {
+          provider.off('synced', onSynced);
+          resolve();
+        };
+        provider.on('synced', onSynced);
+        // Safety net: if the server takes too long, proceed with
+        // whatever we have so the page isn't blocked forever.
+        setTimeout(() => {
+          provider.off('synced', onSynced);
+          resolve();
+        }, 2000);
+      });
+
     (async () => {
       try {
+        // Wait for the shared graph-state doc to finish its initial
+        // sync BEFORE seeding node positions. Otherwise a second
+        // connector would lay out random positions locally and only
+        // snap to the shared pins after the first remote update.
+        await waitForSync();
+        if (cancelled) return;
+
         const res = await fetch(`/api/graph?scope=${encodeURIComponent(scopeParam)}`, {
           cache: 'no-store',
         });
@@ -324,18 +350,33 @@ export function GraphCanvas({
           if (!sigmaRef.current || cancelled) return;
           if (g.order > 1) {
             forceAtlas2.assign(g, tickOpts);
-            // Re-apply fixed positions AFTER the iteration so physics
-            // can't knock pinned / dragged nodes off.
+            // Pinned positions — persistent, shared with peers.
             for (const [id, pos] of Object.entries(pinsRef.current)) {
               if (g.hasNode(id)) {
                 g.setNodeAttribute(id, 'x', pos.x);
                 g.setNodeAttribute(id, 'y', pos.y);
               }
             }
+            // Local drag in progress — hold the node at the cursor.
             const dragged = draggedRef.current;
             if (dragged && g.hasNode(dragged.node)) {
               g.setNodeAttribute(dragged.node, 'x', dragged.x);
               g.setNodeAttribute(dragged.node, 'y', dragged.y);
+            }
+            // Remote drags in progress — reflect each connected peer's
+            // awareness.dragging into their target node so we see
+            // moves in real time (the writer clears awareness on drop
+            // so physics resumes there unless they shift-pinned).
+            const aw = provider.awareness;
+            if (aw) {
+              for (const [clientId, state] of aw.getStates()) {
+                if (clientId === aw.clientID) continue;
+                const drag = (state as { dragging?: { node: string; x: number; y: number } } | undefined)?.dragging;
+                if (drag && drag.node && g.hasNode(drag.node)) {
+                  g.setNodeAttribute(drag.node, 'x', drag.x);
+                  g.setNodeAttribute(drag.node, 'y', drag.y);
+                }
+              }
             }
           }
           rafRef.current = requestAnimationFrame(tick);
@@ -377,16 +418,29 @@ export function GraphCanvas({
           renderer.setSetting('edgeReducer', null);
         });
 
-        // Drag handling. Every drop pins the dropped position —
-        // positions now propagate to every connected peer via the
-        // shared pinsMap so the graph layout reads the same for
-        // everyone after any interaction. Physics keeps running for
-        // nodes nobody has touched yet.
+        // Drag handling:
+        //   * plain drag = move the node while held; physics resumes
+        //     after release (node floats, doesn't pin).
+        //   * shift-drag = same motion, but on release the final
+        //     position is written to pinsMap so it stays put AND
+        //     propagates to every peer.
+        // During any drag we publish the live position via awareness
+        // so peers see the motion in real time.
+        let shiftHeld = false;
+        const broadcastDrag = (): void => {
+          const d = draggedRef.current;
+          provider.awareness?.setLocalStateField(
+            'dragging',
+            d ? { node: d.node, x: d.x, y: d.y } : null,
+          );
+        };
         renderer.on('downNode', ({ node, event }) => {
           const ev = event?.original as MouseEvent | undefined;
           downScreenPos = ev ? { x: ev.clientX, y: ev.clientY } : null;
+          shiftHeld = !!ev?.shiftKey;
           const { x, y } = g.getNodeAttributes(node) as { x: number; y: number };
           draggedRef.current = { node, x, y };
+          broadcastDrag();
           event?.preventSigmaDefault?.();
         });
         const stage = renderer.getMouseCaptor();
@@ -396,6 +450,7 @@ export function GraphCanvas({
           const p = renderer.viewportToGraph({ x: e.x, y: e.y });
           dragged.x = p.x;
           dragged.y = p.y;
+          broadcastDrag();
           e.preventSigmaDefault();
           e.original.preventDefault();
           e.original.stopPropagation();
@@ -403,13 +458,13 @@ export function GraphCanvas({
         stage.on('mouseup', (upEvent) => {
           const dragged = draggedRef.current;
           draggedRef.current = null;
+          provider.awareness?.setLocalStateField('dragging', null);
           if (!dragged) return;
-          // Was this a bare click (pointer barely moved)? Leave the
-          // node alone — clickNode will fire its own navigate. Only
-          // commit a pin when the user actually dragged it.
+          // Click vs drag: only act on actual movement.
           const orig = upEvent.original;
           const clientX = 'clientX' in orig ? orig.clientX : undefined;
           const clientY = 'clientY' in orig ? orig.clientY : undefined;
+          let moved = false;
           if (
             downScreenPos &&
             typeof clientX === 'number' &&
@@ -417,9 +472,19 @@ export function GraphCanvas({
           ) {
             const dx = clientX - downScreenPos.x;
             const dy = clientY - downScreenPos.y;
-            if (Math.hypot(dx, dy) <= 5) return;
+            moved = Math.hypot(dx, dy) > 5;
           }
-          pinsMap.set(dragged.node, { x: dragged.x, y: dragged.y });
+          if (!moved) {
+            shiftHeld = false;
+            return;
+          }
+          if (shiftHeld) {
+            pinsMap.set(dragged.node, { x: dragged.x, y: dragged.y });
+          }
+          // Plain drag: no pin — physics next tick picks the node up
+          // from its dropped position and reshapes the surrounding
+          // layout around it.
+          shiftHeld = false;
         });
 
         setStatus('ready');
@@ -438,7 +503,7 @@ export function GraphCanvas({
       sigmaRef.current = null;
       graphRef.current = null;
     };
-  }, [scopeParam, groupId, router, colorFor, labelMode]);
+  }, [scopeParam, groupId, router, colorFor, labelMode, provider, pinsMap]);
 
   // Live re-colour when tag overrides change without rebuilding the
   // graph (keeps physics running; feels instant).
