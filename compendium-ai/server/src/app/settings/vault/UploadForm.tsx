@@ -10,6 +10,7 @@ type IngestSummary = {
   tags: number;
   durationMs: number;
   skipped: Array<{ path: string; reason: string }>;
+  unresolvedImages: Array<{ path: string; refs: string[] }>;
 };
 
 type UploadState =
@@ -160,6 +161,34 @@ export function UploadForm({
                 {state.summary.skipped.map((s) => (
                   <li key={s.path} className="truncate">
                     <code>{s.path}</code> — {s.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {state.summary.unresolvedImages.length > 0 && (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-[#8B4A52]">
+                Unresolved images (
+                {state.summary.unresolvedImages.reduce((n, g) => n + g.refs.length, 0)}
+                )
+              </summary>
+              <p className="mt-2 text-xs text-[#5A4F42]">
+                These image references didn&rsquo;t match any asset in the ZIP. Most
+                common cause: the image lives in a folder outside the uploaded zip
+                or the filename differs from what the note references.
+              </p>
+              <ul className="mt-2 max-h-40 overflow-auto text-xs text-[#5A4F42]">
+                {state.summary.unresolvedImages.map((g) => (
+                  <li key={g.path} className="mb-1">
+                    <code>{g.path}</code>
+                    <ul className="ml-4 list-disc">
+                      {g.refs.map((r, i) => (
+                        <li key={r + i}>
+                          <code>{r}</code>
+                        </li>
+                      ))}
+                    </ul>
                   </li>
                 ))}
               </ul>

@@ -49,6 +49,10 @@ export type IngestSummary = {
   tags: number;
   durationMs: number;
   skipped: Array<{ path: string; reason: string }>;
+  /** Markdown image refs that didn't match any asset in the ZIP —
+   *  grouped by note so the user can see which files still have
+   *  stale / missing references after upload. */
+  unresolvedImages: Array<{ path: string; refs: string[] }>;
 };
 
 export type IngestOptions = {
@@ -337,6 +341,13 @@ export async function ingestZip(opts: IngestOptions): Promise<IngestSummary> {
     },
   });
 
+  const unresolvedImages = prepared
+    .filter((p) => p.ingest.unresolvedImages.length > 0)
+    .map((p) => ({
+      path: p.ingest.path,
+      refs: p.ingest.unresolvedImages,
+    }));
+
   return {
     notes: prepared.length,
     assets: staged.length,
@@ -345,6 +356,7 @@ export async function ingestZip(opts: IngestOptions): Promise<IngestSummary> {
     tags: tagCount,
     durationMs: Date.now() - t0,
     skipped,
+    unresolvedImages,
   };
 }
 

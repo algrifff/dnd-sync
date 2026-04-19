@@ -67,6 +67,9 @@ export type NoteIngest = {
   contentText: string;
   wikilinks: string[];
   tags: string[];
+  /** Image references that couldn't be resolved against the asset
+   *  index — most often a typo, or an image the ZIP didn't include. */
+  unresolvedImages: string[];
 };
 
 const MD_PARSER = unified().use(remarkParse).use(remarkGfm).use(remarkFrontmatter, ['yaml']);
@@ -84,7 +87,11 @@ export function ingestMarkdown(path: string, raw: string, ctx: IngestContext): N
   const title = findFirstHeading(body) ?? filenameTitle(path);
 
   const ctxForWalk: IngestContext = ctx;
-  const collected: Collected = { wikilinks: new Set<string>(), tags: new Set<string>(fmTags) };
+  const collected: Collected = {
+    wikilinks: new Set<string>(),
+    tags: new Set<string>(fmTags),
+    unresolvedImages: new Set<string>(),
+  };
   const content = body.flatMap((n) => walkBlock(n, ctxForWalk, collected));
 
   const doc: PmNode = { type: 'doc', content };
@@ -97,6 +104,7 @@ export function ingestMarkdown(path: string, raw: string, ctx: IngestContext): N
     contentText: extractPlaintext(doc),
     wikilinks: [...collected.wikilinks],
     tags: [...collected.tags],
+    unresolvedImages: [...collected.unresolvedImages],
   };
 }
 
@@ -161,6 +169,11 @@ function filenameTitle(path: string): string {
 type Collected = {
   wikilinks: Set<string>;
   tags: Set<string>;
+  /** Image URLs that couldn't be matched to a vault asset. Surfaces
+   *  into the ingest summary so users can see which references still
+   *  need fixing rather than silently falling through as broken
+   *  <img> tags. */
+  unresolvedImages: Set<string>;
 };
 
 function walkBlock(n: Mdast, ctx: IngestContext, coll: Collected): PmNode[] {
@@ -350,7 +363,7 @@ function walkOneInline(n: Mdast, ctx: IngestContext, coll: Collected, marks: Mar
       // through unchanged. `![[foo.png]]` wikilink form is handled
       // separately in textToInline as a block embed.
       const rawUrl = n.url ?? '';
-      const src = resolveImageUrl(rawUrl, ctx);
+      const src = resolveImageUrl(rawUrl, ctx, coll);
       return [
         {
           type: 'image',
@@ -364,9 +377,30 @@ function walkOneInline(n: Mdast, ctx: IngestContext, coll: Collected, marks: Mar
     }
     case 'break':
       return [{ type: 'hardBreak' }];
-    case 'html':
-      // Stripping raw HTML to text for v1 safety.
-      return (n.value ?? '').length ? [{ type: 'text', text: n.value ?? '', marks }] : [];
+    case 'html': {
+      // Obsidian notes commonly embed images via raw HTML
+      // (`<img src="...">`). Pull the src out and emit an image
+      // node so those render instead of showing up as literal tags
+      // in the prose. Everything else in the HTML value is dropped
+      // for v1 safety — a future pass can be more permissive.
+      const value = n.value ?? '';
+      if (!value) return [];
+      const imgMatch = /<img\b[^>]*\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))[^>]*>/i.exec(
+        value,
+      );
+      if (imgMatch) {
+        const rawSrc = imgMatch[1] ?? imgMatch[2] ?? imgMatch[3] ?? '';
+        const altMatch = /\balt\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(value);
+        const alt = altMatch ? (altMatch[1] ?? altMatch[2] ?? null) : null;
+        return [
+          {
+            type: 'image',
+            attrs: { src: resolveImageUrl(rawSrc, ctx, coll), alt, title: null },
+          },
+        ];
+      }
+      return [{ type: 'text', text: value, marks }];
+    }
     default:
       return n.children ? walkInline(n.children, ctx, coll, marks) : [];
   }
@@ -594,8 +628,9 @@ function resolveAsset(
  *  an ingested asset get remapped to the /api/assets/<id> endpoint;
  *  external (http/https/data/blob/absolute) URLs pass through; an
  *  unresolved relative path is returned as-is so the broken-image
- *  symptom is visible and fixable rather than silently hidden. */
-function resolveImageUrl(url: string, ctx: IngestContext): string {
+ *  symptom is visible and fixable rather than silently hidden. `coll`
+ *  records unresolved refs for the ingest summary. */
+function resolveImageUrl(url: string, ctx: IngestContext, coll?: Collected): string {
   if (!url) return '';
   if (/^(https?:|data:|blob:|\/)/i.test(url)) return url;
   let basename = url.split('/').pop() ?? url;
@@ -605,7 +640,9 @@ function resolveImageUrl(url: string, ctx: IngestContext): string {
     /* leave encoded */
   }
   const asset = resolveAsset(basename, ctx);
-  return asset ? `/api/assets/${encodeURIComponent(asset.id)}` : url;
+  if (asset) return `/api/assets/${encodeURIComponent(asset.id)}`;
+  if (coll) coll.unresolvedImages.add(url);
+  return url;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
