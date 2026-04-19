@@ -102,19 +102,88 @@ export function HomeChat({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Initial greeting.
+  // Initial greeting + auto-resume any in-flight imports so the DM
+  // picks up right where they left off when they refresh / navigate
+  // back to the home page mid-job.
   useEffect(() => {
-    setMessages([
-      {
-        id: 'boot',
+    const boot: ChatMessage = {
+      id: 'boot',
+      role: 'assistant',
+      kind: 'text',
+      body: canImport
+        ? "Drop a zip of notes or a vault export and I'll organize it — classify every file, move it into the right folder, and link everything up. Check the plan before I apply."
+        : 'Your account doesn\u2019t have import rights. Ask a DM to upload new content.',
+    };
+    const hydrated: ChatMessage[] = [boot];
+
+    // Prefer the most recently updated open job to drive live polling
+    // in the thread; surface older ones as quiet "resume" banners via
+    // the existing resumable-jobs section above the chat.
+    const sorted = [...initialOpenJobs].sort(
+      (a, b) => b.updatedAt - a.updatedAt,
+    );
+    const primary = sorted.find(
+      (j) => j.status === 'analysing' || j.status === 'ready',
+    );
+
+    if (primary) {
+      const plan = primary.plan as ImportPlan | null;
+      const stats = primary.stats as AnalyseStats | null;
+      hydrated.push({
+        id: `resume:${primary.id}`,
+        role: 'user',
+        kind: 'upload',
+        filename: 'earlier import',
+        size: plan?.totals.totalBytes ?? 0,
+      });
+      hydrated.push({
+        id: `parsed:${primary.id}`,
         role: 'assistant',
-        kind: 'text',
-        body: canImport
-          ? "Drop a zip of notes or a vault export and I'll organize it — classify every file, move it into the right folder, and link everything up. Check the plan before I apply."
-          : 'Your account doesn\u2019t have import rights. Ask a DM to upload new content.',
-      },
-    ]);
-  }, [canImport]);
+        kind: 'parsed',
+        jobId: primary.id,
+        totals: plan?.totals ?? {
+          noteCount: 0,
+          assetCount: 0,
+          skippedCount: 0,
+          totalBytes: 0,
+        },
+      });
+      if (primary.status === 'analysing' && stats) {
+        hydrated.push({
+          id: `progress:${primary.id}`,
+          role: 'assistant',
+          kind: 'progress',
+          jobId: primary.id,
+          stats,
+        });
+      }
+      if (
+        primary.status === 'ready' &&
+        plan &&
+        (plan as ImportPlan & { plannedNotes?: PlannedNote[] }).plannedNotes
+      ) {
+        hydrated.push({
+          id: `plan:${primary.id}`,
+          role: 'assistant',
+          kind: 'plan',
+          jobId: primary.id,
+          summary: summarise(
+            plan as ImportPlan & { plannedNotes?: PlannedNote[] },
+            stats,
+          ),
+        });
+      }
+      // Only drive polling when the job's still moving; ready plans
+      // stay static until the DM clicks Accept all.
+      if (primary.status === 'analysing') {
+        setActiveJobId(primary.id);
+      }
+    }
+
+    setMessages(hydrated);
+    // Intentional single run on mount — we want the initial snapshot
+    // of open jobs, not live refetches.
+  }, [canImport, initialOpenJobs]);
 
   // Auto-scroll to bottom on new messages.
   useEffect(() => {
