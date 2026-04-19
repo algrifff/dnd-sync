@@ -5,7 +5,14 @@
 
 import type { ReactElement } from 'react';
 import Link from 'next/link';
-import { Home, Tag, Share2, UserRound, CalendarDays } from 'lucide-react';
+import {
+  Home,
+  Tag,
+  Share2,
+  UserRound,
+  CalendarDays,
+  Image as ImageIcon,
+} from 'lucide-react';
 
 export function SidebarHeader({
   role: _role,
@@ -19,6 +26,7 @@ export function SidebarHeader({
       <IconLink href="/graph" label="Graph" icon={<Share2 size={14} aria-hidden />} />
       <IconLink href="/characters" label="Cast" icon={<UserRound size={14} aria-hidden />} />
       <IconLink href="/sessions" label="Sessions" icon={<CalendarDays size={14} aria-hidden />} />
+      <IconLink href="/assets" label="Assets" icon={<ImageIcon size={14} aria-hidden />} />
     </div>
   );
 }

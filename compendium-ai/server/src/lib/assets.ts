@@ -263,6 +263,44 @@ function safelyRemove(p: string): void {
 }
 
 /** Look up by (group_id, id). Used by the /api/assets/[id] route. */
+export type AssetListEntry = {
+  id: string;
+  mime: string;
+  size: number;
+  originalName: string;
+  originalPath: string;
+  uploadedAt: number;
+};
+
+type AssetListDbRow = {
+  id: string;
+  mime: string;
+  size: number;
+  original_name: string;
+  original_path: string | null;
+  uploaded_at: number;
+};
+
+/** All assets in a group, for the /assets gallery. */
+export function listGroupAssets(groupId: string): AssetListEntry[] {
+  return getDb()
+    .query<AssetListDbRow, [string]>(
+      `SELECT id, mime, size, original_name, original_path, uploaded_at
+         FROM assets
+        WHERE group_id = ?
+        ORDER BY original_path COLLATE NOCASE`,
+    )
+    .all(groupId)
+    .map((r) => ({
+      id: r.id,
+      mime: r.mime,
+      size: r.size,
+      originalName: r.original_name,
+      originalPath: r.original_path ?? r.original_name,
+      uploadedAt: r.uploaded_at,
+    }));
+}
+
 export function getAssetById(id: string, groupId: string): AssetRow | null {
   return (
     getDb()
