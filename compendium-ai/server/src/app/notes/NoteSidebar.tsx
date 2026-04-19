@@ -4,14 +4,17 @@
 import type { ReactElement } from 'react';
 import Link from 'next/link';
 import type { BacklinkRow } from '@/lib/notes';
+import { MiniGraph } from './MiniGraph';
 
 export type OutlineItem = { level: number; text: string };
 
 export function NoteSidebar({
+  path,
   backlinks,
   tags,
   outline,
 }: {
+  path: string;
   backlinks: BacklinkRow[];
   tags: string[];
   outline: OutlineItem[];
@@ -80,12 +83,12 @@ export function NoteSidebar({
       </Section>
 
       <Section title="Graph">
-        <p className="text-xs text-[#5A4F42]">
-          Mini-graph comes in Phase&nbsp;6. Full graph lives at{' '}
+        <MiniGraph path={path} />
+        <p className="mt-2 text-xs text-[#5A4F42]">
+          Full graph →{' '}
           <Link href="/graph" className="underline">
             /graph
           </Link>
-          .
         </p>
       </Section>
     </aside>

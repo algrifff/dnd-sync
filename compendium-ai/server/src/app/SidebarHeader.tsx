@@ -5,7 +5,7 @@
 
 import type { ReactElement } from 'react';
 import Link from 'next/link';
-import { Home, Tag } from 'lucide-react';
+import { Home, Tag, Share2 } from 'lucide-react';
 
 export function SidebarHeader({
   role: _role,
@@ -16,6 +16,7 @@ export function SidebarHeader({
     <div className="flex h-[42px] shrink-0 items-center gap-1 border-b border-[#D4C7AE] bg-[#EAE1CF] px-2">
       <IconLink href="/" label="Home" icon={<Home size={14} aria-hidden />} />
       <IconLink href="/tags" label="Tags" icon={<Tag size={14} aria-hidden />} />
+      <IconLink href="/graph" label="Graph" icon={<Share2 size={14} aria-hidden />} />
     </div>
   );
 }

@@ -113,7 +113,12 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
         </main>
 
           <aside className="hidden md:block">
-            <NoteSidebar backlinks={backlinks} tags={tags} outline={outline} />
+            <NoteSidebar
+              path={path}
+              backlinks={backlinks}
+              tags={tags}
+              outline={outline}
+            />
           </aside>
         </div>
       </div>
