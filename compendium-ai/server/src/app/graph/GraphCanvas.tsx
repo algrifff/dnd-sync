@@ -38,6 +38,7 @@ import Sigma from 'sigma';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
 import { colorForTags, radiusForDegree } from './graphStyle';
 import { PointerOverlay } from '../notes/PointerOverlay';
+import { NotePicker } from '../notes/NotePicker';
 
 type GraphPayload = {
   nodes: Array<{ id: string; title: string; tags: string[]; degree: number }>;
@@ -49,6 +50,19 @@ type Scope =
   | { kind: 'tag'; tag: string };
 
 type LabelMode = 'none' | 'some' | 'all';
+
+/** A user-defined group of tags and/or notes painted with a single
+ *  colour. Groups take priority over individual tag-colour overrides
+ *  so you can narrow a big palette down to collective buckets
+ *  ("factions", "party", etc.). Stored as-is in a Y.Map on the
+ *  shared graph state — every peer sees the same groups live. */
+type Group = {
+  id: string;
+  name: string;
+  color: string;
+  tags: string[];
+  notes: string[];
+};
 
 // Label mode stays local per viewer (personal preference). Pins +
 // tag colours now sync across every connected user via a shared
@@ -89,6 +103,7 @@ export function GraphCanvas({
   });
   const [labelMode, setLabelMode] = useState<LabelMode>('some');
   const [tagColors, setTagColors] = useState<Record<string, string>>({});
+  const [groups, setGroups] = useState<Group[]>([]);
   const [palette, setPalette] = useState<boolean>(false);
   const [nodesPayload, setNodesPayload] = useState<GraphPayload['nodes']>([]);
 
@@ -108,6 +123,7 @@ export function GraphCanvas({
     [ydoc],
   );
   const coloursMap = useMemo(() => ydoc.getMap<string>('colours'), [ydoc]);
+  const groupsMap = useMemo(() => ydoc.getMap<Group>('groups'), [ydoc]);
 
   useEffect(() => {
     return () => {
@@ -121,17 +137,28 @@ export function GraphCanvas({
     return 'all';
   }, [scope]);
 
-  // Resolve a node's colour: user override for the first matching tag
-  // wins, otherwise fall through to the priority-default palette.
+  // Resolve a node's colour in this order:
+  //   1. group membership — first matching group wins. A node matches
+  //      if its path is in the group's notes list OR any of its tags
+  //      are in the group's tags list.
+  //   2. per-tag override from the Colours palette.
+  //   3. default priority palette from graphStyle.
   const colorFor = useCallback(
-    (tags: readonly string[]): string => {
+    (nodeId: string, tags: readonly string[]): string => {
+      const lower = tags.map((t) => t.toLowerCase());
+      for (const g of groups) {
+        if (g.notes.includes(nodeId)) return g.color;
+        for (const t of g.tags) {
+          if (lower.includes(t.toLowerCase())) return g.color;
+        }
+      }
       for (const t of tags) {
         const override = tagColors[t.toLowerCase()];
         if (override) return override;
       }
       return colorForTags(tags);
     },
-    [tagColors],
+    [groups, tagColors],
   );
 
   // Label mode: personal preference, local to this viewer.
@@ -182,6 +209,25 @@ export function GraphCanvas({
     return () => coloursMap.unobserve(apply);
   }, [coloursMap]);
 
+  // Groups: same shape as colours — Y.Map keyed by group id, value is
+  // the full Group record. Local array is ordered by insertion time
+  // (createdAt field folded into the id) for stable render.
+  useEffect(() => {
+    const apply = (): void => {
+      const next: Group[] = [];
+      groupsMap.forEach((value) => {
+        if (value && typeof value === 'object' && typeof value.id === 'string') {
+          next.push(value);
+        }
+      });
+      next.sort((a, b) => a.id.localeCompare(b.id));
+      setGroups(next);
+    };
+    apply();
+    groupsMap.observe(apply);
+    return () => groupsMap.unobserve(apply);
+  }, [groupsMap]);
+
   // ── main load + render cycle ────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -214,7 +260,7 @@ export function GraphCanvas({
           g.addNode(n.id, {
             label: n.title,
             size: radiusForDegree(n.degree),
-            color: colorFor(n.tags),
+            color: colorFor(n.id, n.tags),
             x: pin?.x ?? (Math.random() * 2 - 1),
             y: pin?.y ?? (Math.random() * 2 - 1),
             tags: n.tags,
@@ -402,9 +448,9 @@ export function GraphCanvas({
     if (!g || !renderer) return;
     g.forEachNode((id, attrs) => {
       const tags = (attrs.tags as string[] | undefined) ?? [];
-      g.setNodeAttribute(id, 'color', colorFor(tags));
+      g.setNodeAttribute(id, 'color', colorFor(id, tags));
     });
-  }, [tagColors, colorFor]);
+  }, [tagColors, groups, colorFor]);
 
   // Apply label-mode changes to a live sigma without rebuilding.
   useEffect(() => {
@@ -431,6 +477,22 @@ export function GraphCanvas({
   const clearPins = useCallback(() => {
     pinsMap.clear();
   }, [pinsMap]);
+
+  const createGroup = useCallback(() => {
+    // Seeded with a fresh timestamp-prefixed id so rows sort by
+    // insertion order (older groups stay at the top) while still
+    // being unique across peers.
+    const id =
+      Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    const group: Group = {
+      id,
+      name: `Group ${groups.length + 1}`,
+      color: '#8B4A52',
+      tags: [],
+      notes: [],
+    };
+    groupsMap.set(id, group);
+  }, [groups.length, groupsMap]);
 
   // Tags surfaced in the palette panel: include every tag present on
   // at least one node in the current scope, even if unused by the
@@ -564,19 +626,211 @@ export function GraphCanvas({
           </div>
         )}
 
+        {palette && (
+          <div className="pointer-events-auto max-h-72 overflow-y-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+                Groups
+              </span>
+              <button
+                type="button"
+                onClick={createGroup}
+                className="rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-0.5 text-xs text-[#5A4F42] transition hover:bg-[#EAE1CF] hover:text-[#2A241E]"
+              >
+                + New
+              </button>
+            </div>
+            {groups.length === 0 ? (
+              <div className="text-xs text-[#5A4F42]">
+                Create a group to paint multiple tags or specific notes the
+                same colour.
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {groups.map((g) => (
+                  <GroupEditor
+                    key={g.id}
+                    group={g}
+                    paletteTags={paletteTags}
+                    onUpdate={(next) => groupsMap.set(g.id, next)}
+                    onDelete={() => groupsMap.delete(g.id)}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         <div className="pointer-events-none text-xs text-[#5A4F42]">
           {status === 'loading' && 'Loading graph…'}
           {status === 'ready' && (
             <>
               {counts.nodes} node{counts.nodes === 1 ? '' : 's'} ·{' '}
-              {counts.edges} edge{counts.edges === 1 ? '' : 's'} · drag = move ·
-              shift-drag = pin
+              {counts.edges} edge{counts.edges === 1 ? '' : 's'} · drag-drop
+              pins (synced)
             </>
           )}
           {status === 'error' && <span className="text-[#8B4A52]">Error: {error}</span>}
         </div>
       </div>
     </>
+  );
+}
+
+function GroupEditor({
+  group,
+  paletteTags,
+  onUpdate,
+  onDelete,
+}: {
+  group: Group;
+  paletteTags: string[];
+  onUpdate: (next: Group) => void;
+  onDelete: () => void;
+}): React.JSX.Element {
+  const [notePickerAnchor, setNotePickerAnchor] = useState<
+    { left: number; top: number } | null
+  >(null);
+  const addNoteBtnRef = useRef<HTMLButtonElement>(null);
+
+  const addNote = (path: string): void => {
+    if (group.notes.includes(path)) return;
+    onUpdate({ ...group, notes: [...group.notes, path] });
+  };
+  const removeNote = (path: string): void => {
+    onUpdate({ ...group, notes: group.notes.filter((p) => p !== path) });
+  };
+  const addTag = (tag: string): void => {
+    const lc = tag.toLowerCase();
+    if (group.tags.map((t) => t.toLowerCase()).includes(lc)) return;
+    onUpdate({ ...group, tags: [...group.tags, lc] });
+  };
+  const removeTag = (tag: string): void => {
+    onUpdate({
+      ...group,
+      tags: group.tags.filter((t) => t.toLowerCase() !== tag.toLowerCase()),
+    });
+  };
+
+  const availableTags = paletteTags.filter(
+    (t) => !group.tags.map((x) => x.toLowerCase()).includes(t.toLowerCase()),
+  );
+
+  return (
+    <li className="rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] p-2">
+      <div className="mb-1 flex items-center gap-2">
+        <input
+          type="color"
+          value={group.color}
+          onChange={(e) => onUpdate({ ...group, color: e.target.value })}
+          className="h-6 w-6 shrink-0 cursor-pointer rounded-[4px] border border-[#D4C7AE] bg-transparent p-0"
+        />
+        <input
+          type="text"
+          value={group.name}
+          onChange={(e) => onUpdate({ ...group, name: e.target.value })}
+          placeholder="Group name"
+          className="min-w-0 flex-1 rounded-[6px] border border-[#D4C7AE] bg-[#FBF5E8] px-1.5 py-0.5 text-xs text-[#2A241E] outline-none focus:border-[#D4A85A]"
+        />
+        <button
+          type="button"
+          onClick={() => {
+            if (confirm(`Delete group "${group.name || 'Unnamed'}"?`)) onDelete();
+          }}
+          title="Delete group"
+          aria-label={`Delete group ${group.name}`}
+          className="rounded-[4px] px-1 text-xs text-[#8B4A52] transition hover:bg-[#8B4A52]/10"
+        >
+          ×
+        </button>
+      </div>
+
+      {/* Tags row */}
+      <div className="mb-1 flex flex-wrap items-center gap-1">
+        {group.tags.map((t) => (
+          <span
+            key={t}
+            className="inline-flex items-center gap-1 rounded-full border border-[#D4C7AE] bg-[#FBF5E8] px-2 text-[10px] text-[#2A241E]"
+          >
+            #{t}
+            <button
+              type="button"
+              onClick={() => removeTag(t)}
+              aria-label={`Remove tag ${t}`}
+              className="text-[#5A4F42] hover:text-[#8B4A52]"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        {availableTags.length > 0 && (
+          <select
+            onChange={(e) => {
+              if (e.target.value) {
+                addTag(e.target.value);
+                e.target.value = '';
+              }
+            }}
+            defaultValue=""
+            className="rounded-[6px] border border-[#D4C7AE] bg-[#FBF5E8] px-1 py-0.5 text-[10px] text-[#5A4F42]"
+          >
+            <option value="">+ tag</option>
+            {availableTags.map((t) => (
+              <option key={t} value={t}>
+                #{t}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {/* Notes row */}
+      <div className="flex flex-wrap items-center gap-1">
+        {group.notes.map((p) => {
+          const label = p.split('/').pop()?.replace(/\.(md|canvas)$/i, '') ?? p;
+          return (
+            <span
+              key={p}
+              title={p}
+              className="inline-flex items-center gap-1 rounded-full border border-[#D4C7AE] bg-[#FBF5E8] px-2 text-[10px] text-[#2A241E]"
+            >
+              {label}
+              <button
+                type="button"
+                onClick={() => removeNote(p)}
+                aria-label={`Remove note ${label}`}
+                className="text-[#5A4F42] hover:text-[#8B4A52]"
+              >
+                ×
+              </button>
+            </span>
+          );
+        })}
+        <button
+          ref={addNoteBtnRef}
+          type="button"
+          onClick={() => {
+            const rect = addNoteBtnRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            setNotePickerAnchor({ left: rect.right + 6, top: rect.top });
+          }}
+          className="rounded-[6px] border border-[#D4C7AE] bg-[#FBF5E8] px-1.5 py-0.5 text-[10px] text-[#5A4F42] transition hover:bg-[#EAE1CF]"
+        >
+          + note
+        </button>
+      </div>
+
+      {notePickerAnchor && (
+        <NotePicker
+          anchor={notePickerAnchor}
+          onSelect={(p) => {
+            addNote(p);
+            setNotePickerAnchor(null);
+          }}
+          onClose={() => setNotePickerAnchor(null)}
+        />
+      )}
+    </li>
   );
 }
 
