@@ -250,6 +250,16 @@ const MIGRATIONS: readonly Migration[] = [
       ) WITHOUT ROWID;
     `,
   },
+  {
+    version: 9,
+    description: 'notes: created_at + created_by; backfill from updated_*',
+    sql: `
+      ALTER TABLE notes ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE notes ADD COLUMN created_by TEXT REFERENCES users(id);
+      UPDATE notes SET created_at = updated_at WHERE created_at = 0;
+      UPDATE notes SET created_by = updated_by WHERE created_by IS NULL;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

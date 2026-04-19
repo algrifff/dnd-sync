@@ -21,6 +21,8 @@ export function NoteWorkspace({
   user,
   canEdit,
   csrfToken,
+  creator,
+  createdAt,
 }: {
   path: string;
   initialContent: { type: string } & Record<string, unknown>;
@@ -28,6 +30,8 @@ export function NoteWorkspace({
   user: SurfaceUser;
   canEdit: boolean;
   csrfToken: string;
+  creator: { displayName: string; username: string } | null;
+  createdAt: number;
 }): React.JSX.Element {
   const ydoc = useMemo(() => new Y.Doc(), [path]);
   const provider = useMemo(
@@ -74,6 +78,16 @@ export function NoteWorkspace({
       </div>
 
       <TitleEditor ydoc={ydoc} />
+
+      {creator && createdAt > 0 && (
+        <p className="mt-1 text-xs text-[#5A4F42]">
+          Created by{' '}
+          <span className="font-medium text-[#2A241E]">
+            {creator.displayName || creator.username}
+          </span>{' '}
+          · {formatCreatedAt(createdAt)}
+        </p>
+      )}
 
       <div className="mt-2">
         <TagEditor
@@ -135,6 +149,15 @@ function StatusDot({
       style={{ backgroundColor: color }}
     />
   );
+}
+
+function formatCreatedAt(ts: number): string {
+  const d = new Date(ts);
+  return d.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
 function buildCollabUrl(): string {

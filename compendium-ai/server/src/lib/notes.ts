@@ -14,6 +14,14 @@ export type NoteRow = {
   byte_size: number;
   updated_at: number;
   updated_by: string | null;
+  created_at: number;
+  created_by: string | null;
+};
+
+export type NoteAuthor = {
+  userId: string;
+  displayName: string;
+  username: string;
 };
 
 export type NotePreview = {
@@ -37,10 +45,22 @@ export function loadNote(groupId: string, path: string): NoteRow | null {
     getDb()
       .query<NoteRow, [string, string]>(
         `SELECT id, path, title, content_json, content_md, content_text,
-                frontmatter_json, byte_size, updated_at, updated_by
+                frontmatter_json, byte_size, updated_at, updated_by,
+                created_at, created_by
            FROM notes WHERE group_id = ? AND path = ?`,
       )
       .get(groupId, path) ?? null
+  );
+}
+
+export function loadUser(userId: string): NoteAuthor | null {
+  return (
+    getDb()
+      .query<NoteAuthor, [string]>(
+        `SELECT id AS userId, display_name AS displayName, username
+           FROM users WHERE id = ?`,
+      )
+      .get(userId) ?? null
   );
 }
 

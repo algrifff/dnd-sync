@@ -78,8 +78,8 @@ export async function POST(req: NextRequest): Promise<Response> {
   db.query(
     `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
                         content_md, yjs_state, frontmatter_json, byte_size,
-                        updated_at, updated_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        updated_at, updated_by, created_at, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     session.currentGroupId,
@@ -91,6 +91,8 @@ export async function POST(req: NextRequest): Promise<Response> {
     state,
     '{}',
     0,
+    now,
+    session.userId,
     now,
     session.userId,
   );

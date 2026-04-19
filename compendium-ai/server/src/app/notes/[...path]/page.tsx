@@ -11,6 +11,7 @@ import {
   loadBacklinks,
   loadNote,
   loadTags,
+  loadUser,
 } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
 import { AppHeader } from '../../AppHeader';
@@ -44,6 +45,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   const tree = buildTree(session.currentGroupId);
   const backlinks = loadBacklinks(session.currentGroupId, path);
   const tags = loadTags(session.currentGroupId, path);
+  const creator = note.created_by ? loadUser(note.created_by) : null;
 
   let contentJson: unknown = null;
   try {
@@ -108,6 +110,15 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
               }}
               canEdit={session.role !== 'viewer'}
               csrfToken={session.csrfToken}
+              creator={
+                creator
+                  ? {
+                      displayName: creator.displayName,
+                      username: creator.username,
+                    }
+                  : null
+              }
+              createdAt={note.created_at}
             />
           </div>
         </main>

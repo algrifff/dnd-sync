@@ -293,8 +293,9 @@ export async function ingestZip(opts: IngestOptions): Promise<IngestSummary> {
 
     const insertNote = db.query(
       `INSERT INTO notes (id, group_id, path, title, content_json, content_text, content_md,
-                          yjs_state, frontmatter_json, byte_size, updated_at, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          yjs_state, frontmatter_json, byte_size, updated_at, updated_by,
+                          created_at, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const insertLink = db.query(
       `INSERT OR IGNORE INTO note_links (group_id, from_path, to_path) VALUES (?, ?, ?)`,
@@ -318,6 +319,8 @@ export async function ingestZip(opts: IngestOptions): Promise<IngestSummary> {
         p.yjsState,
         JSON.stringify(p.ingest.frontmatter),
         p.byteSize,
+        now,
+        opts.actorId,
         now,
         opts.actorId,
       );
