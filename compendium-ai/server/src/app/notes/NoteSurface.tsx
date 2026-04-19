@@ -232,7 +232,8 @@ export function NoteSurface({
     <>
       <article
         ref={containerRef}
-        className="note-surface prose-parchment mt-6"
+        id="note-article"
+        className="note-surface prose-parchment relative mt-6"
         aria-label="Note content"
       >
         <EditorContent editor={editor} />

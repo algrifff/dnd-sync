@@ -2,19 +2,28 @@
 
 // Multiplayer freehand drawing on the note body. Strokes live in a
 // Y.Array on the per-note HocuspocusProvider so every viewer sees the
-// same canvas; coordinates are normalised to the note-main scroll
-// host's scrollWidth/scrollHeight so strokes stay anchored to the
-// document regardless of anyone's scroll or viewport width.
+// same canvas.
+//
+// Coordinate basis is the ARTICLE element (the max-w-720 content
+// column), not the scroll host. Using the article means strokes land
+// in the same place regardless of anyone's window width — two peers
+// looking at the note on a 27" monitor and a 13" laptop both see the
+// stroke drawn over the same sentence. If we normalised to the scroll
+// host instead, a stroke at "x=50% of the wider window's padded
+// scope" lands way off the article on the smaller screen. The SVG
+// portals into the article itself so its pixel coordinate system
+// equals the article's scrollWidth / scrollHeight directly.
 //
 // Ownership: each stroke carries the author's userId. Eraser only
 // removes strokes you authored (by-id filter in the Y.Array mutator);
 // "Clear all" wipes only your own. You can see everyone else's
-// strokes but can't touch them — matches the user's brief.
+// strokes but can't touch them.
 //
-// Controls: three floating circular buttons top-left of the scope
-// element (brush / eraser / clear). When the brush is active a
-// secondary colour swatch reveals; clicking it opens a native
-// <input type="color">.
+// Controls: three floating circular buttons top-left of the scroll
+// host (brush / eraser / clear) — mounted in a separate portal to
+// the scope so they don't scroll away with the article content.
+// When the brush is active a secondary colour swatch reveals; clicking
+// opens a native <input type="color">.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -49,12 +58,15 @@ export function DrawingOverlay({
   provider,
   user,
   scopeElementId = 'note-main',
+  articleElementId = 'note-article',
 }: {
   provider: HocuspocusProvider;
   user: { userId: string };
   scopeElementId?: string;
+  articleElementId?: string;
 }): React.JSX.Element | null {
   const [scope, setScope] = useState<HTMLElement | null>(null);
+  const [article, setArticle] = useState<HTMLElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [mode, setMode] = useState<Mode>('none');
@@ -68,14 +80,18 @@ export function DrawingOverlay({
     [provider],
   );
 
-  // Resolve scope element (scroll host the drawings sit inside).
+  // Resolve the two elements we need: the scope (tool-button host,
+  // scroll host for events) and the article (coord basis + SVG
+  // portal target).
   useEffect(() => {
     let raf = 0;
     const tryResolve = (): void => {
       if (typeof document === 'undefined') return;
-      const el = document.getElementById(scopeElementId) as HTMLElement | null;
-      if (el) {
-        setScope(el);
+      const s = document.getElementById(scopeElementId) as HTMLElement | null;
+      const a = document.getElementById(articleElementId) as HTMLElement | null;
+      if (s && a) {
+        setScope(s);
+        setArticle(a);
         return;
       }
       raf = requestAnimationFrame(tryResolve);
@@ -84,19 +100,19 @@ export function DrawingOverlay({
     return () => {
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [scopeElementId]);
+  }, [scopeElementId, articleElementId]);
 
-  // Track scope dimensions so the SVG resizes with the document. We
-  // size the SVG to scrollWidth/scrollHeight (not just clientHeight)
-  // so strokes below the fold render when scrolled into view.
+  // Track the article's dimensions — that's the coord basis. Also
+  // re-read on scroll (scope scrolls, not article, but article's
+  // bounding rect may shift) to keep event coords lined up.
   useEffect(() => {
-    if (!scope) return;
+    if (!article || !scope) return;
     const update = (): void => {
-      setDims({ w: scope.scrollWidth, h: scope.scrollHeight });
+      setDims({ w: article.scrollWidth, h: article.scrollHeight });
     };
     update();
     const ro = new ResizeObserver(update);
-    ro.observe(scope);
+    ro.observe(article);
     const onScroll = (): void => update();
     scope.addEventListener('scroll', onScroll);
     window.addEventListener('resize', onScroll);
@@ -105,7 +121,7 @@ export function DrawingOverlay({
       scope.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
     };
-  }, [scope]);
+  }, [article, scope]);
 
   // Observe the shared Y.Array — any remote add / delete reflows our
   // local snapshot. Local commits write through the same array so we
@@ -119,19 +135,21 @@ export function DrawingOverlay({
     return () => strokesYArray.unobserve(apply);
   }, [strokesYArray]);
 
-  // Convert viewport coords to scope-local normalised fractions.
+  // Convert viewport coords to article-local normalised fractions.
+  // Using article coords (not scope) means strokes land on the same
+  // sentence regardless of viewport width.
   const coordsFromEvent = useCallback(
     (e: PointerEvent | React.PointerEvent): [number, number] | null => {
-      if (!scope) return null;
-      const rect = scope.getBoundingClientRect();
-      const w = scope.scrollWidth;
-      const h = scope.scrollHeight;
+      if (!article) return null;
+      const rect = article.getBoundingClientRect();
+      const w = article.scrollWidth;
+      const h = article.scrollHeight;
       if (w <= 0 || h <= 0) return null;
-      const x = (e.clientX - rect.left + scope.scrollLeft) / w;
-      const y = (e.clientY - rect.top + scope.scrollTop) / h;
+      const x = (e.clientX - rect.left) / w;
+      const y = (e.clientY - rect.top) / h;
       return [clamp01(x), clamp01(y)];
     },
-    [scope],
+    [article],
   );
 
   // Start a brush stroke on pointerdown.
@@ -195,44 +213,47 @@ export function DrawingOverlay({
     setCurrentStroke(null);
   }, [strokesYArray, user.userId]);
 
-  if (!scope || dims.w === 0 || dims.h === 0) return null;
+  if (!scope || !article || dims.w === 0 || dims.h === 0) return null;
 
   const renderable = currentStroke
     ? [...strokes.filter((s) => s.id !== currentStroke.id), currentStroke]
     : strokes;
 
-  return createPortal(
-    <>
-      <svg
-        aria-label="Drawings"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        className="absolute inset-0"
-        style={{
-          width: dims.w,
-          height: dims.h,
-          pointerEvents: mode === 'none' ? 'none' : 'auto',
-          cursor: mode === 'brush' ? 'crosshair' : mode === 'eraser' ? 'cell' : 'auto',
-          zIndex: 4,
-        }}
-        viewBox={`0 0 ${dims.w} ${dims.h}`}
-      >
-        {renderable.map((s) => (
-          <polyline
-            key={s.id}
-            points={s.points.map(([x, y]) => `${x * dims.w},${y * dims.h}`).join(' ')}
-            fill="none"
-            stroke={s.color}
-            strokeWidth={STROKE_WIDTH}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            opacity={0.9}
-          />
-        ))}
-      </svg>
+  const svgPortal = createPortal(
+    <svg
+      aria-label="Drawings"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      className="absolute inset-0"
+      style={{
+        width: dims.w,
+        height: dims.h,
+        pointerEvents: mode === 'none' ? 'none' : 'auto',
+        cursor: mode === 'brush' ? 'crosshair' : mode === 'eraser' ? 'cell' : 'auto',
+        zIndex: 4,
+      }}
+      viewBox={`0 0 ${dims.w} ${dims.h}`}
+    >
+      {renderable.map((s) => (
+        <polyline
+          key={s.id}
+          points={s.points.map(([x, y]) => `${x * dims.w},${y * dims.h}`).join(' ')}
+          fill="none"
+          stroke={s.color}
+          strokeWidth={STROKE_WIDTH}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity={0.9}
+        />
+      ))}
+    </svg>,
+    article,
+  );
 
+  const toolsPortal = createPortal(
+    <>
       <div
         aria-label="Drawing tools"
         className="absolute left-4 top-4 flex flex-col gap-2"
@@ -319,6 +340,13 @@ export function DrawingOverlay({
       </div>
     </>,
     scope,
+  );
+
+  return (
+    <>
+      {svgPortal}
+      {toolsPortal}
+    </>
   );
 }
 
