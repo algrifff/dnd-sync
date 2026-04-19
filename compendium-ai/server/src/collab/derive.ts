@@ -14,6 +14,10 @@ import { yDocToProsemirrorJSON } from 'y-prosemirror';
 import { getDb } from '@/lib/db';
 import { pmToMarkdown } from '@/lib/pm-to-md';
 import { extractPlaintext, type PmNode } from '@/lib/md-to-pm';
+import {
+  deriveCharacterFromFrontmatter,
+  ensureCampaignForPath,
+} from '@/lib/characters';
 
 export function deriveAndPersist(opts: {
   groupId: string;
@@ -81,6 +85,21 @@ export function deriveAndPersist(opts: {
     );
     for (const tag of allTags) insertTag.run(opts.groupId, opts.path, tag);
   })();
+
+  // Character + campaign derivation. Runs in its own transaction so
+  // a schema failure here can't roll back the note's content update.
+  // Both calls are idempotent and cheap no-ops for non-character,
+  // non-campaign paths.
+  try {
+    ensureCampaignForPath(opts.groupId, opts.path);
+    deriveCharacterFromFrontmatter({
+      groupId: opts.groupId,
+      notePath: opts.path,
+      frontmatterJson: fmRow?.frontmatter_json ?? '{}',
+    });
+  } catch (err) {
+    console.error(`[derive] character derive failed for ${opts.path}:`, err);
+  }
 }
 
 function extractTitle(doc: PmNode): string | null {

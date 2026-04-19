@@ -10,7 +10,8 @@ import { Hocuspocus } from '@hocuspocus/server';
 import { Database } from '@hocuspocus/extension-database';
 import { Logger } from '@hocuspocus/extension-logger';
 import { getDb } from '@/lib/db';
-import { readSessionFromIncoming } from '@/lib/session';
+import { readSessionFromIncoming, type Session } from '@/lib/session';
+import { isPcOwnedBy } from '@/lib/characters';
 import { deriveAndPersist } from './derive';
 
 type AuthContext = {
@@ -41,12 +42,56 @@ function parseMetaDocName(
   return { kind: 'groups', groupId: m[1]! };
 }
 
+/** Return true when the given session should be allowed to write to
+ *  the given hocuspocus document. Used to flip connections to
+ *  read-only so a viewer can still join the collab session and see
+ *  everyone else's updates without being able to push their own.
+ *
+ *    - admin / editor: full edit everywhere.
+ *    - viewer: edit on notes they created OR on a PC they own
+ *      (frontmatter player: matches their username).
+ *    - ephemeral `.`-docs (presence, graph-state): editor/admin
+ *      only so viewers don't write pins/colours. Awareness
+ *      (cursors) still broadcasts under read-only.
+ *    - `graph-groups:<id>`: editor/admin only — it's DM-configured
+ *      colour grouping, not a per-user thing.
+ */
+function canEditDoc(documentName: string, session: Session): boolean {
+  if (session.role === 'admin' || session.role === 'editor') return true;
+
+  // Viewer path below.
+  if (documentName.startsWith('.')) return false;
+  if (documentName.startsWith('graph-groups:')) return false;
+
+  // Note path — allow if this user created the note OR owns the PC.
+  const db = getDb();
+  const note = db
+    .query<{ created_by: string | null }, [string, string]>(
+      'SELECT created_by FROM notes WHERE group_id = ? AND path = ?',
+    )
+    .get(session.currentGroupId, documentName);
+  if (note && note.created_by === session.userId) return true;
+  if (isPcOwnedBy(session.currentGroupId, documentName, session.userId)) {
+    return true;
+  }
+  return false;
+}
+
 export const collabServer = new Hocuspocus({
   async onAuthenticate(data): Promise<AuthContext> {
     const session = readSessionFromIncoming({
       headers: { cookie: data.request.headers.cookie },
     });
     if (!session) throw new Error('Unauthorized');
+
+    // Flip viewers to read-only for docs they don't own. They still
+    // connect, still receive live updates from peers, just can't
+    // broadcast their own document updates. Awareness (cursors) is
+    // unaffected.
+    if (!canEditDoc(data.documentName, session)) {
+      data.connectionConfig.readOnly = true;
+    }
+
     return {
       userId: session.userId,
       username: session.username,

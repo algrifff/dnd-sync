@@ -27,6 +27,10 @@ import { getPmSchema } from './pm-schema';
 import { ingestMarkdown, type IngestContext, type NoteIngest } from './md-to-pm';
 import { pmToMarkdown } from './pm-to-md';
 import { sniffMime, isSupportedMime, assetPath } from './assets';
+import {
+  deriveCharacterFromFrontmatter,
+  ensureCampaignForPath,
+} from './characters';
 import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { logAudit } from './audit';
 
@@ -340,6 +344,26 @@ export async function ingestZip(opts: IngestOptions): Promise<IngestSummary> {
       }
     }
   })();
+
+  // Character + campaign derivation. Run AFTER the main transaction
+  // so each note's index entry reflects the fully-written row; a
+  // failure in one note's derive shouldn't roll back the whole
+  // vault ingest.
+  for (const p of prepared) {
+    try {
+      ensureCampaignForPath(opts.groupId, p.ingest.path);
+      deriveCharacterFromFrontmatter({
+        groupId: opts.groupId,
+        notePath: p.ingest.path,
+        frontmatterJson: JSON.stringify(p.ingest.frontmatter),
+      });
+    } catch (err) {
+      console.error(
+        `[ingest] character derive failed for ${p.ingest.path}:`,
+        err,
+      );
+    }
+  }
 
   // Count summary totals from what we just inserted.
   const linkCount = prepared.reduce((n, p) => n + p.ingest.wikilinks.length, 0);
