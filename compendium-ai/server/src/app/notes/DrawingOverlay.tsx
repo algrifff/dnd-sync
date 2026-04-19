@@ -47,7 +47,11 @@ type Stroke = {
 
 type Mode = 'none' | 'brush' | 'eraser';
 
-const VIRTUAL_WIDTH = 720;
+// The note column is much wider than the text column inside it, so
+// annotations can live in the margins (a la Figma's infinite canvas
+// around focused content). Text still wraps to its own narrower
+// inner width for readability — only the drawing canvas is this wide.
+const VIRTUAL_WIDTH = 1600;
 // Eraser radius in virtual px (same scale as stroke coords).
 const ERASER_RADIUS = 10;
 // Throttle interval for mid-draw Y flushes. 50 ms = 20 Hz, enough
@@ -97,11 +101,11 @@ export function DrawingOverlay({
   const [drawingTick, setDrawingTick] = useState<number>(0);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // v2 key — the old `drawing-strokes` map held fraction-based points
-  // that are meaningless under the new coord system. Fresh map, clean
-  // break.
+  // v3 key — v2 held 720-wide strokes; widening the canvas to 1600
+  // would misplace them, so start fresh. Old data sits inert in the
+  // doc and can be dropped later.
   const strokesYMap = useMemo(
-    () => provider.document.getMap<Stroke>('drawing-strokes-v2'),
+    () => provider.document.getMap<Stroke>('drawing-strokes-v3'),
     [provider],
   );
 

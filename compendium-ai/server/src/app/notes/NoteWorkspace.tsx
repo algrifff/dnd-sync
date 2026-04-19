@@ -115,6 +115,9 @@ export function NoteWorkspace({
           name: user.displayName || 'Anonymous',
           color: user.accentColor,
         }}
+        coordScopeId="note-scroll-body"
+        viewportScopeId="note-main"
+        virtualWidth={1600}
       />
 
       <DrawingOverlay provider={provider} user={{ userId: user.userId }} />

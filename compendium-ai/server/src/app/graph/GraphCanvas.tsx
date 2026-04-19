@@ -90,9 +90,7 @@ export function GraphCanvas({
   const graphRef = useRef<Graph | null>(null);
   const rafRef = useRef<number>(0);
   const pinsRef = useRef<Record<string, { x: number; y: number }>>({});
-  const tempPinsRef = useRef<
-    Record<string, { x: number; y: number; expireAt: number }>
-  >({});
+  const anchorsRef = useRef<Record<string, { x: number; y: number }>>({});
   const draggedRef = useRef<{ node: string; x: number; y: number } | null>(null);
 
   const [scope, setScope] = useState<Scope>({ kind: 'all' });
@@ -125,13 +123,14 @@ export function GraphCanvas({
     () => ydoc.getMap<{ x: number; y: number }>('pins'),
     [ydoc],
   );
-  // Transient pins — plain-drag release writes an entry here with an
-  // expiry timestamp. Everyone holds the node at that position while
-  // unexpired so peers see the sticky-drop too (neighbours settle
-  // around it), then physics takes over on all sides.
-  const tempPinsMap = useMemo(
-    () =>
-      ydoc.getMap<{ x: number; y: number; expireAt: number }>('temp-pins'),
+  // Soft anchors — plain-drag release writes the drop position here.
+  // Physics keeps running on the node, but each tick pulls it gently
+  // toward the anchor (see ANCHOR_STRENGTH below), so the node
+  // hovers around where it was dropped instead of snapping back to
+  // the equilibrium position FA2 would otherwise pick. Shift-drag
+  // writes a hard pin (see pinsMap) and clears any anchor.
+  const anchorsMap = useMemo(
+    () => ydoc.getMap<{ x: number; y: number }>('anchors'),
     [ydoc],
   );
   const coloursMap = useMemo(() => ydoc.getMap<string>('colours'), [ydoc]);
@@ -214,34 +213,19 @@ export function GraphCanvas({
     return () => pinsMap.unobserve(apply);
   }, [pinsMap]);
 
-  // Temp pins: same treatment. The tick reads from the ref and
-  // checks expireAt against the current clock.
+  // Soft anchors: mirror into a ref for the physics loop.
   useEffect(() => {
     const apply = (): void => {
-      const next: Record<string, { x: number; y: number; expireAt: number }> = {};
-      tempPinsMap.forEach((value, key) => {
+      const next: Record<string, { x: number; y: number }> = {};
+      anchorsMap.forEach((value, key) => {
         if (value && typeof value === 'object') next[key] = value;
       });
-      tempPinsRef.current = next;
+      anchorsRef.current = next;
     };
     apply();
-    tempPinsMap.observe(apply);
-    return () => tempPinsMap.unobserve(apply);
-  }, [tempPinsMap]);
-
-  // Garbage-collect expired temp pins. Only the peer that placed the
-  // pin deletes it (avoids races), so we sweep every 500 ms for
-  // entries we wrote that are past their TTL. Entries from gone
-  // peers get cleaned up whenever any peer notices them expired.
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = Date.now();
-      tempPinsMap.forEach((value, key) => {
-        if (value && value.expireAt < now) tempPinsMap.delete(key);
-      });
-    }, 500);
-    return () => clearInterval(interval);
-  }, [tempPinsMap]);
+    anchorsMap.observe(apply);
+    return () => anchorsMap.unobserve(apply);
+  }, [anchorsMap]);
 
   // Colours: shared via Y.Map. State holds a mirror that React
   // re-renders against so the palette UI + node-colour effect pick
@@ -405,22 +389,39 @@ export function GraphCanvas({
           if (!sigmaRef.current || cancelled) return;
           if (g.order > 1) {
             forceAtlas2.assign(g, tickOpts);
-            // Pinned positions — persistent, shared with peers.
+            // Soft anchors — after FA2 moves each anchored node this
+            // tick, pull it a little back toward its drop position.
+            // Low strength means the node still reacts to the rest
+            // of the graph (physics keeps it "floaty") but it hovers
+            // around the drop point instead of drifting back to
+            // FA2's unconstrained equilibrium.
+            const ANCHOR_STRENGTH = 0.06;
+            for (const [id, anchor] of Object.entries(anchorsRef.current)) {
+              if (!g.hasNode(id)) continue;
+              // Hard pins win — skip anchor if the same node is
+              // also pinned (shouldn't happen because pins replace
+              // anchors on write, but be defensive).
+              if (pinsRef.current[id]) continue;
+              const x = g.getNodeAttribute(id, 'x') as number;
+              const y = g.getNodeAttribute(id, 'y') as number;
+              g.setNodeAttribute(
+                id,
+                'x',
+                x + (anchor.x - x) * ANCHOR_STRENGTH,
+              );
+              g.setNodeAttribute(
+                id,
+                'y',
+                y + (anchor.y - y) * ANCHOR_STRENGTH,
+              );
+            }
+            // Hard pins — persistent, shared with peers. Applied
+            // after anchors so they can't be softened by a lingering
+            // anchor entry.
             for (const [id, pos] of Object.entries(pinsRef.current)) {
               if (g.hasNode(id)) {
                 g.setNodeAttribute(id, 'x', pos.x);
                 g.setNodeAttribute(id, 'y', pos.y);
-              }
-            }
-            // Temporary pins — sticky-drop after plain drag release,
-            // held on all peers so everyone watches neighbours
-            // settle around the drop point before physics resumes.
-            const now = Date.now();
-            for (const [id, tp] of Object.entries(tempPinsRef.current)) {
-              if (tp.expireAt <= now) continue;
-              if (g.hasNode(id)) {
-                g.setNodeAttribute(id, 'x', tp.x);
-                g.setNodeAttribute(id, 'y', tp.y);
               }
             }
             // Local drag in progress — hold the node at the cursor.
@@ -546,34 +547,28 @@ export function GraphCanvas({
           }
           if (shiftHeld) {
             pinsMap.set(dragged.node, { x: dragged.x, y: dragged.y });
+            // Hard pin overrides any prior soft anchor.
+            anchorsMap.delete(dragged.node);
           } else {
-            // Plain drag: sticky drop. Temp pin holds the node at
-            // drop position for STICKY_MS on every peer so
-            // neighbours settle around it, then physics resumes on
-            // all sides.
-            const STICKY_MS = 1500;
-            const expireAt = Date.now() + STICKY_MS;
-            const nodeId = dragged.node;
-            tempPinsMap.set(nodeId, {
-              x: dragged.x,
-              y: dragged.y,
-              expireAt,
-            });
-            setTimeout(() => {
-              const current = tempPinsMap.get(nodeId);
-              if (current && current.expireAt === expireAt) {
-                tempPinsMap.delete(nodeId);
-              }
-            }, STICKY_MS + 50);
+            // Plain drag: write a soft anchor. The node hovers
+            // around this position from now on; physics still acts
+            // on it so the graph keeps feeling alive, but it no
+            // longer snaps back to FA2's unconstrained equilibrium.
+            anchorsMap.set(dragged.node, { x: dragged.x, y: dragged.y });
           }
           shiftHeld = false;
         });
 
-        // Double-click a pinned node to unpin it. Match Obsidian —
-        // discoverable once you've pinned with shift-drag.
+        // Double-click a node to fully release it — clears both the
+        // hard pin and any soft anchor, so it drifts back into the
+        // flowing layout. Discoverable once a user has pinned or
+        // dragged something.
         renderer.on('doubleClickNode', ({ node, event }) => {
-          if (!pinsMap.has(node)) return;
-          pinsMap.delete(node);
+          const hadPin = pinsMap.has(node);
+          const hadAnchor = anchorsMap.has(node);
+          if (!hadPin && !hadAnchor) return;
+          if (hadPin) pinsMap.delete(node);
+          if (hadAnchor) anchorsMap.delete(node);
           event?.preventSigmaDefault?.();
         });
 
@@ -593,7 +588,7 @@ export function GraphCanvas({
       sigmaRef.current = null;
       graphRef.current = null;
     };
-  }, [scopeParam, groupId, router, colorFor, labelMode, provider, pinsMap, tempPinsMap]);
+  }, [scopeParam, groupId, router, colorFor, labelMode, provider, pinsMap, anchorsMap]);
 
   // Live re-colour when tag overrides change without rebuilding the
   // graph (keeps physics running; feels instant).
@@ -631,7 +626,8 @@ export function GraphCanvas({
 
   const clearPins = useCallback(() => {
     pinsMap.clear();
-  }, [pinsMap]);
+    anchorsMap.clear();
+  }, [pinsMap, anchorsMap]);
 
   const createGroup = useCallback(() => {
     // Seeded with a fresh timestamp-prefixed id so rows sort by
@@ -821,8 +817,8 @@ export function GraphCanvas({
           {status === 'ready' && (
             <>
               {counts.nodes} node{counts.nodes === 1 ? '' : 's'} ·{' '}
-              {counts.edges} edge{counts.edges === 1 ? '' : 's'} · shift-drag
-              to pin · double-click to unpin
+              {counts.edges} edge{counts.edges === 1 ? '' : 's'} · drag to
+              anchor · shift-drag to pin · double-click to release
             </>
           )}
           {status === 'error' && <span className="text-[#8B4A52]">Error: {error}</span>}

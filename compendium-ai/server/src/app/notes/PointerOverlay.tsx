@@ -1,54 +1,84 @@
 'use client';
 
-// Remote mouse pointers layered over the note's main content pane. The
-// listener attaches to `#note-main` (the scrolling host for note pages)
-// and coordinates are normalised to that element's scrollWidth /
-// scrollHeight so a remote peer pointing at a document position stays
-// anchored there regardless of either peer's scroll.
+// Remote mouse pointers layered over collaborative content.
 //
-// The overlay DOM is rendered via a Portal into `#note-main` so its
-// reach is the full width of the document pane — not just the centred
-// article. It deliberately stops at the main column (header and
-// sidebars are excluded). When a remote pointer sits outside the
-// scroll viewport, an edge chip renders at the top or bottom of main;
-// clicking scrolls the pointer into view.
+// Two coordinate modes are supported:
+//
+//  * Virtual-pixel mode (notes): pass `virtualWidth` and the fixed-
+//    width content column id. The coord scope is the column (same
+//    width on every peer), so pointer x/y stored as virtual-px line
+//    up exactly with drawing strokes stored in the same space. Dots
+//    portal into the column and inherit its CSS zoom so they scale
+//    with the drawings.
+//
+//  * Fraction mode (graph canvas): no `virtualWidth`. Coordinates
+//    are stored as fractions of the scope's scrollWidth/scrollHeight,
+//    which is how the original overlay worked. Still handy for
+//    rendering pointers on screens with no fixed-width anchor (the
+//    graph container fills the viewport at whatever size).
+//
+// The outer viewport scope is used to listen for moves (so the
+// whole main column is active) and to anchor edge chips when a peer
+// has scrolled out of view.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { HocuspocusProvider } from '@hocuspocus/provider';
+
+type VirtualPointer = { x: number; y: number };
+type FractionPointer = { xRel: number; yRel: number };
 
 type Remote = {
   clientId: number;
   userId: string;
   name: string;
   color: string;
-  xRel: number;
-  yRel: number;
+  // In virtual mode these are virtual-px; in fraction mode, 0..1.
+  x: number;
+  y: number;
 };
 
 export function PointerOverlay({
   provider,
   user,
-  scopeElementId = 'note-main',
+  coordScopeId,
+  viewportScopeId,
+  scopeElementId,
+  virtualWidth,
 }: {
   provider: HocuspocusProvider;
   user: { userId: string; name: string; color: string };
+  /** Element whose local coord space we broadcast in. Defaults to the
+   *  fixed-width note column in virtual mode. */
+  coordScopeId?: string;
+  /** Element that scrolls around the coord scope. Defaults to the
+   *  note's `note-main`. */
+  viewportScopeId?: string;
+  /** Legacy single-scope prop — if given, used for both coord and
+   *  viewport. Kept for callers that haven't migrated to the two-
+   *  scope API (e.g. the graph canvas). */
   scopeElementId?: string;
+  /** Presence of this prop flips on virtual-pixel mode. */
+  virtualWidth?: number;
 }): React.JSX.Element | null {
-  const [remotes, setRemotes] = useState<Remote[]>([]);
-  const [scope, setScope] = useState<HTMLElement | null>(null);
-  const [tick, setTick] = useState<number>(0); // bump on scroll/resize
+  const resolvedCoordId = coordScopeId ?? scopeElementId ?? 'note-scroll-body';
+  const resolvedViewportId =
+    viewportScopeId ?? scopeElementId ?? 'note-main';
 
-  // Resolve the scope element on mount and whenever the node id might
-  // change between navigations. Next may swap the DOM in place so
-  // poll briefly for the first render.
+  const [remotes, setRemotes] = useState<Remote[]>([]);
+  const [coordScope, setCoordScope] = useState<HTMLElement | null>(null);
+  const [viewportScope, setViewportScope] = useState<HTMLElement | null>(null);
+  const [, bumpTick] = useState<number>(0);
+
   useEffect(() => {
     if (typeof document === 'undefined') return;
     let raf = 0;
     const tryResolve = (): void => {
-      const el = document.getElementById(scopeElementId) as HTMLElement | null;
-      if (el) {
-        setScope(el);
+      const cs = document.getElementById(resolvedCoordId) as HTMLElement | null;
+      const vs = document.getElementById(resolvedViewportId) as HTMLElement | null;
+      if (cs) {
+        setCoordScope(cs);
+        setViewportScope(vs ?? cs);
         return;
       }
       raf = requestAnimationFrame(tryResolve);
@@ -57,11 +87,8 @@ export function PointerOverlay({
     return () => {
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [scopeElementId]);
+  }, [resolvedCoordId, resolvedViewportId]);
 
-  // Seed awareness.user — CollaborationCaret also does this for
-  // editors, but viewers don't mount it, and we still want their
-  // pointer to be labelled for peers.
   useEffect(() => {
     const aw = provider.awareness;
     if (!aw) return;
@@ -72,16 +99,17 @@ export function PointerOverlay({
     });
   }, [provider, user.userId, user.name, user.color]);
 
-  // Broadcast local pointer, rAF-throttled. Listener is on the scope
-  // element so the full middle column is active, not just the centred
-  // article.
+  // Broadcast local pointer. Listen on the viewport scope so moves
+  // anywhere in the column register, but convert into the coord
+  // scope's local space.
   useEffect(() => {
-    if (!scope) return;
+    const listenEl = viewportScope ?? coordScope;
+    if (!listenEl || !coordScope) return;
     const aw = provider.awareness;
     if (!aw) return;
 
     let rafHandle = 0;
-    let last: { xRel: number; yRel: number } | null = null;
+    let last: VirtualPointer | FractionPointer | null = null;
 
     const flush = (): void => {
       rafHandle = 0;
@@ -89,49 +117,77 @@ export function PointerOverlay({
       aw.setLocalStateField('pointer', last);
     };
     const onMove = (e: MouseEvent): void => {
-      const rect = scope.getBoundingClientRect();
-      const w = scope.scrollWidth;
-      const h = scope.scrollHeight;
-      if (w <= 0 || h <= 0) return;
-      // Convert screen coords to scope-local scroll coords.
-      const xInside = e.clientX - rect.left + scope.scrollLeft;
-      const yInside = e.clientY - rect.top + scope.scrollTop;
-      last = { xRel: clamp01(xInside / w), yRel: clamp01(yInside / h) };
+      if (virtualWidth) {
+        const rect = coordScope.getBoundingClientRect();
+        if (rect.width <= 0) return;
+        const scale = rect.width / virtualWidth;
+        last = {
+          x: (e.clientX - rect.left) / scale,
+          y: (e.clientY - rect.top) / scale,
+        };
+      } else {
+        const rect = coordScope.getBoundingClientRect();
+        const w = coordScope.scrollWidth;
+        const h = coordScope.scrollHeight;
+        if (w <= 0 || h <= 0) return;
+        const xInside = e.clientX - rect.left + coordScope.scrollLeft;
+        const yInside = e.clientY - rect.top + coordScope.scrollTop;
+        last = { xRel: clamp01(xInside / w), yRel: clamp01(yInside / h) };
+      }
       if (!rafHandle) rafHandle = requestAnimationFrame(flush);
     };
     const onLeave = (): void => {
       last = null;
       aw.setLocalStateField('pointer', null);
     };
-    scope.addEventListener('mousemove', onMove);
-    scope.addEventListener('mouseleave', onLeave);
+    listenEl.addEventListener('mousemove', onMove);
+    listenEl.addEventListener('mouseleave', onLeave);
     return () => {
-      scope.removeEventListener('mousemove', onMove);
-      scope.removeEventListener('mouseleave', onLeave);
+      listenEl.removeEventListener('mousemove', onMove);
+      listenEl.removeEventListener('mouseleave', onLeave);
       if (rafHandle) cancelAnimationFrame(rafHandle);
       aw.setLocalStateField('pointer', null);
     };
-  }, [provider, scope]);
+  }, [provider, coordScope, viewportScope, virtualWidth]);
 
-  // Read remote awareness.
+  // Read remote awareness, accepting either the virtual-px shape or
+  // the fraction shape.
   useEffect(() => {
     const aw = provider.awareness;
     if (!aw) return;
     const recompute = (): void => {
+      if (!coordScope) return;
+      const w = coordScope.scrollWidth;
+      const h = coordScope.scrollHeight;
       const states = aw.getStates();
       const list: Remote[] = [];
       for (const [clientId, state] of states.entries()) {
         if (clientId === aw.clientID) continue;
         const s = state as Partial<PeerState> | undefined;
         if (!s?.user || !s.pointer) continue;
-        if (typeof s.pointer.xRel !== 'number' || typeof s.pointer.yRel !== 'number') continue;
+        const p = s.pointer;
+        let x: number;
+        let y: number;
+        if (virtualWidth && typeof p.x === 'number' && typeof p.y === 'number') {
+          x = p.x;
+          y = p.y;
+        } else if (
+          !virtualWidth &&
+          typeof p.xRel === 'number' &&
+          typeof p.yRel === 'number'
+        ) {
+          x = p.xRel * w;
+          y = p.yRel * h;
+        } else {
+          continue;
+        }
         list.push({
           clientId,
           userId: s.user.userId ?? '',
           name: s.user.name ?? 'Anonymous',
           color: s.user.color ?? '#5A4F42',
-          xRel: s.pointer.xRel,
-          yRel: s.pointer.yRel,
+          x,
+          y,
         });
       }
       setRemotes(list);
@@ -139,88 +195,150 @@ export function PointerOverlay({
     aw.on('change', recompute);
     recompute();
     return () => aw.off('change', recompute);
-  }, [provider]);
+  }, [provider, coordScope, virtualWidth]);
 
-  // Rerender on scroll / resize so the edge-chip logic reflects the
-  // current viewport.
+  // Cache viewport + coord rects for edge-chip positioning. Bump on
+  // scroll / resize / content change.
+  const viewportRectRef = useRef<DOMRect | null>(null);
+  const coordRectRef = useRef<DOMRect | null>(null);
   useEffect(() => {
-    if (!scope) return;
-    const bump = (): void => setTick((t) => t + 1);
-    scope.addEventListener('scroll', bump);
-    window.addEventListener('resize', bump);
-    return () => {
-      scope.removeEventListener('scroll', bump);
-      window.removeEventListener('resize', bump);
+    if (!viewportScope || !coordScope) return;
+    const bump = (): void => {
+      viewportRectRef.current = viewportScope.getBoundingClientRect();
+      coordRectRef.current = coordScope.getBoundingClientRect();
+      bumpTick((t) => t + 1);
     };
-  }, [scope]);
+    bump();
+    viewportScope.addEventListener('scroll', bump);
+    window.addEventListener('resize', bump);
+    const ro = new ResizeObserver(bump);
+    ro.observe(coordScope);
+    return () => {
+      viewportScope.removeEventListener('scroll', bump);
+      window.removeEventListener('resize', bump);
+      ro.disconnect();
+    };
+  }, [viewportScope, coordScope]);
 
-  void tick;
+  if (!coordScope || !viewportScope) return null;
 
-  if (!scope) return null;
+  const coordRect = coordRectRef.current;
+  const viewportRect = viewportRectRef.current;
+  // Effective scale between virtual-px / fraction units and coord
+  // scope screen pixels.
+  const yScale = virtualWidth
+    ? coordRect && coordRect.width > 0
+      ? coordRect.width / virtualWidth
+      : 1
+    : 1;
 
-  const contentW = scope.scrollWidth;
-  const contentH = scope.scrollHeight;
-  const viewTop = scope.scrollTop;
-  const viewBottom = viewTop + scope.clientHeight;
-
-  return createPortal(
-    <div aria-hidden className="pointer-events-none absolute inset-0" style={{ zIndex: 5 }}>
-      {remotes.map((r) => {
-        const xAbs = r.xRel * contentW;
-        const yAbs = r.yRel * contentH;
-        if (yAbs < viewTop) {
-          return (
-            <EdgeChip
-              key={r.clientId}
-              direction="above"
-              color={r.color}
-              name={r.name}
-              onClick={() => scrollTo(scope, yAbs)}
-              top={viewTop + 8}
-            />
-          );
-        }
-        if (yAbs > viewBottom) {
-          return (
-            <EdgeChip
-              key={r.clientId}
-              direction="below"
-              color={r.color}
-              name={r.name}
-              onClick={() => scrollTo(scope, yAbs)}
-              top={viewBottom - 22}
-            />
-          );
-        }
-        return (
-          <PointerDot key={r.clientId} xAbs={xAbs} yAbs={yAbs} color={r.color} name={r.name} />
-        );
-      })}
+  // Dots sit inside the coord scope so they scroll with content and
+  // inherit any CSS zoom applied there.
+  const dotsPortal = createPortal(
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0"
+      style={{ zIndex: 5 }}
+    >
+      {remotes.map((r) => (
+        <PointerDot
+          key={r.clientId}
+          x={r.x}
+          y={r.y}
+          color={r.color}
+          name={r.name}
+        />
+      ))}
     </div>,
-    scope,
+    coordScope,
+  );
+
+  // Edge chips live on the viewport scope. We compute each peer's
+  // screen y by translating virtual-px through the coord scope's
+  // bounding rect.
+  const edgeChips =
+    viewportRect && coordRect
+      ? remotes
+          .map((r) => {
+            const screenY = coordRect.top + r.y * yScale;
+            if (screenY < viewportRect.top + 4) {
+              return (
+                <EdgeChip
+                  key={r.clientId}
+                  direction="above"
+                  color={r.color}
+                  name={r.name}
+                  onClick={() => {
+                    viewportScope.scrollBy({
+                      top: screenY - viewportRect.top - viewportRect.height * 0.3,
+                      behavior: 'smooth',
+                    });
+                  }}
+                  top={8}
+                />
+              );
+            }
+            if (screenY > viewportRect.bottom - 18) {
+              return (
+                <EdgeChip
+                  key={r.clientId}
+                  direction="below"
+                  color={r.color}
+                  name={r.name}
+                  onClick={() => {
+                    viewportScope.scrollBy({
+                      top: screenY - viewportRect.bottom + viewportRect.height * 0.3,
+                      behavior: 'smooth',
+                    });
+                  }}
+                  top={viewportRect.height - 22}
+                />
+              );
+            }
+            return null;
+          })
+          .filter(Boolean)
+      : [];
+
+  const edgePortal = createPortal(
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0"
+      style={{ zIndex: 6 }}
+    >
+      {edgeChips}
+    </div>,
+    viewportScope,
+  );
+
+  return (
+    <>
+      {dotsPortal}
+      {edgePortal}
+    </>
   );
 }
 
 type PeerState = {
   user: { userId: string; name: string; color: string };
-  pointer?: { xRel: number; yRel: number } | null;
+  pointer?: (Partial<VirtualPointer> & Partial<FractionPointer>) | null;
 };
 
 function PointerDot({
-  xAbs,
-  yAbs,
+  x,
+  y,
   color,
   name,
 }: {
-  xAbs: number;
-  yAbs: number;
+  x: number;
+  y: number;
   color: string;
   name: string;
 }): React.JSX.Element {
   return (
     <div
       className="absolute flex items-start gap-1"
-      style={{ left: xAbs, top: yAbs, color }}
+      style={{ left: x, top: y, color }}
     >
       <svg
         width="14"
@@ -269,13 +387,6 @@ function EdgeChip({
       {name}
     </button>
   );
-}
-
-function scrollTo(scope: HTMLElement, yAbs: number): void {
-  scope.scrollTo({
-    top: Math.max(0, yAbs - scope.clientHeight * 0.3),
-    behavior: 'smooth',
-  });
 }
 
 function clamp01(n: number): number {
