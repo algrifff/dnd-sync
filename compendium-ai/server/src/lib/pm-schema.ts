@@ -5,7 +5,12 @@
 // identical schema to mount Tiptap. They MUST match — otherwise the
 // server writes JSON the client can't render (or vice versa).
 
-import { getSchema, Node, type AnyExtension } from '@tiptap/core';
+import {
+  getSchema,
+  mergeAttributes,
+  Node,
+  type AnyExtension,
+} from '@tiptap/core';
 import type { Schema } from 'prosemirror-model';
 import { StarterKit } from '@tiptap/starter-kit';
 import { Image } from '@tiptap/extension-image';
@@ -217,6 +222,35 @@ export const TagMention = Node.create({
  *  browser editor. Order matters for Tiptap: nodes defined later may
  *  extend or override earlier ones. Keep this in sync with Phase 4's
  *  editor-mount call. */
+/** Image node with a render-time src rewriter. ProseMirror JSON may
+ *  still carry raw vault-relative paths (e.g.
+ *  `Campaign 2/Assets/Portraits/lumen_portrait.jpg`) from older
+ *  ingests, and new markdown references whose ingest-time resolver
+ *  missed. Rather than touching the stored JSON we rewrite the src
+ *  on the way into the DOM — anything that isn't http(s)/data/blob/
+ *  already-served-absolute gets routed through /api/assets/by-path,
+ *  which 302-redirects to the canonical /api/assets/<id> URL. */
+const ResolvingImage = Image.extend({
+  renderHTML({ HTMLAttributes }) {
+    const raw = HTMLAttributes.src as string | undefined;
+    const rewritten = raw ? resolveImageSrc(raw) : raw;
+    return [
+      'img',
+      mergeAttributes(HTMLAttributes, {
+        src: rewritten ?? HTMLAttributes.src,
+      }),
+    ];
+  },
+});
+
+function resolveImageSrc(src: string): string {
+  if (!src) return src;
+  // Absolute URLs, protocol-prefixed URLs, and app-absolute paths
+  // (/api/...) pass through untouched.
+  if (/^(https?:|data:|blob:|\/)/i.test(src)) return src;
+  return `/api/assets/by-path?path=${encodeURIComponent(src)}`;
+}
+
 export const BASE_EXTENSIONS: AnyExtension[] = [
   StarterKit.configure({
     // Yjs owns history; disable Tiptap's.
@@ -225,7 +259,7 @@ export const BASE_EXTENSIONS: AnyExtension[] = [
     link: false,
   }),
   Link.configure({ openOnClick: false, autolink: true }),
-  Image,
+  ResolvingImage,
   Table.configure({ resizable: false }),
   TableRow,
   TableCell,

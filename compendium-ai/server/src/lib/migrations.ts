@@ -281,6 +281,18 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE users ADD COLUMN cursor_mode TEXT NOT NULL DEFAULT 'color';
     `,
   },
+  {
+    version: 12,
+    description: 'assets: store original vault path for by-path lookup',
+    sql: `
+      ALTER TABLE assets ADD COLUMN original_path TEXT;
+      UPDATE assets SET original_path = original_name WHERE original_path IS NULL;
+      CREATE INDEX assets_original_path
+        ON assets(group_id, original_path);
+      CREATE INDEX assets_original_name
+        ON assets(group_id, original_name);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

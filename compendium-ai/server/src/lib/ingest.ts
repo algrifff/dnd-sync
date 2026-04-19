@@ -272,10 +272,14 @@ export async function ingestZip(opts: IngestOptions): Promise<IngestSummary> {
     db.query('DELETE FROM tags        WHERE group_id = ?').run(opts.groupId);
     db.query('DELETE FROM notes       WHERE group_id = ?').run(opts.groupId);
 
-    // Assets: insert new, leave existing alone.
+    // Assets: insert new, leave existing alone. We persist the
+    // original vault path alongside the basename so the by-path
+    // resolver can still match precise references when multiple
+    // files share a basename across folders.
     const insertAsset = db.query(
-      `INSERT INTO assets (id, group_id, hash, mime, size, original_name, uploaded_by, uploaded_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO assets (id, group_id, hash, mime, size, original_name,
+                           original_path, uploaded_by, uploaded_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const now = Date.now();
     for (const a of assetsToInsert) {
@@ -286,6 +290,7 @@ export async function ingestZip(opts: IngestOptions): Promise<IngestSummary> {
         a.mime,
         a.size,
         a.originalName,
+        a.originalPath,
         opts.actorId,
         now,
       );

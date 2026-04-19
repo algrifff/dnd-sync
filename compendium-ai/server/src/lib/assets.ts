@@ -272,3 +272,44 @@ export function getAssetById(id: string, groupId: string): AssetRow | null {
       .get(id, groupId) ?? null
   );
 }
+
+/** Runtime fallback lookup for image `<img src="Campaign 2/...">` style
+ *  references that slipped past ingest-time resolution. Tries the full
+ *  vault path first (original_path), then the basename (original_name).
+ *  Matching is case-insensitive. If multiple rows share a basename we
+ *  take the most recently uploaded; precise full-path matches already
+ *  beat that path. */
+export function getAssetByVaultPath(
+  path: string,
+  groupId: string,
+): AssetRow | null {
+  let decoded = path;
+  try {
+    decoded = decodeURIComponent(path);
+  } catch {
+    /* leave as-is */
+  }
+  const db = getDb();
+  const byPath = db
+    .query<AssetRow, [string, string]>(
+      `SELECT * FROM assets
+         WHERE group_id = ?
+           AND LOWER(original_path) = LOWER(?)
+         LIMIT 1`,
+    )
+    .get(groupId, decoded);
+  if (byPath) return byPath;
+
+  const basename = decoded.split('/').pop() ?? decoded;
+  return (
+    db
+      .query<AssetRow, [string, string]>(
+        `SELECT * FROM assets
+           WHERE group_id = ?
+             AND LOWER(original_name) = LOWER(?)
+           ORDER BY uploaded_at DESC
+           LIMIT 1`,
+      )
+      .get(groupId, basename) ?? null
+  );
+}
