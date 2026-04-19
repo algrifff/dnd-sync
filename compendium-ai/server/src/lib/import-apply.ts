@@ -214,7 +214,7 @@ function commitPlannedNote(
 
   // Build the incoming markdown body — wikilink rewrites applied at
   // the markdown layer so the md-to-pm pipeline picks them up.
-  const { fmBlock, body } = splitFrontmatter(raw);
+  const { body } = splitFrontmatter(raw);
   const rewrittenBody = classification
     ? rewriteWikilinks(body, classification.wikilinks)
     : body;
@@ -667,13 +667,13 @@ function commitAsset(
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-function splitFrontmatter(raw: string): { fmBlock: string; body: string } {
+function splitFrontmatter(raw: string): { body: string } {
   if (!raw.startsWith('---\n') && !raw.startsWith('---\r\n')) {
-    return { fmBlock: '', body: raw };
+    return { body: raw };
   }
   const end = raw.indexOf('\n---', 4);
-  if (end === -1) return { fmBlock: '', body: raw };
-  return { fmBlock: raw.slice(0, end + 4), body: raw.slice(end + 4) };
+  if (end === -1) return { body: raw };
+  return { body: raw.slice(end + 4) };
 }
 
 function stripFrontmatter(raw: string): string {
