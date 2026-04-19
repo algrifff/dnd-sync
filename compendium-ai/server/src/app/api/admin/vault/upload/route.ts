@@ -25,11 +25,36 @@ export const dynamic = 'force-dynamic';
 const UPLOAD_CAP = 500 * 1024 * 1024;
 
 export async function POST(req: NextRequest): Promise<Response> {
+  // Outer safety net: no matter where a throw happens, respond with JSON
+  // (including the stack head) so the client shows the real cause rather
+  // than Next's generic HTML 500 page.
+  try {
+    return await handleUpload(req);
+  } catch (err) {
+    console.error('[vault.upload] unhandled:', err);
+    return json(
+      {
+        error: 'unhandled',
+        message: err instanceof Error ? err.message : String(err),
+        stack:
+          err instanceof Error
+            ? (err.stack ?? '').split('\n').slice(0, 5).join('\n')
+            : undefined,
+      },
+      500,
+    );
+  }
+}
+
+async function handleUpload(req: NextRequest): Promise<Response> {
+  console.log('[vault.upload] step=start');
   const authed = requireAdmin(req);
   if (authed instanceof Response) return authed;
+  console.log('[vault.upload] step=authed user=' + authed.userId);
 
   const csrf = verifyCsrf(req, authed);
   if (csrf) return csrf;
+  console.log('[vault.upload] step=csrf-ok');
 
   const rate = adminUploadLimiter.check(authed.userId, false);
   if (!rate.allowed) {
@@ -48,9 +73,17 @@ export async function POST(req: NextRequest): Promise<Response> {
   let form: FormData;
   try {
     form = await req.formData();
-  } catch {
-    return json({ error: 'invalid_multipart' }, 400);
+  } catch (err) {
+    console.error('[vault.upload] step=formdata-failed:', err);
+    return json(
+      {
+        error: 'invalid_multipart',
+        message: err instanceof Error ? err.message : String(err),
+      },
+      400,
+    );
   }
+  console.log('[vault.upload] step=formdata-ok');
 
   const vault = form.get('vault');
   if (!(vault instanceof Blob) || vault.size === 0) {
@@ -59,6 +92,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (vault.size > UPLOAD_CAP) {
     return json({ error: 'payload_too_large', maxBytes: UPLOAD_CAP }, 413);
   }
+  console.log('[vault.upload] step=blob-ok size=' + vault.size);
 
   // Write the blob to $DATA_DIR/tmp so adm-zip can open by path rather
   // than forcing us to hold it all in memory. Wrap setup in the same
@@ -71,6 +105,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     tmpPath = join(tmpDir, `upload-${randomUUID()}.zip`);
     const bytes = new Uint8Array(await vault.arrayBuffer());
     writeFileSync(tmpPath, bytes);
+    console.log('[vault.upload] step=tmp-written path=' + tmpPath);
   } catch (err) {
     adminUploadLimiter.recordFailure(authed.userId, false);
     console.error('[vault.upload] tmp write failed:', err);
@@ -92,11 +127,13 @@ export async function POST(req: NextRequest): Promise<Response> {
     .map((r) => r.path);
 
   try {
+    console.log('[vault.upload] step=ingest-start');
     const summary = await ingestZip({
       zipPath: tmpPath,
       groupId: authed.currentGroupId,
       actorId: authed.userId,
     });
+    console.log('[vault.upload] step=ingest-ok notes=' + summary.notes);
     adminUploadLimiter.recordSuccess(authed.userId);
 
     // Kick any live editors on paths that existed before so they
