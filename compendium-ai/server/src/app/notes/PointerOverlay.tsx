@@ -376,7 +376,7 @@ function PointerDot({
   // not a replacement for the pointer.
   return (
     <div
-      className="absolute flex items-start gap-1"
+      className="absolute flex items-start"
       style={{ left: x, top: y, color }}
     >
       <svg
@@ -389,7 +389,7 @@ function PointerDot({
       >
         <path d="M1 1 L1 11 L4 8 L6.5 13 L8.5 12.2 L6 7.3 L11 7.3 Z" />
       </svg>
-      <div className="mt-2 flex flex-col items-start gap-1">
+      <div className="flex flex-col items-center">
         {avatarUrl && (
           <img
             src={avatarUrl}
