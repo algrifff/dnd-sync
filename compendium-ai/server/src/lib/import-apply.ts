@@ -47,7 +47,8 @@ import { getPmSchema } from './pm-schema';
 import { ingestMarkdown, type IngestContext, type NoteIngest } from './md-to-pm';
 import { pmToMarkdown } from './pm-to-md';
 import type { PlannedNote } from './import-analyse';
-import type { ImportClassifyResult } from './ai/import-skill';
+import type { ImportClassifyResult } from './ai/skills/types';
+import { runMerge } from './ai/skills/merge';
 
 export type ApplySummary = {
   moved: number;
@@ -55,6 +56,8 @@ export type ApplySummary = {
   keptInPlace: number;
   failed: number;
   assetsCommitted: number;
+  mergeSkillCalls: number;       // # of AI merge calls billed this run
+  mergeSkillCostUsd: number;
   errors: Array<{ sourcePath: string; message: string }>;
 };
 
@@ -92,6 +95,8 @@ export async function applyImportJob(jobId: string): Promise<ApplySummary> {
     keptInPlace: 0,
     failed: 0,
     assetsCommitted: 0,
+    mergeSkillCalls: 0,
+    mergeSkillCostUsd: 0,
     errors: [],
   };
 
@@ -109,7 +114,7 @@ export async function applyImportJob(jobId: string): Promise<ApplySummary> {
         // Row was rejected (or kind=plain and DM didn't opt in).
         // Still commit it at its original path as a plain page so
         // nothing is lost.
-        commitPlannedNote(
+        await commitPlannedNote(
           job,
           pn,
           null,
@@ -121,7 +126,7 @@ export async function applyImportJob(jobId: string): Promise<ApplySummary> {
         );
         continue;
       }
-      commitPlannedNote(
+      await commitPlannedNote(
         job,
         pn,
         pn.classification,
@@ -176,7 +181,7 @@ export async function applyImportJob(jobId: string): Promise<ApplySummary> {
 
 // ── Per-note commit ────────────────────────────────────────────────────
 
-function commitPlannedNote(
+async function commitPlannedNote(
   job: ImportJob,
   pn: PlannedNote,
   classification: ImportClassifyResult | null,
@@ -185,7 +190,7 @@ function commitPlannedNote(
   committedAssets: Set<string>,
   summary: ApplySummary,
   opts: { forceKeepInPlace?: boolean },
-): void {
+): Promise<void> {
   const groupId = job.groupId;
   const userId = job.createdBy;
   const db = getDb();
@@ -244,12 +249,63 @@ function commitPlannedNote(
   // For characters / sessions / etc., build the final markdown
   // package (frontmatter + body) then run the existing
   // md-to-pm + Y.Doc pipeline so every derive hook runs.
-  const finalFm = existing
-    ? mergeFrontmatter(parseJson(existing.frontmatter_json), incomingFm)
-    : incomingFm;
-  const finalBody = existing
-    ? appendMergeBody(existing.content_md, rewrittenBody, pn.basename)
-    : rewrittenBody;
+  let finalFm: Record<string, unknown>;
+  let finalBody: string;
+  if (existing) {
+    const existingFm = parseJson(existing.frontmatter_json);
+    if (process.env.OPENAI_API_KEY) {
+      // Use the merge skill to produce a coherent combined body
+      // and suggest any missing frontmatter. Existing frontmatter
+      // keys still win per the merge rule.
+      try {
+        const m = await runMerge({
+          path: targetPath,
+          existing: { frontmatter: existingFm, body: existing.content_md },
+          incoming: {
+            frontmatter: incomingFm,
+            body: rewrittenBody,
+            sourceFilename: pn.basename,
+          },
+        });
+        summary.mergeSkillCalls++;
+        summary.mergeSkillCostUsd += m.costUsd;
+        // Merge: existing → + AI suggestions → + incoming (blank-fill).
+        const withSuggestions = mergeFrontmatter(
+          existingFm,
+          m.result.frontmatterSuggestions,
+        );
+        finalFm = mergeFrontmatter(withSuggestions, incomingFm);
+        // Tag union includes the merge skill's tag list.
+        const mergedTags = new Set([
+          ...readTagList(finalFm.tags),
+          ...m.result.tags,
+        ]);
+        if (mergedTags.size > 0) finalFm.tags = [...mergedTags];
+        finalBody = m.result.mergedBody;
+      } catch (err) {
+        console.warn(
+          '[import.apply] merge skill failed, falling back to append:',
+          err,
+        );
+        finalFm = mergeFrontmatter(existingFm, incomingFm);
+        finalBody = appendMergeBody(
+          existing.content_md,
+          rewrittenBody,
+          pn.basename,
+        );
+      }
+    } else {
+      finalFm = mergeFrontmatter(existingFm, incomingFm);
+      finalBody = appendMergeBody(
+        existing.content_md,
+        rewrittenBody,
+        pn.basename,
+      );
+    }
+  } else {
+    finalFm = incomingFm;
+    finalBody = rewrittenBody;
+  }
 
   const finalMd = composeMarkdown(finalFm, finalBody);
 

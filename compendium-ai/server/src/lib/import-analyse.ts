@@ -8,13 +8,25 @@
 import type { ImportJob } from './imports';
 import { deleteJobZip, getImportJob, updateImportJob } from './imports';
 import type { ImportPlan, ParsedNote } from './import-parse';
+import { runClassify, type ClassifyInput } from './ai/skills/classify';
 import {
-  classifyImportNote,
+  extractAlly,
+  extractItem,
+  extractLocation,
+  extractNpc,
+  extractPc,
+  extractSession,
+  extractVillain,
+  type ExtractInput,
+  type ExtractResult,
+} from './ai/skills/extract';
+import {
   defaultConventions,
   type FolderConventions,
-  type ImportClassifyContext,
-  type ImportClassifyResult,
-} from './ai/import-skill';
+  type ImportSkillContext,
+} from './ai/skills/common';
+import type { ImportClassifyResult } from './ai/skills/types';
+import type { TokenUsage } from './ai/pricing';
 import { listCampaigns } from './characters';
 import { getDb } from './db';
 
@@ -158,28 +170,48 @@ async function doAnalyse(jobId: string, signal: AbortSignal): Promise<void> {
       if (idx >= planned.length) return;
 
       const note = planned[idx]!;
-      stats.callCount++;
       try {
-        const { result, usage, costUsd } = await classifyImportNote(
-          {
-            filename: note.basename,
-            folderPath: note.sourcePath
-              .split('/')
-              .slice(0, -1)
-              .join('/'),
-            content: note.content,
-            existingFrontmatter: note.existingFrontmatter,
-            context: ctx,
-          },
-          { signal },
-        );
-        note.classification = result;
+        const classifyInput: ClassifyInput = {
+          filename: note.basename,
+          folderPath: note.sourcePath.split('/').slice(0, -1).join('/'),
+          content: note.content,
+          existingFrontmatter: note.existingFrontmatter,
+          context: ctx,
+        };
+
+        // Step 1 — classify. One OpenAI call; decides kind + path +
+        // common metadata.
+        stats.callCount++;
+        const classified = await runClassify(classifyInput, { signal });
+        addUsage(stats, classified.usage, classified.costUsd);
+
+        // Step 2 — per-kind extract. Skipped for kind=plain or
+        // kind=lore (no structured sheet). Call the specific
+        // extractor so each one can carry its own narrow prompt.
+        let extract: { result: ExtractResult; usage: TokenUsage; costUsd: number } | null = null;
+        if (
+          stats.callCount < envInt('IMPORT_MAX_AI_CALLS', DEFAULT_MAX_CALLS)
+        ) {
+          const extractInput: ExtractInput = {
+            ...classifyInput,
+            displayName: classified.result.displayName,
+          };
+          const extractor = pickExtractor(classified.result);
+          if (extractor) {
+            stats.callCount++;
+            extract = await extractor(extractInput, { signal });
+            addUsage(stats, extract.usage, extract.costUsd);
+          }
+        }
+
+        const merged: ImportClassifyResult = {
+          ...classified.result,
+          sheet: extract?.result.sheet ?? {},
+        };
+        note.classification = merged;
         note.analyseStatus = 'ok';
-        note.accepted = result.confidence >= 0.4 && result.kind !== 'plain';
-        stats.inputTokens += usage.inputTokens;
-        stats.outputTokens += usage.outputTokens;
-        stats.reasoningTokens += usage.reasoningTokens;
-        stats.costUsd += costUsd;
+        note.accepted =
+          merged.confidence >= 0.4 && merged.kind !== 'plain';
       } catch (err) {
         if (signal.aborted) return;
         note.analyseStatus = 'failed';
@@ -231,10 +263,54 @@ function flush(
   });
 }
 
+function addUsage(
+  stats: AnalyseStats,
+  usage: TokenUsage,
+  cost: number,
+): void {
+  stats.inputTokens += usage.inputTokens;
+  stats.outputTokens += usage.outputTokens;
+  stats.reasoningTokens += usage.reasoningTokens;
+  stats.costUsd += cost;
+}
+
+function pickExtractor(
+  classified: { kind: string; role: string | null },
+): ((input: ExtractInput, opts: { signal?: AbortSignal }) => Promise<{
+  result: ExtractResult;
+  usage: TokenUsage;
+  costUsd: number;
+  model: string;
+}>) | null {
+  if (classified.kind === 'character') {
+    switch (classified.role) {
+      case 'pc':
+        return extractPc;
+      case 'ally':
+        return extractAlly;
+      case 'villain':
+        return extractVillain;
+      case 'npc':
+      default:
+        return extractNpc;
+    }
+  }
+  switch (classified.kind) {
+    case 'location':
+      return extractLocation;
+    case 'item':
+      return extractItem;
+    case 'session':
+      return extractSession;
+    default:
+      return null; // lore + plain skip extract
+  }
+}
+
 function buildContext(
   job: ImportJob,
   planned: PlannedNote[],
-): ImportClassifyContext {
+): ImportSkillContext {
   const db = getDb();
   const existingVaultPaths = db
     .query<{ path: string }, [string]>(

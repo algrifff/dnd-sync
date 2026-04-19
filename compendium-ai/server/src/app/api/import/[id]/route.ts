@@ -13,7 +13,7 @@ import {
 } from '@/lib/imports';
 import { abortAnalyse, type PlannedNote } from '@/lib/import-analyse';
 import type { ImportPlan } from '@/lib/import-parse';
-import type { ImportClassifyResult } from '@/lib/ai/import-skill';
+import type { ImportClassifyResult } from '@/lib/ai/skills/types';
 
 export const dynamic = 'force-dynamic';
 

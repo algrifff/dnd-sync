@@ -19,7 +19,7 @@ import type {
   AnalyseStats,
   PlannedNote,
 } from '@/lib/import-analyse';
-import type { ImportClassifyResult } from '@/lib/ai/import-skill';
+import type { ImportClassifyResult } from '@/lib/ai/skills/types';
 
 type Kind = ImportClassifyResult['kind'];
 type Role = NonNullable<ImportClassifyResult['role']>;
