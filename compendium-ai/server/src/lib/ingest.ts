@@ -31,6 +31,7 @@ import {
   deriveCharacterFromFrontmatter,
   ensureCampaignForPath,
 } from './characters';
+import { deriveSessionFromFrontmatter } from './sessions';
 import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { logAudit } from './audit';
 
@@ -357,9 +358,14 @@ export async function ingestZip(opts: IngestOptions): Promise<IngestSummary> {
         notePath: p.ingest.path,
         frontmatterJson: JSON.stringify(p.ingest.frontmatter),
       });
+      deriveSessionFromFrontmatter({
+        groupId: opts.groupId,
+        notePath: p.ingest.path,
+        frontmatterJson: JSON.stringify(p.ingest.frontmatter),
+      });
     } catch (err) {
       console.error(
-        `[ingest] character derive failed for ${p.ingest.path}:`,
+        `[ingest] structured derive failed for ${p.ingest.path}:`,
         err,
       );
     }

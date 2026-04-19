@@ -360,6 +360,27 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE users ADD COLUMN active_character_path TEXT;
     `,
   },
+  {
+    version: 14,
+    description: 'sessions: index of kind: session notes for /sessions',
+    sql: `
+      CREATE TABLE sessions (
+        group_id       TEXT NOT NULL,
+        note_path      TEXT NOT NULL,
+        campaign_slug  TEXT,
+        session_date   TEXT,    -- YYYY-MM-DD for chronological sort
+        session_number INTEGER,
+        title          TEXT,
+        attendees_json TEXT,    -- JSON array of strings
+        updated_at     INTEGER NOT NULL,
+        PRIMARY KEY (group_id, note_path),
+        FOREIGN KEY (group_id, note_path)
+          REFERENCES notes(group_id, path) ON DELETE CASCADE
+      ) WITHOUT ROWID;
+      CREATE INDEX sessions_campaign_date
+        ON sessions(group_id, campaign_slug, session_date DESC);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

@@ -18,6 +18,7 @@ import {
   deriveCharacterFromFrontmatter,
   ensureCampaignForPath,
 } from '@/lib/characters';
+import { deriveSessionFromFrontmatter } from '@/lib/sessions';
 
 export function deriveAndPersist(opts: {
   groupId: string;
@@ -97,8 +98,13 @@ export function deriveAndPersist(opts: {
       notePath: opts.path,
       frontmatterJson: fmRow?.frontmatter_json ?? '{}',
     });
+    deriveSessionFromFrontmatter({
+      groupId: opts.groupId,
+      notePath: opts.path,
+      frontmatterJson: fmRow?.frontmatter_json ?? '{}',
+    });
   } catch (err) {
-    console.error(`[derive] character derive failed for ${opts.path}:`, err);
+    console.error(`[derive] structured derive failed for ${opts.path}:`, err);
   }
 }
 
