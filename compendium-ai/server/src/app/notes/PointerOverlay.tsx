@@ -370,36 +370,41 @@ function PointerDot({
   name: string;
   avatarUrl: string | null;
 }): React.JSX.Element {
+  // The triangle pointer is always rendered so peers can tell where
+  // the actual cursor tip is. The avatar, when enabled, sits
+  // directly above the name label in a second column — it's a badge,
+  // not a replacement for the pointer.
   return (
     <div
       className="absolute flex items-start gap-1"
       style={{ left: x, top: y, color }}
     >
-      {avatarUrl ? (
-        <img
-          src={avatarUrl}
-          alt=""
-          className="h-5 w-5 rounded-full border-2 object-cover shadow-[0_2px_6px_rgba(42,36,30,0.3)]"
-          style={{ borderColor: color }}
-        />
-      ) : (
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 14 14"
-          fill={color}
-          stroke="#FBF5E8"
-          strokeWidth="1"
-        >
-          <path d="M1 1 L1 11 L4 8 L6.5 13 L8.5 12.2 L6 7.3 L11 7.3 Z" />
-        </svg>
-      )}
-      <span
-        className="mt-2 whitespace-nowrap rounded-[4px] px-1 text-[10px] font-medium text-[#2A241E]"
-        style={{ backgroundColor: color }}
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 14 14"
+        fill={color}
+        stroke="#FBF5E8"
+        strokeWidth="1"
       >
-        {name}
-      </span>
+        <path d="M1 1 L1 11 L4 8 L6.5 13 L8.5 12.2 L6 7.3 L11 7.3 Z" />
+      </svg>
+      <div className="mt-2 flex flex-col items-start gap-1">
+        {avatarUrl && (
+          <img
+            src={avatarUrl}
+            alt=""
+            className="h-10 w-10 rounded-full border-2 object-cover shadow-[0_2px_6px_rgba(42,36,30,0.3)]"
+            style={{ borderColor: color }}
+          />
+        )}
+        <span
+          className="whitespace-nowrap rounded-[4px] px-1 text-[10px] font-medium text-[#2A241E]"
+          style={{ backgroundColor: color }}
+        >
+          {name}
+        </span>
+      </div>
     </div>
   );
 }

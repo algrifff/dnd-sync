@@ -1214,31 +1214,32 @@ function GraphCursors({
                 className="absolute flex items-start gap-1"
                 style={{ left: vp.x, top: vp.y, color: r.color }}
               >
-                {avatarUrl ? (
-                  <img
-                    src={avatarUrl}
-                    alt=""
-                    className="h-5 w-5 rounded-full border-2 object-cover shadow-[0_2px_6px_rgba(42,36,30,0.3)]"
-                    style={{ borderColor: r.color }}
-                  />
-                ) : (
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 14 14"
-                    fill={r.color}
-                    stroke="#FBF5E8"
-                    strokeWidth="1"
-                  >
-                    <path d="M1 1 L1 11 L4 8 L6.5 13 L8.5 12.2 L6 7.3 L11 7.3 Z" />
-                  </svg>
-                )}
-                <span
-                  className="mt-2 whitespace-nowrap rounded-[4px] px-1 text-[10px] font-medium text-[#2A241E]"
-                  style={{ backgroundColor: r.color }}
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill={r.color}
+                  stroke="#FBF5E8"
+                  strokeWidth="1"
                 >
-                  {r.name}
-                </span>
+                  <path d="M1 1 L1 11 L4 8 L6.5 13 L8.5 12.2 L6 7.3 L11 7.3 Z" />
+                </svg>
+                <div className="mt-2 flex flex-col items-start gap-1">
+                  {avatarUrl && (
+                    <img
+                      src={avatarUrl}
+                      alt=""
+                      className="h-10 w-10 rounded-full border-2 object-cover shadow-[0_2px_6px_rgba(42,36,30,0.3)]"
+                      style={{ borderColor: r.color }}
+                    />
+                  )}
+                  <span
+                    className="whitespace-nowrap rounded-[4px] px-1 text-[10px] font-medium text-[#2A241E]"
+                    style={{ backgroundColor: r.color }}
+                  >
+                    {r.name}
+                  </span>
+                </div>
               </div>
             );
           })
