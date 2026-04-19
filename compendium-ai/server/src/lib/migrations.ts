@@ -293,6 +293,73 @@ const MIGRATIONS: readonly Migration[] = [
         ON assets(group_id, original_name);
     `,
   },
+  {
+    version: 13,
+    description:
+      'characters: global note_templates + campaigns + characters index + active_character_path',
+    sql: `
+      -- Server-global schema registry. Keyed by kind so there's
+      -- exactly one template per kind; any admin on any world can
+      -- edit and every world sees the same shape.
+      CREATE TABLE note_templates (
+        kind        TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        schema_json TEXT NOT NULL,
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL,
+        updated_by  TEXT REFERENCES users(id)
+      ) WITHOUT ROWID;
+
+      -- Campaigns are per-world. Auto-created on save when a note's
+      -- path falls under Campaigns/<slug>/; admins can rename the
+      -- display value without touching the folder.
+      CREATE TABLE campaigns (
+        group_id    TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        slug        TEXT NOT NULL,
+        name        TEXT NOT NULL,
+        folder_path TEXT NOT NULL,
+        created_at  INTEGER NOT NULL,
+        PRIMARY KEY (group_id, slug)
+      ) WITHOUT ROWID;
+
+      -- Character index. Derived from note frontmatter each save,
+      -- cascade-deleted with the backing note. The note (source of
+      -- truth) can recover this table at any time via re-derive.
+      CREATE TABLE characters (
+        group_id       TEXT NOT NULL,
+        note_path      TEXT NOT NULL,
+        kind           TEXT NOT NULL,
+        player_user_id TEXT REFERENCES users(id),
+        display_name   TEXT NOT NULL,
+        portrait_path  TEXT,
+        level          INTEGER,
+        class          TEXT,
+        race           TEXT,
+        updated_at     INTEGER NOT NULL,
+        PRIMARY KEY (group_id, note_path),
+        FOREIGN KEY (group_id, note_path)
+          REFERENCES notes(group_id, path) ON DELETE CASCADE
+      ) WITHOUT ROWID;
+      CREATE INDEX characters_player ON characters(group_id, player_user_id);
+      CREATE INDEX characters_kind ON characters(group_id, kind);
+
+      -- Many-to-many for crossover characters. Chained deletes
+      -- follow the characters row.
+      CREATE TABLE character_campaigns (
+        group_id       TEXT NOT NULL,
+        note_path      TEXT NOT NULL,
+        campaign_slug  TEXT NOT NULL,
+        PRIMARY KEY (group_id, note_path, campaign_slug),
+        FOREIGN KEY (group_id, note_path)
+          REFERENCES characters(group_id, note_path) ON DELETE CASCADE
+      ) WITHOUT ROWID;
+
+      -- Each user has one pinned active character (null = none).
+      -- Plain path string; we don't FK-constrain because users may
+      -- set an active character in a world and move between groups.
+      ALTER TABLE users ADD COLUMN active_character_path TEXT;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {
