@@ -1,12 +1,13 @@
 # AI-assisted import — plan
 
-> Drop any folder (Obsidian, Google Docs export, loose `.md`, whatever) and
-> the server runs a two-pass ingest: classical parse, then an OpenAI pass
-> that classifies every note, extracts structured frontmatter, pairs images
-> with their owners, auto-tags, and proposes vault paths. The DM reviews —
-> "Accept all" in one click, or pick through edits — and the apply step
-> writes through the existing derive pipeline so graph / backlinks /
-> dashboards all light up together.
+> Drop any folder (Obsidian, Google Docs export, loose `.md`, whatever) into
+> a chat panel on the home page. The server runs a two-pass ingest:
+> classical parse, then a GPT-5-mini pass that classifies every note,
+> extracts structured frontmatter, pairs images with their owners, auto-
+> tags, and proposes vault paths. The DM sees the plan as a chat reply,
+> one-clicks **Accept all** (or opens the full per-row review), and the
+> apply step writes through the existing derive pipeline so graph /
+> backlinks / dashboards all light up together.
 
 ---
 
@@ -241,9 +242,96 @@ If the drop has nested folders that look like campaigns, the AI respects them. O
 
 ---
 
-## 8. Review screen
+## 8. Ingress: home-page chat
 
-`/settings/import/:id`, admin-only. Table, one row per note:
+Rather than a hidden settings form, the primary entrypoint is a
+chat-style panel that **replaces the welcome block on the home page
+(`/`)**. Dropping a ZIP (or dragging a folder the browser's
+File-System-Access API treats as one) straight into the chat kicks off
+an import job. Responses from the server — progress, the proposed plan,
+the apply confirmation — appear as assistant messages in the thread.
+
+```
+┌─ World: The Compendium ────────────────────────────────┐
+│                                                        │
+│ 👤 you                                                 │
+│     [dropped: my-old-vault.zip, 47 files]              │
+│                                                        │
+│ 🧭 compendium                                          │
+│     Parsing 47 files… done. Sending 42 notes to the    │
+│     AI (5 were images, already queued as assets).      │
+│                                                        │
+│     ▓▓▓▓▓▓▓▓░░ 34 / 42 · 112k tokens · $0.04           │
+│                                                        │
+│ 🧭 compendium                                          │
+│     Here's what I'd do:                                │
+│       • 12 characters (8 NPC, 3 ally, 1 villain)       │
+│       • 5 sessions                                     │
+│       • 8 locations · 2 items · 14 lore                │
+│       • 3 conflicts with existing notes (will merge)   │
+│       • 1 note I couldn't classify confidently         │
+│       [ Accept all ] [ Open full review ] [ Cancel ]   │
+│                                                        │
+├─ drop a zip or folder / describe what you want ────────┤
+│ [ ...input... ]                                  [ ↑ ] │
+└────────────────────────────────────────────────────────┘
+```
+
+### Message model
+
+```ts
+type ChatMessage =
+  | { id; role: 'user'; kind: 'text'; body: string }
+  | { id; role: 'user'; kind: 'upload'; filename: string; bytes: number }
+  | { id; role: 'assistant'; kind: 'text'; body: string }
+  | { id; role: 'assistant'; kind: 'progress'; jobId; done: number; total: number; tokens: number; costUsd: number }
+  | { id; role: 'assistant'; kind: 'plan'; jobId; summary: PlanSummary; conflicts: number; isolated: number }
+  | { id; role: 'assistant'; kind: 'applied'; jobId; moved: number; merged: number; failed: number };
+```
+
+Thread is **ephemeral** per browser session for v1 — nothing persisted
+in the DB. If the user refreshes mid-job the thread is empty again but
+the job itself is still running and discoverable at `/settings/import/:id`.
+(A later phase can persist chat threads; not worth the table now.)
+
+### Flow
+
+1. User drops a ZIP. Client `POST /api/import`, gets a job id, appends
+   a `progress` message wired to that job.
+2. Client calls `POST /api/import/:id/analyse`, then polls
+   `GET /api/import/:id` every 1 s; each poll refreshes the
+   `progress` message (done / total / tokens / cost).
+3. On status `ready`, the `progress` message collapses and an assistant
+   `plan` message appears with the summary + three buttons:
+   - **Accept all** — `POST /api/import/:id/apply` with the plan as-is.
+   - **Open full review** — deep-links to `/settings/import/:id` (the
+     detailed per-row table from below, same data, more room to edit).
+   - **Cancel** — `DELETE /api/import/:id`.
+4. Apply response becomes an `applied` assistant message with counts
+   and a link to the resulting notes.
+
+### Text input
+
+The bottom input accepts file drops **and** free-form text. v1 only
+actions the file side; free text posts a neutral assistant reply
+("I can import folders and zips today — type commands coming soon")
+so the shape is in place for a later AI-assistant loop (e.g.
+"add the 'villain' tag to every NPC in Campaign 3").
+
+### Re-entering a job
+
+If you navigate away and come back, the home-page chat shows any
+jobs owned by the current user still in `analysing` or `ready` as a
+resumable banner at the top: *"Import in progress — 42% · resume"*.
+Click-through re-hydrates the `progress` / `plan` message for that job.
+
+---
+
+## 8b. Full review screen (secondary)
+
+`/settings/import/:id`, admin-only. The per-row table behind the
+chat's "Open full review" button — useful when the plan is large or
+the DM wants to edit individual rows. Same data, finer controls.
 
 ```
 ☑ lumen.md              → Campaigns/…/Characters/Allies/Lumen Flumen.md  [ally] · Aasimar Cleric 5 · 3 tags · 2 links · 📷 lumen_portrait.jpg
@@ -252,11 +340,16 @@ If the drop has nested folders that look like campaigns, the AI respects them. O
 ⚠ atoxis.md             → Campaigns/…/Characters/Villains/Atoxis.md       [conflict: existing note; will merge]
 ```
 
-Row actions: accept / reject, edit path (typeahead), override kind, expand to tweak sheet JSON, hover a link to see the anchor.
+Row actions: accept / reject, edit path (typeahead), override kind,
+expand to tweak sheet JSON, hover a link to see the anchor.
 
-Bulk actions: **Accept all** (default happy path), accept all above X confidence, reject all "plain", re-run AI on selected rows.
+Bulk actions: **Accept all**, accept all above X confidence, reject
+all "plain", re-run AI on selected rows.
 
-The job-level header has the target-campaign picker + total token budget spent.
+The job-level header has the target-campaign picker + total token
+budget spent. Clicking **Apply** there does the same thing as the
+chat's Accept-all button but with whatever row-level edits the DM
+made.
 
 ---
 
@@ -327,13 +420,14 @@ v2 (deferred):
 
 | # | What lands |
 |--|--|
-| **1a** | Migration + API scaffold (upload / get / cancel), temp-file handling |
-| **1b** | Classical parse pass (reuses existing ingest helpers); review page shows the pre-AI plan |
-| **1c** | OpenAI client + skill + structured-output schema + retry + cost accounting |
-| **1d** | Review UI with per-row accept / edit / reject + "Accept all" |
+| **1a** | Migration + API scaffold (upload / get / cancel) + temp-file handling |
+| **1b** | Classical parse pass (reuses existing ingest helpers); `/settings/import/:id` shows pre-AI plan |
+| **1c** | OpenAI client wrapper (Responses API + Chat Completions dispatch) + skill + schema validation + retry + cost accounting |
+| **1d** | Home-page chat component: drop → upload → progress → plan → accept-all |
 | **1e** | Apply step: file moves, frontmatter merge, wikilink rewrites, image pairing, merge-on-conflict |
-| **1f** | Live progress + token/cost display + mid-analyse cancel |
-| **2**  | `.docx` ingest, batched prompting for tiny notes to drop cost, on-demand re-analysis of a subset |
+| **1f** | `/settings/import/:id` full-review UI (per-row edit / reject / re-run), wired to the chat's "Open full review" button |
+| **1g** | Resumable jobs banner on the home page; polling refactor (use server-sent events later if polling gets chatty) |
+| **2**  | `.docx` ingest, batched prompting for tiny notes to drop cost, on-demand re-analysis of a subset, persisted chat threads, free-text commands |
 
 ---
 
