@@ -10,6 +10,7 @@ import { readSession } from '@/lib/session';
 import { buildTree } from '@/lib/tree';
 import { listNoteKinds } from '@/lib/characters';
 import { AppHeader } from '../AppHeader';
+import { WorldsSidebar } from '../WorldsSidebar';
 import { SidebarHeader } from '../SidebarHeader';
 import { SidebarFooter } from '../SidebarFooter';
 import { FileTree } from '../notes/FileTree';
@@ -38,6 +39,7 @@ export default async function SettingsLayout({
 
   return (
     <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
+      <WorldsSidebar csrfToken={session.csrfToken} />
       <aside className="hidden h-full w-[260px] shrink-0 flex-col bg-[#EAE1CF]/60 md:flex">
         <SidebarHeader role={session.role} />
         <ActiveCharacterBlock

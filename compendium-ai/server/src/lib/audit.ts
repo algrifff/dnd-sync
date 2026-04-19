@@ -23,7 +23,9 @@ export type AuditAction =
   | 'folder.create'
   | 'folder.rename'
   | 'folder.destroy'
-  | 'session.rotate';
+  | 'session.rotate'
+  | 'group.create'
+  | 'group.switch';
 
 export type AuditEntry = {
   action: AuditAction;

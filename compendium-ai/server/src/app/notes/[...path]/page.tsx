@@ -17,6 +17,7 @@ import { getTemplate, type NoteTemplate, type TemplateKind } from '@/lib/templat
 import { listNoteKinds } from '@/lib/characters';
 import { buildTree } from '@/lib/tree';
 import { AppHeader } from '../../AppHeader';
+import { WorldsSidebar } from '../../WorldsSidebar';
 import { SidebarHeader } from '../../SidebarHeader';
 import { SidebarFooter } from '../../SidebarFooter';
 import { FileTree } from '../FileTree';
@@ -80,6 +81,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
   return (
     <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
+      <WorldsSidebar csrfToken={session.csrfToken} />
       <aside className="hidden h-full w-[260px] shrink-0 flex-col bg-[#EAE1CF]/60 md:flex">
         <SidebarHeader role={session.role} />
         <ActiveCharacterBlock
