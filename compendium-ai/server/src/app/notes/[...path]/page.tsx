@@ -13,6 +13,7 @@ import {
   loadTags,
   loadUser,
 } from '@/lib/notes';
+import { getTemplate, type NoteTemplate, type TemplateKind } from '@/lib/templates';
 import { buildTree } from '@/lib/tree';
 import { AppHeader } from '../../AppHeader';
 import { SidebarHeader } from '../../SidebarHeader';
@@ -46,6 +47,19 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   const backlinks = loadBacklinks(session.currentGroupId, path);
   const tags = loadTags(session.currentGroupId, path);
   const creator = note.created_by ? loadUser(note.created_by) : null;
+
+  // Character sheet detection. If the note's frontmatter declares
+  // kind: character, load the template for its role and decide
+  // whether the current session may edit every field or just the
+  // playerEditable ones.
+  const character = resolveCharacterView({
+    frontmatterJson: note.frontmatter_json,
+    path,
+    sessionRole: session.role,
+    sessionUsername: session.username,
+    sessionUserId: session.userId,
+    createdBy: note.created_by,
+  });
 
   let contentJson: unknown = null;
   try {
@@ -104,9 +118,12 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
               <p className="text-xs text-[#5A4F42]">
                 <code>{path}</code>
               </p>
-              {session.role !== 'viewer' && (
-                <NoteMenu path={path} csrfToken={session.csrfToken} />
-              )}
+              {canEditNote({
+                role: session.role,
+                userId: session.userId,
+                createdBy: note.created_by,
+                character,
+              }) && <NoteMenu path={path} csrfToken={session.csrfToken} />}
             </header>
 
             <NoteWorkspace
@@ -120,7 +137,12 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                 cursorMode: session.cursorMode,
                 avatarVersion: session.avatarVersion,
               }}
-              canEdit={session.role !== 'viewer'}
+              canEdit={canEditNote({
+                role: session.role,
+                userId: session.userId,
+                createdBy: note.created_by,
+                character,
+              })}
               csrfToken={session.csrfToken}
               creator={
                 creator
@@ -131,6 +153,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                   : null
               }
               createdAt={note.created_at}
+              character={character}
             />
           </div>
           </div>
@@ -149,4 +172,120 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
     </div>
   );
 }
+
+const CHARACTER_KINDS_BY_PATH: Array<[RegExp, TemplateKind]> = [
+  [/(^|\/)pcs\//i, 'pc'],
+  [/(^|\/)allies\//i, 'ally'],
+  [/(^|\/)villains\//i, 'villain'],
+  [/(^|\/)npcs\//i, 'npc'],
+];
+
+/** Decide whether this note is a character and, if so, prepare the
+ *  CharacterSheet's props: the template, initial sheet values, edit
+ *  scope, display name, and portrait URL. Returns null for
+ *  non-character notes. */
+function resolveCharacterView(args: {
+  frontmatterJson: string;
+  path: string;
+  sessionRole: 'admin' | 'editor' | 'viewer';
+  sessionUsername: string;
+  sessionUserId: string;
+  createdBy: string | null;
+}): CharacterView | null {
+  let fm: Record<string, unknown>;
+  try {
+    fm = JSON.parse(args.frontmatterJson) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (fm.kind !== 'character') return null;
+
+  const role = deriveRole(fm, args.path);
+  const template = getTemplate(role);
+  if (!template) return null;
+
+  const sheet =
+    fm.sheet && typeof fm.sheet === 'object'
+      ? (fm.sheet as Record<string, unknown>)
+      : {};
+
+  const displayName =
+    strOr(sheet.name) ??
+    filenameDisplayName(args.path);
+
+  const portraitVault = strOr(fm.portrait);
+  const portraitUrl = portraitVault
+    ? `/api/assets/by-path?path=${encodeURIComponent(portraitVault)}`
+    : null;
+
+  const isOwner =
+    role === 'pc' &&
+    typeof fm.player === 'string' &&
+    fm.player.trim().toLowerCase() === args.sessionUsername.toLowerCase();
+  const canWriteAll =
+    args.sessionRole === 'admin' ||
+    args.sessionRole === 'editor' ||
+    args.createdBy === args.sessionUserId ||
+    isOwner;
+
+  return {
+    roleLabel: ROLE_LABELS[role],
+    template,
+    sheet,
+    displayName,
+    portraitUrl,
+    canWriteAll,
+  };
+}
+
+function deriveRole(
+  fm: Record<string, unknown>,
+  path: string,
+): TemplateKind {
+  if (typeof fm.role === 'string') {
+    const r = fm.role as TemplateKind;
+    if (['pc', 'npc', 'ally', 'villain'].includes(r)) return r;
+  }
+  for (const [re, kind] of CHARACTER_KINDS_BY_PATH) {
+    if (re.test(path)) return kind;
+  }
+  return 'npc';
+}
+
+function canEditNote(args: {
+  role: 'admin' | 'editor' | 'viewer';
+  userId: string;
+  createdBy: string | null;
+  character: CharacterView | null;
+}): boolean {
+  if (args.role === 'admin' || args.role === 'editor') return true;
+  if (args.createdBy === args.userId) return true;
+  if (args.character?.canWriteAll) return true;
+  return false;
+}
+
+function strOr(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() !== '' ? v.trim() : null;
+}
+
+function filenameDisplayName(notePath: string): string {
+  return (notePath.split('/').pop() ?? notePath).replace(/\.(md|canvas)$/i, '');
+}
+
+const ROLE_LABELS: Record<TemplateKind, string> = {
+  pc: 'Player character',
+  npc: 'NPC',
+  ally: 'Ally',
+  villain: 'Villain',
+  session: 'Session',
+};
+
+export type CharacterView = {
+  roleLabel: string;
+  template: NoteTemplate;
+  sheet: Record<string, unknown>;
+  displayName: string;
+  portraitUrl: string | null;
+  canWriteAll: boolean;
+};
 

@@ -13,6 +13,17 @@ import { TagEditor } from './TagEditor';
 import { NoteSurface, type SurfaceUser } from './NoteSurface';
 import { PointerOverlay } from './PointerOverlay';
 import { DrawingOverlay } from './DrawingOverlay';
+import { CharacterSheet } from './CharacterSheet';
+import type { NoteTemplate } from '@/lib/templates';
+
+export type CharacterProp = {
+  roleLabel: string;
+  template: NoteTemplate;
+  sheet: Record<string, unknown>;
+  displayName: string;
+  portraitUrl: string | null;
+  canWriteAll: boolean;
+};
 
 export function NoteWorkspace({
   path,
@@ -23,6 +34,7 @@ export function NoteWorkspace({
   csrfToken,
   creator,
   createdAt,
+  character,
 }: {
   path: string;
   initialContent: { type: string } & Record<string, unknown>;
@@ -32,6 +44,7 @@ export function NoteWorkspace({
   csrfToken: string;
   creator: { displayName: string; username: string } | null;
   createdAt: number;
+  character: CharacterProp | null;
 }): React.JSX.Element {
   const ydoc = useMemo(() => new Y.Doc(), [path]);
   const provider = useMemo(
@@ -97,6 +110,21 @@ export function NoteWorkspace({
           canEdit={canEdit}
         />
       </div>
+
+      {character && (
+        <div className="mt-4">
+          <CharacterSheet
+            path={path}
+            csrfToken={csrfToken}
+            template={character.template}
+            initialSheet={character.sheet}
+            canWriteAll={character.canWriteAll}
+            displayName={character.displayName}
+            portraitUrl={character.portraitUrl}
+            roleLabel={character.roleLabel}
+          />
+        </div>
+      )}
 
       <NoteSurface
         path={path}
