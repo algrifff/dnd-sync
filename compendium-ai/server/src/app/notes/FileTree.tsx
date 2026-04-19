@@ -13,6 +13,7 @@ import { ChevronRight, Plus, FolderPlus } from 'lucide-react';
 import type { Tree, TreeDir } from '@/lib/tree';
 import { broadcastTreeChange } from '@/lib/tree-sync';
 import { RowMenu } from './RowMenu';
+import { PeerStack } from './PeerStack';
 
 const STORAGE_KEY = 'compendium.tree.open';
 
@@ -649,6 +650,7 @@ function TreeRow({
           style={{ paddingLeft: padding + 14 }}
         >
           <span className="truncate">{item.title || item.name}</span>
+          <PeerStack notePath={item.path} />
         </Link>
         {canCreate && (
           <div className="mr-1 hidden items-center group-hover:flex">

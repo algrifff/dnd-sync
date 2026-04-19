@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Plus, Tag, X } from 'lucide-react';
+import { broadcastTreeChange } from '@/lib/tree-sync';
 
 export function TagEditor({
   path,
@@ -98,6 +99,7 @@ export function TagEditor({
         if (Array.isArray(body.tags)) setTags(body.tags as string[]);
         else setTags(next);
         router.refresh();
+        broadcastTreeChange();
         return true;
       } catch (err) {
         setError(err instanceof Error ? err.message : 'network error');

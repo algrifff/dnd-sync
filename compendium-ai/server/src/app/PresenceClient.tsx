@@ -16,6 +16,11 @@ import { HocuspocusProvider } from '@hocuspocus/provider';
 import * as Y from 'yjs';
 import { PresencePanel, type PresencePeer } from './PresencePanel';
 import { TREE_CHANGE_EVENT } from '@/lib/tree-sync';
+import {
+  notePathFromPathname,
+  setPresencePeers,
+  type PresencePeerLite,
+} from '@/lib/presence-state';
 
 export type Me = {
   userId: string;
@@ -59,21 +64,35 @@ export function PresenceClient({ me }: { me: Me }): React.JSX.Element {
     const recompute = (): void => {
       const states = aw.getStates();
       const list: PresencePeer[] = [];
+      const lite: PresencePeerLite[] = [];
       for (const [clientId, state] of states.entries()) {
         if (clientId === aw.clientID) continue;
         const s = state as Partial<PeerState> | undefined;
         if (!s?.user) continue;
+        const viewing = s.viewing ?? null;
+        const color = s.user.color ?? '#5A4F42';
+        const name = s.user.name ?? 'Anonymous';
+        const userId = s.user.userId ?? '';
         list.push({
           clientId,
-          userId: s.user.userId ?? '',
-          name: s.user.name ?? 'Anonymous',
+          userId,
+          name,
           username: s.user.username ?? '',
-          color: s.user.color ?? '#5A4F42',
-          viewing: s.viewing ?? null,
+          color,
+          viewing,
           viewingTitle: s.viewingTitle ?? null,
+        });
+        lite.push({
+          clientId,
+          userId,
+          name,
+          color,
+          viewing,
+          notePath: notePathFromPathname(viewing),
         });
       }
       setPeers(list);
+      setPresencePeers(lite);
     };
 
     aw.on('change', recompute);
