@@ -12,9 +12,11 @@ import { getDb } from '@/lib/db';
 import { recentlyUpdated } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
 import { listNoteKinds } from '@/lib/characters';
+import { listOpenJobsForUser } from '@/lib/imports';
 import { AppHeader } from './AppHeader';
 import { WorldsSidebar } from './WorldsSidebar';
 import { SidebarHeader } from './SidebarHeader';
+import { HomeChat } from './HomeChat';
 import { SidebarFooter } from './SidebarFooter';
 import { FileTree } from './notes/FileTree';
 import { ActiveCharacterBlock } from './notes/ActiveCharacterBlock';
@@ -43,6 +45,7 @@ export default async function HomePage(): Promise<ReactElement> {
     hideDmOnly: session.role === 'viewer',
   });
   const kindMap = Object.fromEntries(listNoteKinds(DEFAULT_GROUP_ID));
+  const openJobs = listOpenJobsForUser(session.currentGroupId, session.userId);
   const topFolders = tree.root.children.filter((c) => c.kind === 'dir').slice(0, 6);
 
   return (
@@ -83,7 +86,7 @@ export default async function HomePage(): Promise<ReactElement> {
         />
         <div className="flex-1 overflow-y-auto">
         <main className="surface-paper mx-auto w-full max-w-4xl px-6 py-10">
-        <section className="mb-10">
+        <section className="mb-6">
           <h1
             className="text-4xl font-bold tracking-tight text-[#2A241E]"
             style={{ fontFamily: '"Fraunces", Georgia, serif' }}
@@ -109,6 +112,14 @@ export default async function HomePage(): Promise<ReactElement> {
               )}
             </p>
           )}
+        </section>
+
+        <section className="mb-10">
+          <HomeChat
+            csrfToken={session.csrfToken}
+            canImport={session.role !== 'viewer'}
+            initialOpenJobs={openJobs}
+          />
         </section>
 
         {topFolders.length > 0 && (
