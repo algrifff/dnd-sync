@@ -75,15 +75,18 @@ const PRESET_COLORS = [
 export function DrawingOverlay({
   provider,
   user,
-  scopeElementId = 'note-main',
   columnElementId = 'note-scroll-body',
+  toolsElementId = 'note-tools-anchor',
 }: {
   provider: HocuspocusProvider;
   user: { userId: string };
-  scopeElementId?: string;
   columnElementId?: string;
+  /** A non-scrolling ancestor where the floating tool palette lives.
+   *  Separated from the drawing column so the tools stay pinned in
+   *  the viewport as the user scrolls the note. */
+  toolsElementId?: string;
 }): React.JSX.Element | null {
-  const [scope, setScope] = useState<HTMLElement | null>(null);
+  const [toolsAnchor, setToolsAnchor] = useState<HTMLElement | null>(null);
   const [column, setColumn] = useState<HTMLElement | null>(null);
   const [columnHeight, setColumnHeight] = useState<number>(0);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
@@ -114,10 +117,10 @@ export function DrawingOverlay({
     let raf = 0;
     const tryResolve = (): void => {
       if (typeof document === 'undefined') return;
-      const s = document.getElementById(scopeElementId) as HTMLElement | null;
+      const t = document.getElementById(toolsElementId) as HTMLElement | null;
       const c = document.getElementById(columnElementId) as HTMLElement | null;
-      if (s && c) {
-        setScope(s);
+      if (t && c) {
+        setToolsAnchor(t);
         setColumn(c);
         return;
       }
@@ -127,7 +130,7 @@ export function DrawingOverlay({
     return () => {
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [scopeElementId, columnElementId]);
+  }, [toolsElementId, columnElementId]);
 
   // Track column height so the SVG grows as content is added. Width
   // is fixed at VIRTUAL_WIDTH — no observation needed.
@@ -270,7 +273,7 @@ export function DrawingOverlay({
     setDrawingTick((t) => t + 1);
   }, [strokesYMap, user.userId]);
 
-  if (!scope || !column) return null;
+  if (!toolsAnchor || !column) return null;
   const svgHeight = Math.max(columnHeight, 1);
 
   const drawing = drawingRef.current;
@@ -430,7 +433,7 @@ export function DrawingOverlay({
         />
       </div>
     </div>,
-    scope,
+    toolsAnchor,
   );
 
   return (

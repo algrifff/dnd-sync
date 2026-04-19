@@ -87,12 +87,18 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
           canCreate={session.role !== 'viewer'}
         />
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,1fr)_280px]">
+        <div
+          id="note-tools-anchor"
+          className="relative grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,1fr)_280px]"
+        >
           <main
-            className="relative overflow-y-auto overflow-x-hidden px-8 py-10"
+            className="relative flex justify-center overflow-y-auto overflow-x-hidden px-8 py-10"
             id="note-main"
           >
-          <div id="note-scroll-body" className="relative mx-auto w-[1600px]">
+          <div
+            id="note-scroll-body"
+            className="relative w-[1600px] shrink-0 self-start"
+          >
           <div className="relative mx-auto max-w-[720px]">
             <header className="mb-4 flex items-center justify-between gap-3">
               <p className="text-xs text-[#5A4F42]">
