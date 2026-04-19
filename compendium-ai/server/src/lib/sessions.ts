@@ -70,7 +70,7 @@ export function deriveSessionFromFrontmatter(opts: {
   }
   if (fm.kind !== 'session') {
     db.query(
-      'DELETE FROM sessions WHERE group_id = ? AND note_path = ?',
+      'DELETE FROM session_notes WHERE group_id = ? AND note_path = ?',
     ).run(opts.groupId, opts.notePath);
     return;
   }
@@ -88,7 +88,7 @@ export function deriveSessionFromFrontmatter(opts: {
     : [];
 
   db.query(
-    `INSERT INTO sessions
+    `INSERT INTO session_notes
        (group_id, note_path, campaign_slug, session_date, session_number,
         title, attendees_json, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -126,7 +126,7 @@ export function listSessions(
     .query<DbRow, string[]>(
       `SELECT note_path, campaign_slug, session_date, session_number,
               title, attendees_json, updated_at
-         FROM sessions
+         FROM session_notes
         WHERE ${wheres.join(' AND ')}
         ORDER BY COALESCE(session_date, '') DESC,
                  COALESCE(session_number, 0) DESC,

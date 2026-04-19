@@ -3,6 +3,73 @@
 
 import { getDb } from './db';
 
+/** Default D&D-shaped folder skeleton seeded on first boot. Each
+ *  entry is a folder path relative to the vault root; subfolders
+ *  must list their full path so the empty-folder marker table
+ *  carries them all. Users can delete any folder they don't want;
+ *  we only seed on startup when the markers table is empty for the
+ *  group, so a second boot doesn't revive deleted folders. */
+const DEFAULT_FOLDERS: readonly string[] = [
+  'Campaigns',
+  'Campaigns/Campaign 1',
+  'Campaigns/Campaign 1/Characters',
+  'Campaigns/Campaign 1/Characters/PCs',
+  'Campaigns/Campaign 1/Characters/NPCs',
+  'Campaigns/Campaign 1/Characters/Allies',
+  'Campaigns/Campaign 1/Characters/Villains',
+  'Campaigns/Campaign 1/Sessions',
+  'Campaigns/Campaign 1/Locations',
+  'World',
+  'World/Locations',
+  'World/Factions',
+  'World/Lore',
+  'Assets',
+] as const;
+
+/** Seed the default folder skeleton if the group has no notes and no
+ *  folder_markers yet. Idempotent on a populated vault — runs nothing
+ *  if anything already exists so a DM who removed Campaign 1 on a
+ *  previous run doesn't see it come back on restart. */
+export function ensureDefaultFolders(groupId: string): void {
+  const db = getDb();
+  const hasContent = db
+    .query<{ n: number }, [string, string]>(
+      `SELECT
+         (SELECT COUNT(*) FROM notes WHERE group_id = ?1)
+         +
+         (SELECT COUNT(*) FROM folder_markers WHERE group_id = ?2) AS n`,
+    )
+    .get(groupId, groupId);
+  if ((hasContent?.n ?? 0) > 0) return;
+
+  const now = Date.now();
+  const insertFolder = db.query(
+    `INSERT OR IGNORE INTO folder_markers (group_id, path, created_at)
+     VALUES (?, ?, ?)`,
+  );
+  const insertCampaign = db.query(
+    `INSERT OR IGNORE INTO campaigns (group_id, slug, name, folder_path, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  );
+
+  db.transaction(() => {
+    for (const path of DEFAULT_FOLDERS) insertFolder.run(groupId, path, now);
+    // Seed the matching campaigns row so the /characters + /sessions
+    // dashboards have something in their dropdown out of the box.
+    insertCampaign.run(
+      groupId,
+      'campaign-1',
+      'Campaign 1',
+      'Campaigns/Campaign 1',
+      now,
+    );
+  })();
+
+  console.log(
+    `[tree] seeded default folder skeleton for group "${groupId}"`,
+  );
+}
+
 export type TreeFile = {
   kind: 'file';
   name: string;

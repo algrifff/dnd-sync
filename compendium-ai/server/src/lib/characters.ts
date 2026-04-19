@@ -271,7 +271,7 @@ export function listNoteKinds(groupId: string): Map<string, NoteKind> {
   for (const r of chars) out.set(r.note_path, r.kind as CharacterKind);
   const sessions = db
     .query<{ note_path: string }, [string]>(
-      'SELECT note_path FROM sessions WHERE group_id = ?',
+      'SELECT note_path FROM session_notes WHERE group_id = ?',
     )
     .all(groupId);
   for (const r of sessions) out.set(r.note_path, 'session');

@@ -362,9 +362,11 @@ const MIGRATIONS: readonly Migration[] = [
   },
   {
     version: 14,
-    description: 'sessions: index of kind: session notes for /sessions',
+    description: 'session_notes: index of kind: session notes for /sessions',
     sql: `
-      CREATE TABLE sessions (
+      -- Named session_notes (not sessions) because the auth sessions
+      -- table already owns that name from migration v4.
+      CREATE TABLE session_notes (
         group_id       TEXT NOT NULL,
         note_path      TEXT NOT NULL,
         campaign_slug  TEXT,
@@ -377,8 +379,8 @@ const MIGRATIONS: readonly Migration[] = [
         FOREIGN KEY (group_id, note_path)
           REFERENCES notes(group_id, path) ON DELETE CASCADE
       ) WITHOUT ROWID;
-      CREATE INDEX sessions_campaign_date
-        ON sessions(group_id, campaign_slug, session_date DESC);
+      CREATE INDEX session_notes_campaign_date
+        ON session_notes(group_id, campaign_slug, session_date DESC);
     `,
   },
   {
