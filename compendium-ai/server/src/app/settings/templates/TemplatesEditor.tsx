@@ -40,6 +40,8 @@ const KIND_LABELS: Record<TemplateKind, string> = {
   ally: 'Ally',
   villain: 'Villain',
   session: 'Session',
+  item: 'Item',
+  location: 'Location',
 };
 
 type Flash = { kind: 'ok' | 'error'; message: string } | null;

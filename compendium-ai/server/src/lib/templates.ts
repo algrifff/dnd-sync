@@ -17,7 +17,14 @@
 
 import { getDb } from './db';
 
-export type TemplateKind = 'pc' | 'npc' | 'ally' | 'villain' | 'session';
+export type TemplateKind =
+  | 'pc'
+  | 'npc'
+  | 'ally'
+  | 'villain'
+  | 'session'
+  | 'item'
+  | 'location';
 
 export const TEMPLATE_KINDS: readonly TemplateKind[] = [
   'pc',
@@ -25,6 +32,8 @@ export const TEMPLATE_KINDS: readonly TemplateKind[] = [
   'ally',
   'villain',
   'session',
+  'item',
+  'location',
 ] as const;
 
 export type TemplateFieldType =
@@ -307,6 +316,81 @@ const DEFAULT_SESSION_SCHEMA: TemplateSchema = {
   ],
 };
 
+const DEFAULT_ITEM_SCHEMA: TemplateSchema = {
+  version: 1,
+  sections: [
+    {
+      id: 'basics',
+      label: 'Basics',
+      fields: [
+        { id: 'name', label: 'Name', type: 'text', required: true },
+        {
+          id: 'type',
+          label: 'Type',
+          type: 'enum',
+          options: ['weapon', 'armor', 'wondrous', 'potion', 'scroll', 'tool', 'treasure', 'other'],
+          default: 'wondrous',
+        },
+        {
+          id: 'rarity',
+          label: 'Rarity',
+          type: 'enum',
+          options: ['common', 'uncommon', 'rare', 'very rare', 'legendary', 'artifact'],
+          default: 'common',
+        },
+        { id: 'attunement', label: 'Requires attunement', type: 'boolean', default: false },
+      ],
+    },
+    {
+      id: 'stats',
+      label: 'Stats',
+      fields: [
+        { id: 'weight', label: 'Weight (lb)', type: 'number', min: 0 },
+        { id: 'value', label: 'Value (gp)', type: 'integer', min: 0 },
+        { id: 'charges', label: 'Charges', type: 'integer', min: 0 },
+      ],
+    },
+    {
+      id: 'description',
+      label: 'Description',
+      fields: [
+        { id: 'summary', label: 'Summary', type: 'longtext' },
+        { id: 'properties', label: 'Properties', type: 'list<text>' },
+      ],
+    },
+  ],
+};
+
+const DEFAULT_LOCATION_SCHEMA: TemplateSchema = {
+  version: 1,
+  sections: [
+    {
+      id: 'basics',
+      label: 'Basics',
+      fields: [
+        { id: 'name', label: 'Name', type: 'text', required: true },
+        {
+          id: 'type',
+          label: 'Type',
+          type: 'enum',
+          options: ['city', 'town', 'village', 'dungeon', 'wilderness', 'landmark', 'plane', 'other'],
+          default: 'town',
+        },
+        { id: 'region', label: 'Region', type: 'text' },
+        { id: 'population', label: 'Population', type: 'text', hint: 'e.g. 12k, mostly dwarves' },
+      ],
+    },
+    {
+      id: 'overview',
+      label: 'Overview',
+      fields: [
+        { id: 'summary', label: 'Summary', type: 'longtext' },
+        { id: 'notable', label: 'Notable features', type: 'list<text>' },
+      ],
+    },
+  ],
+};
+
 const DEFAULT_TEMPLATES: Array<{
   kind: TemplateKind;
   name: string;
@@ -317,6 +401,8 @@ const DEFAULT_TEMPLATES: Array<{
   { kind: 'ally', name: 'Ally', schema: DEFAULT_ALLY_SCHEMA },
   { kind: 'villain', name: 'Villain', schema: DEFAULT_VILLAIN_SCHEMA },
   { kind: 'session', name: 'Session log', schema: DEFAULT_SESSION_SCHEMA },
+  { kind: 'item', name: 'Item', schema: DEFAULT_ITEM_SCHEMA },
+  { kind: 'location', name: 'Location', schema: DEFAULT_LOCATION_SCHEMA },
 ];
 
 /** Populate note_templates on first boot. Idempotent — if a row for

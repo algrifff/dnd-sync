@@ -72,14 +72,15 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   } catch {
     fm = {};
   }
-  if (fm.kind !== 'character') {
-    return json({ error: 'not_a_character' }, 400);
+  // Accept any kind with a matching template (character/npc/ally/
+  // villain via inferRole; item + location use their kind directly).
+  let role: TemplateKind | null = null;
+  if (fm.kind === 'character') {
+    role = inferRole(fm, body.path);
+  } else if (fm.kind === 'item' || fm.kind === 'location') {
+    role = fm.kind;
   }
-
-  // Role → template lookup. Falls back to folder inference if
-  // `role:` is missing — mirrors what the derive pipeline does.
-  const role = inferRole(fm, body.path);
-  if (!role) return json({ error: 'unknown_role' }, 400);
+  if (!role) return json({ error: 'no_structured_sheet' }, 400);
   const template = getTemplate(role);
   const playerEditableIds = new Set<string>();
   if (template) {

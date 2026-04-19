@@ -19,15 +19,20 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   CalendarDays,
+  ChevronDown,
   ChevronRight,
+  FileText,
   FolderPlus,
   Heart,
+  Map as MapIcon,
+  Package,
   Plus,
   Skull,
   Sword,
   UserRound,
 } from 'lucide-react';
 import type { Tree, TreeDir } from '@/lib/tree';
+import { WORLD_ROOT_PATH } from '@/lib/tree-constants';
 import { broadcastTreeChange } from '@/lib/tree-sync';
 import { RowMenu } from './RowMenu';
 import { PeerStack } from './PeerStack';
@@ -35,6 +40,43 @@ import { PeerStack } from './PeerStack';
 export type FileTreeKind = 'pc' | 'npc' | 'ally' | 'villain' | 'session';
 type KindMap = Record<string, FileTreeKind>;
 const KindMapContext = createContext<KindMap>({});
+
+/** The synthetic World wrapper stands in for the vault root at the
+ *  UI layer; any API that expects a folder path needs to see the
+ *  real empty-string root instead of the sentinel. */
+function resolveRealPath(p: string): string {
+  return p === WORLD_ROOT_PATH ? '' : p;
+}
+
+/** Every kind the tree-level "+ New" dropdown can seed. Folder and
+ *  page are handled inline; the rest go through /api/notes/create
+ *  with a matching `kind` so frontmatter is pre-filled from the
+ *  template. */
+type CreateKind =
+  | 'page'
+  | 'folder'
+  | 'pc'
+  | 'npc'
+  | 'ally'
+  | 'villain'
+  | 'item'
+  | 'location';
+
+const NEW_ENTRY_OPTIONS: Array<{
+  kind: CreateKind;
+  label: string;
+  icon: typeof FileText;
+  placeholder: string;
+}> = [
+  { kind: 'page', label: 'Page', icon: FileText, placeholder: 'Untitled' },
+  { kind: 'folder', label: 'Folder', icon: FolderPlus, placeholder: 'New folder' },
+  { kind: 'pc', label: 'Player character', icon: Sword, placeholder: 'New PC' },
+  { kind: 'npc', label: 'NPC', icon: UserRound, placeholder: 'New NPC' },
+  { kind: 'ally', label: 'Ally', icon: Heart, placeholder: 'New ally' },
+  { kind: 'villain', label: 'Villain', icon: Skull, placeholder: 'New villain' },
+  { kind: 'item', label: 'Item', icon: Package, placeholder: 'New item' },
+  { kind: 'location', label: 'Location', icon: MapIcon, placeholder: 'New location' },
+];
 
 const STORAGE_KEY = 'compendium.tree.open';
 
@@ -57,9 +99,14 @@ export function FileTree({
 }): React.JSX.Element {
   const router = useRouter();
   const storageKey = `${STORAGE_KEY}.${groupId}`;
-  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  // Seed the open set with the synthetic World node so the tree
+  // starts expanded on first render. Restored sets from localStorage
+  // may or may not carry it — we always re-add below after hydrating.
+  const [open, setOpen] = useState<Set<string>>(
+    () => new Set([WORLD_ROOT_PATH]),
+  );
   const [creatingIn, setCreatingIn] = useState<
-    { parent: string; kind: 'page' | 'folder' } | null
+    { parent: string; kind: CreateKind } | null
   >(null);
   const [creating, setCreating] = useState<boolean>(false);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
@@ -115,7 +162,7 @@ export function FileTree({
   );
 
   const startCreate = useCallback(
-    (parent: string, kind: 'page' | 'folder') => {
+    (parent: string, kind: CreateKind) => {
       setError(null);
       setCreatingIn({ parent, kind });
       // Ensure the target folder is expanded so the inline row is
@@ -133,26 +180,43 @@ export function FileTree({
   }, []);
 
   const createNote = useCallback(
-    async (folder: string, name: string) => {
+    async (folder: string, name: string, kind: CreateKind = 'page') => {
       if (!name.trim()) return;
       setCreating(true);
       setError(null);
       try {
+        const payload: Record<string, unknown> = {
+          folder: resolveRealPath(folder),
+          name: name.trim(),
+        };
+        // API treats missing kind as "page"; omitting keeps the log
+        // clean for the common case.
+        if (kind !== 'page') payload.kind = kind;
         const res = await fetch('/api/notes/create', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'X-CSRF-Token': csrfToken,
           },
-          body: JSON.stringify({ folder, name: name.trim() }),
+          body: JSON.stringify(payload),
         });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok || !body.ok) {
-          setError(body.error === 'exists' ? 'A note with that name already exists.' : (body.error ?? `HTTP ${res.status}`));
+        const body = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          path?: string;
+          error?: string;
+        };
+        if (!res.ok || !body.ok || !body.path) {
+          setError(
+            body.error === 'exists'
+              ? 'A note with that name already exists.'
+              : body.error ?? `HTTP ${res.status}`,
+          );
           return;
         }
         setCreatingIn(null);
-        router.push('/notes/' + body.path.split('/').map(encodeURIComponent).join('/'));
+        router.push(
+          '/notes/' + body.path.split('/').map(encodeURIComponent).join('/'),
+        );
         router.refresh();
         broadcastTreeChange();
       } catch (err) {
@@ -176,7 +240,7 @@ export function FileTree({
             'Content-Type': 'application/json',
             'X-CSRF-Token': csrfToken,
           },
-          body: JSON.stringify({ parent, name: name.trim() }),
+          body: JSON.stringify({ parent: resolveRealPath(parent), name: name.trim() }),
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok || !body.ok) {
@@ -257,6 +321,9 @@ export function FileTree({
       src: { kind: 'file' | 'folder'; path: string },
       destFolder: string,
     ): Promise<void> => {
+      // The synthetic World node is a visual wrapper — dropping onto
+      // it is a drop onto the real vault root.
+      destFolder = resolveRealPath(destFolder);
       const basename = src.path.includes('/')
         ? src.path.slice(src.path.lastIndexOf('/') + 1)
         : src.path;
@@ -313,28 +380,16 @@ export function FileTree({
       className="min-h-0 flex-1 overflow-y-auto border-r border-[#D4C7AE] py-3 text-sm"
     >
       {canCreate && (
-        <div className="mb-1 flex items-center gap-1 px-2">
-          <button
-            type="button"
-            onClick={() => startCreate('', 'page')}
-            className="flex flex-1 items-center gap-1.5 rounded-[6px] px-2 py-1 text-left text-[#5A4F42] transition hover:bg-[#D4A85A]/15 hover:text-[#2A241E]"
-          >
-            <Plus size={14} aria-hidden />
-            <span>New page</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => startCreate('', 'folder')}
-            title="New folder"
-            aria-label="New folder"
-            className="rounded-[6px] p-1.5 text-[#5A4F42] transition hover:bg-[#D4A85A]/15 hover:text-[#2A241E]"
-          >
-            <FolderPlus size={14} aria-hidden />
-          </button>
+        <div className="mb-1 px-2">
+          <NewEntryDropdown
+            onPick={(kind) => startCreate(WORLD_ROOT_PATH, kind)}
+            variant="wide"
+          />
         </div>
       )}
 
-      {creatingIn?.parent === '' && (
+      {(creatingIn?.parent === '' ||
+        creatingIn?.parent === WORLD_ROOT_PATH) && (
         <div className="mb-1 px-2">
           <NewEntryRow
             kind={creatingIn.kind}
@@ -342,11 +397,10 @@ export function FileTree({
             disabled={creating}
             error={error}
             onCancel={cancelCreate}
-            onSubmit={(name) =>
-              creatingIn.kind === 'page'
-                ? createNote('', name)
-                : createFolder('', name)
-            }
+            onSubmit={(name) => {
+              if (creatingIn.kind === 'folder') createFolder('', name);
+              else createNote('', name, creatingIn.kind);
+            }}
           />
         </div>
       )}
@@ -425,11 +479,13 @@ export function FileTree({
                 disabled={creating}
                 error={error}
                 onCancel={cancelCreate}
-                onSubmit={(name) =>
-                  creatingIn.kind === 'page'
-                    ? createNote(item.path, name)
-                    : createFolder(item.path, name)
-                }
+                onSubmit={(name) => {
+                  if (creatingIn.kind === 'folder') {
+                    createFolder(item.path, name);
+                  } else {
+                    createNote(item.path, name, creatingIn.kind);
+                  }
+                }}
               />
             ) : null}
           </TreeRow>
@@ -542,7 +598,7 @@ function TreeRow({
   onDragOverDir: (dirPath: string) => void;
   onDropDir: (dirPath: string) => void;
   onToggle: (path: string) => void;
-  onStartCreate: (folder: string, kind: 'page' | 'folder') => void;
+  onStartCreate: (folder: string, kind: CreateKind) => void;
   onStartRename: () => void;
   onCancelRename: () => void;
   onSubmitRename: (name: string) => void;
@@ -590,6 +646,8 @@ function TreeRow({
       : {};
   const padding = 8 + item.depth * 14;
 
+  const isWorldRow = item.kind === 'dir' && item.path === WORLD_ROOT_PATH;
+
   if (item.kind === 'dir') {
     if (isRenaming) {
       return (
@@ -607,10 +665,14 @@ function TreeRow({
         </li>
       );
     }
+    // The World row is the synthetic vault anchor — not draggable,
+    // no rename/delete, but still a drop target + a place to
+    // create new top-level entries.
+    const effectiveRowDragProps = isWorldRow ? {} : rowDragProps;
     return (
       <li role="treeitem" aria-expanded={item.open} className="list-none">
         <div
-          {...rowDragProps}
+          {...effectiveRowDragProps}
           {...dirDropProps}
           className={
             'group flex items-center rounded-[6px] transition ' +
@@ -635,36 +697,19 @@ function TreeRow({
           </button>
           {canCreate && (
             <div className="mr-1 hidden items-center gap-0.5 group-hover:flex">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onStartCreate(item.path, 'page');
-                }}
-                className="rounded-[4px] p-1 text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]"
-                title={`New page in ${item.name}`}
-                aria-label={`New page in ${item.name}`}
-              >
-                <Plus size={14} aria-hidden />
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onStartCreate(item.path, 'folder');
-                }}
-                className="rounded-[4px] p-1 text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]"
-                title={`New folder in ${item.name}`}
-                aria-label={`New folder in ${item.name}`}
-              >
-                <FolderPlus size={14} aria-hidden />
-              </button>
-              <RowMenu
-                kind="folder"
-                path={item.path}
-                csrfToken={csrfToken}
-                onStartRename={onStartRename}
+              <NewEntryDropdown
+                onPick={(kind) => onStartCreate(item.path, kind)}
+                variant="compact"
+                folderName={item.name}
               />
+              {!isWorldRow && (
+                <RowMenu
+                  kind="folder"
+                  path={item.path}
+                  csrfToken={csrfToken}
+                  onStartRename={onStartRename}
+                />
+              )}
             </div>
           )}
         </div>
@@ -725,6 +770,87 @@ function TreeRow({
   );
 }
 
+function NewEntryDropdown({
+  onPick,
+  variant,
+  folderName,
+}: {
+  onPick: (kind: CreateKind) => void;
+  variant: 'wide' | 'compact';
+  folderName?: string;
+}): React.JSX.Element {
+  const [open, setOpen] = useState<boolean>(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent): void => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={folderName ? `New in ${folderName}` : 'New entry'}
+        aria-label={folderName ? `New in ${folderName}` : 'New entry'}
+        className={
+          variant === 'wide'
+            ? 'flex w-full items-center gap-1.5 rounded-[6px] px-2 py-1 text-left text-[#5A4F42] transition hover:bg-[#D4A85A]/15 hover:text-[#2A241E]'
+            : 'flex items-center gap-0.5 rounded-[4px] p-1 text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]'
+        }
+      >
+        <Plus size={14} aria-hidden />
+        {variant === 'wide' && <span className="flex-1">New</span>}
+        <ChevronDown size={12} aria-hidden className="opacity-70" />
+      </button>
+      {open && (
+        <ul
+          role="menu"
+          className={
+            'absolute z-30 w-44 overflow-hidden rounded-[8px] border border-[#D4C7AE] bg-[#FBF5E8] py-0.5 shadow-[0_8px_24px_rgba(42,36,30,0.12)] ' +
+            (variant === 'wide' ? 'left-0 top-full mt-1' : 'right-0 top-full mt-1')
+          }
+        >
+          {NEW_ENTRY_OPTIONS.map(({ kind, label, icon: Icon }) => (
+            <li key={kind}>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpen(false);
+                  onPick(kind);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[#2A241E] transition hover:bg-[#D4A85A]/15"
+              >
+                <Icon size={12} aria-hidden className="text-[#5A4F42]" />
+                <span>{label}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function NewEntryRow({
   kind,
   depth,
@@ -734,7 +860,7 @@ function NewEntryRow({
   onSubmit,
   onCancel,
 }: {
-  kind: 'page' | 'folder';
+  kind: CreateKind;
   depth: number;
   disabled: boolean;
   error: string | null;
@@ -742,10 +868,10 @@ function NewEntryRow({
   onSubmit: (name: string) => void;
   onCancel: () => void;
 }): React.JSX.Element {
+  const placeholder =
+    NEW_ENTRY_OPTIONS.find((o) => o.kind === kind)?.placeholder ?? 'Untitled';
   const inputRef = useRef<HTMLInputElement>(null);
-  const [value, setValue] = useState<string>(
-    initialValue ?? (kind === 'page' ? 'Untitled' : 'New folder'),
-  );
+  const [value, setValue] = useState<string>(initialValue ?? placeholder);
 
   useEffect(() => {
     // Focus + select the default "Untitled" on mount so the user can
@@ -777,7 +903,7 @@ function NewEntryRow({
             }
           }}
           disabled={disabled}
-          placeholder={kind === 'page' ? 'Untitled' : 'New folder'}
+          placeholder={placeholder}
           className="flex-1 border-0 bg-transparent px-0 text-sm text-[#2A241E] outline-none placeholder:text-[#5A4F42]/60 disabled:opacity-60"
         />
       </form>

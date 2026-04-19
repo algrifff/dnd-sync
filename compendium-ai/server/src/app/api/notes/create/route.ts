@@ -12,6 +12,11 @@ import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { getPmSchema } from '@/lib/pm-schema';
 import { logAudit } from '@/lib/audit';
+import {
+  deriveCharacterFromFrontmatter,
+  ensureCampaignForPath,
+} from '@/lib/characters';
+import { getTemplate, type TemplateKind } from '@/lib/templates';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,14 +27,17 @@ const Body = z.object({
     .min(1)
     .max(200)
     .regex(/^[^/\\\0]+$/, 'name must not contain slashes or null bytes'),
+  /** Optional entry kind — when set, we pre-seed frontmatter from
+   *  the matching template so the sheet UI has defaults to render.
+   *  "page" (or omitted) creates a plain note with no kind. */
+  kind: z
+    .enum(['page', 'pc', 'npc', 'ally', 'villain', 'item', 'location'])
+    .optional(),
 });
 
 export async function POST(req: NextRequest): Promise<Response> {
   const session = requireSession(req);
   if (session instanceof Response) return session;
-  if (session.role === 'viewer') {
-    return json({ error: 'forbidden', reason: 'viewers cannot create notes' }, 403);
-  }
 
   const csrf = verifyCsrf(req, session);
   if (csrf) return csrf;
@@ -40,6 +48,18 @@ export async function POST(req: NextRequest): Promise<Response> {
     parsed = Body.parse(body);
   } catch (err) {
     return json({ error: 'invalid_body', detail: err instanceof Error ? err.message : 'bad' }, 400);
+  }
+
+  const requestedKind = parsed.kind ?? 'page';
+
+  // Viewers can create plain pages (their own creator-owned notes)
+  // and their own PCs; everything else is an admin/editor action.
+  if (
+    session.role === 'viewer' &&
+    requestedKind !== 'page' &&
+    requestedKind !== 'pc'
+  ) {
+    return json({ error: 'forbidden', reason: 'players can create pages or PCs only' }, 403);
   }
 
   const folder = parsed.folder.replace(/^\/+|\/+$/g, '').replace(/\\/g, '/');
@@ -59,6 +79,10 @@ export async function POST(req: NextRequest): Promise<Response> {
   if ((existing?.n ?? 0) > 0) {
     return json({ error: 'exists', path }, 409);
   }
+
+  // Seed frontmatter from the template whenever a kind is specified.
+  // Plain pages still get '{}' so the JSON is valid downstream.
+  const frontmatter = buildFrontmatter(requestedKind, cleanName, session.username);
 
   // Title lives on a dedicated Y.Text so the TitleEditor can subscribe
   // to it independently. Body starts as an empty paragraph — the
@@ -89,7 +113,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     '',
     '',
     state,
-    '{}',
+    JSON.stringify(frontmatter),
     0,
     now,
     session.userId,
@@ -97,14 +121,60 @@ export async function POST(req: NextRequest): Promise<Response> {
     session.userId,
   );
 
+  // Run the derive pipeline so the characters / campaigns index
+  // rows catch up without waiting for the first collab save.
+  try {
+    ensureCampaignForPath(session.currentGroupId, path);
+    deriveCharacterFromFrontmatter({
+      groupId: session.currentGroupId,
+      notePath: path,
+      frontmatterJson: JSON.stringify(frontmatter),
+    });
+  } catch (err) {
+    console.error('[notes/create] derive failed:', err);
+  }
+
   logAudit({
     action: 'note.create',
     actorId: session.userId,
     groupId: session.currentGroupId,
     target: path,
+    details: { kind: requestedKind },
   });
 
   return json({ ok: true, path }, 201);
+}
+
+function buildFrontmatter(
+  kind: 'page' | TemplateKind | 'pc' | 'npc' | 'ally' | 'villain' | 'item' | 'location',
+  name: string,
+  username: string,
+): Record<string, unknown> {
+  if (kind === 'page') return {};
+
+  const template = getTemplate(kind as TemplateKind);
+  const sheet: Record<string, unknown> = { name };
+  if (template) {
+    for (const section of template.schema.sections) {
+      for (const field of section.fields) {
+        if (field.id === 'name') continue;
+        if (field.default !== undefined) sheet[field.id] = field.default;
+      }
+    }
+  }
+
+  if (kind === 'pc' || kind === 'npc' || kind === 'ally' || kind === 'villain') {
+    const fm: Record<string, unknown> = {
+      kind: 'character',
+      role: kind,
+      template: kind,
+      sheet,
+    };
+    if (kind === 'pc') fm.player = username;
+    return fm;
+  }
+  // item / location share the same 'kind:<literal>' + sheet shape.
+  return { kind, template: kind, sheet };
 }
 
 function json(body: unknown, status: number): Response {

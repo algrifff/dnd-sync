@@ -210,10 +210,9 @@ const CHARACTER_KINDS_BY_PATH: Array<[RegExp, TemplateKind]> = [
   [/(^|\/)npcs\//i, 'npc'],
 ];
 
-/** Decide whether this note is a character and, if so, prepare the
- *  CharacterSheet's props: the template, initial sheet values, edit
- *  scope, display name, and portrait URL. Returns null for
- *  non-character notes. */
+/** Decide whether this note carries a structured sheet (character,
+ *  item, location — anything with a matching template) and if so
+ *  prepare the CharacterSheet props. Returns null for plain notes. */
 function resolveCharacterView(args: {
   frontmatterJson: string;
   path: string;
@@ -228,10 +227,17 @@ function resolveCharacterView(args: {
   } catch {
     return null;
   }
-  if (fm.kind !== 'character') return null;
 
-  const role = deriveRole(fm, args.path);
-  const template = getTemplate(role);
+  let templateKind: TemplateKind;
+  if (fm.kind === 'character') {
+    templateKind = deriveRole(fm, args.path);
+  } else if (fm.kind === 'item' || fm.kind === 'location') {
+    templateKind = fm.kind;
+  } else {
+    return null;
+  }
+
+  const template = getTemplate(templateKind);
   if (!template) return null;
 
   const sheet =
@@ -239,9 +245,7 @@ function resolveCharacterView(args: {
       ? (fm.sheet as Record<string, unknown>)
       : {};
 
-  const displayName =
-    strOr(sheet.name) ??
-    filenameDisplayName(args.path);
+  const displayName = strOr(sheet.name) ?? filenameDisplayName(args.path);
 
   const portraitVault = strOr(fm.portrait);
   const portraitUrl = portraitVault
@@ -249,7 +253,7 @@ function resolveCharacterView(args: {
     : null;
 
   const isOwner =
-    role === 'pc' &&
+    templateKind === 'pc' &&
     typeof fm.player === 'string' &&
     fm.player.trim().toLowerCase() === args.sessionUsername.toLowerCase();
   const canWriteAll =
@@ -259,7 +263,7 @@ function resolveCharacterView(args: {
     isOwner;
 
   return {
-    roleLabel: ROLE_LABELS[role],
+    roleLabel: ROLE_LABELS[templateKind],
     template,
     sheet,
     displayName,
@@ -308,6 +312,8 @@ const ROLE_LABELS: Record<TemplateKind, string> = {
   ally: 'Ally',
   villain: 'Villain',
   session: 'Session',
+  item: 'Item',
+  location: 'Location',
 };
 
 export type CharacterView = {

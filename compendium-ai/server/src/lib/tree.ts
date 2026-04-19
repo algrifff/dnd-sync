@@ -1,7 +1,16 @@
 // Builds a folder tree for the current group's notes. Consumed by the
 // /api/tree endpoint + the server-side FileTree render on note pages.
+//
+// The tree is rendered under a synthetic "World" root so the sidebar
+// reads as one vault-wide anchor. The synthetic node has a reserved
+// path — WORLD_ROOT_PATH — that FileTree intercepts so creates and
+// drops against it still resolve to the real vault root (empty
+// string). The node is undeletable + unrenameable at the UI layer.
 
 import { getDb } from './db';
+import { WORLD_ROOT_NAME, WORLD_ROOT_PATH } from './tree-constants';
+
+export { WORLD_ROOT_NAME, WORLD_ROOT_PATH };
 
 /** Default D&D-shaped folder skeleton seeded on first boot. Each
  *  entry is a folder path relative to the vault root; subfolders
@@ -130,7 +139,20 @@ export function buildTree(
   }
 
   sortTree(root);
-  return { root, updatedAt: maxUpdated };
+
+  // Wrap everything under a synthetic "World" node. Its path sits
+  // on a reserved sentinel so FileTree can tell it apart from a
+  // real folder when resolving creates, drops, and row actions.
+  const world: TreeDir = {
+    kind: 'dir',
+    name: WORLD_ROOT_NAME,
+    path: WORLD_ROOT_PATH,
+    children: root.children,
+  };
+  return {
+    root: { kind: 'dir', name: '', path: '', children: [world] },
+    updatedAt: maxUpdated,
+  };
 }
 
 function ensureFolder(root: TreeDir, path: string): void {
