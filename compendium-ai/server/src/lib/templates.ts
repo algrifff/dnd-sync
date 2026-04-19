@@ -40,16 +40,16 @@ export type TemplateField = {
   id: string;
   label: string;
   type: TemplateFieldType;
-  required?: boolean;
-  default?: string | number | boolean | string[];
-  min?: number;
-  max?: number;
-  options?: string[];
-  hint?: string;
+  required?: boolean | undefined;
+  default?: string | number | boolean | string[] | undefined;
+  min?: number | undefined;
+  max?: number | undefined;
+  options?: string[] | undefined;
+  hint?: string | undefined;
   /** When true, any authenticated user may write this field on any
    *  character sheet (not just the owner). For shared combat state —
    *  HP-current, conditions, death saves. */
-  playerEditable?: boolean;
+  playerEditable?: boolean | undefined;
 };
 
 export type TemplateSection = {

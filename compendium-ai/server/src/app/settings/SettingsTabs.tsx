@@ -19,6 +19,7 @@ export function SettingsTabs({
   if (role === 'admin') {
     tabs.push({ href: '/settings/vault', label: 'Vault' });
     tabs.push({ href: '/settings/users', label: 'Users' });
+    tabs.push({ href: '/settings/templates', label: 'Templates' });
   }
 
   return (
