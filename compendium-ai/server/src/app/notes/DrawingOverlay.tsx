@@ -1,29 +1,32 @@
 'use client';
 
-// Multiplayer freehand drawing on the note body. Strokes live in a
-// Y.Array on the per-note HocuspocusProvider so every viewer sees the
-// same canvas.
+// Multiplayer freehand drawing on the note body.
 //
-// Coordinate basis is the ARTICLE element (the max-w-720 content
-// column), not the scroll host. Using the article means strokes land
-// in the same place regardless of anyone's window width — two peers
-// looking at the note on a 27" monitor and a 13" laptop both see the
-// stroke drawn over the same sentence. If we normalised to the scroll
-// host instead, a stroke at "x=50% of the wider window's padded
-// scope" lands way off the article on the smaller screen. The SVG
-// portals into the article itself so its pixel coordinate system
-// equals the article's scrollWidth / scrollHeight directly.
+// Canvas covers the entire scroll host (note-main), but stroke points
+// are stored as fractions of the ARTICLE element (max-w-720). That
+// way a stroke drawn over a word stays anchored to the same word on
+// every peer's screen regardless of viewport width; points outside
+// the article (in the padding) go negative or >1 and still render in
+// consistent pixel-distance from the article across screens. The SVG
+// portals into the scope and renders each stroke translated through
+// the article's offset within the scope — no clamping.
 //
 // Ownership: each stroke carries the author's userId. Eraser only
-// removes strokes you authored (by-id filter in the Y.Array mutator);
-// "Clear all" wipes only your own. You can see everyone else's
-// strokes but can't touch them.
+// removes strokes you authored (by-id filter in the mutator); "Clear
+// all" wipes only your own. You can see everyone else's strokes but
+// can't touch them.
+//
+// Live streaming: strokes live in a Y.Map<strokeId, StrokeData>
+// instead of a Y.Array so each ongoing stroke can be rewritten
+// atomically as points accumulate. Local draws flush at ~50 ms
+// intervals while the pointer's down so peers see the stroke build
+// up in real time; a final flush on pointerup guarantees the
+// complete stroke lands.
 //
 // Controls: three floating circular buttons top-left of the scroll
-// host (brush / eraser / clear) — mounted in a separate portal to
-// the scope so they don't scroll away with the article content.
-// When the brush is active a secondary colour swatch reveals; clicking
-// opens a native <input type="color">.
+// host (brush / eraser / clear), portalled into the scope so they
+// don't scroll away with the article. Colour swatch appears when
+// brush is active.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -35,8 +38,10 @@ type Stroke = {
   id: string;
   userId: string;
   color: string;
-  // Points are fractions of the scope element's scrollWidth /
-  // scrollHeight (both in [0, 1]). Converted to pixels at render.
+  // Points are fractions of the article's scrollWidth / scrollHeight.
+  // Unclamped — a point at (-0.1, 0.5) renders 10% of article-width
+  // to the left of the article, which is the same pixel offset from
+  // the article on every screen (article width is 720 px everywhere).
   points: Array<[number, number]>;
 };
 
@@ -52,7 +57,11 @@ const PRESET_COLORS = [
 ];
 
 const STROKE_WIDTH = 2;
-const ERASER_RADIUS = 0.012; // fraction of the scope; ~10px at 800px wide
+// Eraser radius as a fraction of the article width. ~8 px at 720 px.
+const ERASER_RADIUS = 0.012;
+// Throttle interval for mid-draw Y flushes. 50 ms = 20 Hz, enough for
+// peers to see smooth stroke growth without spamming the sync layer.
+const FLUSH_INTERVAL_MS = 50;
 
 export function DrawingOverlay({
   provider,
@@ -67,22 +76,29 @@ export function DrawingOverlay({
 }): React.JSX.Element | null {
   const [scope, setScope] = useState<HTMLElement | null>(null);
   const [article, setArticle] = useState<HTMLElement | null>(null);
-  const [dims, setDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  const [scopeDims, setScopeDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  const [articleDims, setArticleDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  const [articleOffset, setArticleOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [mode, setMode] = useState<Mode>('none');
   const [color, setColor] = useState<string>(PRESET_COLORS[0]!);
-  const [currentStroke, setCurrentStroke] = useState<Stroke | null>(null);
   const [swatchOpen, setSwatchOpen] = useState<boolean>(false);
   const colorInputRef = useRef<HTMLInputElement>(null);
 
-  const strokesYArray = useMemo(
-    () => provider.document.getArray<Stroke>('drawing-strokes'),
+  // Active-draw bookkeeping. Keeping the in-flight stroke in a ref
+  // (plus a mirrored state for local render) lets event handlers and
+  // the flush timer both append to the same object without React
+  // update latency.
+  const drawingRef = useRef<Stroke | null>(null);
+  const [drawingTick, setDrawingTick] = useState<number>(0);
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const strokesYMap = useMemo(
+    () => provider.document.getMap<Stroke>('drawing-strokes'),
     [provider],
   );
 
-  // Resolve the two elements we need: the scope (tool-button host,
-  // scroll host for events) and the article (coord basis + SVG
-  // portal target).
+  // Resolve the two host elements.
   useEffect(() => {
     let raf = 0;
     const tryResolve = (): void => {
@@ -102,16 +118,23 @@ export function DrawingOverlay({
     };
   }, [scopeElementId, articleElementId]);
 
-  // Track the article's dimensions — that's the coord basis. Also
-  // re-read on scroll (scope scrolls, not article, but article's
-  // bounding rect may shift) to keep event coords lined up.
+  // Track scope + article dims and the article's offset within the
+  // scope. Recomputed on resize + scroll so the render + event coords
+  // stay consistent as the document grows.
   useEffect(() => {
-    if (!article || !scope) return;
+    if (!scope || !article) return;
     const update = (): void => {
-      setDims({ w: article.scrollWidth, h: article.scrollHeight });
+      setScopeDims({ w: scope.scrollWidth, h: scope.scrollHeight });
+      setArticleDims({ w: article.scrollWidth, h: article.scrollHeight });
+      // article.offsetLeft/Top is relative to its offsetParent, which
+      // is the positioned scope (main has position:relative). That
+      // gives us the article's x/y within scope's scroll coordinate
+      // system — exactly what the SVG needs to translate points.
+      setArticleOffset({ x: article.offsetLeft, y: article.offsetTop });
     };
     update();
     const ro = new ResizeObserver(update);
+    ro.observe(scope);
     ro.observe(article);
     const onScroll = (): void => update();
     scope.addEventListener('scroll', onScroll);
@@ -121,23 +144,25 @@ export function DrawingOverlay({
       scope.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
     };
-  }, [article, scope]);
+  }, [scope, article]);
 
-  // Observe the shared Y.Array — any remote add / delete reflows our
-  // local snapshot. Local commits write through the same array so we
-  // pick up our own changes too.
+  // Observe the shared Y.Map — remote add / update / delete reflows
+  // the local strokes snapshot.
   useEffect(() => {
     const apply = (): void => {
-      setStrokes(strokesYArray.toArray().slice());
+      const next: Stroke[] = [];
+      strokesYMap.forEach((value) => {
+        if (value && typeof value === 'object') next.push(value);
+      });
+      setStrokes(next);
     };
     apply();
-    strokesYArray.observe(apply);
-    return () => strokesYArray.unobserve(apply);
-  }, [strokesYArray]);
+    strokesYMap.observe(apply);
+    return () => strokesYMap.unobserve(apply);
+  }, [strokesYMap]);
 
   // Convert viewport coords to article-local normalised fractions.
-  // Using article coords (not scope) means strokes land on the same
-  // sentence regardless of viewport width.
+  // NOT clamped — strokes can extend outside the article.
   const coordsFromEvent = useCallback(
     (e: PointerEvent | React.PointerEvent): [number, number] | null => {
       if (!article) return null;
@@ -145,14 +170,29 @@ export function DrawingOverlay({
       const w = article.scrollWidth;
       const h = article.scrollHeight;
       if (w <= 0 || h <= 0) return null;
-      const x = (e.clientX - rect.left) / w;
-      const y = (e.clientY - rect.top) / h;
-      return [clamp01(x), clamp01(y)];
+      return [(e.clientX - rect.left) / w, (e.clientY - rect.top) / h];
     },
     [article],
   );
 
-  // Start a brush stroke on pointerdown.
+  const scheduleFlush = useCallback(() => {
+    if (flushTimerRef.current) return;
+    flushTimerRef.current = setTimeout(() => {
+      flushTimerRef.current = null;
+      const stroke = drawingRef.current;
+      if (!stroke) return;
+      // Set the stroke every flush. Y.Map replaces by key atomically;
+      // peers' observers fire and their local strokes refresh with
+      // the longer point list.
+      strokesYMap.set(stroke.id, {
+        id: stroke.id,
+        userId: stroke.userId,
+        color: stroke.color,
+        points: stroke.points.slice(),
+      });
+    }, FLUSH_INTERVAL_MS);
+  }, [strokesYMap]);
+
   const onPointerDown = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
       if (mode === 'none') return;
@@ -166,12 +206,15 @@ export function DrawingOverlay({
           color,
           points: [pt],
         };
-        setCurrentStroke(stroke);
+        drawingRef.current = stroke;
+        setDrawingTick((t) => t + 1);
+        // First flush immediately so peers see the starting dot.
+        strokesYMap.set(stroke.id, { ...stroke });
       } else if (mode === 'eraser') {
-        eraseAt(strokesYArray, user.userId, pt[0], pt[1]);
+        eraseAt(strokesYMap, user.userId, pt[0], pt[1]);
       }
     },
-    [mode, coordsFromEvent, user.userId, color, strokesYArray],
+    [mode, coordsFromEvent, user.userId, color, strokesYMap],
   );
 
   const onPointerMove = useCallback(
@@ -179,45 +222,62 @@ export function DrawingOverlay({
       if (mode === 'none') return;
       const pt = coordsFromEvent(e);
       if (!pt) return;
-      if (mode === 'brush' && currentStroke) {
-        setCurrentStroke((prev) => {
-          if (!prev) return prev;
-          // Drop duplicate consecutive points to keep the array lean.
-          const last = prev.points[prev.points.length - 1];
-          if (last && last[0] === pt[0] && last[1] === pt[1]) return prev;
-          return { ...prev, points: [...prev.points, pt] };
-        });
+      const stroke = drawingRef.current;
+      if (mode === 'brush' && stroke) {
+        const last = stroke.points[stroke.points.length - 1];
+        if (last && last[0] === pt[0] && last[1] === pt[1]) return;
+        stroke.points.push(pt);
+        setDrawingTick((t) => t + 1);
+        scheduleFlush();
       } else if (mode === 'eraser' && (e.buttons & 1) === 1) {
-        eraseAt(strokesYArray, user.userId, pt[0], pt[1]);
+        eraseAt(strokesYMap, user.userId, pt[0], pt[1]);
       }
     },
-    [mode, coordsFromEvent, currentStroke, user.userId, strokesYArray],
+    [mode, coordsFromEvent, user.userId, strokesYMap, scheduleFlush],
   );
 
   const onPointerUp = useCallback(() => {
-    if (currentStroke && currentStroke.points.length > 1) {
-      strokesYArray.push([currentStroke]);
+    const stroke = drawingRef.current;
+    drawingRef.current = null;
+    setDrawingTick((t) => t + 1);
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
     }
-    setCurrentStroke(null);
-  }, [currentStroke, strokesYArray]);
+    if (stroke && stroke.points.length > 1) {
+      strokesYMap.set(stroke.id, { ...stroke });
+    } else if (stroke) {
+      // A single-point "stroke" is really a dud click. Remove it if
+      // it made it into the map via the initial flush.
+      strokesYMap.delete(stroke.id);
+    }
+  }, [strokesYMap]);
 
   const clearMine = useCallback(() => {
-    // Delete own strokes highest-index-first so remaining indices
-    // stay valid through the loop.
-    const mineIndices: number[] = [];
-    strokesYArray.forEach((s, i) => {
-      if (s.userId === user.userId) mineIndices.push(i);
+    const toDelete: string[] = [];
+    strokesYMap.forEach((s, id) => {
+      if (s.userId === user.userId) toDelete.push(id);
     });
-    mineIndices.reverse();
-    for (const i of mineIndices) strokesYArray.delete(i, 1);
-    setCurrentStroke(null);
-  }, [strokesYArray, user.userId]);
+    for (const id of toDelete) strokesYMap.delete(id);
+    drawingRef.current = null;
+    setDrawingTick((t) => t + 1);
+  }, [strokesYMap, user.userId]);
 
-  if (!scope || !article || dims.w === 0 || dims.h === 0) return null;
+  if (!scope || !article) return null;
+  if (scopeDims.w === 0 || articleDims.w === 0) return null;
 
-  const renderable = currentStroke
-    ? [...strokes.filter((s) => s.id !== currentStroke.id), currentStroke]
+  // Merge the live in-flight stroke on top of the synced list so the
+  // drawer sees pen-down feedback without waiting for the next flush.
+  const drawing = drawingRef.current;
+  void drawingTick; // ensure React rerenders when the ref mutates
+  const renderable = drawing
+    ? [...strokes.filter((s) => s.id !== drawing.id), drawing]
     : strokes;
+
+  const toPixel = (x: number, y: number): [number, number] => [
+    articleOffset.x + x * articleDims.w,
+    articleOffset.y + y * articleDims.h,
+  ];
 
   const svgPortal = createPortal(
     <svg
@@ -228,18 +288,23 @@ export function DrawingOverlay({
       onPointerCancel={onPointerUp}
       className="absolute inset-0"
       style={{
-        width: dims.w,
-        height: dims.h,
+        width: scopeDims.w,
+        height: scopeDims.h,
         pointerEvents: mode === 'none' ? 'none' : 'auto',
         cursor: mode === 'brush' ? 'crosshair' : mode === 'eraser' ? 'cell' : 'auto',
         zIndex: 4,
       }}
-      viewBox={`0 0 ${dims.w} ${dims.h}`}
+      viewBox={`0 0 ${scopeDims.w} ${scopeDims.h}`}
     >
       {renderable.map((s) => (
         <polyline
           key={s.id}
-          points={s.points.map(([x, y]) => `${x * dims.w},${y * dims.h}`).join(' ')}
+          points={s.points
+            .map(([x, y]) => {
+              const [px, py] = toPixel(x, y);
+              return `${px},${py}`;
+            })
+            .join(' ')}
           fill="none"
           stroke={s.color}
           strokeWidth={STROKE_WIDTH}
@@ -249,7 +314,7 @@ export function DrawingOverlay({
         />
       ))}
     </svg>,
-    article,
+    scope,
   );
 
   const toolsPortal = createPortal(
@@ -351,27 +416,22 @@ export function DrawingOverlay({
 }
 
 function eraseAt(
-  strokesYArray: Y.Array<Stroke>,
+  strokesYMap: Y.Map<Stroke>,
   userId: string,
   x: number,
   y: number,
 ): void {
-  // Collect own-stroke indices whose points pass within the eraser
-  // radius of (x, y). Delete in reverse index order so the remaining
-  // indices stay valid through the loop.
-  const toDelete: number[] = [];
-  strokesYArray.forEach((s, i) => {
+  const toDelete: string[] = [];
+  strokesYMap.forEach((s, id) => {
     if (s.userId !== userId) return;
     for (const [px, py] of s.points) {
       if (Math.hypot(px - x, py - y) <= ERASER_RADIUS) {
-        toDelete.push(i);
+        toDelete.push(id);
         break;
       }
     }
   });
-  if (toDelete.length === 0) return;
-  toDelete.reverse();
-  for (const i of toDelete) strokesYArray.delete(i, 1);
+  for (const id of toDelete) strokesYMap.delete(id);
 }
 
 function ToolButton({
@@ -409,10 +469,4 @@ function ToolButton({
       {icon}
     </button>
   );
-}
-
-function clamp01(n: number): number {
-  if (n < 0) return 0;
-  if (n > 1) return 1;
-  return n;
 }
