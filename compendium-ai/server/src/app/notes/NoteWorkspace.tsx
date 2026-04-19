@@ -122,6 +122,7 @@ export function NoteWorkspace({
             displayName={character.displayName}
             portraitUrl={character.portraitUrl}
             roleLabel={character.roleLabel}
+            provider={provider}
           />
         </div>
       )}

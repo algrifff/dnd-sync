@@ -10,8 +10,16 @@
 // playerEditable. The server applies the same rules and drops any
 // unauthorised field writes, so the client is allowed to be a bit
 // optimistic here.
+//
+// Real-time collab for HP / conditions and the like: every local
+// change broadcasts the new value on the note's existing hocuspocus
+// awareness channel so peers currently viewing the same note get
+// an instant visual update, before the PATCH round-trip. Server
+// persistence remains authoritative — a refresh shows exactly what
+// the server accepted.
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { HocuspocusProvider } from '@hocuspocus/provider';
 import type {
   NoteTemplate,
   TemplateField,
@@ -29,6 +37,7 @@ export function CharacterSheet({
   displayName,
   portraitUrl,
   roleLabel,
+  provider,
 }: {
   path: string;
   csrfToken: string;
@@ -38,6 +47,10 @@ export function CharacterSheet({
   displayName: string;
   portraitUrl: string | null;
   roleLabel: string;
+  /** Note's collab provider — used only for awareness broadcasts so
+   *  peers see sheet edits before PATCH. All persistence still
+   *  flows through /api/notes/sheet. */
+  provider: HocuspocusProvider;
 }): React.JSX.Element {
   const [sheet, setSheet] = useState<SheetValues>(initialSheet);
   const [pending, setPending] = useState<Record<string, true>>({});
@@ -67,6 +80,19 @@ export function CharacterSheet({
       setSheet((prev) => ({ ...prev, [fieldId]: value }));
       pendingPatchRef.current[fieldId] = value;
       setPending((p) => ({ ...p, [fieldId]: true }));
+      // Broadcast over awareness so peers' sheets update instantly.
+      // Writes are keyed by a monotonic counter so hocuspocus's
+      // awareness diff sees every consecutive change (same payload
+      // shape twice in a row gets deduped otherwise).
+      const aw = provider.awareness;
+      if (aw) {
+        const seq = Date.now();
+        aw.setLocalStateField('sheetEdit', {
+          path,
+          seq,
+          fields: { [fieldId]: value },
+        });
+      }
       if (flushTimer.current) clearTimeout(flushTimer.current);
       flushTimer.current = setTimeout(() => {
         void flush();
@@ -74,8 +100,43 @@ export function CharacterSheet({
     },
     // flush is stable — deliberately omitted to avoid re-registering
     // the timer on every render.
-    [],
+    [path, provider],
   );
+
+  // Listen for peer sheet edits on the same note and merge into
+  // local state. We ignore our own client's awareness entry so the
+  // local commit path doesn't bounce back through the observer.
+  useEffect(() => {
+    const aw = provider.awareness;
+    if (!aw) return;
+    const seen = new Map<number, number>(); // clientId → last seen seq
+    const onChange = (): void => {
+      for (const [clientId, state] of aw.getStates().entries()) {
+        if (clientId === aw.clientID) continue;
+        const s = state as
+          | {
+              sheetEdit?: {
+                path?: string;
+                seq?: number;
+                fields?: Record<string, unknown>;
+              };
+            }
+          | undefined;
+        const edit = s?.sheetEdit;
+        if (!edit || edit.path !== path || typeof edit.seq !== 'number') {
+          continue;
+        }
+        const last = seen.get(clientId);
+        if (last === edit.seq) continue;
+        seen.set(clientId, edit.seq);
+        if (edit.fields && typeof edit.fields === 'object') {
+          setSheet((prev) => ({ ...prev, ...edit.fields! }));
+        }
+      }
+    };
+    aw.on('change', onChange);
+    return () => aw.off('change', onChange);
+  }, [provider, path]);
 
   const flush = useCallback(async (): Promise<void> => {
     if (savingRef.current) {
