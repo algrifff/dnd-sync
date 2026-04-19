@@ -37,8 +37,17 @@ import Graph from 'graphology';
 import Sigma from 'sigma';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
 import { colorForTags, radiusForDegree } from './graphStyle';
-import { PointerOverlay } from '../notes/PointerOverlay';
 import { NotePicker } from '../notes/NotePicker';
+
+type RemoteGraphCursor = {
+  clientId: number;
+  name: string;
+  color: string;
+  // Graph-space coordinates (sigma's internal system). Converted to
+  // viewport pixels each frame via renderer.graphToViewport.
+  gx: number;
+  gy: number;
+};
 
 type GraphPayload = {
   nodes: Array<{ id: string; title: string; tags: string[]; degree: number }>;
@@ -92,6 +101,7 @@ export function GraphCanvas({
   const pinsRef = useRef<Record<string, { x: number; y: number }>>({});
   const anchorsRef = useRef<Record<string, { x: number; y: number }>>({});
   const draggedRef = useRef<{ node: string; x: number; y: number } | null>(null);
+  const cleanupListenersRef = useRef<(() => void) | null>(null);
 
   const [scope, setScope] = useState<Scope>({ kind: 'all' });
   const [status, setStatus] = useState<'idle' | 'loading' | 'error' | 'ready'>(
@@ -107,6 +117,11 @@ export function GraphCanvas({
   const [groups, setGroups] = useState<Group[]>([]);
   const [palette, setPalette] = useState<boolean>(false);
   const [nodesPayload, setNodesPayload] = useState<GraphPayload['nodes']>([]);
+  const [remoteCursors, setRemoteCursors] = useState<RemoteGraphCursor[]>([]);
+  // Bumped on every sigma render so the overlay rerenders the peer
+  // cursors at their latest screen positions (camera pan/zoom,
+  // dragged nodes, physics — all update the graph→viewport mapping).
+  const [renderTick, setRenderTick] = useState<number>(0);
 
   // ── shared graph state (synced across connected peers) ─────────────
   const ydoc = useMemo(() => new Y.Doc(), []);
@@ -373,6 +388,86 @@ export function GraphCanvas({
         graphRef.current = g;
         setCounts({ nodes: g.order, edges: g.size });
 
+        // Seed our awareness user info — the cursor overlay renders
+        // each peer's name label from here. No CollaborationCaret on
+        // the graph, so we set it manually.
+        provider.awareness?.setLocalStateField('user', {
+          userId: me.userId,
+          name: me.displayName || 'Anonymous',
+          color: me.accentColor,
+        });
+
+        // Broadcast the local cursor in GRAPH coordinates (not
+        // screen px). That way peers can render the cursor at the
+        // same spot in graph-space as the node being dragged — so a
+        // drag's cursor visibly follows the moving node on every
+        // connected user's screen, regardless of viewport size.
+        const onContainerMove = (e: MouseEvent): void => {
+          const rect = container.getBoundingClientRect();
+          const viewport = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+          const gp = renderer.viewportToGraph(viewport);
+          provider.awareness?.setLocalStateField('graphPointer', {
+            x: gp.x,
+            y: gp.y,
+          });
+        };
+        const onContainerLeave = (): void => {
+          provider.awareness?.setLocalStateField('graphPointer', null);
+        };
+        container.addEventListener('mousemove', onContainerMove);
+        container.addEventListener('mouseleave', onContainerLeave);
+
+        // Observe remote awareness for graphPointer + user.
+        const aw = provider.awareness;
+        const onAwarenessChange = (): void => {
+          if (!aw) return;
+          const list: RemoteGraphCursor[] = [];
+          for (const [clientId, state] of aw.getStates().entries()) {
+            if (clientId === aw.clientID) continue;
+            const s = state as
+              | {
+                  user?: { userId?: string; name?: string; color?: string };
+                  graphPointer?: { x: number; y: number } | null;
+                }
+              | undefined;
+            if (!s?.user || !s.graphPointer) continue;
+            const gp = s.graphPointer;
+            if (typeof gp.x !== 'number' || typeof gp.y !== 'number') continue;
+            list.push({
+              clientId,
+              name: s.user.name ?? 'Anonymous',
+              color: s.user.color ?? '#5A4F42',
+              gx: gp.x,
+              gy: gp.y,
+            });
+          }
+          setRemoteCursors(list);
+        };
+        aw?.on('change', onAwarenessChange);
+        onAwarenessChange();
+
+        // Re-render the cursor overlay on every sigma frame — camera
+        // motion, drag, and physics all move the graph→viewport
+        // projection, so peer cursor pixels need refreshing each
+        // frame. This is the only React state update driven by the
+        // renderer; the physics loop itself runs in rAF without
+        // touching React.
+        const onAfterRender = (): void => {
+          setRenderTick((t) => (t + 1) & 0x3fffffff);
+        };
+        renderer.on('afterRender', onAfterRender);
+
+        // Bundle these listeners into the outer cleanup so they
+        // vanish with the renderer.
+        const cleanupListeners = (): void => {
+          container.removeEventListener('mousemove', onContainerMove);
+          container.removeEventListener('mouseleave', onContainerLeave);
+          aw?.off('change', onAwarenessChange);
+          aw?.setLocalStateField('graphPointer', null);
+          renderer.off('afterRender', onAfterRender);
+        };
+        cleanupListenersRef.current = cleanupListeners;
+
         // ── Continuous physics loop ──────────────────────────────────
         const liveSettings = forceAtlas2.inferSettings(g);
         const tickOpts = {
@@ -582,13 +677,27 @@ export function GraphCanvas({
 
     return () => {
       cancelled = true;
+      cleanupListenersRef.current?.();
+      cleanupListenersRef.current = null;
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
       sigmaRef.current?.kill();
       sigmaRef.current = null;
       graphRef.current = null;
     };
-  }, [scopeParam, groupId, router, colorFor, labelMode, provider, pinsMap, anchorsMap]);
+  }, [
+    scopeParam,
+    groupId,
+    router,
+    colorFor,
+    labelMode,
+    provider,
+    pinsMap,
+    anchorsMap,
+    me.userId,
+    me.displayName,
+    me.accentColor,
+  ]);
 
   // Live re-colour when tag overrides change without rebuilding the
   // graph (keeps physics running; feels instant).
@@ -663,19 +772,12 @@ export function GraphCanvas({
         className="absolute inset-0 bg-[#F4EDE0]"
       />
 
-      {/* Live mouse cursors for other viewers of the graph. Uses the
-          `.graph-state` provider's awareness so these pointers are
-          only visible to people looking at the graph, not to note
-          viewers. */}
-      <PointerOverlay
-        provider={provider}
-        user={{
-          userId: me.userId,
-          name: me.displayName || 'Anonymous',
-          color: me.accentColor,
-        }}
-        scopeElementId={GRAPH_SCOPE_ID}
-      />
+      {/* Peer cursors in graph space. Each peer broadcasts their
+          mouse in sigma's internal graph coordinates; we convert
+          back to viewport pixels every frame, so a peer's cursor
+          tracks exactly alongside the node they're dragging
+          regardless of how either viewer is zoomed or panned. */}
+      <GraphCursors sigmaRef={sigmaRef} remotes={remoteCursors} tick={renderTick} />
 
       <div className="pointer-events-none absolute left-4 top-4 w-64 space-y-2 text-sm">
         <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
@@ -1031,6 +1133,56 @@ function labelModeLabel(mode: LabelMode): string {
   if (mode === 'none') return 'None';
   if (mode === 'all') return 'All';
   return 'Some';
+}
+
+function GraphCursors({
+  sigmaRef,
+  remotes,
+  tick,
+}: {
+  sigmaRef: React.RefObject<Sigma | null>;
+  remotes: RemoteGraphCursor[];
+  tick: number;
+}): React.JSX.Element {
+  void tick; // ensures the div re-renders every sigma frame
+  const renderer = sigmaRef.current;
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0"
+      style={{ zIndex: 6 }}
+    >
+      {renderer
+        ? remotes.map((r) => {
+            const vp = renderer.graphToViewport({ x: r.gx, y: r.gy });
+            return (
+              <div
+                key={r.clientId}
+                className="absolute flex items-start gap-1"
+                style={{ left: vp.x, top: vp.y, color: r.color }}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill={r.color}
+                  stroke="#FBF5E8"
+                  strokeWidth="1"
+                >
+                  <path d="M1 1 L1 11 L4 8 L6.5 13 L8.5 12.2 L6 7.3 L11 7.3 Z" />
+                </svg>
+                <span
+                  className="mt-2 whitespace-nowrap rounded-[4px] px-1 text-[10px] font-medium text-[#2A241E]"
+                  style={{ backgroundColor: r.color }}
+                >
+                  {r.name}
+                </span>
+              </div>
+            );
+          })
+        : null}
+    </div>
+  );
 }
 
 // Deterministic per-node seed. Maps a node id to a point in roughly

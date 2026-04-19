@@ -88,7 +88,10 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
         />
 
         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,1fr)_280px]">
-          <main className="relative overflow-auto px-8 py-10" id="note-main">
+          <main
+            className="relative overflow-y-auto overflow-x-hidden px-8 py-10"
+            id="note-main"
+          >
           <div id="note-scroll-body" className="relative mx-auto w-[1600px]">
           <div className="relative mx-auto max-w-[720px]">
             <header className="mb-4 flex items-center justify-between gap-3">
