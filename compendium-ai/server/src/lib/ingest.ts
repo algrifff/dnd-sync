@@ -170,10 +170,18 @@ export async function ingestZip(opts: IngestOptions): Promise<IngestSummary> {
 
   // Second: register assets in the filenameToAsset map — we don't yet
   // know if assets will reuse existing DB rows, so emit new UUIDs here
-  // and let the transaction resolve dedup below.
+  // and let the transaction resolve dedup below. Register under BOTH
+  // the vault-relative full path AND the basename (each also under
+  // its lowercase form) so md references using either form resolve
+  // unambiguously — full-path matching disambiguates vaults that
+  // carry multiple assets with the same basename under different
+  // folders (e.g. `Campaign 3/Assets/token.png` and `Campaign 4/Assets/token.png`).
   for (const s of staged) {
-    filenameToAsset.set(s.originalName, { id: s.id, mime: s.mime });
-    filenameToAsset.set(s.originalName.toLowerCase(), { id: s.id, mime: s.mime });
+    const entry = { id: s.id, mime: s.mime };
+    filenameToAsset.set(s.originalName, entry);
+    filenameToAsset.set(s.originalName.toLowerCase(), entry);
+    filenameToAsset.set(s.originalPath, entry);
+    filenameToAsset.set(s.originalPath.toLowerCase(), entry);
   }
 
   const ctx: IngestContext = { allPaths, aliasMap, assetsByName: filenameToAsset };

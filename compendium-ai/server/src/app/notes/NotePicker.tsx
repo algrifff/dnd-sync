@@ -123,11 +123,23 @@ export function NotePicker({
     }
   };
 
+  // Clamp the preferred anchor to the viewport so the popover is
+  // always fully on screen regardless of where the caller put it.
+  // Using a conservative max-size estimate (w-80 → 320px, ~400px tall
+  // at full list) so the calc is synchronous and the popover doesn't
+  // flash in the wrong spot on first render.
+  const POPOVER_W = 320;
+  const POPOVER_H_EST = 360;
+  const vw = typeof window !== 'undefined' ? window.innerWidth : POPOVER_W;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : POPOVER_H_EST;
+  const left = Math.max(8, Math.min(anchor.left, vw - POPOVER_W - 8));
+  const top = Math.max(8, Math.min(anchor.top, vh - POPOVER_H_EST - 8));
+
   return (
     <div
       ref={popoverRef}
       className="fixed z-40 w-80 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_12px_32px_rgba(42,36,30,0.18)]"
-      style={{ left: anchor.left, top: anchor.top }}
+      style={{ left, top }}
     >
       <div className="border-b border-[#D4C7AE] p-2">
         <input

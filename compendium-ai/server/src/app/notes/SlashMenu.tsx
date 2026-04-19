@@ -49,6 +49,73 @@ type Cmd = {
 function buildCommands(opts: CmdOpts): Cmd[] {
   return [
   {
+    id: 'link',
+    label: 'Link to note',
+    hint: 'Pick a note to wikilink',
+    icon: <LinkIcon size={16} aria-hidden />,
+    keywords: ['link', 'wikilink', 'connect', 'reference', 'mention'],
+    run: (e, r) => {
+      // Capture the caret position in viewport coords BEFORE
+      // deleting the trigger range — once the range disappears the
+      // coords would shift by a few pixels as surrounding text
+      // reflows.
+      let anchor = { left: 0, top: 0 };
+      try {
+        const coords = e.view.coordsAtPos(r.from);
+        anchor = { left: coords.left, top: coords.bottom + 4 };
+      } catch {
+        /* ignore — picker falls back to viewport origin */
+      }
+      e.chain().focus().deleteRange(r).run();
+      void (async () => {
+        const path = await opts.pickNote(anchor);
+        if (!path) return;
+        const target = path.replace(/\.(md|canvas)$/i, '');
+        e.chain()
+          .focus()
+          .insertContent({
+            type: 'wikilink',
+            attrs: { target, label: '', orphan: false },
+          })
+          .insertContent(' ')
+          .run();
+      })();
+    },
+  },
+  {
+    id: 'image',
+    label: 'Image',
+    hint: 'Upload and embed an image',
+    icon: <ImageIcon size={16} aria-hidden />,
+    keywords: ['image', 'img', 'photo', 'picture', 'upload', 'file'],
+    run: (e, r) => {
+      // Delete the `/query` text immediately so the trigger doesn't
+      // linger on screen while the file picker / upload run. If the
+      // user cancels the picker we're left with a clean caret.
+      e.chain().focus().deleteRange(r).run();
+      void (async () => {
+        const file = await opts.pickImage();
+        if (!file) return;
+        try {
+          const asset = await uploadImageAsset(file, opts.csrfToken);
+          e.chain()
+            .focus()
+            .insertContent({
+              type: 'embed',
+              attrs: {
+                assetId: asset.id,
+                mime: asset.mime,
+                originalName: asset.originalName,
+              },
+            })
+            .run();
+        } catch (err) {
+          alert(err instanceof Error ? err.message : 'image upload failed');
+        }
+      })();
+    },
+  },
+  {
     id: 'h1',
     label: 'Heading 1',
     hint: 'Large section title',
@@ -165,73 +232,6 @@ function buildCommands(opts: CmdOpts): Cmd[] {
         .deleteRange(r)
         .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
         .run(),
-  },
-  {
-    id: 'image',
-    label: 'Image',
-    hint: 'Upload and embed an image',
-    icon: <ImageIcon size={16} aria-hidden />,
-    keywords: ['image', 'img', 'photo', 'picture', 'upload', 'file'],
-    run: (e, r) => {
-      // Delete the `/query` text immediately so the trigger doesn't
-      // linger on screen while the file picker / upload run. If the
-      // user cancels the picker we're left with a clean caret.
-      e.chain().focus().deleteRange(r).run();
-      void (async () => {
-        const file = await opts.pickImage();
-        if (!file) return;
-        try {
-          const asset = await uploadImageAsset(file, opts.csrfToken);
-          e.chain()
-            .focus()
-            .insertContent({
-              type: 'embed',
-              attrs: {
-                assetId: asset.id,
-                mime: asset.mime,
-                originalName: asset.originalName,
-              },
-            })
-            .run();
-        } catch (err) {
-          alert(err instanceof Error ? err.message : 'image upload failed');
-        }
-      })();
-    },
-  },
-  {
-    id: 'link',
-    label: 'Link to note',
-    hint: 'Pick a note to wikilink',
-    icon: <LinkIcon size={16} aria-hidden />,
-    keywords: ['link', 'wikilink', 'connect', 'reference', 'mention'],
-    run: (e, r) => {
-      // Capture the caret position in viewport coords BEFORE
-      // deleting the trigger range — once the range disappears the
-      // coords would shift by a few pixels as surrounding text
-      // reflows.
-      let anchor = { left: 0, top: 0 };
-      try {
-        const coords = e.view.coordsAtPos(r.from);
-        anchor = { left: coords.left, top: coords.bottom + 4 };
-      } catch {
-        /* ignore — picker falls back to viewport origin */
-      }
-      e.chain().focus().deleteRange(r).run();
-      void (async () => {
-        const path = await opts.pickNote(anchor);
-        if (!path) return;
-        const target = path.replace(/\.(md|canvas)$/i, '');
-        e.chain()
-          .focus()
-          .insertContent({
-            type: 'wikilink',
-            attrs: { target, label: '', orphan: false },
-          })
-          .insertContent(' ')
-          .run();
-      })();
-    },
   },
   ];
 }

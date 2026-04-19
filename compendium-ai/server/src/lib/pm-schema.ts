@@ -43,7 +43,13 @@ export const WikiLink = Node.create({
   renderHTML({ node }) {
     const { target, label, anchor, orphan } = node.attrs as Record<string, unknown>;
     const targetStr = String(target ?? '');
+    const labelStr = String(label ?? '');
     const href = orphan ? '#orphan' : targetStr ? '/notes/' + encodePath(targetStr) : '#';
+    // Prefer an explicit label. Otherwise show the target's basename
+    // without the .md/.canvas extension so e.g. "Campaign 3/NPCs/
+    // Arin.md" reads as "Arin" in the prose — the full path is still
+    // available in data-target + the href for navigation.
+    const display = labelStr || niceWikilinkLabel(targetStr);
     return [
       'a',
       {
@@ -52,10 +58,16 @@ export const WikiLink = Node.create({
         ...(anchor ? { 'data-anchor': String(anchor) } : {}),
         href,
       },
-      String(label || target || ''),
+      display,
     ];
   },
 });
+
+function niceWikilinkLabel(target: string): string {
+  if (!target) return '';
+  const last = target.split('/').pop() ?? target;
+  return last.replace(/\.(md|canvas)$/i, '');
+}
 
 function encodePath(p: string): string {
   return p.split('/').map(encodeURIComponent).join('/');

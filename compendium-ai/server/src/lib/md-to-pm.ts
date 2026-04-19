@@ -620,8 +620,26 @@ function resolveAsset(
   target: string,
   ctx: IngestContext,
 ): { id: string; mime: string } | null {
-  const name = target.split('/').pop() ?? target;
-  return ctx.assetsByName.get(name) ?? ctx.assetsByName.get(name.toLowerCase()) ?? null;
+  // Try the full path first, then the basename — the ingest registers
+  // both under each of their exact + lowercase forms so a wikilink
+  // that includes folder segments still resolves to the specific
+  // asset (not just any asset sharing that basename).
+  let fullDecoded = target;
+  try {
+    fullDecoded = decodeURIComponent(target);
+  } catch {
+    /* leave encoded */
+  }
+  const full =
+    ctx.assetsByName.get(target) ??
+    ctx.assetsByName.get(target.toLowerCase()) ??
+    ctx.assetsByName.get(fullDecoded) ??
+    ctx.assetsByName.get(fullDecoded.toLowerCase());
+  if (full) return full;
+  const basename = fullDecoded.split('/').pop() ?? fullDecoded;
+  return (
+    ctx.assetsByName.get(basename) ?? ctx.assetsByName.get(basename.toLowerCase()) ?? null
+  );
 }
 
 /** Rewrite a markdown image URL. Vault-relative paths that resolve to
@@ -633,13 +651,10 @@ function resolveAsset(
 function resolveImageUrl(url: string, ctx: IngestContext, coll?: Collected): string {
   if (!url) return '';
   if (/^(https?:|data:|blob:|\/)/i.test(url)) return url;
-  let basename = url.split('/').pop() ?? url;
-  try {
-    basename = decodeURIComponent(basename);
-  } catch {
-    /* leave encoded */
-  }
-  const asset = resolveAsset(basename, ctx);
+  // resolveAsset now tries the full path first, then the basename,
+  // so a reference like `Campaign 3/Assets/Tokens/token.png` matches
+  // the specific asset even when multiple files share the basename.
+  const asset = resolveAsset(url, ctx);
   if (asset) return `/api/assets/${encodeURIComponent(asset.id)}`;
   if (coll) coll.unresolvedImages.add(url);
   return url;
