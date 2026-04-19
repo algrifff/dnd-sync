@@ -107,6 +107,16 @@ export async function POST(req: NextRequest): Promise<Response> {
         groupId,
         m.from,
       );
+      // Character / session index tables use note_path as PK too.
+      db.query(
+        'UPDATE characters SET note_path = ? WHERE group_id = ? AND note_path = ?',
+      ).run(m.to, groupId, m.from);
+      db.query(
+        'UPDATE character_campaigns SET note_path = ? WHERE group_id = ? AND note_path = ?',
+      ).run(m.to, groupId, m.from);
+      db.query(
+        'UPDATE session_notes SET note_path = ? WHERE group_id = ? AND note_path = ?',
+      ).run(m.to, groupId, m.from);
       db.query('DELETE FROM notes_fts WHERE path = ?').run(m.from);
       db.query('INSERT INTO notes_fts(path, title, content) VALUES (?, ?, ?)').run(
         m.to,
@@ -133,6 +143,45 @@ export async function POST(req: NextRequest): Promise<Response> {
         'UPDATE folder_markers SET path = ? WHERE group_id = ? AND path = ?',
       ).run(next, groupId, mk.path);
     }
+
+    // Campaign folders: when a Campaigns/<slug> folder is the thing
+    // being moved / renamed, the campaigns row needs to follow so
+    // the /sessions + /characters dropdowns keep pointing at the
+    // right place.
+    const campaigns = db
+      .query<
+        { slug: string; folder_path: string; name: string },
+        [string, string, string]
+      >(
+        `SELECT slug, folder_path, name FROM campaigns
+          WHERE group_id = ? AND (folder_path = ? OR folder_path LIKE ? || '/%')`,
+      )
+      .all(groupId, from, from);
+    for (const c of campaigns) {
+      const nextPath = to + c.folder_path.slice(from.length);
+      const nextSlug = slugify(nextPath.split('/').pop() ?? c.slug);
+      // Drop any row that would collide at the destination.
+      db.query(
+        'DELETE FROM campaigns WHERE group_id = ? AND slug = ? AND slug != ?',
+      ).run(groupId, nextSlug, c.slug);
+      db.query(
+        `UPDATE campaigns
+            SET folder_path = ?,
+                slug = ?
+          WHERE group_id = ? AND slug = ?`,
+      ).run(nextPath, nextSlug, groupId, c.slug);
+      // Re-home the character_campaigns rows that referenced the
+      // old slug. (name stays as the user chose; display-name isn't
+      // derived from folder.)
+      if (nextSlug !== c.slug) {
+        db.query(
+          'UPDATE character_campaigns SET campaign_slug = ? WHERE group_id = ? AND campaign_slug = ?',
+        ).run(nextSlug, groupId, c.slug);
+        db.query(
+          'UPDATE session_notes SET campaign_slug = ? WHERE group_id = ? AND campaign_slug = ?',
+        ).run(nextSlug, groupId, c.slug);
+      }
+    }
   })();
 
   // Kick live editors for every moved note so they reconnect at the
@@ -149,6 +198,14 @@ export async function POST(req: NextRequest): Promise<Response> {
   });
 
   return json({ ok: true, path: to, moved: moved.length });
+}
+
+function slugify(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 function normalizePath(p: string): string {

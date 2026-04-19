@@ -32,7 +32,6 @@ import {
   UserRound,
 } from 'lucide-react';
 import type { Tree, TreeDir } from '@/lib/tree';
-import { WORLD_ROOT_PATH } from '@/lib/tree-constants';
 import { broadcastTreeChange } from '@/lib/tree-sync';
 import { RowMenu } from './RowMenu';
 import { PeerStack } from './PeerStack';
@@ -40,13 +39,6 @@ import { PeerStack } from './PeerStack';
 export type FileTreeKind = 'pc' | 'npc' | 'ally' | 'villain' | 'session';
 type KindMap = Record<string, FileTreeKind>;
 const KindMapContext = createContext<KindMap>({});
-
-/** The synthetic World wrapper stands in for the vault root at the
- *  UI layer; any API that expects a folder path needs to see the
- *  real empty-string root instead of the sentinel. */
-function resolveRealPath(p: string): string {
-  return p === WORLD_ROOT_PATH ? '' : p;
-}
 
 /** Every kind the tree-level "+ New" dropdown can seed. Folder and
  *  page are handled inline; the rest go through /api/notes/create
@@ -99,12 +91,7 @@ export function FileTree({
 }): React.JSX.Element {
   const router = useRouter();
   const storageKey = `${STORAGE_KEY}.${groupId}`;
-  // Seed the open set with the synthetic World node so the tree
-  // starts expanded on first render. Restored sets from localStorage
-  // may or may not carry it — we always re-add below after hydrating.
-  const [open, setOpen] = useState<Set<string>>(
-    () => new Set([WORLD_ROOT_PATH]),
-  );
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
   const [creatingIn, setCreatingIn] = useState<
     { parent: string; kind: CreateKind } | null
   >(null);
@@ -186,7 +173,7 @@ export function FileTree({
       setError(null);
       try {
         const payload: Record<string, unknown> = {
-          folder: resolveRealPath(folder),
+          folder,
           name: name.trim(),
         };
         // API treats missing kind as "page"; omitting keeps the log
@@ -240,7 +227,7 @@ export function FileTree({
             'Content-Type': 'application/json',
             'X-CSRF-Token': csrfToken,
           },
-          body: JSON.stringify({ parent: resolveRealPath(parent), name: name.trim() }),
+          body: JSON.stringify({ parent, name: name.trim() }),
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok || !body.ok) {
@@ -321,9 +308,6 @@ export function FileTree({
       src: { kind: 'file' | 'folder'; path: string },
       destFolder: string,
     ): Promise<void> => {
-      // The synthetic World node is a visual wrapper — dropping onto
-      // it is a drop onto the real vault root.
-      destFolder = resolveRealPath(destFolder);
       const basename = src.path.includes('/')
         ? src.path.slice(src.path.lastIndexOf('/') + 1)
         : src.path;
@@ -382,14 +366,13 @@ export function FileTree({
       {canCreate && (
         <div className="mb-1 px-2">
           <NewEntryDropdown
-            onPick={(kind) => startCreate(WORLD_ROOT_PATH, kind)}
+            onPick={(kind) => startCreate('', kind)}
             variant="wide"
           />
         </div>
       )}
 
-      {(creatingIn?.parent === '' ||
-        creatingIn?.parent === WORLD_ROOT_PATH) && (
+      {creatingIn?.parent === '' && (
         <div className="mb-1 px-2">
           <NewEntryRow
             kind={creatingIn.kind}
@@ -646,8 +629,6 @@ function TreeRow({
       : {};
   const padding = 8 + item.depth * 14;
 
-  const isWorldRow = item.kind === 'dir' && item.path === WORLD_ROOT_PATH;
-
   if (item.kind === 'dir') {
     if (isRenaming) {
       return (
@@ -665,14 +646,10 @@ function TreeRow({
         </li>
       );
     }
-    // The World row is the synthetic vault anchor — not draggable,
-    // no rename/delete, but still a drop target + a place to
-    // create new top-level entries.
-    const effectiveRowDragProps = isWorldRow ? {} : rowDragProps;
     return (
       <li role="treeitem" aria-expanded={item.open} className="list-none">
         <div
-          {...effectiveRowDragProps}
+          {...rowDragProps}
           {...dirDropProps}
           className={
             'group flex items-center rounded-[6px] transition ' +
@@ -702,14 +679,12 @@ function TreeRow({
                 variant="compact"
                 folderName={item.name}
               />
-              {!isWorldRow && (
-                <RowMenu
-                  kind="folder"
-                  path={item.path}
-                  csrfToken={csrfToken}
-                  onStartRename={onStartRename}
-                />
-              )}
+              <RowMenu
+                kind="folder"
+                path={item.path}
+                csrfToken={csrfToken}
+                onStartRename={onStartRename}
+              />
             </div>
           )}
         </div>

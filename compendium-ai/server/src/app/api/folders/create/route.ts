@@ -10,6 +10,7 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
+import { ensureCampaignForPath } from '@/lib/characters';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,6 +68,18 @@ export async function POST(req: NextRequest): Promise<Response> {
   db.query(
     `INSERT INTO folder_markers (group_id, path, created_at) VALUES (?, ?, ?)`,
   ).run(session.currentGroupId, path, Date.now());
+
+  // Register a campaigns row the moment a "Campaigns/<name>" folder
+  // exists, so /sessions + /characters dashboards pick it up in
+  // their dropdown without waiting for the first note to land.
+  // Also covers a campaign's subfolders (Characters/, Sessions/…).
+  try {
+    // ensureCampaignForPath expects a note path underneath the
+    // campaign folder, so feed it a synthetic descendant.
+    ensureCampaignForPath(session.currentGroupId, path + '/.marker');
+  } catch (err) {
+    console.error('[folders/create] ensureCampaignForPath failed:', err);
+  }
 
   logAudit({
     action: 'folder.create',

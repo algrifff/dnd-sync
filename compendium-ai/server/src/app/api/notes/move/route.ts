@@ -89,6 +89,16 @@ export async function POST(req: NextRequest): Promise<Response> {
       session.currentGroupId,
       from,
     );
+    // Structured-note index tables also use note_path as the key.
+    db.query(
+      'UPDATE characters SET note_path = ? WHERE group_id = ? AND note_path = ?',
+    ).run(to, session.currentGroupId, from);
+    db.query(
+      'UPDATE character_campaigns SET note_path = ? WHERE group_id = ? AND note_path = ?',
+    ).run(to, session.currentGroupId, from);
+    db.query(
+      'UPDATE session_notes SET note_path = ? WHERE group_id = ? AND note_path = ?',
+    ).run(to, session.currentGroupId, from);
     // FTS mirror — triggers fire on title/content_text updates, not on
     // path, so reseed manually.
     db.query('DELETE FROM notes_fts WHERE path = ?').run(from);
