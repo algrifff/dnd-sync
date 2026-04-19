@@ -4,16 +4,23 @@
 // (constant-time lookup via the `sessions.id` PRIMARY KEY index; the
 // 256-bit entropy makes guessing infeasible).
 //
-// Passwords are hashed with argon2id via the `argon2` npm package (a
-// Node-native binding). Standard PHC-format output, so hashes written
-// by the earlier Bun.password code path remain verifiable without any
-// migration.
+// Passwords are hashed with argon2id via the `@node-rs/argon2` package
+// (Rust via N-API, ships prebuilts as platform-specific optional deps
+// — no node-gyp compile path, installs cleanly under either Bun or
+// npm). Standard PHC-format output interoperable with hashes written
+// by the earlier Bun.password and `argon2` npm package code paths, so
+// no migration is needed.
 //
 // This module coexists with the legacy token auth in `auth.ts` (plugin
 // path). Neither touches the other's state.
 
 import { randomBytes } from 'node:crypto';
-import argon2 from 'argon2';
+import { hash as argon2Hash, verify as argon2Verify } from '@node-rs/argon2';
+
+// @node-rs/argon2's Algorithm enum is a `const enum`, which
+// verbatimModuleSyntax refuses to import. Inline the value.
+// 0 = Argon2d, 1 = Argon2i, 2 = Argon2id (upstream ordering).
+const ARGON2ID = 2;
 import { getDb } from './db';
 import { SESSION_COOKIE as COOKIE_SID, CSRF_COOKIE as COOKIE_CSRF } from './session-public';
 
@@ -49,14 +56,14 @@ export type NewSessionInput = {
  *  hashes the earlier Bun.password code path produced. */
 export async function hashPassword(plain: string): Promise<string> {
   if (plain.length < 8) throw new Error('password must be at least 8 characters');
-  return argon2.hash(plain, { type: argon2.argon2id });
+  return argon2Hash(plain, { algorithm: ARGON2ID });
 }
 
 /** Constant-time verify a password against its stored hash. */
 export async function verifyPassword(plain: string, hash: string): Promise<boolean> {
   if (!plain || !hash) return false;
   try {
-    return await argon2.verify(hash, plain);
+    return await argon2Verify(hash, plain);
   } catch {
     // Malformed hash in storage. Treat as non-match; never throw from auth.
     return false;
