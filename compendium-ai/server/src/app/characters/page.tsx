@@ -14,6 +14,7 @@ import { buildTree } from '@/lib/tree';
 import {
   listCampaigns,
   listCharacters,
+  listNoteKinds,
   type CharacterListRow,
 } from '@/lib/characters';
 import { AppHeader } from '../AppHeader';
@@ -35,6 +36,7 @@ export default async function CharactersPage(): Promise<ReactElement> {
   if (!session) redirect('/login?next=/characters');
 
   const tree = buildTree(session.currentGroupId);
+  const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
   const campaigns = listCampaigns(session.currentGroupId);
   const mine = listCharacters(session.currentGroupId, {
     playerUserId: session.userId,
@@ -58,6 +60,7 @@ export default async function CharactersPage(): Promise<ReactElement> {
           groupId={session.currentGroupId}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
+          kindMap={kindMap}
         />
         <SidebarFooter
           displayName={session.displayName}

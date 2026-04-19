@@ -10,7 +10,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { buildTree } from '@/lib/tree';
-import { listCampaigns } from '@/lib/characters';
+import { listCampaigns, listNoteKinds } from '@/lib/characters';
 import { listSessions } from '@/lib/sessions';
 import { AppHeader } from '../AppHeader';
 import { SidebarHeader } from '../SidebarHeader';
@@ -31,6 +31,7 @@ export default async function SessionsPage(): Promise<ReactElement> {
   if (!session) redirect('/login?next=/sessions');
 
   const tree = buildTree(session.currentGroupId);
+  const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
   const campaigns = listCampaigns(session.currentGroupId);
   const sessions = listSessions(session.currentGroupId);
 
@@ -48,6 +49,7 @@ export default async function SessionsPage(): Promise<ReactElement> {
           groupId={session.currentGroupId}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
+          kindMap={kindMap}
         />
         <SidebarFooter
           displayName={session.displayName}

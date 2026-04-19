@@ -254,6 +254,30 @@ export function listCharacters(
   return rows.map((r) => rowToListEntry(r, campaignsByPath.get(r.note_path) ?? []));
 }
 
+/** Fast lookup of "what kind is the note at this path?" for the
+ *  file-tree icon rail. Characters come from the characters table;
+ *  sessions come from the sessions table. Anything not indexed
+ *  returns no entry — the caller treats it as a plain note. */
+export type NoteKind = CharacterKind | 'session';
+
+export function listNoteKinds(groupId: string): Map<string, NoteKind> {
+  const db = getDb();
+  const out = new Map<string, NoteKind>();
+  const chars = db
+    .query<{ note_path: string; kind: string }, [string]>(
+      'SELECT note_path, kind FROM characters WHERE group_id = ?',
+    )
+    .all(groupId);
+  for (const r of chars) out.set(r.note_path, r.kind as CharacterKind);
+  const sessions = db
+    .query<{ note_path: string }, [string]>(
+      'SELECT note_path FROM sessions WHERE group_id = ?',
+    )
+    .all(groupId);
+  for (const r of sessions) out.set(r.note_path, 'session');
+  return out;
+}
+
 export type CampaignRow = {
   slug: string;
   name: string;

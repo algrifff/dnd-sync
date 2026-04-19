@@ -6,14 +6,35 @@
 // style hover "+" affordance that creates a new page in the
 // matching folder.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ChevronRight, Plus, FolderPlus } from 'lucide-react';
+import {
+  CalendarDays,
+  ChevronRight,
+  FolderPlus,
+  Heart,
+  Plus,
+  Skull,
+  Sword,
+  UserRound,
+} from 'lucide-react';
 import type { Tree, TreeDir } from '@/lib/tree';
 import { broadcastTreeChange } from '@/lib/tree-sync';
 import { RowMenu } from './RowMenu';
 import { PeerStack } from './PeerStack';
+
+export type FileTreeKind = 'pc' | 'npc' | 'ally' | 'villain' | 'session';
+type KindMap = Record<string, FileTreeKind>;
+const KindMapContext = createContext<KindMap>({});
 
 const STORAGE_KEY = 'compendium.tree.open';
 
@@ -23,12 +44,16 @@ export function FileTree({
   groupId,
   csrfToken,
   canCreate,
+  kindMap,
 }: {
   tree: Tree;
   activePath: string;
   groupId: string;
   csrfToken: string;
   canCreate: boolean;
+  /** Path → note kind. Rows with a kind get a small icon so the
+   *  sidebar reads like a roster at a glance. */
+  kindMap?: KindMap;
 }): React.JSX.Element {
   const router = useRouter();
   const storageKey = `${STORAGE_KEY}.${groupId}`;
@@ -282,6 +307,7 @@ export function FileTree({
   const items = useMemo(() => flatten(tree.root, open, 0), [tree.root, open]);
 
   return (
+    <KindMapContext.Provider value={kindMap ?? EMPTY_KIND_MAP}>
     <nav
       aria-label="Note tree"
       className="min-h-0 flex-1 overflow-y-auto border-r border-[#D4C7AE] py-3 text-sm"
@@ -410,8 +436,39 @@ export function FileTree({
         ))}
       </ul>
     </nav>
+    </KindMapContext.Provider>
   );
 }
+
+const EMPTY_KIND_MAP: KindMap = {};
+
+function KindIcon({ path }: { path: string }): React.JSX.Element | null {
+  const kindMap = useContext(KindMapContext);
+  const kind = kindMap[path];
+  if (!kind) return null;
+  const { icon: Icon, color, label } = KIND_META[kind];
+  return (
+    <span
+      className="shrink-0"
+      style={{ color }}
+      aria-label={label}
+      title={label}
+    >
+      <Icon size={12} aria-hidden />
+    </span>
+  );
+}
+
+const KIND_META: Record<
+  FileTreeKind,
+  { icon: typeof Sword; color: string; label: string }
+> = {
+  pc: { icon: Sword, color: '#7B8A5F', label: 'Player character' },
+  ally: { icon: Heart, color: '#D4A85A', label: 'Ally' },
+  villain: { icon: Skull, color: '#8B4A52', label: 'Villain' },
+  npc: { icon: UserRound, color: '#6B7F8E', label: 'NPC' },
+  session: { icon: CalendarDays, color: '#6A5D8B', label: 'Session' },
+};
 
 type FlatRow =
   | { kind: 'dir'; key: string; name: string; path: string; depth: number; open: boolean; hasChildren: boolean }
@@ -649,6 +706,7 @@ function TreeRow({
           }
           style={{ paddingLeft: padding + 14 }}
         >
+          <KindIcon path={item.path} />
           <span className="truncate">{item.title || item.name}</span>
           <PeerStack notePath={item.path} />
         </Link>

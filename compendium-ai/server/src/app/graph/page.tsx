@@ -7,6 +7,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { buildTree } from '@/lib/tree';
+import { listNoteKinds } from '@/lib/characters';
 import { listAllTags } from '@/lib/notes';
 import { AppHeader } from '../AppHeader';
 import { SidebarHeader } from '../SidebarHeader';
@@ -27,6 +28,7 @@ export default async function GraphPage(): Promise<ReactElement> {
   if (!session) redirect('/login?next=/graph');
 
   const tree = buildTree(session.currentGroupId);
+  const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
   const allTags = listAllTags(session.currentGroupId).map((t) => t.tag);
 
   return (
@@ -43,6 +45,7 @@ export default async function GraphPage(): Promise<ReactElement> {
           groupId={session.currentGroupId}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
+          kindMap={kindMap}
         />
         <SidebarFooter
           displayName={session.displayName}

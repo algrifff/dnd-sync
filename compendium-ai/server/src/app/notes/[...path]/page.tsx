@@ -14,6 +14,7 @@ import {
   loadUser,
 } from '@/lib/notes';
 import { getTemplate, type NoteTemplate, type TemplateKind } from '@/lib/templates';
+import { listNoteKinds } from '@/lib/characters';
 import { buildTree } from '@/lib/tree';
 import { AppHeader } from '../../AppHeader';
 import { SidebarHeader } from '../../SidebarHeader';
@@ -45,6 +46,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   if (!note) notFound();
 
   const tree = buildTree(session.currentGroupId);
+  const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
   const backlinks = loadBacklinks(session.currentGroupId, path);
   const tags = loadTags(session.currentGroupId, path);
   const creator = note.created_by ? loadUser(note.created_by) : null;
@@ -84,6 +86,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
           groupId={session.currentGroupId}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
+          kindMap={kindMap}
         />
         <SidebarFooter
           displayName={session.displayName}

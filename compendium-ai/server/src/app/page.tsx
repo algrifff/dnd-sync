@@ -11,6 +11,7 @@ import { DEFAULT_GROUP_ID } from '@/lib/users';
 import { getDb } from '@/lib/db';
 import { recentlyUpdated } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
+import { listNoteKinds } from '@/lib/characters';
 import { AppHeader } from './AppHeader';
 import { SidebarHeader } from './SidebarHeader';
 import { SidebarFooter } from './SidebarFooter';
@@ -38,6 +39,7 @@ export default async function HomePage(): Promise<ReactElement> {
 
   const recent = recentlyUpdated(DEFAULT_GROUP_ID, 12);
   const tree = buildTree(DEFAULT_GROUP_ID);
+  const kindMap = Object.fromEntries(listNoteKinds(DEFAULT_GROUP_ID));
   const topFolders = tree.root.children.filter((c) => c.kind === 'dir').slice(0, 6);
 
   return (
@@ -54,6 +56,7 @@ export default async function HomePage(): Promise<ReactElement> {
           groupId={session.currentGroupId}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
+          kindMap={kindMap}
         />
         <SidebarFooter
           displayName={session.displayName}

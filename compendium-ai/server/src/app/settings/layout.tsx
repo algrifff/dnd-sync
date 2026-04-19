@@ -8,6 +8,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { buildTree } from '@/lib/tree';
+import { listNoteKinds } from '@/lib/characters';
 import { AppHeader } from '../AppHeader';
 import { SidebarHeader } from '../SidebarHeader';
 import { SidebarFooter } from '../SidebarFooter';
@@ -31,6 +32,7 @@ export default async function SettingsLayout({
   if (!session) redirect('/login?next=/settings');
 
   const tree = buildTree(session.currentGroupId);
+  const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
 
   return (
     <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
@@ -46,6 +48,7 @@ export default async function SettingsLayout({
           groupId={session.currentGroupId}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
+          kindMap={kindMap}
         />
         <SidebarFooter
           displayName={session.displayName}

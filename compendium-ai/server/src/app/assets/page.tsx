@@ -11,6 +11,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { buildTree } from '@/lib/tree';
+import { listNoteKinds } from '@/lib/characters';
 import { listGroupAssets } from '@/lib/assets';
 import { AppHeader } from '../AppHeader';
 import { SidebarHeader } from '../SidebarHeader';
@@ -31,6 +32,7 @@ export default async function AssetsPage(): Promise<ReactElement> {
   if (!session) redirect('/login?next=/assets');
 
   const tree = buildTree(session.currentGroupId);
+  const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
   const assets = listGroupAssets(session.currentGroupId);
 
   return (
@@ -47,6 +49,7 @@ export default async function AssetsPage(): Promise<ReactElement> {
           groupId={session.currentGroupId}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
+          kindMap={kindMap}
         />
         <SidebarFooter
           displayName={session.displayName}
