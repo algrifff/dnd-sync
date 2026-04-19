@@ -5,7 +5,7 @@
 #   * Install with Bun — honours bun.lockb, resolves the `workspace:*`
 #     protocol natively, fast. Requires python3+make+g++ in the image
 #     because a missing prebuild for argon2 / better-sqlite3 falls back
-#     to node-gyp compile, which node:20-slim has but oven/bun doesn't
+#     to node-gyp compile, which node:22-slim has but oven/bun doesn't
 #     out of the box.
 #   * Build + runtime on Node — Next 15's production SSR runs under
 #     Bun's Node-compat layer with opaque "SyntaxError: Unexpected
@@ -16,7 +16,7 @@
 #
 # Native modules compiled during the install stage target Node-API,
 # which is ABI-stable across Node majors, so they load cleanly under
-# node:20-slim at runtime without a rebuild step.
+# node:22-slim at runtime without a rebuild step.
 
 # --- Stage 1: install on Bun + build tools for native module fallback ---
 FROM oven/bun:1.1.45 AS deps
@@ -34,7 +34,7 @@ RUN bun install --frozen-lockfile
 
 
 # --- Stage 2: Next build on Node --------------------------------------
-FROM node:20-slim AS build
+FROM node:22-slim AS build
 WORKDIR /app
 
 COPY --from=deps /app/node_modules       ./node_modules
@@ -54,7 +54,7 @@ RUN npm run build
 
 
 # --- Stage 3: runtime on Node -----------------------------------------
-FROM node:20-slim AS runtime
+FROM node:22-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
