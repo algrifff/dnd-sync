@@ -5,15 +5,21 @@ import type { NextConfig } from 'next';
 const config: NextConfig = {
   reactStrictMode: true,
 
-  // Any package that pulls in `yjs` (directly or transitively) must be
-  // marked external for server-side bundling. `yjs` keeps a module-
-  // level registry; if the custom server loads one copy from
-  // node_modules and a bundled route handler loads another,
-  // constructor checks fail with "Yjs was already imported" and
-  // downstream JSON.parse calls surface as the opaque
-  // "SyntaxError: Unexpected token ','". Externalising forces the
-  // whole server process — server.ts + every route handler — to
-  // resolve to the single copy in node_modules.
+  // Externalise packages that hold module-level singleton state, so the
+  // whole server process (custom server.ts + every route handler) shares
+  // one canonical copy loaded from node_modules at runtime rather than a
+  // bundled copy per route chunk. Two copies of `yjs` in particular
+  // fires the "Yjs was already imported" warning and surfaces as
+  // "SyntaxError: Unexpected token ','" under load.
+  //
+  // Deliberately NOT externalised: anything that imports React
+  // (@tiptap/react, etc.). Externalising those makes them resolve
+  // `react` outside the chunk Next primes with an SSR dispatcher,
+  // so hook calls hit a null `ReactSharedInternals.H` and SSR
+  // blows up with "null is not an object (evaluating
+  // 'ReactSharedInternals.H.useRef')". @tiptap/* has no singleton
+  // state; bundling it is safe and keeps its React imports on the
+  // same copy Next is using.
   //
   // `bun:sqlite` is a Bun runtime built-in with no Node equivalent.
   // Next's build phase runs under Node, so keep the import external
@@ -28,20 +34,6 @@ const config: NextConfig = {
     '@hocuspocus/provider',
     '@hocuspocus/extension-database',
     '@hocuspocus/extension-logger',
-    '@tiptap/core',
-    '@tiptap/starter-kit',
-    '@tiptap/react',
-    '@tiptap/extension-collaboration',
-    '@tiptap/extension-collaboration-caret',
-    '@tiptap/extension-highlight',
-    '@tiptap/extension-image',
-    '@tiptap/extension-link',
-    '@tiptap/extension-table',
-    '@tiptap/extension-table-cell',
-    '@tiptap/extension-table-header',
-    '@tiptap/extension-table-row',
-    '@tiptap/extension-task-item',
-    '@tiptap/extension-task-list',
     'prosemirror-model',
     'prosemirror-state',
     'prosemirror-view',
