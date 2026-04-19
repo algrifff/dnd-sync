@@ -173,7 +173,7 @@ function titleFromPathname(pathname: string): string {
     }
   }
   if (pathname === '/tags') return 'Tags';
-  if (pathname.startsWith('/admin/')) return 'Admin';
+  if (pathname.startsWith('/settings')) return 'Settings';
   return pathname;
 }
 

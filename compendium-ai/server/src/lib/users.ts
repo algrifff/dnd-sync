@@ -12,7 +12,7 @@ export const DEFAULT_GROUP_ID = 'default';
 
 /** Ordered palette used to auto-assign cursor / pointer colours on user
  *  creation. Kept small so each friend has a distinct shade. */
-const ACCENT_PALETTE = [
+export const ACCENT_PALETTE = [
   '#D4A85A', // candlelight
   '#7B8A5F', // moss
   '#8B4A52', // wine
@@ -166,6 +166,30 @@ export async function createUser(input: CreateUserInput): Promise<User> {
     createdAt: now,
     lastLoginAt: null,
   };
+}
+
+/** Self-service profile update: display name + accent color. Callers
+ *  enforce auth/ownership. No audit entry — a name tweak isn't worth
+ *  the row and shows up in updated_at on the user record anyway. */
+export function updateUserProfile(
+  userId: string,
+  patch: { displayName?: string | undefined; accentColor?: string | undefined },
+): void {
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  if (typeof patch.displayName === 'string') {
+    sets.push('display_name = ?');
+    values.push(patch.displayName);
+  }
+  if (typeof patch.accentColor === 'string') {
+    sets.push('accent_color = ?');
+    values.push(patch.accentColor);
+  }
+  if (sets.length === 0) return;
+  values.push(userId);
+  getDb()
+    .query(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`)
+    .run(...(values as [string | number, ...Array<string | number>]));
 }
 
 export async function changeUserPassword(

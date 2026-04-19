@@ -74,7 +74,7 @@ export async function createUserAction(
     };
   }
 
-  revalidatePath('/admin/users');
+  revalidatePath('/settings/users');
 
   return {
     ok: true,
@@ -92,6 +92,6 @@ export async function revokeUserAction(userId: string): Promise<RevokeUserResult
   }
   const ok = revokeUser(userId, actor, DEFAULT_GROUP_ID);
   if (!ok) return { ok: false, error: 'user not found' };
-  revalidatePath('/admin/users');
+  revalidatePath('/settings/users');
   return { ok: true };
 }

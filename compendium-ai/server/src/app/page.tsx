@@ -87,8 +87,8 @@ export default async function HomePage(): Promise<ReactElement> {
               {session.role === 'admin' ? (
                 <>
                   The vault is empty. Head to{' '}
-                  <Link href="/admin/vault" className="underline">
-                    /admin/vault
+                  <Link href="/settings/vault" className="underline">
+                    /settings/vault
                   </Link>{' '}
                   and upload a ZIP to get started.
                 </>

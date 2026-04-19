@@ -3,6 +3,8 @@
 // is always reachable without being in the way.
 
 import type { ReactElement } from 'react';
+import Link from 'next/link';
+import { Settings } from 'lucide-react';
 import { logoutAction } from './login/actions';
 
 export function SidebarFooter({
@@ -37,6 +39,14 @@ export function SidebarFooter({
           </div>
           <div className="truncate text-xs text-[#5A4F42]">@{username}</div>
         </div>
+        <Link
+          href="/settings/profile"
+          title="Settings"
+          aria-label="Settings"
+          className="rounded-[6px] p-1.5 text-[#5A4F42] transition hover:bg-[#D4A85A]/15 hover:text-[#2A241E]"
+        >
+          <Settings size={14} aria-hidden />
+        </Link>
         <form action={logoutAction}>
           <button
             type="submit"

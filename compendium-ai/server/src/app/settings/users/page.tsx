@@ -1,67 +1,38 @@
-// Admin → Users. Create + revoke friend accounts.
-// Layout at /admin already gated role=admin.
+// /settings/users — admin-only user management. Layout renders app
+// chrome + tabs; this page just renders the inner content.
 
 import type { ReactElement } from 'react';
 import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
-import {
-  DEFAULT_GROUP_ID,
-  listUsersInGroup,
-  type UserWithRole,
-} from '@/lib/users';
-import { AppHeader } from '../../AppHeader';
+import { DEFAULT_GROUP_ID, listUsersInGroup, type UserWithRole } from '@/lib/users';
 import { CreateUserForm } from './CreateUserForm';
 import { RevokeButton } from './RevokeButton';
 
 export const dynamic = 'force-dynamic';
 
-export default async function AdminUsersPage(): Promise<ReactElement> {
+export default async function SettingsUsersPage(): Promise<ReactElement> {
   const jar = await cookies();
   const cookieHeader = jar
     .getAll()
     .map((c) => `${c.name}=${c.value}`)
     .join('; ');
   const session = readSession(cookieHeader);
-  // Layout already guarded; this is defence-in-depth for types.
-  if (!session) throw new Error('missing session in admin users page');
+  if (!session) redirect('/login?next=/settings/users');
+  if (session.role !== 'admin') redirect('/settings/profile');
 
   const users = listUsersInGroup(DEFAULT_GROUP_ID);
 
   return (
-    <div className="min-h-screen bg-[#F4EDE0] text-[#2A241E]">
-      <AppHeader
-        role={session.role}
-        includeNav
-        me={{
-          userId: session.userId,
-          displayName: session.displayName,
-          username: session.username,
-          accentColor: session.accentColor,
-        }}
-        user={{
-          displayName: session.displayName,
-          username: session.username,
-          accentColor: session.accentColor,
-        }}
-      />
-      <main className="mx-auto max-w-3xl space-y-6 px-6 py-8">
-        <div>
-          <h1
-            className="text-3xl font-bold text-[#2A241E]"
-            style={{ fontFamily: '"Fraunces", Georgia, serif' }}
-          >
-            Users
-          </h1>
-          <p className="mt-1 text-sm text-[#5A4F42]">
-            Create accounts for your players and DMs. Share the generated
-            password out-of-band — it is displayed only once.
-          </p>
-        </div>
+    <div className="space-y-6">
+      <p className="text-sm text-[#5A4F42]">
+        Create accounts for your players and DMs. Share the generated
+        password out-of-band — it is displayed only once.
+      </p>
 
-        <CreateUserForm />
+      <CreateUserForm />
 
-        <UserTable users={users} currentUserId={session.userId} />
-      </main>
+      <UserTable users={users} currentUserId={session.userId} />
     </div>
   );
 }

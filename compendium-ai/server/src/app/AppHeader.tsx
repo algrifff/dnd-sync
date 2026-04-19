@@ -7,12 +7,11 @@ import type { ReactElement } from 'react';
 import Link from 'next/link';
 import { NoteTabs } from './NoteTabs';
 import { NewTabButton } from './NewTabButton';
-import { SettingsMenu } from './SettingsMenu';
 import { PresenceClient, type Me } from './PresenceClient';
 import { logoutAction } from './login/actions';
 
 export function AppHeader({
-  role,
+  role: _role,
   me,
   user,
   csrfToken,
@@ -36,7 +35,6 @@ export function AppHeader({
           <Link href="/tags" className="underline-offset-2 hover:underline">
             Tags
           </Link>
-          {role === 'admin' && <SettingsMenu />}
           <span aria-hidden className="h-5 w-px bg-[#D4C7AE]" />
         </nav>
       )}
