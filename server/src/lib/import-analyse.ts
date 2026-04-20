@@ -344,14 +344,14 @@ function buildContext(
   if (targetCampaignSlug) {
     const active = campaigns.find((c) => c.slug === targetCampaignSlug);
     if (active) {
-      conventions.campaignRoot = active.folderPath;
-      conventions.pcsFolder = `${active.folderPath}/Characters/PCs`;
-      conventions.npcsFolder = `${active.folderPath}/Characters/NPCs`;
-      conventions.alliesFolder = `${active.folderPath}/Characters/Allies`;
-      conventions.villainsFolder = `${active.folderPath}/Characters/Villains`;
-      conventions.sessionsFolder = `${active.folderPath}/Sessions`;
-      conventions.locationsFolder = `${active.folderPath}/Locations`;
-      conventions.itemsFolder = `${active.folderPath}/Items`;
+      conventions.campaignRoot     = active.folderPath;
+      conventions.charactersFolder   = `${active.folderPath}/Characters`;
+      conventions.peopleFolder       = `${active.folderPath}/People`;
+      conventions.enemiesFolder      = `${active.folderPath}/Enemies`;
+      conventions.adventureLogFolder = `${active.folderPath}/Adventure Log`;
+      conventions.placesFolder       = `${active.folderPath}/Places`;
+      conventions.lootFolder         = `${active.folderPath}/Loot`;
+      conventions.creaturesFolder    = `${active.folderPath}/Creatures`;
     }
   }
 

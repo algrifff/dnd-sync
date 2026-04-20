@@ -22,14 +22,14 @@ export type ImportSkillContext = {
 
 export type FolderConventions = {
   campaignRoot: string | null;
-  pcsFolder: string;
-  npcsFolder: string;
-  alliesFolder: string;
-  villainsFolder: string;
-  sessionsFolder: string;
-  locationsFolder: string;
-  itemsFolder: string;
-  loreFolder: string;
+  charactersFolder: string;
+  peopleFolder: string;
+  enemiesFolder: string;
+  adventureLogFolder: string;
+  placesFolder: string;
+  lootFolder: string;
+  creaturesFolder: string;
+  worldLoreFolder: string;
   assetsPortraits: string;
   assetsMaps: string;
   assetsTokens: string;
@@ -37,16 +37,16 @@ export type FolderConventions = {
 
 export function renderConventions(c: FolderConventions): string {
   return [
-    c.campaignRoot && `Campaign root:    ${c.campaignRoot}`,
-    `PCs folder:       ${c.pcsFolder}`,
-    `NPCs folder:      ${c.npcsFolder}`,
-    `Allies folder:    ${c.alliesFolder}`,
-    `Villains folder:  ${c.villainsFolder}`,
-    `Sessions folder:  ${c.sessionsFolder}`,
-    `Locations folder: ${c.locationsFolder}`,
-    `Items folder:     ${c.itemsFolder}`,
-    `Lore folder:      ${c.loreFolder}`,
-    `Assets/portraits: ${c.assetsPortraits}`,
+    c.campaignRoot && `Campaign root:     ${c.campaignRoot}`,
+    `Characters folder: ${c.charactersFolder}`,
+    `People folder:     ${c.peopleFolder}`,
+    `Enemies folder:    ${c.enemiesFolder}`,
+    `Adventure Log:     ${c.adventureLogFolder}`,
+    `Places folder:     ${c.placesFolder}`,
+    `Loot folder:       ${c.lootFolder}`,
+    `Creatures folder:  ${c.creaturesFolder}`,
+    `World Lore folder: ${c.worldLoreFolder}`,
+    `Assets/portraits:  ${c.assetsPortraits}`,
   ]
     .filter(Boolean)
     .join('\n');
@@ -58,16 +58,14 @@ export function defaultConventions(
   const root = campaignSlug ? `Campaigns/${slugToTitle(campaignSlug)}` : null;
   return {
     campaignRoot: root,
-    pcsFolder: root ? `${root}/Characters/PCs` : 'Characters/PCs',
-    npcsFolder: root ? `${root}/Characters/NPCs` : 'Characters/NPCs',
-    alliesFolder: root ? `${root}/Characters/Allies` : 'Characters/Allies',
-    villainsFolder: root
-      ? `${root}/Characters/Villains`
-      : 'Characters/Villains',
-    sessionsFolder: root ? `${root}/Sessions` : 'Sessions',
-    locationsFolder: root ? `${root}/Locations` : 'Lore/Locations',
-    itemsFolder: root ? `${root}/Items` : 'Lore/Items',
-    loreFolder: 'Lore',
+    charactersFolder:   root ? `${root}/Characters`    : 'Characters',
+    peopleFolder:       root ? `${root}/People`        : 'People',
+    enemiesFolder:      root ? `${root}/Enemies`       : 'Enemies',
+    adventureLogFolder: root ? `${root}/Adventure Log` : 'Adventure Log',
+    placesFolder:       root ? `${root}/Places`        : 'Places',
+    lootFolder:         root ? `${root}/Loot`          : 'Loot',
+    creaturesFolder:    root ? `${root}/Creatures`     : 'Creatures',
+    worldLoreFolder: 'World Lore',
     assetsPortraits: 'Assets/Portraits',
     assetsMaps: 'Assets/Maps',
     assetsTokens: 'Assets/Tokens',
