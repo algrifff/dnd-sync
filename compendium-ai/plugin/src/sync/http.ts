@@ -4,21 +4,14 @@
 
 import { requestUrl } from 'obsidian';
 import type { RequestUrlParam, RequestUrlResponse } from 'obsidian';
+import { InventoryResponseSchema, PluginVersionSchema } from '@compendium/shared';
+import type { InventoryResponse, PluginVersion } from '@compendium/shared';
+
+export type { InventoryResponse };
 
 export type HttpConfig = {
   serverUrl: string;
   authToken: string;
-};
-
-export type InventoryResponse = {
-  textDocs: Array<{ path: string; updatedAt: number; bytes: number }>;
-  binaryFiles: Array<{
-    path: string;
-    mimeType: string;
-    size: number;
-    updatedAt: number;
-    contentHash: string;
-  }>;
 };
 
 function normalizeBase(url: string): string {
@@ -31,7 +24,7 @@ export async function fetchInventory(cfg: HttpConfig): Promise<InventoryResponse
     method: 'GET',
   });
   if (res.status !== 200) throw new Error(`inventory failed: ${res.status}`);
-  return JSON.parse(res.text) as InventoryResponse;
+  return InventoryResponseSchema.parse(JSON.parse(res.text));
 }
 
 export async function putBinary(
@@ -79,13 +72,13 @@ export async function deleteDoc(cfg: HttpConfig, path: string): Promise<void> {
   }
 }
 
-export async function fetchPluginVersion(cfg: HttpConfig): Promise<{ hash: string }> {
+export async function fetchPluginVersion(cfg: HttpConfig): Promise<PluginVersion> {
   const res = await doRequest(cfg, {
     url: `${normalizeBase(cfg.serverUrl)}/api/plugin/version`,
     method: 'GET',
   });
   if (res.status !== 200) throw new Error(`plugin version failed: ${res.status}`);
-  return JSON.parse(res.text) as { hash: string };
+  return PluginVersionSchema.parse(JSON.parse(res.text));
 }
 
 export async function fetchPluginBundle(cfg: HttpConfig): Promise<ArrayBuffer> {

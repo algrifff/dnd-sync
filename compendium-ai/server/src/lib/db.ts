@@ -1,15 +1,17 @@
 // SQLite singleton. Opens compendium.db under $DATA_DIR, applies pending
 // migrations, and returns a ready handle.
 //
-// Backing store is better-sqlite3 (Node-native, synchronous). The rest
-// of the codebase was written against bun:sqlite's `db.query(sql)` API
-// with generics in `<Row, Params>` order; we wrap better-sqlite3's
-// `prepare(sql)` behind a `query` method with the same shape so every
-// existing call site (128+ across the codebase) keeps working
-// unchanged.
+// Backing store is runtime-adaptive:
+//   - bun:sqlite  when running under Bun  (tests, local dev)
+//   - better-sqlite3 when running under Node.js  (production via Dockerfile)
+//
+// Both back-ends expose the same `Database` interface (query/get/all/run)
+// so every call site in the codebase works unchanged regardless of
+// which runtime is in use.
 
 import BetterSqlite3 from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { runMigrations } from './migrations';
 
@@ -42,13 +44,65 @@ function resolveDataDir(): string {
   return abs;
 }
 
-function makeDatabase(path: string): Database {
+const IS_BUN = typeof process.versions.bun === 'string';
+
+// ── bun:sqlite adapter ─────────────────────────────────────────────────
+
+function makeBunDatabase(path: string): Database {
+  // createRequire resolves bun:* built-in modules under Bun even in ESM.
+  const _req = createRequire(import.meta.url);
+  const { Database: BunDB } = _req('bun:sqlite') as { Database: new (p: string) => BunSqliteInner };
+  const inner = new BunDB(path);
+
+  // bun:sqlite Statement.run() returns void; follow up with changes() to
+  // emulate better-sqlite3's RunResult shape that the codebase relies on.
+  const changesStmt = inner.query<{ c: number; r: number }>(
+    'SELECT changes() AS c, last_insert_rowid() AS r',
+  );
+
+  return {
+    exec: (sql) => { inner.exec(sql); },
+    query: <Row = unknown, Params extends unknown[] = unknown[]>(sql: string): Statement<Row, Params> => {
+      const stmt = inner.query<Row>(sql);
+      return {
+        get: (...params: Params): Row | undefined =>
+          stmt.get(...(params as unknown[])) ?? undefined,
+        all: (...params: Params): Row[] => stmt.all(...(params as unknown[])),
+        run: (...params: Params): RunResult => {
+          stmt.run(...(params as unknown[]));
+          const meta = changesStmt.get();
+          return { changes: meta?.c ?? 0, lastInsertRowid: meta?.r ?? 0 };
+        },
+      };
+    },
+    transaction: <A extends unknown[]>(fn: (...args: A) => void) => {
+      const wrapped = inner.transaction(fn);
+      return (...args: A): void => { wrapped(...args); };
+    },
+    close: () => { inner.close(); },
+  };
+}
+
+// Minimal shape of bun:sqlite Database that we actually use.
+type BunSqliteInner = {
+  exec(sql: string): void;
+  query<Row>(sql: string): BunStmt<Row>;
+  transaction<A extends unknown[]>(fn: (...args: A) => void): (...args: A) => void;
+  close(): void;
+};
+type BunStmt<Row> = {
+  get(...params: unknown[]): Row | null | undefined;
+  all(...params: unknown[]): Row[];
+  run(...params: unknown[]): void;
+};
+
+// ── better-sqlite3 adapter (Node.js runtime) ───────────────────────────
+
+function makeNodeDatabase(path: string): Database {
   const inner = new BetterSqlite3(path);
 
   return {
-    exec: (sql) => {
-      inner.exec(sql);
-    },
+    exec: (sql) => { inner.exec(sql); },
     query: <Row = unknown, Params extends unknown[] = unknown[]>(sql: string): Statement<Row, Params> => {
       const stmt = inner.prepare(sql);
       return {
@@ -67,14 +121,16 @@ function makeDatabase(path: string): Database {
     },
     transaction: <A extends unknown[]>(fn: (...args: A) => void) => {
       const wrapped = inner.transaction(fn);
-      return (...args: A): void => {
-        wrapped(...args);
-      };
+      return (...args: A): void => { wrapped(...args); };
     },
-    close: () => {
-      inner.close();
-    },
+    close: () => { inner.close(); },
   };
+}
+
+// ── public API ──────────────────────────────────────────────────────────
+
+function makeDatabase(path: string): Database {
+  return IS_BUN ? makeBunDatabase(path) : makeNodeDatabase(path);
 }
 
 export function getDb(): Database {
@@ -99,3 +155,4 @@ export function closeDb(): void {
     db = null;
   }
 }
+
