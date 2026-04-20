@@ -1,16 +1,20 @@
 'use client';
 
-// Settings subnav — Profile only. Admin tools (Vault, Users, Templates)
-// live at /admin.
-
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 type Tab = { href: string; label: string };
 
-export function SettingsTabs(): React.JSX.Element {
+export function SettingsTabs({
+  role,
+}: {
+  role: 'admin' | 'editor' | 'viewer';
+}): React.JSX.Element {
   const pathname = usePathname() ?? '';
-  const tabs: Tab[] = [{ href: '/settings/profile', label: 'Profile' }];
+  const tabs: Tab[] = [
+    { href: '/settings/profile', label: 'Profile' },
+    ...(role === 'admin' ? [{ href: '/settings/world', label: 'World' }] : []),
+  ];
 
   return (
     <div

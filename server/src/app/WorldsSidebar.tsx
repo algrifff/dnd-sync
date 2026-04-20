@@ -27,7 +27,6 @@ export function WorldsSidebar({
   const [worlds, setWorlds] = useState<World[] | null>(null);
   const [creating, setCreating] = useState<boolean>(false);
   const [busy, setBusy] = useState<boolean>(false);
-  const [editing, setEditing] = useState<World | null>(null);
 
   useEffect(() => {
     void fetchWorlds();
@@ -44,22 +43,41 @@ export function WorldsSidebar({
     }
   };
 
+  const activateWorld = async (id: string): Promise<boolean> => {
+    const res = await fetch('/api/worlds/active', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken,
+      },
+      body: JSON.stringify({ id }),
+    });
+    return res.ok;
+  };
+
   const switchWorld = async (id: string): Promise<void> => {
     if (busy) return;
     setBusy(true);
     try {
-      const res = await fetch('/api/worlds/active', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken,
-        },
-        body: JSON.stringify({ id }),
-      });
-      if (!res.ok) return;
+      const ok = await activateWorld(id);
+      if (!ok) return;
       // Full reload to drop any active-character pin / in-memory state
       // from the previous world.
       window.location.href = '/';
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const editWorld = async (w: World): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (!w.isActive) {
+        const ok = await activateWorld(w.id);
+        if (!ok) return;
+      }
+      window.location.href = '/settings/world';
     } finally {
       setBusy(false);
     }
@@ -81,7 +99,7 @@ export function WorldsSidebar({
               onClick={() => {
                 if (!w.isActive) void switchWorld(w.id);
               }}
-              onEdit={() => setEditing(w)}
+              onEdit={() => void editWorld(w)}
             />
           ))
         )}
@@ -103,17 +121,6 @@ export function WorldsSidebar({
           onCreated={() => {
             setCreating(false);
             window.location.href = '/';
-          }}
-        />
-      )}
-      {editing && (
-        <EditWorldDialog
-          csrfToken={csrfToken}
-          world={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            void fetchWorlds();
           }}
         />
       )}
@@ -176,121 +183,6 @@ function WorldIcon({
   );
 }
 
-function EditWorldDialog({
-  csrfToken,
-  world,
-  onClose,
-  onSaved,
-}: {
-  csrfToken: string;
-  world: World;
-  onClose: () => void;
-  onSaved: () => void;
-}): React.JSX.Element {
-  const [name, setName] = useState<string>(world.name);
-  const [pending, setPending] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, []);
-
-  const submit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
-    e.preventDefault();
-    const clean = name.trim();
-    if (!clean || pending || clean === world.name) {
-      if (!clean) setError('Name is required.');
-      else onClose();
-      return;
-    }
-    setPending(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/worlds/${encodeURIComponent(world.id)}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken,
-        },
-        body: JSON.stringify({ name: clean }),
-      });
-      const body = (await res.json().catch(() => ({}))) as {
-        ok?: boolean;
-        error?: string;
-        detail?: string;
-      };
-      if (!res.ok || !body.ok) {
-        setError(body.detail ?? body.error ?? `HTTP ${res.status}`);
-        return;
-      }
-      onSaved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'network error');
-    } finally {
-      setPending(false);
-    }
-  };
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[#2A241E]/50 p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <form
-        onSubmit={submit}
-        className="w-full max-w-sm rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-4 shadow-[0_16px_48px_rgba(42,36,30,0.3)]"
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-[#2A241E]">Edit world</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-[6px] p-1 text-[#5A4F42] transition hover:bg-[#F4EDE0]"
-          >
-            <X size={14} aria-hidden />
-          </button>
-        </div>
-        <label className="mb-3 block">
-          <span className="mb-1 block text-xs font-medium text-[#5A4F42]">
-            Name
-          </span>
-          <input
-            ref={inputRef}
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={80}
-            className="w-full rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1.5 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
-          />
-        </label>
-        {error && <p className="mb-3 text-xs text-[#8B4A52]">{error}</p>}
-        <div className="flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-[6px] px-3 py-1.5 text-xs font-medium text-[#5A4F42] transition hover:text-[#2A241E]"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={pending || !name.trim()}
-            className="rounded-[6px] bg-[#2A241E] px-3 py-1.5 text-xs font-medium text-[#F4EDE0] transition hover:bg-[#3A342E] disabled:opacity-50"
-          >
-            {pending ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
 
 function NewWorldDialog({
   csrfToken,

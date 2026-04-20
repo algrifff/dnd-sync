@@ -80,7 +80,7 @@ export default async function SettingsLayout({
             <p className="mb-6 text-sm text-[#5A4F42]">
               Change how you look and what you sign in with.
             </p>
-            <SettingsTabs />
+            <SettingsTabs role={session.role} />
             <div className="mt-6">{children}</div>
           </div>
         </div>
