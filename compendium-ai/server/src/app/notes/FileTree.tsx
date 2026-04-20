@@ -18,16 +18,22 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
+  BookOpen,
   CalendarDays,
   ChevronDown,
   ChevronRight,
   FileText,
   FolderPlus,
+  Ghost,
+  Globe,
   Heart,
   Lock,
   Map as MapIcon,
+  MapPin,
   Package,
   Plus,
+  ScrollText,
+  Shield,
   Skull,
   Sword,
   Upload,
@@ -55,7 +61,8 @@ type CreateKind =
   | 'villain'
   | 'item'
   | 'location'
-  | 'session';
+  | 'session'
+  | 'monster';
 
 const NEW_ENTRY_OPTIONS: Array<{
   kind: CreateKind;
@@ -72,6 +79,7 @@ const NEW_ENTRY_OPTIONS: Array<{
   { kind: 'item', label: 'Item', icon: Package, placeholder: 'New item' },
   { kind: 'location', label: 'Location', icon: MapIcon, placeholder: 'New location' },
   { kind: 'session', label: 'Session note', icon: CalendarDays, placeholder: 'Session notes' },
+  { kind: 'monster', label: 'Monster', icon: Ghost, placeholder: 'New monster' },
 ];
 
 /** Returns the subset of CreateKinds appropriate for a given folder path,
@@ -114,6 +122,9 @@ function getContextualOptions(folderPath: string | undefined): {
   if (folderPath === 'Lore') {
     return { kinds: ['page', 'folder'], isUpload: false, labelOverrides: {} };
   }
+  if (folderPath === 'Lore/Monsters') {
+    return { kinds: ['monster', 'folder'], isUpload: false, labelOverrides: {} };
+  }
   if (folderPath === 'Lore/Quests') {
     return { kinds: ['page', 'folder'], isUpload: false, labelOverrides: { page: 'New quest' } };
   }
@@ -123,6 +134,27 @@ function getContextualOptions(folderPath: string | undefined): {
 
   // Default — all options
   return { kinds: ['page', 'folder', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session'], isUpload: false, labelOverrides: {} };
+}
+
+type LucideIcon = typeof Sword;
+type FolderIconDef = { Icon: LucideIcon; color: string };
+
+function getFolderIcon(path: string): FolderIconDef | null {
+  if (path === 'Assets') return { Icon: MapIcon, color: '#8B7355' };
+  if (path === 'Campaigns') return { Icon: Shield, color: '#5A7A6A' };
+  if (path === 'Lore') return { Icon: BookOpen, color: '#7B5A8B' };
+  if (path === 'Lore/Monsters') return { Icon: Ghost, color: '#6B5A8E' };
+  if (path === 'Lore/Quests') return { Icon: ScrollText, color: '#8B7A45' };
+  if (path === 'Lore/World Info') return { Icon: Globe, color: '#4A7A8B' };
+  if (/^Campaigns\/[^/]+$/.test(path)) return { Icon: MapIcon, color: '#4A7A6A' };
+  if (/^Campaigns\/[^/]+\/PCs$/.test(path)) return { Icon: Sword, color: '#7B8A5F' };
+  if (/^Campaigns\/[^/]+\/NPCs$/.test(path)) return { Icon: UserRound, color: '#6B7F8E' };
+  if (/^Campaigns\/[^/]+\/Allies$/.test(path)) return { Icon: Heart, color: '#D4A85A' };
+  if (/^Campaigns\/[^/]+\/Villains$/.test(path)) return { Icon: Skull, color: '#8B4A52' };
+  if (/^Campaigns\/[^/]+\/Items$/.test(path)) return { Icon: Package, color: '#7B6A5A' };
+  if (/^Campaigns\/[^/]+\/Sessions$/.test(path)) return { Icon: CalendarDays, color: '#6A5D8B' };
+  if (/^Campaigns\/[^/]+\/Locations$/.test(path)) return { Icon: MapPin, color: '#5A7A6A' };
+  return null;
 }
 
 const STORAGE_KEY = 'compendium.tree.open';
@@ -764,6 +796,12 @@ function TreeRow({
               style={{ transform: item.open ? 'rotate(90deg)' : 'none' }}
               aria-hidden
             />
+            {(() => {
+              const fi = getFolderIcon(item.path);
+              return fi ? (
+                <fi.Icon size={13} aria-hidden className="shrink-0" style={{ color: fi.color }} />
+              ) : null;
+            })()}
             <span className={`truncate font-medium ${isSystem ? 'tracking-wide text-xs uppercase text-[#5A4F42]/70' : ''}`}>
               {item.name}
             </span>

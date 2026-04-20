@@ -28,7 +28,7 @@ export default async function AdminLayout({
   if (!session) redirect('/login?next=/admin');
   if (session.role !== 'admin') redirect('/');
 
-  const tree = buildTree(session.currentGroupId, { hideDmOnly: false });
+  const tree = buildTree(session.currentGroupId);
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
 
   return (
@@ -45,7 +45,7 @@ export default async function AdminLayout({
           activePath=""
           groupId={session.currentGroupId}
           csrfToken={session.csrfToken}
-          canCreate={true}
+          canCreate={false}
           kindMap={kindMap}
         />
         <SidebarFooter
@@ -73,11 +73,10 @@ export default async function AdminLayout({
               className="mb-1 text-3xl font-bold"
               style={{ fontFamily: '"Fraunces", Georgia, serif' }}
             >
-              DM Panel
+              World Settings
             </h1>
             <p className="mb-6 text-sm text-[#5A4F42]">
-              Vault uploads, player accounts, and character sheet templates for
-              this server.
+              Share your world with players, manage templates, and import vault content.
             </p>
             <AdminTabs />
             <div className="mt-6">{children}</div>

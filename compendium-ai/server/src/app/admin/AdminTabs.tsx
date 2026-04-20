@@ -6,9 +6,9 @@ import { usePathname } from 'next/navigation';
 type Tab = { href: string; label: string };
 
 const TABS: Tab[] = [
-  { href: '/admin/vault', label: 'Vault' },
-  { href: '/admin/users', label: 'Users' },
+  { href: '/admin/users', label: 'Share' },
   { href: '/admin/templates', label: 'Templates' },
+  { href: '/admin/vault', label: 'Import Vault' },
   { href: '/admin/server', label: 'Server' },
 ];
 
@@ -18,7 +18,7 @@ export function AdminTabs(): React.JSX.Element {
   return (
     <div
       role="tablist"
-      aria-label="DM Panel"
+      aria-label="World Settings"
       className="flex items-end gap-0.5 border-b border-[#D4C7AE]"
     >
       {TABS.map((t) => {
