@@ -24,6 +24,7 @@ import {
   FileText,
   FolderPlus,
   Heart,
+  Lock,
   Map as MapIcon,
   Package,
   Plus,
@@ -510,7 +511,7 @@ const KIND_META: Record<
 };
 
 type FlatRow =
-  | { kind: 'dir'; key: string; name: string; path: string; depth: number; open: boolean; hasChildren: boolean }
+  | { kind: 'dir'; key: string; name: string; path: string; depth: number; open: boolean; hasChildren: boolean; system: boolean }
   | { kind: 'file'; key: string; name: string; path: string; title: string; depth: number };
 
 function flatten(dir: TreeDir, openSet: Set<string>, depth: number): FlatRow[] {
@@ -526,6 +527,7 @@ function flatten(dir: TreeDir, openSet: Set<string>, depth: number): FlatRow[] {
         depth,
         open: isOpen,
         hasChildren: child.children.length > 0,
+        system: child.system,
       });
       if (isOpen) out.push(...flatten(child, openSet, depth + 1));
     } else {
@@ -587,7 +589,9 @@ function TreeRow({
   onSubmitRename: (name: string) => void;
   children?: React.ReactNode;
 }): React.JSX.Element {
-  const rowDragProps = canCreate
+  const isSystem = item.kind === 'dir' && item.system;
+
+  const rowDragProps = canCreate && !isSystem
     ? {
         draggable: true,
         onDragStart: (e: React.DragEvent) => {
@@ -606,6 +610,7 @@ function TreeRow({
   const isInvalidDrop =
     !dragging ||
     item.kind !== 'dir' ||
+    isSystem ||
     (dragging.kind === 'folder' &&
       (dragging.path === item.path ||
         item.path.startsWith(dragging.path + '/') ||
@@ -670,9 +675,18 @@ function TreeRow({
               style={{ transform: item.open ? 'rotate(90deg)' : 'none' }}
               aria-hidden
             />
-            <span className="truncate font-medium">{item.name}</span>
+            <span className={`truncate font-medium ${isSystem ? 'tracking-wide text-xs uppercase text-[#5A4F42]/70' : ''}`}>
+              {item.name}
+            </span>
           </button>
-          {canCreate && (
+          {isSystem ? (
+            <span
+              className="mr-2 hidden text-[#5A4F42]/35 group-hover:block"
+              title="System folder — cannot be deleted or renamed"
+            >
+              <Lock size={11} aria-hidden />
+            </span>
+          ) : canCreate && (
             <div className="mr-1 hidden items-center gap-0.5 group-hover:flex">
               <NewEntryDropdown
                 onPick={(kind) => onStartCreate(item.path, kind)}

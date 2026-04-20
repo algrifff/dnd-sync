@@ -12,16 +12,34 @@ import { getDb } from './db';
 const DEFAULT_FOLDERS: readonly string[] = [
   'Campaigns',
   'Campaigns/Campaign 1',
-  'Campaigns/Campaign 1/Characters',
-  'Campaigns/Campaign 1/Characters/PCs',
-  'Campaigns/Campaign 1/Characters/NPCs',
-  'Campaigns/Campaign 1/Characters/Allies',
-  'Campaigns/Campaign 1/Characters/Villains',
+  'Campaigns/Campaign 1/PCs',
+  'Campaigns/Campaign 1/NPCs',
+  'Campaigns/Campaign 1/Allies',
+  'Campaigns/Campaign 1/Villains',
+  'Campaigns/Campaign 1/Items',
   'Campaigns/Campaign 1/Sessions',
   'Campaigns/Campaign 1/Locations',
   'Lore',
   'Assets',
 ] as const;
+
+/**
+ * Returns true if a folder path is a system-managed folder that
+ * should never be deleted or renamed by users. Covers:
+ *   - Top-level vault sections (Campaigns, Lore, Assets)
+ *   - Per-campaign canonical sub-folders (PCs, NPCs, Allies,
+ *     Villains, Items, Sessions, Locations)
+ *
+ * The check is intentionally path-pattern-based so it works for
+ * any campaign slug without needing a DB lookup.
+ */
+export function isSystemFolder(path: string): boolean {
+  if (path === 'Campaigns' || path === 'Lore' || path === 'Assets') return true;
+  // Campaigns/<any-slug>  itself is system-managed
+  if (/^Campaigns\/[^/]+$/.test(path)) return true;
+  // Per-campaign canonical folders
+  return /^Campaigns\/[^/]+\/(PCs|NPCs|Allies|Villains|Items|Sessions|Locations)$/.test(path);
+}
 
 /** Seed the default folder skeleton if the group has no notes and no
  *  folder_markers yet. Idempotent on a populated vault — runs nothing
@@ -82,6 +100,7 @@ export type TreeDir = {
   kind: 'dir';
   name: string;
   path: string; // folder path without trailing slash
+  system: boolean; // true = canonical folder, cannot be deleted or renamed
   children: Array<TreeDir | TreeFile>;
 };
 
@@ -115,7 +134,7 @@ export function buildTree(
     )
     .all(groupId);
 
-  const root: TreeDir = { kind: 'dir', name: '', path: '', children: [] };
+  const root: TreeDir = { kind: 'dir', name: '', path: '', system: false, children: [] };
   let maxUpdated = 0;
 
   for (const row of rows) {
@@ -143,10 +162,12 @@ function ensureFolder(root: TreeDir, path: string): void {
       dir = existing;
       continue;
     }
+    const folderPath = segments.slice(0, i + 1).join('/');
     const child: TreeDir = {
       kind: 'dir',
       name,
-      path: segments.slice(0, i + 1).join('/'),
+      path: folderPath,
+      system: isSystemFolder(folderPath),
       children: [],
     };
     dir.children.push(child);
@@ -165,10 +186,12 @@ function insert(dir: TreeDir, segments: string[], fullPath: string, title: strin
     (c): c is TreeDir => c.kind === 'dir' && c.name === head,
   );
   if (!child) {
+    const folderPath = dir.path ? `${dir.path}/${head}` : head;
     child = {
       kind: 'dir',
       name: head,
-      path: dir.path ? `${dir.path}/${head}` : head,
+      path: folderPath,
+      system: isSystemFolder(folderPath),
       children: [],
     };
     dir.children.push(child);
