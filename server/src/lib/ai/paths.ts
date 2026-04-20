@@ -13,6 +13,7 @@ export type EntityKind =
   | 'item'
   | 'location'
   | 'session'
+  | 'monster'
   | 'lore'
   | 'note';
 
@@ -23,15 +24,16 @@ export function canonicalFolder(opts: {
   const base = opts.campaignSlug ? `Campaigns/${opts.campaignSlug}` : null;
 
   switch (opts.kind) {
-    case 'pc':       return base ? `${base}/PCs`       : 'PCs';
-    case 'npc':      return base ? `${base}/NPCs`      : 'NPCs';
-    case 'ally':     return base ? `${base}/Allies`    : 'Allies';
-    case 'villain':  return base ? `${base}/Villains`  : 'Villains';
-    case 'item':     return base ? `${base}/Items`     : 'Items';
-    case 'location': return base ? `${base}/Locations` : 'Lore/Locations';
-    case 'session':  return base ? `${base}/Sessions`  : 'Sessions';
-    case 'lore':     return 'Lore';
-    case 'note':     return base ?? 'Lore';
+    case 'pc':       return base ? `${base}/Characters`    : 'Characters';
+    case 'npc':      return base ? `${base}/People`        : 'People';
+    case 'ally':     return base ? `${base}/People`        : 'People';
+    case 'villain':  return base ? `${base}/Enemies`       : 'Enemies';
+    case 'item':     return base ? `${base}/Loot`          : 'Loot';
+    case 'location': return base ? `${base}/Places`        : 'Places';
+    case 'session':  return base ? `${base}/Adventure Log` : 'Adventure Log';
+    case 'monster':  return base ? `${base}/Creatures`     : 'Creatures';
+    case 'lore':     return 'World Lore';
+    case 'note':     return base ?? 'World Lore';
   }
 }
 

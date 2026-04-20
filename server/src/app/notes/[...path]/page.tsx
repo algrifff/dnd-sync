@@ -76,7 +76,17 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   const outline = extractOutline(contentJson);
 
   return (
-    <div className="flex h-screen flex-col bg-[#F4EDE0] text-[#2A241E]">
+    <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
+      <WorldsSidebar
+          csrfToken={session.csrfToken}
+          userId={session.userId}
+          displayName={session.displayName}
+          accentColor={session.accentColor}
+          avatarVersion={session.avatarVersion}
+          role={session.role}
+          worldId={session.currentGroupId}
+        />
+      <div className="flex min-w-0 flex-1 flex-col">
       <AppHeader
         role={session.role}
         me={{
@@ -90,15 +100,6 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
         groupId={session.currentGroupId}
         />
       <div className="flex min-h-0 flex-1 overflow-hidden">
-      <WorldsSidebar
-          csrfToken={session.csrfToken}
-          userId={session.userId}
-          displayName={session.displayName}
-          accentColor={session.accentColor}
-          avatarVersion={session.avatarVersion}
-          role={session.role}
-          worldId={session.currentGroupId}
-        />
       <aside className="hidden h-full w-[260px] shrink-0 flex-col bg-[#EAE1CF]/60 md:flex">
         <ActiveCharacterBlock
           csrfToken={session.csrfToken}
@@ -212,6 +213,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
           : {})}
       />
       </div>
+      </div>
     </div>
   );
 }
@@ -221,10 +223,9 @@ function campaignSlugFromPath(path: string): string | undefined {
 }
 
 const CHARACTER_KINDS_BY_PATH: Array<[RegExp, TemplateKind]> = [
-  [/(^|\/)pcs\//i, 'pc'],
-  [/(^|\/)allies\//i, 'ally'],
-  [/(^|\/)villains\//i, 'villain'],
-  [/(^|\/)npcs\//i, 'npc'],
+  [/(^|\/)characters\//i, 'pc'],
+  [/(^|\/)enemies\//i, 'villain'],
+  [/(^|\/)people\//i, 'npc'],
 ];
 
 /** Decide whether this note carries a structured sheet (character,

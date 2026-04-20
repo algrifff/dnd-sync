@@ -11,31 +11,23 @@ import { getDb } from './db';
  *  group, so a second boot doesn't revive deleted folders. */
 const DEFAULT_FOLDERS: readonly string[] = [
   'Campaigns',
-  'Lore',
-  'Lore/Monsters',
-  'Lore/Quests',
-  'Lore/World Info',
+  'World Lore',
+  'World Lore/Quests',
+  'World Lore/World Info',
   'Assets',
 ] as const;
 
 /**
  * Returns true if a folder path is a system-managed folder that
  * should never be deleted or renamed by users. Covers:
- *   - Top-level vault sections (Campaigns, Lore, Assets)
- *   - Per-campaign canonical sub-folders (PCs, NPCs, Allies,
- *     Villains, Items, Sessions, Locations)
- *
- * The check is intentionally path-pattern-based so it works for
- * any campaign slug without needing a DB lookup.
+ *   - Top-level vault sections (Campaigns, World Lore, Assets)
+ *   - Per-campaign canonical sub-folders
  */
 export function isSystemFolder(path: string): boolean {
-  if (path === 'Campaigns' || path === 'Lore' || path === 'Assets') return true;
-  // Campaigns/<any-slug>  itself is system-managed
+  if (path === 'Campaigns' || path === 'World Lore' || path === 'Assets') return true;
   if (/^Campaigns\/[^/]+$/.test(path)) return true;
-  // Per-campaign canonical folders
-  if (/^Campaigns\/[^/]+\/(PCs|NPCs|Allies|Villains|Items|Sessions|Locations)$/.test(path)) return true;
-  // Lore canonical sub-folders
-  return /^Lore\/(Quests|World Info|Monsters)$/.test(path);
+  if (/^Campaigns\/[^/]+\/(Characters|People|Enemies|Loot|Adventure Log|Places|Creatures)$/.test(path)) return true;
+  return /^World Lore\/(Quests|World Info)$/.test(path);
 }
 
 /** Seed the default folder skeleton if the group has no notes and no

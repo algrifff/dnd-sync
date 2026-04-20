@@ -26,7 +26,6 @@ import {
   FolderPlus,
   Ghost,
   Globe,
-  Heart,
   Lock,
   Map as MapIcon,
   MapPin,
@@ -76,13 +75,13 @@ const NEW_ENTRY_OPTIONS: Array<{
   { kind: 'folder', label: 'Folder', icon: FolderPlus, placeholder: 'New folder' },
   { kind: 'campaign', label: 'New campaign', icon: Shield, placeholder: 'Campaign name' },
   { kind: 'pc', label: 'Player character', icon: Sword, placeholder: 'New PC' },
-  { kind: 'npc', label: 'NPC', icon: UserRound, placeholder: 'New NPC' },
-  { kind: 'ally', label: 'Ally', icon: Heart, placeholder: 'New ally' },
-  { kind: 'villain', label: 'Villain', icon: Skull, placeholder: 'New villain' },
-  { kind: 'item', label: 'Item', icon: Package, placeholder: 'New item' },
-  { kind: 'location', label: 'Location', icon: MapIcon, placeholder: 'New location' },
-  { kind: 'session', label: 'Session note', icon: CalendarDays, placeholder: 'Session notes' },
-  { kind: 'monster', label: 'Monster', icon: Ghost, placeholder: 'New monster' },
+  { kind: 'npc', label: 'Person (NPC)', icon: UserRound, placeholder: 'New person' },
+  { kind: 'ally', label: 'Ally', icon: UserRound, placeholder: 'New ally' },
+  { kind: 'villain', label: 'Enemy', icon: Skull, placeholder: 'New enemy' },
+  { kind: 'item', label: 'Loot', icon: Package, placeholder: 'New item' },
+  { kind: 'location', label: 'Place', icon: MapIcon, placeholder: 'New place' },
+  { kind: 'session', label: 'Adventure log', icon: CalendarDays, placeholder: 'Session notes' },
+  { kind: 'monster', label: 'Creature', icon: Ghost, placeholder: 'New creature' },
 ];
 
 /** Returns the subset of CreateKinds appropriate for a given folder path,
@@ -94,7 +93,7 @@ function getContextualOptions(folderPath: string | undefined): {
   labelOverrides: Partial<Record<CreateKind, string>>;
 } {
   if (!folderPath) {
-    return { kinds: ['page', 'folder', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session'], isUpload: false, labelOverrides: {} };
+    return { kinds: ['page', 'folder', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'monster'], isUpload: false, labelOverrides: {} };
   }
 
   // Assets section — file upload only
@@ -109,34 +108,31 @@ function getContextualOptions(folderPath: string | undefined): {
 
   // Campaign root (Campaigns/<slug>) — all entity kinds + subfolder
   if (/^Campaigns\/[^/]+$/.test(folderPath)) {
-    return { kinds: ['pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'folder'], isUpload: false, labelOverrides: { folder: 'New subfolder' } };
+    return { kinds: ['pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'monster', 'folder'], isUpload: false, labelOverrides: { folder: 'New subfolder' } };
   }
 
   // Per-campaign canonical sub-folders
-  if (/^Campaigns\/[^/]+\/PCs$/.test(folderPath))       return { kinds: ['pc', 'folder'],      isUpload: false, labelOverrides: {} };
-  if (/^Campaigns\/[^/]+\/NPCs$/.test(folderPath))      return { kinds: ['npc', 'folder'],     isUpload: false, labelOverrides: {} };
-  if (/^Campaigns\/[^/]+\/Allies$/.test(folderPath))    return { kinds: ['ally', 'folder'],    isUpload: false, labelOverrides: {} };
-  if (/^Campaigns\/[^/]+\/Villains$/.test(folderPath))  return { kinds: ['villain', 'folder'], isUpload: false, labelOverrides: {} };
-  if (/^Campaigns\/[^/]+\/Items$/.test(folderPath))     return { kinds: ['item', 'folder'],    isUpload: false, labelOverrides: {} };
-  if (/^Campaigns\/[^/]+\/Sessions$/.test(folderPath))  return { kinds: ['session', 'folder'], isUpload: false, labelOverrides: {} };
-  if (/^Campaigns\/[^/]+\/Locations$/.test(folderPath)) return { kinds: ['location', 'folder'],isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Characters$/.test(folderPath))    return { kinds: ['pc', 'folder'],              isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/People$/.test(folderPath))        return { kinds: ['npc', 'ally', 'folder'],     isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Enemies$/.test(folderPath))       return { kinds: ['villain', 'folder'],         isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Loot$/.test(folderPath))          return { kinds: ['item', 'folder'],            isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Adventure Log$/.test(folderPath)) return { kinds: ['session', 'folder'],         isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Places$/.test(folderPath))        return { kinds: ['location', 'folder'],        isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Creatures$/.test(folderPath))     return { kinds: ['monster', 'folder'],         isUpload: false, labelOverrides: {} };
 
-  // Lore section
-  if (folderPath === 'Lore') {
+  // World Lore section
+  if (folderPath === 'World Lore') {
     return { kinds: ['page', 'folder'], isUpload: false, labelOverrides: {} };
   }
-  if (folderPath === 'Lore/Monsters') {
-    return { kinds: ['monster', 'folder'], isUpload: false, labelOverrides: {} };
-  }
-  if (folderPath === 'Lore/Quests') {
+  if (folderPath === 'World Lore/Quests') {
     return { kinds: ['page', 'folder'], isUpload: false, labelOverrides: { page: 'New quest' } };
   }
-  if (folderPath === 'Lore/World Info') {
+  if (folderPath === 'World Lore/World Info') {
     return { kinds: ['page', 'folder'], isUpload: false, labelOverrides: {} };
   }
 
   // Default — all options
-  return { kinds: ['page', 'folder', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session'], isUpload: false, labelOverrides: {} };
+  return { kinds: ['page', 'folder', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'monster'], isUpload: false, labelOverrides: {} };
 }
 
 type LucideIcon = typeof Sword;
@@ -145,18 +141,17 @@ type FolderIconDef = { Icon: LucideIcon; color: string };
 function getFolderIcon(path: string): FolderIconDef | null {
   if (path === 'Assets') return { Icon: MapIcon, color: '#8B7355' };
   if (path === 'Campaigns') return { Icon: Shield, color: '#5A7A6A' };
-  if (path === 'Lore') return { Icon: BookOpen, color: '#7B5A8B' };
-  if (path === 'Lore/Monsters') return { Icon: Ghost, color: '#6B5A8E' };
-  if (path === 'Lore/Quests') return { Icon: ScrollText, color: '#8B7A45' };
-  if (path === 'Lore/World Info') return { Icon: Globe, color: '#4A7A8B' };
+  if (path === 'World Lore') return { Icon: BookOpen, color: '#7B5A8B' };
+  if (path === 'World Lore/Quests') return { Icon: ScrollText, color: '#8B7A45' };
+  if (path === 'World Lore/World Info') return { Icon: Globe, color: '#4A7A8B' };
   if (/^Campaigns\/[^/]+$/.test(path)) return { Icon: MapIcon, color: '#4A7A6A' };
-  if (/^Campaigns\/[^/]+\/PCs$/.test(path)) return { Icon: Sword, color: '#7B8A5F' };
-  if (/^Campaigns\/[^/]+\/NPCs$/.test(path)) return { Icon: UserRound, color: '#6B7F8E' };
-  if (/^Campaigns\/[^/]+\/Allies$/.test(path)) return { Icon: Heart, color: '#D4A85A' };
-  if (/^Campaigns\/[^/]+\/Villains$/.test(path)) return { Icon: Skull, color: '#8B4A52' };
-  if (/^Campaigns\/[^/]+\/Items$/.test(path)) return { Icon: Package, color: '#7B6A5A' };
-  if (/^Campaigns\/[^/]+\/Sessions$/.test(path)) return { Icon: CalendarDays, color: '#6A5D8B' };
-  if (/^Campaigns\/[^/]+\/Locations$/.test(path)) return { Icon: MapPin, color: '#5A7A6A' };
+  if (/^Campaigns\/[^/]+\/Characters$/.test(path))    return { Icon: Sword, color: '#7B8A5F' };
+  if (/^Campaigns\/[^/]+\/People$/.test(path))        return { Icon: UserRound, color: '#6B7F8E' };
+  if (/^Campaigns\/[^/]+\/Enemies$/.test(path))       return { Icon: Skull, color: '#8B4A52' };
+  if (/^Campaigns\/[^/]+\/Loot$/.test(path))          return { Icon: Package, color: '#7B6A5A' };
+  if (/^Campaigns\/[^/]+\/Adventure Log$/.test(path)) return { Icon: CalendarDays, color: '#6A5D8B' };
+  if (/^Campaigns\/[^/]+\/Places$/.test(path))        return { Icon: MapPin, color: '#5A7A6A' };
+  if (/^Campaigns\/[^/]+\/Creatures$/.test(path))     return { Icon: Ghost, color: '#6B5A8E' };
   return null;
 }
 
@@ -249,8 +244,8 @@ export function FileTree({
       // When creating an entity from the campaign root, auto-route to the
       // correct canonical subfolder so the note lands in the right place.
       const KIND_SUBFOLDER: Partial<Record<CreateKind, string>> = {
-        pc: 'PCs', npc: 'NPCs', ally: 'Allies', villain: 'Villains',
-        item: 'Items', session: 'Sessions', location: 'Locations',
+        pc: 'Characters', npc: 'People', ally: 'People', villain: 'Enemies',
+        item: 'Loot', session: 'Adventure Log', location: 'Places', monster: 'Creatures',
       };
       let resolvedParent = parent;
       if (/^Campaigns\/[^/]+$/.test(parent) && kind in KIND_SUBFOLDER) {
@@ -659,10 +654,10 @@ const KIND_META: Record<
   FileTreeKind,
   { icon: typeof Sword; color: string; label: string }
 > = {
-  pc: { icon: Sword, color: '#7B8A5F', label: 'Player character' },
-  ally: { icon: Heart, color: '#D4A85A', label: 'Ally' },
-  villain: { icon: Skull, color: '#8B4A52', label: 'Villain' },
-  npc: { icon: UserRound, color: '#6B7F8E', label: 'NPC' },
+  pc: { icon: Sword, color: '#7B8A5F', label: 'Character' },
+  ally: { icon: UserRound, color: '#D4A85A', label: 'Ally' },
+  villain: { icon: Skull, color: '#8B4A52', label: 'Enemy' },
+  npc: { icon: UserRound, color: '#6B7F8E', label: 'Person' },
   session: { icon: CalendarDays, color: '#6A5D8B', label: 'Session' },
 };
 
@@ -1129,7 +1124,7 @@ function NewEntryRow({
 }
 
 const CAMPAIGN_SUBFOLDERS = [
-  'PCs', 'NPCs', 'Allies', 'Villains', 'Items', 'Sessions', 'Locations',
+  'Characters', 'People', 'Enemies', 'Loot', 'Adventure Log', 'Places', 'Creatures',
 ] as const;
 type CampaignSubfolder = typeof CAMPAIGN_SUBFOLDERS[number];
 
