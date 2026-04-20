@@ -157,6 +157,8 @@ export function deleteWorld(opts: {
         WHERE current_group_id = ?`,
     ).run(otherWorld.id, opts.groupId);
 
+    // audit_log.group_id has no ON DELETE CASCADE, so clear it manually.
+    db.query('DELETE FROM audit_log WHERE group_id = ?').run(opts.groupId);
     db.query('DELETE FROM groups WHERE id = ?').run(opts.groupId);
   })();
 
