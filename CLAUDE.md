@@ -52,3 +52,26 @@ Set env vars: `ADMIN_TOKEN`, `PLAYER_TOKEN`, `DATA_DIR=/data` + a mounted volume
 - No comments unless the WHY is non-obvious
 - TypeScript strict mode throughout
 - Migrations: append to `MIGRATIONS` array in `migrations.ts`, never edit existing entries
+
+## Skills (invoke with `/skill:<name>`)
+
+| Skill | Purpose |
+|-------|---------|
+| `code-review` | Structured review — correctness, perf, type safety |
+| `security-audit` | OWASP Top 10 scan, auth/input validation focus |
+| `refactor-plan` | Strategic refactoring with risk assessment |
+| `rigor-audit` | Combined quality + security check |
+
+Full docs: [`.claude/skills/README.md`](.claude/skills/README.md)
+
+## Path-specific rules (auto-loaded by Claude Code)
+
+| Rule file | Applies to |
+|-----------|------------|
+| [`.claude/rules/frontend.md`](.claude/rules/frontend.md) | `**/*.tsx`, `**/*.jsx`, `**/components/**` |
+| [`.claude/rules/backend.md`](.claude/rules/backend.md) | `**/api/**`, `**/server/**` |
+| [`.claude/rules/database.md`](.claude/rules/database.md) | `**/migrations*`, `**/*.sql` |
+| [`.claude/rules/security.md`](.claude/rules/security.md) | `**/auth/**`, `**/security/**` |
+| [`.claude/rules/testing.md`](.claude/rules/testing.md) | `**/*.test.*`, `**/*.spec.*` |
+
+Language guides (TypeScript/Next.js most relevant): [`.claude/languages/`](.claude/languages/)
