@@ -10,6 +10,17 @@ export default function AdminUsersPage(): ReactElement {
 
   return (
     <div className="space-y-6">
+      <div>
+        <h1
+          className="mb-1 text-3xl font-bold text-[#2A241E]"
+          style={{ fontFamily: '"Fraunces", Georgia, serif' }}
+        >
+          Users
+        </h1>
+        <p className="text-sm text-[#5A4F42]">
+          Create accounts and manage who can access this server.
+        </p>
+      </div>
       <p className="text-sm text-[#5A4F42]">
         Create accounts for your players and DMs. Share the generated
         password out-of-band — it is displayed only once.

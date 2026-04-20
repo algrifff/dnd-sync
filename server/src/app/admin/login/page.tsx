@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shield } from 'lucide-react';
 
 export default function AdminLoginPage(): React.JSX.Element {
   const [token, setToken] = useState('');

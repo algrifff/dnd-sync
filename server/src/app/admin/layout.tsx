@@ -28,15 +28,6 @@ export default function AdminLayout({
         <AdminSignOut />
       </header>
       <main className="mx-auto max-w-3xl px-6 py-8">
-        <h1
-          className="mb-1 text-3xl font-bold"
-          style={{ fontFamily: '"Fraunces", Georgia, serif' }}
-        >
-          Users
-        </h1>
-        <p className="mb-6 text-sm text-[#5A4F42]">
-          Create accounts and manage who can access this server.
-        </p>
         {children}
       </main>
     </div>
