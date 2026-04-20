@@ -27,21 +27,30 @@ export type Me = {
   displayName: string;
   username: string;
   accentColor: string;
+  avatarVersion: number;
 };
 
-export function PresenceClient({ me }: { me: Me }): React.JSX.Element {
+export function PresenceClient({
+  me,
+  groupId,
+}: {
+  me: Me;
+  groupId?: string;
+}): React.JSX.Element {
   const router = useRouter();
   const pathname = usePathname() ?? '';
 
-  const ydoc = useMemo(() => new Y.Doc(), []);
+  const ydoc = useMemo(() => new Y.Doc(), [groupId]);
   const provider = useMemo(
     () =>
       new HocuspocusProvider({
         url: buildCollabUrl(),
-        name: '.presence',
+        // Scope presence per group so users from different worlds
+        // don't appear in each other's avatar rows.
+        name: groupId ? `.presence:${groupId}` : '.presence',
         document: ydoc,
       }),
-    [ydoc],
+    [ydoc, groupId],
   );
 
   const [peers, setPeers] = useState<PresencePeer[]>([]);
@@ -59,6 +68,7 @@ export function PresenceClient({ me }: { me: Me }): React.JSX.Element {
       name: me.displayName,
       username: me.username,
       color: me.accentColor,
+      avatarVersion: me.avatarVersion,
     });
 
     const recompute = (): void => {
@@ -73,12 +83,15 @@ export function PresenceClient({ me }: { me: Me }): React.JSX.Element {
         const color = s.user.color ?? '#5A4F42';
         const name = s.user.name ?? 'Anonymous';
         const userId = s.user.userId ?? '';
+        const avatarVersion =
+          typeof s.user.avatarVersion === 'number' ? s.user.avatarVersion : 0;
         list.push({
           clientId,
           userId,
           name,
           username: s.user.username ?? '',
           color,
+          avatarVersion,
           viewing,
           viewingTitle: s.viewingTitle ?? null,
         });
@@ -87,6 +100,7 @@ export function PresenceClient({ me }: { me: Me }): React.JSX.Element {
           userId,
           name,
           color,
+          avatarVersion,
           viewing,
           notePath: notePathFromPathname(viewing),
         });
@@ -156,11 +170,14 @@ export function PresenceClient({ me }: { me: Me }): React.JSX.Element {
     };
   }, [router]);
 
-  // Tear down on unmount.
+  // Tear down on unmount. Clear local awareness first so peers see
+  // the user disappear immediately rather than waiting for the
+  // WebSocket close timeout.
   useEffect(() => {
     const p = provider;
     const d = ydoc;
     return () => {
+      p.awareness?.setLocalState(null);
       p.destroy();
       d.destroy();
     };
@@ -175,6 +192,7 @@ type PeerState = {
     name: string;
     username: string;
     color: string;
+    avatarVersion?: number;
   };
   viewing?: string | null;
   viewingTitle?: string | null;

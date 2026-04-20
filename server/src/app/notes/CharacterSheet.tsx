@@ -184,13 +184,15 @@ export function CharacterSheet({
       aria-label="Character sheet"
       className="mb-6 rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-4"
     >
-      {(savingAny || flash) && (
-        <div className="mb-3 text-right text-xs text-[#5A4F42]">
-          {savingAny ? 'Saving…' : (
-            <span className="text-[#8B4A52]">{flash}</span>
-          )}
-        </div>
-      )}
+      <div
+        className="mb-3 h-4 text-right text-xs text-[#5A4F42] transition-opacity"
+        style={{ opacity: savingAny || flash ? 1 : 0 }}
+        aria-live="polite"
+      >
+        {savingAny ? 'Saving…' : flash ? (
+          <span className="text-[#8B4A52]">{flash}</span>
+        ) : null}
+      </div>
 
       <div className="space-y-4">
         {template.schema.sections.map((section) => (
@@ -308,7 +310,10 @@ function FieldInput({
           else {
             const n = Number(local);
             if (Number.isFinite(n)) {
-              onCommit(field.type === 'integer' ? Math.trunc(n) : n);
+              let clamped = field.type === 'integer' ? Math.trunc(n) : n;
+              if (field.min != null) clamped = Math.max(field.min, clamped);
+              if (field.max != null) clamped = Math.min(field.max, clamped);
+              onCommit(clamped);
             }
           }
         }}

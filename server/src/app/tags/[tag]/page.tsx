@@ -58,6 +58,7 @@ export default async function TagDetailPage({ params }: Ctx): Promise<ReactEleme
             displayName: session.displayName,
             username: session.username,
             accentColor: session.accentColor,
+            avatarVersion: session.avatarVersion,
           }}
         csrfToken={session.csrfToken}
         canCreate={session.role !== 'viewer'}

@@ -278,9 +278,13 @@ function Chip({
   children: React.ReactNode;
   onRemove?: (() => void) | undefined;
 }): React.JSX.Element {
+  const label = typeof children === 'string' ? children : undefined;
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-[#8B4A52]/40 bg-[#8B4A52]/10 px-2.5 py-0.5 text-xs font-medium text-[#5E3A3F]">
-      <span>{children}</span>
+    <span
+      title={label}
+      className="inline-flex max-w-[200px] items-center gap-1 rounded-full border border-[#8B4A52]/40 bg-[#8B4A52]/10 px-2.5 py-0.5 text-xs font-medium text-[#5E3A3F]"
+    >
+      <span className="truncate">{children}</span>
       {onRemove && (
         <button
           type="button"

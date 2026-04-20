@@ -54,6 +54,7 @@ export default async function SettingsLayout({
             displayName: session.displayName,
             username: session.username,
             accentColor: session.accentColor,
+            avatarVersion: session.avatarVersion,
           }}
         csrfToken={session.csrfToken}
         canCreate={session.role !== 'viewer'}

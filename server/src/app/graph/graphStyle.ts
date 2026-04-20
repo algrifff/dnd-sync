@@ -14,8 +14,8 @@
 // Anything not in the table falls through to the ink-soft default.
 // New categories: add a row here, ordered by the priority you want.
 
-export const NODE_BASE_RADIUS = 3;
-export const NODE_DEGREE_COEFF = 1.5;
+export const NODE_BASE_RADIUS = 5;
+export const NODE_DEGREE_COEFF = 2.5;
 
 export type TagStyle = {
   tag: string;

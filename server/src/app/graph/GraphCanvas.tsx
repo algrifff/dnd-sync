@@ -138,6 +138,11 @@ export function GraphCanvas({
   // cursors at their latest screen positions (camera pan/zoom,
   // dragged nodes, physics — all update the graph→viewport mapping).
   const [renderTick, setRenderTick] = useState<number>(0);
+  // Incremented when the server signals that note_links changed so we
+  // re-fetch graph data without a full page reload.
+  const [graphVersion, setGraphVersion] = useState<number>(0);
+  const [nodeScale, setNodeScale] = useState<number>(1);
+  const nodeScaleRef = useRef<number>(1);
 
   // ── shared graph state (synced across connected peers) ─────────────
   // Two providers: one ephemeral (pins/colours/anchors/awareness),
@@ -177,10 +182,20 @@ export function GraphCanvas({
     [ydoc],
   );
   const coloursMap = useMemo(() => ydoc.getMap<string>('colours'), [ydoc]);
+  const metaMap = useMemo(() => ydoc.getMap<number>('meta'), [ydoc]);
   const groupsMap = useMemo(
     () => groupsYdoc.getMap<Group>('groups'),
     [groupsYdoc],
   );
+
+  // Re-fetch graph data when the server signals note_links changed.
+  useEffect(() => {
+    const onMeta = (): void => {
+      if (metaMap.has('graphDirty')) setGraphVersion((v) => v + 1);
+    };
+    metaMap.observe(onMeta);
+    return () => metaMap.unobserve(onMeta);
+  }, [metaMap]);
 
   useEffect(() => {
     return () => {
@@ -371,7 +386,7 @@ export function GraphCanvas({
           const seed = seedPosition(n.id);
           g.addNode(n.id, {
             label: n.title,
-            size: radiusForDegree(n.degree),
+            size: radiusForDegree(n.degree) * nodeScaleRef.current,
             color: colorFor(n.id, n.tags),
             x: pin?.x ?? seed.x,
             y: pin?.y ?? seed.y,
@@ -746,6 +761,7 @@ export function GraphCanvas({
     me.accentColor,
     me.cursorMode,
     me.avatarVersion,
+    graphVersion,
   ]);
 
   // Live re-colour when tag overrides change without rebuilding the
@@ -769,6 +785,17 @@ export function GraphCanvas({
       renderer.setSetting(k as Parameters<typeof renderer.setSetting>[0], v as never);
     }
   }, [labelMode]);
+
+  // Apply node scale changes without rebuilding the graph.
+  useEffect(() => {
+    nodeScaleRef.current = nodeScale;
+    const g = graphRef.current;
+    if (!g) return;
+    g.forEachNode((node) => {
+      const degree = (g.getNodeAttribute(node, 'degree') as number) ?? 0;
+      g.setNodeAttribute(node, 'size', radiusForDegree(degree) * nodeScale);
+    });
+  }, [nodeScale]);
 
   const zoomBy = useCallback((factor: number) => {
     const renderer = sigmaRef.current;
@@ -872,6 +899,24 @@ export function GraphCanvas({
               const v = Number(e.target.value);
               setLabelMode(v === 0 ? 'none' : v === 1 ? 'some' : 'all');
             }}
+            className="w-full accent-[#8B4A52]"
+          />
+        </div>
+
+        <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+              Node size
+            </span>
+            <span className="text-xs text-[#5A4F42]">{nodeScale.toFixed(1)}×</span>
+          </div>
+          <input
+            type="range"
+            min={0.5}
+            max={3}
+            step={0.1}
+            value={nodeScale}
+            onChange={(e) => setNodeScale(Number(e.target.value))}
             className="w-full accent-[#8B4A52]"
           />
         </div>

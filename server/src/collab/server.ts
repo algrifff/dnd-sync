@@ -177,16 +177,31 @@ export const collabServer = new Hocuspocus({
             'UPDATE notes SET yjs_state = ?, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
           )
           .run(state, Date.now(), context.userId, context.groupId, documentName);
-        try {
-          deriveAndPersist({
-            groupId: context.groupId,
-            path: documentName,
-            doc: document,
-            userId: context.userId,
-          });
-        } catch (err) {
-          console.error(`[collab] derive failed for ${documentName}:`, err);
-        }
+        // Derive runs asynchronously so it doesn't block the collab
+        // server from broadcasting this update to other connected peers.
+        setImmediate(() => {
+          try {
+            deriveAndPersist({
+              groupId: context.groupId,
+              path: documentName,
+              doc: document,
+              userId: context.userId,
+            });
+            // Signal graph clients to re-fetch — the note may have added or
+            // removed wikilinks, so the graph data is now stale.
+            const graphStateDoc = collabServer.documents.get(
+              `.graph-state:${context.groupId}`,
+            );
+            if (graphStateDoc) {
+              (graphStateDoc.getMap('meta') as import('yjs').Map<number>).set(
+                'graphDirty',
+                Date.now(),
+              );
+            }
+          } catch (err) {
+            console.error(`[collab] derive failed for ${documentName}:`, err);
+          }
+        });
       },
     }),
   ],

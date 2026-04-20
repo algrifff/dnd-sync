@@ -14,6 +14,7 @@ export type PresencePeerLite = {
   userId: string;
   name: string;
   color: string;
+  avatarVersion: number;
   viewing: string | null;
   notePath: string | null;
 };

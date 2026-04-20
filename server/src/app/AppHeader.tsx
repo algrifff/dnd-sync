@@ -52,7 +52,7 @@ export function AppHeader({
 
         {worldName && (
           <span
-            className="truncate text-xl font-semibold leading-none tracking-wide"
+            className="truncate text-xl font-semibold leading-tight tracking-wide"
             style={{
               fontFamily: 'var(--font-fraunces), "Fraunces", Georgia, serif',
               color: headerColor,
@@ -63,7 +63,7 @@ export function AppHeader({
         )}
 
         {/* Live presence — sits right of the title */}
-        <PresenceClient me={me} />
+        {groupId ? <PresenceClient me={me} groupId={groupId} /> : <PresenceClient me={me} />}
 
         {/* Sidebar-less pages: inline nav */}
         {/* (includeNav is no longer needed — kept for API compat) */}

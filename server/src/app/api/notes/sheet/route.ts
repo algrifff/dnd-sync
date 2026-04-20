@@ -77,8 +77,8 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   let role: TemplateKind | null = null;
   if (fm.kind === 'character') {
     role = inferRole(fm, body.path);
-  } else if (fm.kind === 'item' || fm.kind === 'location') {
-    role = fm.kind;
+  } else if (fm.kind === 'item' || fm.kind === 'location' || fm.kind === 'monster') {
+    role = fm.kind as TemplateKind;
   }
   if (!role) return json({ error: 'no_structured_sheet' }, 400);
   const template = getTemplate(role);

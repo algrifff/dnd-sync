@@ -54,9 +54,9 @@ type Mode = 'none' | 'brush' | 'eraser';
 const VIRTUAL_WIDTH = 1600;
 // Eraser radius in virtual px (same scale as stroke coords).
 const ERASER_RADIUS = 10;
-// Throttle interval for mid-draw Y flushes. 50 ms = 20 Hz, enough
-// for peers to see smooth stroke growth without spamming sync.
-const FLUSH_INTERVAL_MS = 50;
+// Throttle interval for mid-draw Y flushes. 16 ms ≈ 60 Hz so remote
+// peers see strokes grow at near-frame-rate before network RTT adds latency.
+const FLUSH_INTERVAL_MS = 16;
 const STROKE_WIDTH = 2;
 
 const MIN_ZOOM = 0.5;
@@ -274,7 +274,12 @@ export function DrawingOverlay({
   }, [strokesYMap, user.userId]);
 
   if (!toolsAnchor || !column) return null;
-  const svgHeight = Math.max(columnHeight, 1);
+  // Minimum canvas height: enough virtual pixels to fill the viewport.
+  // The column has CSS zoom applied, so we divide by zoom to get the
+  // equivalent virtual-pixel count that will visually cover the screen.
+  const minVirtualHeight =
+    typeof window !== 'undefined' ? Math.ceil(window.innerHeight / zoom) : 800;
+  const svgHeight = Math.max(columnHeight, minVirtualHeight);
 
   const drawing = drawingRef.current;
   void drawingTick;

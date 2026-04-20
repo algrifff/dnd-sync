@@ -43,20 +43,30 @@ export function PeerStack({ notePath }: { notePath: string }): React.JSX.Element
       aria-label={`${here.length} viewing`}
       title={here.map((p) => p.name).join(', ')}
     >
-      {visible.map((p, i) => (
-        <span
-          key={p.clientId}
-          className="flex h-4 w-4 items-center justify-center rounded-full border-2 text-[8px] font-semibold text-[#2A241E]"
-          style={{
-            backgroundColor: withAlpha(p.color, 0.25),
-            borderColor: p.color,
-            marginLeft: i === 0 ? 0 : -6,
-            zIndex: visible.length - i,
-          }}
-        >
-          {initials(p.name)}
-        </span>
-      ))}
+      {visible.map((p, i) => {
+        const avatarUrl =
+          p.avatarVersion > 0 && p.userId
+            ? `/api/users/${p.userId}/avatar?v=${p.avatarVersion}`
+            : null;
+        return (
+          <span
+            key={p.clientId}
+            className="flex h-4 w-4 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 text-[8px] font-semibold text-white"
+            style={{
+              backgroundColor: avatarUrl ? 'transparent' : p.color,
+              borderColor: p.color,
+              marginLeft: i === 0 ? 0 : -6,
+              zIndex: visible.length - i,
+            }}
+          >
+            {avatarUrl ? (
+              <img src={avatarUrl} alt={p.name} className="h-full w-full object-cover" />
+            ) : (
+              initials(p.name)
+            )}
+          </span>
+        );
+      })}
       {extra > 0 && (
         <span
           className="flex h-4 items-center justify-center rounded-full border-2 border-[#D4C7AE] bg-[#FBF5E8] px-1 text-[8px] font-semibold text-[#5A4F42]"
@@ -77,13 +87,3 @@ function initials(name: string): string {
   return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }
 
-function withAlpha(hex: string, alpha: number): string {
-  const m = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(hex.trim());
-  if (!m) return hex;
-  let body = m[1]!;
-  if (body.length === 3) body = body.split('').map((c) => c + c).join('');
-  const r = parseInt(body.slice(0, 2), 16);
-  const g = parseInt(body.slice(2, 4), 16);
-  const b = parseInt(body.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, alpha))})`;
-}

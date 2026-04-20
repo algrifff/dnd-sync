@@ -65,6 +65,7 @@ export default async function HomePage(): Promise<ReactElement> {
             displayName: session.displayName,
             username: session.username,
             accentColor: session.accentColor,
+            avatarVersion: session.avatarVersion,
           }}
         csrfToken={session.csrfToken}
         canCreate={session.role !== 'viewer'}

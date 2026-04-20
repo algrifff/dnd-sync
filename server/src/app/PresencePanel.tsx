@@ -10,6 +10,7 @@ export type PresencePeer = {
   name: string;
   username: string;
   color: string;
+  avatarVersion: number;
   viewing: string | null;
   viewingTitle: string | null;
 };
@@ -42,6 +43,10 @@ export function PresencePanel({
         const tooltip = p.viewingTitle
           ? `${p.name} is viewing ${p.viewingTitle}`
           : `${p.name} is online`;
+        const avatarUrl =
+          p.avatarVersion > 0 && p.userId
+            ? `/api/users/${p.userId}/avatar?v=${p.avatarVersion}`
+            : null;
         return (
           <button
             key={p.clientId}
@@ -52,13 +57,21 @@ export function PresencePanel({
             disabled={!isNavigable}
             title={tooltip}
             aria-label={tooltip}
-            className="group relative flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-semibold text-[#2A241E] transition hover:-translate-y-px disabled:cursor-default disabled:hover:translate-y-0"
+            className="group relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 text-xs font-semibold text-white transition hover:-translate-y-px disabled:cursor-default disabled:hover:translate-y-0"
             style={{
-              backgroundColor: withAlpha(p.color, 0.2),
+              backgroundColor: avatarUrl ? 'transparent' : p.color,
               borderColor: p.color,
             }}
           >
-            <span aria-hidden>{initials(p.name)}</span>
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt={p.name}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <span aria-hidden>{initials(p.name)}</span>
+            )}
           </button>
         );
       })}
@@ -74,17 +87,3 @@ function initials(name: string): string {
   return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }
 
-// Accept "#RRGGBB" or "#RGB"; fall back to the opaque colour if we
-// can't parse. alpha clamped to [0, 1].
-function withAlpha(hex: string, alpha: number): string {
-  const trimmed = hex.trim();
-  const m = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(trimmed);
-  if (!m) return trimmed;
-  let body = m[1]!;
-  if (body.length === 3) body = body.split('').map((c) => c + c).join('');
-  const r = parseInt(body.slice(0, 2), 16);
-  const g = parseInt(body.slice(2, 4), 16);
-  const b = parseInt(body.slice(4, 6), 16);
-  const a = Math.max(0, Math.min(1, alpha));
-  return `rgba(${r}, ${g}, ${b}, ${a})`;
-}

@@ -416,6 +416,15 @@ export function SlashMenu({
   }
 
   const { rect } = trigger;
+  const MENU_W = 288; // w-72
+  const MENU_H = 320; // max-h-80
+  const vw = typeof window !== 'undefined' ? window.innerWidth : MENU_W + 16;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : MENU_H + 16;
+  const menuLeft = Math.max(8, Math.min(rect.left, vw - MENU_W - 8));
+  const menuTop =
+    rect.bottom + 6 + MENU_H > vh
+      ? Math.max(8, rect.top - MENU_H - 6) // flip above caret
+      : rect.bottom + 6;
   return (
     <>
       {hiddenFileInput}
@@ -424,8 +433,8 @@ export function SlashMenu({
         ref={popoverRef}
         role="listbox"
         aria-label="Slash commands"
-        className="fixed z-30 w-72 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_12px_32px_rgba(42,36,30,0.18)]"
-        style={{ left: rect.left, top: rect.bottom + 6 }}
+        className="fixed z-50 w-72 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_12px_32px_rgba(42,36,30,0.18)]"
+        style={{ left: menuLeft, top: menuTop }}
       >
         {options.length === 0 ? (
           <div className="px-3 py-2 text-xs text-[#5A4F42]">No matches</div>
