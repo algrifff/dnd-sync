@@ -11,14 +11,6 @@ import { getDb } from './db';
  *  group, so a second boot doesn't revive deleted folders. */
 const DEFAULT_FOLDERS: readonly string[] = [
   'Campaigns',
-  'Campaigns/Campaign 1',
-  'Campaigns/Campaign 1/PCs',
-  'Campaigns/Campaign 1/NPCs',
-  'Campaigns/Campaign 1/Allies',
-  'Campaigns/Campaign 1/Villains',
-  'Campaigns/Campaign 1/Items',
-  'Campaigns/Campaign 1/Sessions',
-  'Campaigns/Campaign 1/Locations',
   'Lore',
   'Lore/Monsters',
   'Lore/Quests',
@@ -71,22 +63,9 @@ export function ensureDefaultFolders(groupId: string): void {
     `INSERT OR IGNORE INTO folder_markers (group_id, path, created_at)
      VALUES (?, ?, ?)`,
   );
-  const insertCampaign = db.query(
-    `INSERT OR IGNORE INTO campaigns (group_id, slug, name, folder_path, created_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  );
 
   db.transaction(() => {
     for (const path of DEFAULT_FOLDERS) insertFolder.run(groupId, path, now);
-    // Seed the matching campaigns row so the /characters + /sessions
-    // dashboards have something in their dropdown out of the box.
-    insertCampaign.run(
-      groupId,
-      'campaign-1',
-      'Campaign 1',
-      'Campaigns/Campaign 1',
-      now,
-    );
   })();
 
   console.log(

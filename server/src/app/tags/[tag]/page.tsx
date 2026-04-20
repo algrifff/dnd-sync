@@ -42,11 +42,11 @@ export default async function TagDetailPage({ params }: Ctx): Promise<ReactEleme
     <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
       <WorldsSidebar csrfToken={session.csrfToken} />
       <aside className="hidden h-full w-[260px] shrink-0 flex-col bg-[#EAE1CF]/60 md:flex">
-        <SidebarHeader role={session.role} />
         <ActiveCharacterBlock
           csrfToken={session.csrfToken}
           initialActivePath={session.activeCharacterPath}
         />
+        <SidebarHeader role={session.role} />
         <FileTree
           tree={tree}
           activePath=""
