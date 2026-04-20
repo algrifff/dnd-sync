@@ -679,26 +679,28 @@ function TreeRow({
               {item.name}
             </span>
           </button>
-          {isSystem ? (
-            <span
-              className="mr-2 hidden text-[#5A4F42]/35 group-hover:block"
-              title="System folder — cannot be deleted or renamed"
-            >
-              <Lock size={11} aria-hidden />
-            </span>
-          ) : canCreate && (
+          {canCreate && (
             <div className="mr-1 hidden items-center gap-0.5 group-hover:flex">
               <NewEntryDropdown
                 onPick={(kind) => onStartCreate(item.path, kind)}
                 variant="compact"
                 folderName={item.name}
               />
-              <RowMenu
-                kind="folder"
-                path={item.path}
-                csrfToken={csrfToken}
-                onStartRename={onStartRename}
-              />
+              {isSystem ? (
+                <span
+                  className="p-1 text-[#5A4F42]/35"
+                  title="System folder — cannot be deleted or renamed"
+                >
+                  <Lock size={11} aria-hidden />
+                </span>
+              ) : (
+                <RowMenu
+                  kind="folder"
+                  path={item.path}
+                  csrfToken={csrfToken}
+                  onStartRename={onStartRename}
+                />
+              )}
             </div>
           )}
         </div>
