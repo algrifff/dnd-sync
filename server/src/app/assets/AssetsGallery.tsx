@@ -1,16 +1,12 @@
 'use client';
 
 // Assets gallery — image-first grid with folder-derived bucket
-// filters and a full-size preview modal.
-//
-// Buckets are derived from the segment after the nearest Assets/
-// folder in the path (typical vault convention). Non-image mimes
-// (PDFs, videos, audio) fall into an "Other" bucket rendered as a
-// text-only list; they're still clickable.
+// filters, an upload button, and a detail modal with tag editing.
 
-import { useMemo, useState } from 'react';
-import Link from 'next/link';
-import { FileText, X } from 'lucide-react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { FileText, Upload, X } from 'lucide-react';
+import { AssetTagEditor } from './AssetTagEditor';
 
 type Asset = {
   id: string;
@@ -19,37 +15,66 @@ type Asset = {
   originalName: string;
   originalPath: string;
   uploadedAt: number;
+  tags: string[];
 };
 
 export function AssetsGallery({
-  assets,
+  assets: initialAssets,
+  csrfToken,
+  canEdit,
 }: {
   assets: Asset[];
+  csrfToken: string;
+  canEdit: boolean;
 }): React.JSX.Element {
-  const buckets = useMemo(() => bucketize(assets), [assets]);
+  const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<Asset | null>(null);
+
+  const buckets = useMemo(() => bucketize(initialAssets), [initialAssets]);
   const bucketNames = Object.keys(buckets).sort(bucketSort);
   const [activeBucket, setActiveBucket] = useState<string>(
     bucketNames[0] ?? 'All',
   );
-  const [preview, setPreview] = useState<Asset | null>(null);
 
-  if (assets.length === 0) {
-    return (
-      <p className="rounded-[10px] border border-dashed border-[#D4C7AE] bg-[#FBF5E8]/60 px-4 py-6 text-sm text-[#5A4F42]">
-        No assets yet. Upload a vault ZIP from{' '}
-        <Link href="/settings/vault" className="underline">
-          /settings/vault
-        </Link>{' '}
-        to populate the gallery.
-      </p>
-    );
-  }
+  const handleUpload = useCallback(
+    async (files: FileList) => {
+      setUploading(true);
+      setUploadError(null);
+      for (const file of Array.from(files)) {
+        const form = new FormData();
+        form.append('file', file);
+        try {
+          const res = await fetch('/api/assets/upload', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken },
+            body: form,
+          });
+          if (!res.ok) {
+            const body = (await res.json().catch(() => ({}))) as { error?: string };
+            setUploadError(body.error ?? `Upload failed (HTTP ${res.status})`);
+            setUploading(false);
+            return;
+          }
+        } catch (err) {
+          setUploadError(err instanceof Error ? err.message : 'network error');
+          setUploading(false);
+          return;
+        }
+      }
+      setUploading(false);
+      router.refresh();
+    },
+    [csrfToken, router],
+  );
 
   const active = buckets[activeBucket] ?? [];
 
   return (
     <div>
-      {/* Bucket chips */}
+      {/* Toolbar: bucket chips + upload button */}
       <div className="mb-4 flex flex-wrap items-center gap-1">
         {bucketNames.map((name) => {
           const selected = name === activeBucket;
@@ -79,32 +104,59 @@ export function AssetsGallery({
             </button>
           );
         })}
+
+        <div className="ml-auto flex items-center gap-2">
+          {uploadError && (
+            <span className="text-xs text-[#8B4A52]">{uploadError}</span>
+          )}
+          {canEdit && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="sr-only"
+                onChange={(e) => {
+                  if (e.target.files?.length) {
+                    void handleUpload(e.target.files);
+                    e.target.value = '';
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] px-3 py-1 text-xs font-medium text-[#2A241E] transition hover:bg-[#EAE1CF] disabled:opacity-60"
+              >
+                <Upload size={12} aria-hidden />
+                {uploading ? 'Uploading…' : 'Upload'}
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Grid */}
-      {activeBucket === 'Other' ? (
+      {initialAssets.length === 0 ? (
+        <p className="rounded-[10px] border border-dashed border-[#D4C7AE] bg-[#FBF5E8]/60 px-4 py-6 text-sm text-[#5A4F42]">
+          No assets yet.{canEdit ? ' Click Upload above to add your first file.' : ''}
+        </p>
+      ) : activeBucket === 'Other' ? (
         <ul className="divide-y divide-[#D4C7AE]/50 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8]">
           {active.map((a) => (
             <li key={a.id}>
-              <a
-                href={`/api/assets/${encodeURIComponent(a.id)}`}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-3 px-3 py-2 transition hover:bg-[#F4EDE0]"
+              <button
+                type="button"
+                onClick={() => setPreview(a)}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left transition hover:bg-[#F4EDE0]"
               >
                 <FileText size={14} aria-hidden className="shrink-0 text-[#5A4F42]" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm text-[#2A241E]">
-                    {a.originalName}
-                  </div>
-                  <div className="truncate text-xs text-[#5A4F42]">
-                    {a.originalPath}
-                  </div>
+                  <div className="truncate text-sm text-[#2A241E]">{a.originalName}</div>
+                  <div className="truncate text-xs text-[#5A4F42]">{a.originalPath}</div>
                 </div>
-                <div className="shrink-0 text-xs text-[#5A4F42]">
-                  {fmtSize(a.size)}
-                </div>
-              </a>
+                <div className="shrink-0 text-xs text-[#5A4F42]">{fmtSize(a.size)}</div>
+              </button>
             </li>
           ))}
         </ul>
@@ -133,24 +185,54 @@ export function AssetsGallery({
                   <span className="truncate">{shortPath(a.originalPath)}</span>
                   <span className="shrink-0 pl-2">{fmtSize(a.size)}</span>
                 </div>
+                {a.tags.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {a.tags.slice(0, 3).map((t) => (
+                      <span
+                        key={t}
+                        className="rounded-full border border-[#8B4A52]/40 bg-[#8B4A52]/10 px-1.5 py-px text-[9px] font-medium text-[#5E3A3F]"
+                      >
+                        #{t}
+                      </span>
+                    ))}
+                    {a.tags.length > 3 && (
+                      <span className="text-[9px] text-[#5A4F42]">+{a.tags.length - 3}</span>
+                    )}
+                  </div>
+                )}
               </div>
             </button>
           ))}
         </div>
       )}
 
-      {preview && <PreviewModal asset={preview} onClose={() => setPreview(null)} />}
+      {preview && (
+        <PreviewModal
+          asset={preview}
+          csrfToken={csrfToken}
+          canEdit={canEdit}
+          onClose={() => setPreview(null)}
+          onTagsChange={(tags) => setPreview((p) => p ? { ...p, tags } : p)}
+        />
+      )}
     </div>
   );
 }
 
 function PreviewModal({
   asset,
+  csrfToken,
+  canEdit,
   onClose,
+  onTagsChange,
 }: {
   asset: Asset;
+  csrfToken: string;
+  canEdit: boolean;
   onClose: () => void;
+  onTagsChange: (tags: string[]) => void;
 }): React.JSX.Element {
+  const isImage = asset.mime.startsWith('image/');
   return (
     <div
       role="dialog"
@@ -160,7 +242,8 @@ function PreviewModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="max-h-full max-w-5xl overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_16px_48px_rgba(42,36,30,0.5)]">
+      <div className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_16px_48px_rgba(42,36,30,0.5)]">
+        {/* Header */}
         <div className="flex items-center gap-2 border-b border-[#D4C7AE] px-3 py-2">
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium text-[#2A241E]">
@@ -187,11 +270,26 @@ function PreviewModal({
             <X size={14} aria-hidden />
           </button>
         </div>
-        <div className="flex max-h-[80vh] items-center justify-center overflow-auto bg-[#F4EDE0]">
-          <img
-            src={`/api/assets/${encodeURIComponent(asset.id)}`}
-            alt={asset.originalName}
-            className="h-auto max-h-[80vh] w-auto max-w-full"
+
+        {/* Preview */}
+        {isImage && (
+          <div className="flex max-h-[60vh] items-center justify-center overflow-auto bg-[#F4EDE0]">
+            <img
+              src={`/api/assets/${encodeURIComponent(asset.id)}`}
+              alt={asset.originalName}
+              className="h-auto max-h-[60vh] w-auto max-w-full"
+            />
+          </div>
+        )}
+
+        {/* Tags */}
+        <div className="border-t border-[#D4C7AE] px-3 py-2.5">
+          <AssetTagEditor
+            assetId={asset.id}
+            initialTags={asset.tags}
+            csrfToken={csrfToken}
+            canEdit={canEdit}
+            onTagsChange={onTagsChange}
           />
         </div>
       </div>
@@ -212,9 +310,7 @@ function bucketize(assets: Asset[]): Record<string, Asset[]> {
 function deriveBucket(a: Asset): string {
   if (!a.mime.startsWith('image/')) return 'Other';
   const segments = a.originalPath.split('/');
-  const assetsIdx = segments.findIndex(
-    (s) => s.toLowerCase() === 'assets',
-  );
+  const assetsIdx = segments.findIndex((s) => s.toLowerCase() === 'assets');
   if (assetsIdx >= 0 && assetsIdx + 1 < segments.length - 1) {
     const next = segments[assetsIdx + 1]!;
     return next.charAt(0).toUpperCase() + next.slice(1);

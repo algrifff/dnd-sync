@@ -301,6 +301,28 @@ export function listGroupAssets(groupId: string): AssetListEntry[] {
     }));
 }
 
+export type AssetListEntryWithTags = AssetListEntry & { tags: string[] };
+
+/** All assets in a group with their tags, for the /assets gallery. */
+export function listGroupAssetsWithTags(groupId: string): AssetListEntryWithTags[] {
+  const assets = listGroupAssets(groupId);
+
+  const tagRows = getDb()
+    .query<{ asset_id: string; tag: string }, [string]>(
+      'SELECT asset_id, tag FROM asset_tags WHERE group_id = ? ORDER BY tag ASC',
+    )
+    .all(groupId);
+
+  const tagMap = new Map<string, string[]>();
+  for (const row of tagRows) {
+    const arr = tagMap.get(row.asset_id) ?? [];
+    arr.push(row.tag);
+    tagMap.set(row.asset_id, arr);
+  }
+
+  return assets.map((a) => ({ ...a, tags: tagMap.get(a.id) ?? [] }));
+}
+
 export function getAssetById(id: string, groupId: string): AssetRow | null {
   return (
     getDb()

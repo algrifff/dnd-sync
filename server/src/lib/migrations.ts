@@ -437,6 +437,19 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX group_invite_tokens_group ON group_invite_tokens(group_id);
     `,
   },
+  {
+    version: 19,
+    description: 'asset_tags: per-asset tag set',
+    sql: `
+      CREATE TABLE asset_tags (
+        group_id TEXT NOT NULL,
+        asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        tag      TEXT NOT NULL,
+        PRIMARY KEY (group_id, asset_id, tag)
+      ) WITHOUT ROWID;
+      CREATE INDEX asset_tags_tag ON asset_tags(group_id, tag);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

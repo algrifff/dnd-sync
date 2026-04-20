@@ -12,15 +12,18 @@ export async function GET(req: NextRequest): Promise<Response> {
   if (session instanceof Response) return session;
 
   const rows = getDb()
-    .query<{ tag: string; count: number }, [string]>(
+    .query<{ tag: string; count: number }, [string, string]>(
       `SELECT tag, COUNT(*) AS count
-         FROM tags
-         WHERE group_id = ?
+         FROM (
+           SELECT tag FROM tags WHERE group_id = ?
+           UNION ALL
+           SELECT tag FROM asset_tags WHERE group_id = ?
+         )
          GROUP BY tag
          ORDER BY count DESC, tag ASC
          LIMIT 500`,
     )
-    .all(session.currentGroupId);
+    .all(session.currentGroupId, session.currentGroupId);
 
   return new Response(JSON.stringify({ tags: rows }), {
     status: 200,

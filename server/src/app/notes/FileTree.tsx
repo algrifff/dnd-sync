@@ -656,6 +656,7 @@ type FlatRow =
 function flatten(dir: TreeDir, openSet: Set<string>, depth: number): FlatRow[] {
   const out: FlatRow[] = [];
   for (const child of dir.children) {
+    if (child.kind === 'dir' && (child.path === 'Assets' || child.path.startsWith('Assets/'))) continue;
     if (child.kind === 'dir') {
       const isOpen = openSet.has(child.path);
       out.push({

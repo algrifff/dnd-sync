@@ -12,7 +12,7 @@ import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { buildTree } from '@/lib/tree';
 import { listNoteKinds } from '@/lib/characters';
-import { listGroupAssets } from '@/lib/assets';
+import { listGroupAssetsWithTags } from '@/lib/assets';
 import { AppHeader } from '../AppHeader';
 import { WorldsSidebar } from '../WorldsSidebar';
 import { SidebarHeader } from '../SidebarHeader';
@@ -34,7 +34,7 @@ export default async function AssetsPage(): Promise<ReactElement> {
 
   const tree = buildTree(session.currentGroupId);
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
-  const assets = listGroupAssets(session.currentGroupId);
+  const assets = listGroupAssetsWithTags(session.currentGroupId);
 
   return (
     <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
@@ -84,7 +84,11 @@ export default async function AssetsPage(): Promise<ReactElement> {
               Every image, map, and token uploaded to this vault. Click a tile
               to open a full-size preview.
             </p>
-            <AssetsGallery assets={assets} />
+            <AssetsGallery
+              assets={assets}
+              csrfToken={session.csrfToken}
+              canEdit={session.role !== 'viewer'}
+            />
           </div>
         </div>
       </div>
