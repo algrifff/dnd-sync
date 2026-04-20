@@ -34,7 +34,7 @@ RUN bun install --frozen-lockfile
 
 
 # --- Stage 2: Next build on Node --------------------------------------
-FROM node:22-slim AS build
+FROM node:22-trixie-slim AS build
 WORKDIR /app
 
 COPY --from=deps /app/node_modules       ./node_modules
@@ -54,7 +54,7 @@ RUN npm run build
 
 
 # --- Stage 3: runtime on Node -----------------------------------------
-FROM node:22-slim AS runtime
+FROM node:22-trixie-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
