@@ -30,6 +30,7 @@ import {
   Plus,
   Skull,
   Sword,
+  Upload,
   UserRound,
 } from 'lucide-react';
 import type { Tree, TreeDir } from '@/lib/tree';
@@ -53,7 +54,8 @@ type CreateKind =
   | 'ally'
   | 'villain'
   | 'item'
-  | 'location';
+  | 'location'
+  | 'session';
 
 const NEW_ENTRY_OPTIONS: Array<{
   kind: CreateKind;
@@ -69,7 +71,59 @@ const NEW_ENTRY_OPTIONS: Array<{
   { kind: 'villain', label: 'Villain', icon: Skull, placeholder: 'New villain' },
   { kind: 'item', label: 'Item', icon: Package, placeholder: 'New item' },
   { kind: 'location', label: 'Location', icon: MapIcon, placeholder: 'New location' },
+  { kind: 'session', label: 'Session note', icon: CalendarDays, placeholder: 'Session notes' },
 ];
+
+/** Returns the subset of CreateKinds appropriate for a given folder path,
+ *  plus optional label overrides. 'upload' is a special marker for the
+ *  Assets section, handled via file input rather than a note kind. */
+function getContextualOptions(folderPath: string | undefined): {
+  kinds: CreateKind[];
+  isUpload: boolean;
+  labelOverrides: Partial<Record<CreateKind, string>>;
+} {
+  if (!folderPath) {
+    return { kinds: ['page', 'folder', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session'], isUpload: false, labelOverrides: {} };
+  }
+
+  // Assets section — file upload only
+  if (folderPath === 'Assets' || folderPath.startsWith('Assets/')) {
+    return { kinds: [], isUpload: true, labelOverrides: {} };
+  }
+
+  // Top-level Campaigns — only create a new campaign folder
+  if (folderPath === 'Campaigns') {
+    return { kinds: ['folder'], isUpload: false, labelOverrides: { folder: 'New campaign' } };
+  }
+
+  // Campaign root (Campaigns/<slug>) — allow custom sub-folders
+  if (/^Campaigns\/[^/]+$/.test(folderPath)) {
+    return { kinds: ['folder'], isUpload: false, labelOverrides: { folder: 'New subfolder' } };
+  }
+
+  // Per-campaign canonical sub-folders
+  if (/^Campaigns\/[^/]+\/PCs$/.test(folderPath))       return { kinds: ['pc', 'folder'],      isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/NPCs$/.test(folderPath))      return { kinds: ['npc', 'folder'],     isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Allies$/.test(folderPath))    return { kinds: ['ally', 'folder'],    isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Villains$/.test(folderPath))  return { kinds: ['villain', 'folder'], isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Items$/.test(folderPath))     return { kinds: ['item', 'folder'],    isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Sessions$/.test(folderPath))  return { kinds: ['session', 'folder'], isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Locations$/.test(folderPath)) return { kinds: ['location', 'folder'],isUpload: false, labelOverrides: {} };
+
+  // Lore section
+  if (folderPath === 'Lore') {
+    return { kinds: ['page', 'folder'], isUpload: false, labelOverrides: {} };
+  }
+  if (folderPath === 'Lore/Quests') {
+    return { kinds: ['page', 'folder'], isUpload: false, labelOverrides: { page: 'New quest' } };
+  }
+  if (folderPath === 'Lore/World Info') {
+    return { kinds: ['page', 'folder'], isUpload: false, labelOverrides: {} };
+  }
+
+  // Default — all options
+  return { kinds: ['page', 'folder', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session'], isUpload: false, labelOverrides: {} };
+}
 
 const STORAGE_KEY = 'compendium.tree.open';
 
@@ -356,6 +410,36 @@ export function FileTree({
     [activePath, csrfToken, router],
   );
 
+  const uploadAsset = useCallback(
+    async (files: FileList, folder: string) => {
+      for (const file of Array.from(files)) {
+        const form = new FormData();
+        form.append('file', file);
+        try {
+          const res = await fetch('/api/assets/upload', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken },
+            body: form,
+          });
+          if (!res.ok) {
+            const body = (await res.json().catch(() => ({}))) as { error?: string };
+            setError(body.error ?? `Upload failed (HTTP ${res.status})`);
+            return;
+          }
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'network error');
+          return;
+        }
+      }
+      // Expand the target folder and refresh so any asset-derived
+      // entries become visible.
+      if (folder) setOpen((prev) => new Set(prev).add(folder));
+      router.refresh();
+      broadcastTreeChange();
+    },
+    [csrfToken, router],
+  );
+
   const items = useMemo(() => flatten(tree.root, open, 0), [tree.root, open]);
 
   return (
@@ -368,7 +452,9 @@ export function FileTree({
         <div className="mb-1 px-2">
           <NewEntryDropdown
             onPick={(kind) => startCreate('', kind)}
+            onUpload={(files) => void uploadAsset(files, '')}
             variant="wide"
+            folderPath=""
           />
         </div>
       )}
@@ -444,6 +530,7 @@ export function FileTree({
             }}
             onToggle={toggle}
             onStartCreate={startCreate}
+            onUpload={(files, folder) => void uploadAsset(files, folder)}
             onStartRename={() => {
               setError(null);
               setRenamingPath(item.path);
@@ -564,6 +651,7 @@ function TreeRow({
   onDropDir,
   onToggle,
   onStartCreate,
+  onUpload,
   onStartRename,
   onCancelRename,
   onSubmitRename,
@@ -584,6 +672,7 @@ function TreeRow({
   onDropDir: (dirPath: string) => void;
   onToggle: (path: string) => void;
   onStartCreate: (folder: string, kind: CreateKind) => void;
+  onUpload: (files: FileList, folder: string) => void;
   onStartRename: () => void;
   onCancelRename: () => void;
   onSubmitRename: (name: string) => void;
@@ -683,8 +772,10 @@ function TreeRow({
             <div className="mr-1 hidden items-center gap-0.5 group-hover:flex">
               <NewEntryDropdown
                 onPick={(kind) => onStartCreate(item.path, kind)}
+                onUpload={(files) => onUpload(files, item.path)}
                 variant="compact"
                 folderName={item.name}
+                folderPath={item.path}
               />
               {isSystem ? (
                 <span
@@ -763,15 +854,22 @@ function TreeRow({
 
 function NewEntryDropdown({
   onPick,
+  onUpload,
   variant,
   folderName,
+  folderPath,
 }: {
   onPick: (kind: CreateKind) => void;
+  onUpload?: (files: FileList) => void;
   variant: 'wide' | 'compact';
   folderName?: string;
+  folderPath?: string;
 }): React.JSX.Element {
   const [open, setOpen] = useState<boolean>(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { kinds, isUpload, labelOverrides } = getContextualOptions(folderPath);
 
   useEffect(() => {
     if (!open) return;
@@ -789,12 +887,55 @@ function NewEntryDropdown({
     };
   }, [open]);
 
+  // Assets section: single upload button, no dropdown
+  if (isUpload) {
+    return (
+      <div ref={wrapRef} className="relative">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,video/*,.pdf,.doc,.docx"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files?.length) onUpload?.(e.target.files);
+            e.target.value = '';
+          }}
+        />
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            fileInputRef.current?.click();
+          }}
+          title={folderName ? `Upload to ${folderName}` : 'Upload file'}
+          aria-label={folderName ? `Upload to ${folderName}` : 'Upload file'}
+          className={
+            variant === 'wide'
+              ? 'flex w-full items-center gap-1.5 rounded-[6px] px-2 py-1 text-left text-[#5A4F42] transition hover:bg-[#D4A85A]/15 hover:text-[#2A241E]'
+              : 'flex items-center gap-0.5 rounded-[4px] p-1 text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]'
+          }
+        >
+          <Upload size={14} aria-hidden />
+          {variant === 'wide' && <span className="flex-1">Upload</span>}
+        </button>
+      </div>
+    );
+  }
+
+  const visibleOptions = NEW_ENTRY_OPTIONS.filter((o) => kinds.includes(o.kind));
+
   return (
     <div ref={wrapRef} className="relative">
       <button
         type="button"
         onClick={(e) => {
           e.stopPropagation();
+          // If there's only one option, skip the dropdown and pick immediately.
+          if (visibleOptions.length === 1 && visibleOptions[0]) {
+            onPick(visibleOptions[0].kind);
+            return;
+          }
           setOpen((o) => !o);
         }}
         aria-haspopup="menu"
@@ -809,34 +950,40 @@ function NewEntryDropdown({
       >
         <Plus size={14} aria-hidden />
         {variant === 'wide' && <span className="flex-1">New</span>}
-        <ChevronDown size={12} aria-hidden className="opacity-70" />
+        {visibleOptions.length !== 1 && <ChevronDown size={12} aria-hidden className="opacity-70" />}
       </button>
       {open && (
-        <ul
-          role="menu"
+        // pt-1 creates an invisible bridge over the gap so the cursor
+        // stays inside wrapRef while moving from button to menu.
+        <div
           className={
-            'absolute z-30 w-44 overflow-hidden rounded-[8px] border border-[#D4C7AE] bg-[#FBF5E8] py-0.5 shadow-[0_8px_24px_rgba(42,36,30,0.12)] ' +
-            (variant === 'wide' ? 'left-0 top-full mt-1' : 'right-0 top-full mt-1')
+            'absolute z-30 pt-1 ' +
+            (variant === 'wide' ? 'left-0 top-full' : 'right-0 top-full')
           }
         >
-          {NEW_ENTRY_OPTIONS.map(({ kind, label, icon: Icon }) => (
-            <li key={kind}>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setOpen(false);
-                  onPick(kind);
-                }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[#2A241E] transition hover:bg-[#D4A85A]/15"
-              >
-                <Icon size={12} aria-hidden className="text-[#5A4F42]" />
-                <span>{label}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
+          <ul
+            role="menu"
+            className="w-44 overflow-hidden rounded-[8px] border border-[#D4C7AE] bg-[#FBF5E8] py-0.5 shadow-[0_8px_24px_rgba(42,36,30,0.12)]"
+          >
+            {visibleOptions.map(({ kind, label, icon: Icon }) => (
+              <li key={kind}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpen(false);
+                    onPick(kind);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[#2A241E] transition hover:bg-[#D4A85A]/15"
+                >
+                  <Icon size={12} aria-hidden className="text-[#5A4F42]" />
+                  <span>{labelOverrides[kind] ?? label}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );

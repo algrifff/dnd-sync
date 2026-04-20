@@ -1,5 +1,6 @@
-// PATCH /api/worlds/[id] — rename a world. Admin-only; the caller
-// must be an admin of the target world.
+// PATCH /api/worlds/[id] — rename a world. Admin-only.
+// DELETE /api/worlds/[id] — delete a world and all its data. Admin-only;
+//   refuses if it is the caller's last world.
 
 import { z } from 'zod';
 import type { NextRequest } from 'next/server';
@@ -7,6 +8,7 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
+import { deleteWorld } from '@/lib/groups';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,6 +57,30 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
   });
 
   return json({ ok: true });
+}
+
+export async function DELETE(req: NextRequest, ctx: Ctx): Promise<Response> {
+  const session = requireSession(req);
+  if (session instanceof Response) return session;
+  const csrf = verifyCsrf(req, session);
+  if (csrf) return csrf;
+
+  const { id } = await ctx.params;
+
+  try {
+    const result = deleteWorld({
+      groupId: id,
+      actorId: session.userId,
+      sessionId: session.id,
+    });
+    return json({ ok: true, switchToId: result.switchToId });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'error';
+    if (msg === 'forbidden') return json({ error: 'forbidden' }, 403);
+    if (msg === 'last_world')
+      return json({ error: 'last_world', detail: 'Cannot delete your only world.' }, 409);
+    return json({ error: 'delete_failed', detail: msg }, 500);
+  }
 }
 
 function json(body: unknown, status = 200): Response {

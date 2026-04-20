@@ -1,6 +1,3 @@
-// Shared shell for every /settings/* route. Profile settings only —
-// vault, users, and templates have moved to /admin.
-
 import type { ReactElement, ReactNode } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -13,11 +10,11 @@ import { SidebarHeader } from '../SidebarHeader';
 import { SidebarFooter } from '../SidebarFooter';
 import { FileTree } from '../notes/FileTree';
 import { ActiveCharacterBlock } from '../notes/ActiveCharacterBlock';
-import { SettingsTabs } from './SettingsTabs';
+import { AdminTabs } from './AdminTabs';
 
 export const dynamic = 'force-dynamic';
 
-export default async function SettingsLayout({
+export default async function AdminLayout({
   children,
 }: {
   children: ReactNode;
@@ -28,11 +25,10 @@ export default async function SettingsLayout({
     .map((c) => `${c.name}=${c.value}`)
     .join('; ');
   const session = readSession(cookieHeader);
-  if (!session) redirect('/login?next=/settings');
+  if (!session) redirect('/login?next=/admin');
+  if (session.role !== 'admin') redirect('/');
 
-  const tree = buildTree(session.currentGroupId, {
-    hideDmOnly: session.role === 'viewer',
-  });
+  const tree = buildTree(session.currentGroupId, { hideDmOnly: false });
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
 
   return (
@@ -49,7 +45,7 @@ export default async function SettingsLayout({
           activePath=""
           groupId={session.currentGroupId}
           csrfToken={session.csrfToken}
-          canCreate={session.role !== 'viewer'}
+          canCreate={true}
           kindMap={kindMap}
         />
         <SidebarFooter
@@ -69,7 +65,7 @@ export default async function SettingsLayout({
             accentColor: session.accentColor,
           }}
           csrfToken={session.csrfToken}
-          canCreate={session.role !== 'viewer'}
+          canCreate={true}
         />
         <div className="flex-1 overflow-y-auto px-6 py-8">
           <div className="mx-auto max-w-3xl">
@@ -77,12 +73,13 @@ export default async function SettingsLayout({
               className="mb-1 text-3xl font-bold"
               style={{ fontFamily: '"Fraunces", Georgia, serif' }}
             >
-              Settings
+              DM Panel
             </h1>
             <p className="mb-6 text-sm text-[#5A4F42]">
-              Change how you look and what you sign in with.
+              Vault uploads, player accounts, and character sheet templates for
+              this server.
             </p>
-            <SettingsTabs />
+            <AdminTabs />
             <div className="mt-6">{children}</div>
           </div>
         </div>
