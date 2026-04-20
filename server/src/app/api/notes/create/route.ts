@@ -31,7 +31,7 @@ const Body = z.object({
    *  the matching template so the sheet UI has defaults to render.
    *  "page" (or omitted) creates a plain note with no kind. */
   kind: z
-    .enum(['page', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session'])
+    .enum(['page', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'monster'])
     .optional(),
 });
 
@@ -146,7 +146,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 }
 
 function buildFrontmatter(
-  kind: 'page' | TemplateKind | 'pc' | 'npc' | 'ally' | 'villain' | 'item' | 'location' | 'session',
+  kind: 'page' | TemplateKind | 'pc' | 'npc' | 'ally' | 'villain' | 'item' | 'location' | 'session' | 'monster',
   name: string,
   username: string,
 ): Record<string, unknown> {
