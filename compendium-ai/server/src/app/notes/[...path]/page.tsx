@@ -25,6 +25,7 @@ import { NoteMenu } from '../NoteMenu';
 import { NoteWorkspace } from '../NoteWorkspace';
 import { NoteSidebar, extractOutline } from '../NoteSidebar';
 import { ActiveCharacterBlock } from '../ActiveCharacterBlock';
+import { ChatPane } from '../../ChatPane';
 
 export const dynamic = 'force-dynamic';
 
@@ -201,8 +202,20 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
           </aside>
         </div>
       </div>
+
+      <ChatPane
+        groupId={session.currentGroupId}
+        role={session.role === 'viewer' ? 'player' : 'dm'}
+        {...(campaignSlugFromPath(path) !== undefined
+          ? { campaignSlug: campaignSlugFromPath(path) }
+          : {})}
+      />
     </div>
   );
+}
+
+function campaignSlugFromPath(path: string): string | undefined {
+  return /^Campaigns\/([^/]+)\//.exec(path)?.[1];
 }
 
 const CHARACTER_KINDS_BY_PATH: Array<[RegExp, TemplateKind]> = [
