@@ -69,6 +69,7 @@ export default async function TagsIndexPage(): Promise<ReactElement> {
           }}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
+          groupId={session.currentGroupId}
         />
         <div className="flex-1 overflow-y-auto">
       <main className="mx-auto max-w-[960px] px-8 py-10">

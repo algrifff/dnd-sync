@@ -52,7 +52,7 @@ export function PresencePanel({
             disabled={!isNavigable}
             title={tooltip}
             aria-label={tooltip}
-            className="group relative flex h-6 w-6 items-center justify-center rounded-full border-2 text-[10px] font-semibold text-[#2A241E] transition hover:-translate-y-px disabled:cursor-default disabled:hover:translate-y-0"
+            className="group relative flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-semibold text-[#2A241E] transition hover:-translate-y-px disabled:cursor-default disabled:hover:translate-y-0"
             style={{
               backgroundColor: withAlpha(p.color, 0.2),
               borderColor: p.color,

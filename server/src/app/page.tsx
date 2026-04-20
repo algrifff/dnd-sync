@@ -83,6 +83,7 @@ export default async function HomePage(): Promise<ReactElement> {
           }}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
+          groupId={session.currentGroupId}
         />
         <div className="flex-1 overflow-y-auto">
         <main className="surface-paper mx-auto w-full max-w-4xl px-6 py-10">

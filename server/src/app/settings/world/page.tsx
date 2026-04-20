@@ -19,7 +19,9 @@ export default async function WorldSettingsPage(): Promise<ReactElement> {
   if (session.role !== 'admin') redirect('/settings/profile');
 
   const group = getDb()
-    .query<{ name: string }, [string]>('SELECT name FROM groups WHERE id = ?')
+    .query<{ name: string; header_color: string | null }, [string]>(
+      'SELECT name, header_color FROM groups WHERE id = ?',
+    )
     .get(session.currentGroupId);
 
   const worldName = group?.name ?? 'Unknown';
@@ -29,6 +31,7 @@ export default async function WorldSettingsPage(): Promise<ReactElement> {
     <ServerSettingsForm
       worldId={session.currentGroupId}
       worldName={worldName}
+      headerColor={group?.header_color ?? null}
       csrfToken={session.csrfToken}
       initialToken={inviteToken}
     />

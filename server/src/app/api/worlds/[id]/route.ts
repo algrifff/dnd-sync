@@ -13,7 +13,8 @@ import { deleteWorld } from '@/lib/groups';
 export const dynamic = 'force-dynamic';
 
 const Body = z.object({
-  name: z.string().trim().min(1).max(80),
+  name: z.string().trim().min(1).max(80).optional(),
+  headerColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
 });
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -46,14 +47,23 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
     return json({ error: 'forbidden' }, 403);
   }
 
-  db.query('UPDATE groups SET name = ? WHERE id = ?').run(body.name, id);
+  if (body.name === undefined && body.headerColor === undefined) {
+    return json({ error: 'invalid_body', detail: 'Nothing to update' }, 400);
+  }
+
+  if (body.name !== undefined) {
+    db.query('UPDATE groups SET name = ? WHERE id = ?').run(body.name, id);
+  }
+  if (body.headerColor !== undefined) {
+    db.query('UPDATE groups SET header_color = ? WHERE id = ?').run(body.headerColor, id);
+  }
 
   logAudit({
     action: 'group.switch',
     actorId: session.userId,
     groupId: id,
     target: id,
-    details: { rename: body.name },
+    details: { rename: body.name, headerColor: body.headerColor },
   });
 
   return json({ ok: true });

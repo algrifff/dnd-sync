@@ -85,6 +85,7 @@ export default async function CharactersPage(): Promise<ReactElement> {
           }}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
+          groupId={session.currentGroupId}
         />
         <div className="flex-1 overflow-y-auto px-6 py-8">
           <div className="mx-auto max-w-4xl">

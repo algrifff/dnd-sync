@@ -18,6 +18,20 @@ export type WorldRow = {
   isActive: boolean;
 };
 
+export type WorldHeader = {
+  name: string;
+  headerColor: string | null;
+};
+
+export function getWorldHeader(groupId: string): WorldHeader {
+  const row = getDb()
+    .query<{ name: string; header_color: string | null }, [string]>(
+      'SELECT name, header_color FROM groups WHERE id = ?',
+    )
+    .get(groupId);
+  return { name: row?.name ?? '', headerColor: row?.header_color ?? null };
+}
+
 type ListDbRow = {
   id: string;
   name: string;

@@ -113,6 +113,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
           }}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
+          groupId={session.currentGroupId}
         />
 
         <div

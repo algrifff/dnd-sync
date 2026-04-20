@@ -6,17 +6,20 @@ import { Copy, Check, RefreshCw } from 'lucide-react';
 export function ServerSettingsForm({
   worldId,
   worldName,
+  headerColor,
   csrfToken,
   initialToken,
 }: {
   worldId: string;
   worldName: string;
+  headerColor: string | null;
   csrfToken: string;
   initialToken: string | null;
 }): React.JSX.Element {
   return (
     <div className="space-y-8">
       <RenameSection worldId={worldId} worldName={worldName} csrfToken={csrfToken} />
+      <HeaderColorSection worldId={worldId} initialColor={headerColor} csrfToken={csrfToken} />
       <InviteSection worldId={worldId} csrfToken={csrfToken} initialToken={initialToken} />
       <DangerZone worldId={worldId} worldName={worldName} csrfToken={csrfToken} />
     </div>
@@ -88,6 +91,112 @@ function RenameSection({
           {pending ? 'Saving…' : saved ? 'Saved' : 'Save'}
         </button>
       </form>
+      {error && <p className="mt-2 text-xs text-[#8B4A52]">{error}</p>}
+    </section>
+  );
+}
+
+const HEADER_PRESETS = [
+  { label: 'Default (dark)', value: '#2A241E' },
+  { label: 'Crimson', value: '#8B4A52' },
+  { label: 'Gold', value: '#D4A85A' },
+  { label: 'Forest', value: '#7B8A5F' },
+  { label: 'Sapphire', value: '#4A6B7B' },
+  { label: 'Violet', value: '#6A5D8B' },
+  { label: 'Ember', value: '#B5572A' },
+];
+
+function HeaderColorSection({
+  worldId,
+  initialColor,
+  csrfToken,
+}: {
+  worldId: string;
+  initialColor: string | null;
+  csrfToken: string;
+}): React.JSX.Element {
+  const [color, setColor] = useState(initialColor ?? '#2A241E');
+  const [pending, setPending] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async (val: string): Promise<void> => {
+    setColor(val);
+    setPending(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const res = await fetch(`/api/worlds/${encodeURIComponent(worldId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ headerColor: val }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; detail?: string };
+      if (!res.ok || !body.ok) {
+        setError(body.detail ?? `HTTP ${res.status}`);
+        return;
+      }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'network error');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <section className="rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-5">
+      <h2 className="mb-1 text-base font-semibold text-[#2A241E]">Header colour</h2>
+      <p className="mb-4 text-sm text-[#5A4F42]">
+        Colour used for the world name in the top bar. Pick a preset or choose any colour.
+      </p>
+
+      {/* Preview */}
+      <div className="mb-4 flex items-center gap-2 rounded-[8px] border border-[#D4C7AE] bg-[#EAE1CF] px-3 py-2">
+        <span className="text-xs text-[#5A4F42]">Preview:</span>
+        <span className="text-sm font-bold" style={{ color }}>World Name</span>
+      </div>
+
+      {/* Presets */}
+      <div className="mb-3 flex flex-wrap gap-2">
+        {HEADER_PRESETS.map((p) => (
+          <button
+            key={p.value}
+            type="button"
+            title={p.label}
+            onClick={() => void save(p.value)}
+            disabled={pending}
+            className={`h-6 w-6 rounded-full border-2 transition hover:scale-110 disabled:opacity-40 ${
+              color === p.value ? 'border-[#2A241E] scale-110' : 'border-transparent'
+            }`}
+            style={{ backgroundColor: p.value }}
+            aria-label={p.label}
+          />
+        ))}
+      </div>
+
+      {/* Custom picker */}
+      <div className="flex items-center gap-3">
+        <label className="flex items-center gap-2 text-xs text-[#5A4F42]">
+          Custom colour
+          <input
+            type="color"
+            value={color}
+            onChange={(e) => setColor(e.target.value)}
+            onBlur={(e) => void save(e.target.value)}
+            className="h-6 w-10 cursor-pointer rounded border border-[#D4C7AE] bg-transparent p-0"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => void save(color)}
+          disabled={pending}
+          className="rounded-[6px] bg-[#2A241E] px-3 py-1.5 text-xs font-medium text-[#F4EDE0] transition hover:bg-[#3A342E] disabled:opacity-40"
+        >
+          {pending ? 'Saving…' : saved ? 'Saved' : 'Save'}
+        </button>
+      </div>
       {error && <p className="mt-2 text-xs text-[#8B4A52]">{error}</p>}
     </section>
   );

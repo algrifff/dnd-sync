@@ -70,6 +70,7 @@ export default async function GraphPage(): Promise<ReactElement> {
           }}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
+          groupId={session.currentGroupId}
         />
         <div className="relative flex-1 overflow-hidden">
           <GraphCanvas

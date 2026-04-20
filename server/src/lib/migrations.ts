@@ -450,6 +450,11 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX asset_tags_tag ON asset_tags(group_id, tag);
     `,
   },
+  {
+    version: 20,
+    description: 'groups: header_color for custom world name colour in the top bar',
+    sql: `ALTER TABLE groups ADD COLUMN header_color TEXT;`,
+  },
 ];
 
 export function runMigrations(db: Database): void {

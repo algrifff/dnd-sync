@@ -12,11 +12,10 @@ import {
   UserRound,
   CalendarDays,
   Image as ImageIcon,
-  Settings2,
 } from 'lucide-react';
 
 export function SidebarHeader({
-  role,
+  role: _role,
 }: {
   role: 'admin' | 'editor' | 'viewer';
 }): ReactElement {
@@ -28,9 +27,6 @@ export function SidebarHeader({
       <IconLink href="/characters" label="Cast" icon={<UserRound size={16} aria-hidden />} />
       <IconLink href="/sessions" label="Sessions" icon={<CalendarDays size={16} aria-hidden />} />
       <IconLink href="/assets" label="Assets" icon={<ImageIcon size={16} aria-hidden />} />
-      {role === 'admin' && (
-        <IconLink href="/settings/world" label="World settings" icon={<Settings2 size={16} aria-hidden />} />
-      )}
     </div>
   );
 }
