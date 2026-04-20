@@ -1,26 +1,28 @@
 'use client';
 
-// Settings subnav — Profile only. Admin tools (Vault, Users, Templates)
-// live at /admin.
-
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 type Tab = { href: string; label: string };
 
-export function SettingsTabs(): React.JSX.Element {
+const TABS: Tab[] = [
+  { href: '/admin/vault', label: 'Vault' },
+  { href: '/admin/users', label: 'Users' },
+  { href: '/admin/templates', label: 'Templates' },
+  { href: '/admin/server', label: 'Server' },
+];
+
+export function AdminTabs(): React.JSX.Element {
   const pathname = usePathname() ?? '';
-  const tabs: Tab[] = [{ href: '/settings/profile', label: 'Profile' }];
 
   return (
     <div
       role="tablist"
-      aria-label="Settings"
+      aria-label="DM Panel"
       className="flex items-end gap-0.5 border-b border-[#D4C7AE]"
     >
-      {tabs.map((t) => {
-        const active =
-          pathname === t.href || pathname.startsWith(t.href + '/');
+      {TABS.map((t) => {
+        const active = pathname === t.href || pathname.startsWith(t.href + '/');
         return (
           <Link
             key={t.href}

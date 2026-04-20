@@ -412,6 +412,31 @@ const MIGRATIONS: readonly Migration[] = [
         ON import_jobs(created_by, status);
     `,
   },
+  {
+    version: 17,
+    description: 'session_notes: status + dm_review_json for session close workflow',
+    sql: `
+      ALTER TABLE session_notes ADD COLUMN status TEXT NOT NULL DEFAULT 'open';
+      ALTER TABLE session_notes ADD COLUMN dm_review_json TEXT;
+      ALTER TABLE session_notes ADD COLUMN closed_at INTEGER;
+      ALTER TABLE session_notes ADD COLUMN closed_by TEXT REFERENCES users(id);
+      CREATE INDEX session_notes_status ON session_notes(group_id, status);
+    `,
+  },
+  {
+    version: 18,
+    description: 'group_invite_tokens: shareable world invite links',
+    sql: `
+      CREATE TABLE group_invite_tokens (
+        token      TEXT PRIMARY KEY,
+        group_id   TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        created_by TEXT NOT NULL REFERENCES users(id),
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER
+      ) WITHOUT ROWID;
+      CREATE INDEX group_invite_tokens_group ON group_invite_tokens(group_id);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {
