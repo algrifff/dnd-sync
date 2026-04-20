@@ -2,7 +2,7 @@
   "name": "compendium-ai",
   "private": true,
   "type": "module",
-  "workspaces": ["shared", "server", "plugin"],
+  "workspaces": ["shared", "server"],
   "scripts": {
     "typecheck": "bun --filter '*' typecheck",
     "lint": "eslint .",

@@ -10,7 +10,6 @@ Players connect via a web dashboard. Notes sync live across all clients via Yjs 
 
 ```
 server/     # Next.js 15 App Router + custom WebSocket server (the main app)
-plugin/     # Obsidian plugin — syncs vault files to the server via Yjs + REST
 shared/     # @compendium/shared — Zod schemas + protocol constants (no build step)
 scripts/    # one-off utilities (e.g. vault deduplication)
 ```
@@ -21,7 +20,6 @@ scripts/    # one-off utilities (e.g. vault deduplication)
 |---------|---------|
 | Install deps | `bun install` (from root) |
 | Dev server | `cd server && bun run server.ts` |
-| Plugin watch | `cd plugin && bun run dev` |
 | Type-check all | `bun run typecheck` (from root) |
 | Lint | `bun run lint` |
 | Tests | `bun test` |
@@ -58,28 +56,22 @@ All queries include `group_id` — no table-level tenant isolation, just strict 
 
 ## Auth — two separate layers
 
-**Bearer token** (Obsidian plugin + legacy API)
+**Bearer token** (legacy API / admin scripts)
 - `Authorization: Bearer <token>` or `?token=`
 - `admin` or `player` role; timing-safe comparison
-- Tokens come from env vars or `config` table; friend tokens from `friends` table
+- Tokens come from env vars or `config` table
 
 **Session-based** (web dashboard)
 - HTTP-only cookie + CSRF token validated on every mutation
 - Roles within a group: `admin`, `editor`, `viewer`
 - Admin/editor = DM privileges in AI; viewer = player
 
-**Middleware** (`server/src/middleware.ts`): redirects unauthenticated to `/login`; public paths: `/login`, `/api/*`, `/install/*`, `/_next/*`
+**Middleware** (`server/src/middleware.ts`): redirects unauthenticated to `/login`; public paths: `/login`, `/api/*`, `/_next/*`
 
 ## Real-time sync
 
-**Obsidian plugin → server**
-- Yjs WebSocket at `ws://host/sync/<path>` — binary y-protocols (sync + awareness)
-- Awareness carries cursor positions and user metadata
-- REST for binary files (images, PDFs): PUT/DELETE `/api/files/[...path]`
-- `fileMirror.ts` watches vault events; diffs against Y.Doc and applies delta
-
 **Web editing**
-- Hocuspocus server at `/collab` — same Yjs CRDTs, different upgrade path
+- Hocuspocus server at `/collab` — Yjs CRDTs over WebSocket
 - Tiptap + ProseMirror on the frontend; `Collaboration` extension binds to Y.Doc
 - Cursor awareness via `CollaborationCaret`
 
@@ -119,7 +111,6 @@ All queries include `group_id` — no table-level tenant isolation, just strict 
 | `server/src/lib/notes.ts` | Note CRUD, backlink derivation, FTS sync |
 | `server/src/lib/ai/orchestrator.ts` | Chat system prompt builder + skill injection |
 | `server/src/lib/ai/tools.ts` | All AI tool definitions |
-| `server/src/ws/setup.ts` | Yjs WebSocket handler (sync + awareness) |
 | `server/src/collab/server.ts` | Hocuspocus server for web editing |
 | `server/server.ts` | Entry point — Next.js + WebSocket on the same port |
 | `server/next.config.ts` | `serverExternalPackages` for Yjs/Tiptap/graph libs — touch carefully |
@@ -150,12 +141,11 @@ HTTP status usage: 400 bad input, 401 unauthenticated, 403 forbidden, 404 not fo
 
 Bun's native test runner (`bun:test`). Run with `bun test` from root or any workspace.
 
-Test files (all in `server/src/lib/` and `plugin/src/sync/`):
+Test files (all in `server/src/lib/`):
 - `auth.test.ts`, `session.test.ts`, `csrf.test.ts` — auth layer
 - `notes.test.ts`, `users.test.ts` — core lib
 - `md-to-pm.test.ts` — Markdown → ProseMirror conversion
 - `ratelimit.test.ts` — auth throttling
-- `hash.test.ts`, `retry.test.ts` — plugin utilities
 
 Pattern: AAA (Arrange → Act → Assert). Real in-memory SQLite — no DB mocking. No e2e tests yet.
 
@@ -172,8 +162,6 @@ Pattern: AAA (Arrange → Act → Assert). Real in-memory SQLite — no DB mocki
 **Asset deduplication** — same binary content = same `asset_id`. Two users uploading the same image store one blob.
 
 **`yjs_state` is a raw binary blob** — `Y.encodeStateAsUpdate()` format. The DB is the only backup of real-time edit history.
-
-**Plugin URL normalisation** — `normalizeServerUrl()` auto-corrects trailing slashes and wrong schemes on save. If users report "can't connect" check the saved URL in plugin settings first.
 
 ## Deployment
 
