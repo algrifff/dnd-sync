@@ -19,7 +19,7 @@
 # node:22-slim at runtime without a rebuild step.
 
 # --- Stage 1: install on Bun + build tools for native module fallback ---
-FROM oven/bun:1.1.45 AS deps
+FROM oven/bun:1.3.11 AS deps
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
