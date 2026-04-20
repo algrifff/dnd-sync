@@ -79,7 +79,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   };
 
   const openai = createOpenAI({ apiKey });
-  const model  = process.env.OPENAI_MODEL ?? 'gpt-4o-mini';
+  const model  = process.env.OPENAI_MODEL ?? 'gpt-5.4-mini';
 
   const result = streamText({
     model: openai(model),
