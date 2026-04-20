@@ -36,8 +36,7 @@ Mise manages the Bun version automatically. If you skip mise you need Bun 1.1 in
 ## Quick Start
 
 ```bash
-# 1. Clone and enter the monorepo root
-cd compendium-ai
+# 1. Clone and enter the repo root
 
 # 2. Install tool versions pinned in mise.toml (Bun 1.1)
 mise install
@@ -65,7 +64,7 @@ Point Obsidian's Compendium plugin to `http://localhost:3000` with the admin tok
 
 ## Running with Mise
 
-Mise reads `mise.toml` and activates the correct Bun version whenever you `cd` into the `compendium-ai/` folder.
+Mise reads `mise.toml` and activates the correct Bun version for this project.
 
 ```bash
 # First-time: install mise itself
@@ -73,7 +72,6 @@ curl https://mise.run | sh
 # Follow the prompt to add mise to your shell (adds to ~/.zshrc or ~/.bashrc)
 
 # Then activate tool versions for this project
-cd compendium-ai
 mise install        # installs Bun 1.1 as pinned in mise.toml
 
 # Verify
@@ -100,8 +98,6 @@ Mise also lets you pin Node for CI if needed — add `node = "22"` to `mise.toml
 If you already have Bun 1.1 and don't want mise:
 
 ```bash
-cd compendium-ai
-
 # Install all workspace deps
 bun install
 
@@ -171,7 +167,7 @@ PLAYER_TOKEN=replace-with-a-long-random-string
 ## Workspace Layout
 
 ```
-compendium-ai/
+.
 ├── mise.toml               # Tool versions (Bun 1.1)
 ├── package.json            # Workspace root — defines three workspaces
 ├── bun.lockb               # Bun lockfile (commit this)
@@ -188,7 +184,6 @@ compendium-ai/
 │   ├── server.ts           # Custom entry point (Next.js + ws on same port)
 │   ├── .env.example        # Environment variable template
 │   ├── Dockerfile          # Multi-stage build for production
-│   ├── railway.toml        # Railway deployment config
 │   └── src/
 │       ├── app/            # Next.js App Router (pages + 50+ API routes)
 │       ├── lib/            # Business logic (~8 400 LOC)
@@ -259,8 +254,8 @@ Key tables: `notes`, `users`, `groups`, `group_members`, `characters`, `session_
 
 ### Railway (recommended)
 
-1. Connect your repo in Railway and set the **service source root** to `compendium-ai/`.
-2. Railway picks up `server/railway.toml` automatically — it uses the `server/Dockerfile`.
+1. Connect your repo in Railway. The service source root is the repo root.
+2. Railway picks up `railway.toml` at root — it uses `server/Dockerfile`.
 3. Add a **Volume** mounted at `/data`.
 4. Set environment variables:
    - `ADMIN_TOKEN` — generate with `openssl rand -hex 32`
@@ -272,9 +267,7 @@ Key tables: `notes`, `users`, `groups`, `group_members`, `characters`, `session_
 ### Docker (self-hosted)
 
 ```bash
-cd compendium-ai
-
-# Build the image
+# Build the image (from repo root)
 docker build -f server/Dockerfile -t compendium .
 
 # Run with a named volume for persistence

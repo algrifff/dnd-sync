@@ -1,6 +1,5 @@
 # Railway deploy config for the Compendium server.
-# In Railway, set the service source root to `compendium-ai/` so this file
-# is picked up and the Dockerfile's relative paths resolve correctly.
+# Build context is the repo root; Dockerfile is at server/Dockerfile.
 
 [build]
 builder = "dockerfile"
