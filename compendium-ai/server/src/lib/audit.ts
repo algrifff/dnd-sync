@@ -25,6 +25,7 @@ export type AuditAction =
   | 'folder.destroy'
   | 'session.rotate'
   | 'group.create'
+  | 'group.delete'
   | 'group.switch';
 
 export type AuditEntry = {
