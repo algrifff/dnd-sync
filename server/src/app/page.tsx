@@ -13,6 +13,7 @@ import { buildTree } from '@/lib/tree';
 import { listNoteKinds } from '@/lib/characters';
 import { listOpenJobsForUser } from '@/lib/imports';
 import { AppHeader } from './AppHeader';
+import { NoteTabBar } from './NoteTabBar';
 import { WorldsSidebar } from './WorldsSidebar';
 import { SidebarHeader } from './SidebarHeader';
 import { HomeChat } from './HomeChat';
@@ -46,7 +47,20 @@ export default async function HomePage(): Promise<ReactElement> {
   const topFolders = tree.root.children.filter((c) => c.kind === 'dir').slice(0, 6);
 
   return (
-    <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
+    <div className="flex h-screen flex-col bg-[#F4EDE0] text-[#2A241E]">
+      <AppHeader
+        role={session.role}
+        me={{
+            userId: session.userId,
+            displayName: session.displayName,
+            username: session.username,
+            accentColor: session.accentColor,
+          }}
+        csrfToken={session.csrfToken}
+        canCreate={session.role !== 'viewer'}
+        groupId={session.currentGroupId}
+        />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       <WorldsSidebar
           csrfToken={session.csrfToken}
           userId={session.userId}
@@ -73,18 +87,7 @@ export default async function HomePage(): Promise<ReactElement> {
         <SidebarFooter username={session.username} />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <AppHeader
-          role={session.role}
-          me={{
-            userId: session.userId,
-            displayName: session.displayName,
-            username: session.username,
-            accentColor: session.accentColor,
-          }}
-          csrfToken={session.csrfToken}
-          canCreate={session.role !== 'viewer'}
-          groupId={session.currentGroupId}
-        />
+        <NoteTabBar canCreate={session.role !== 'viewer'} csrfToken={session.csrfToken} />
         <div className="flex-1 overflow-y-auto">
         <main className="surface-paper mx-auto w-full max-w-4xl px-6 py-10">
         <section className="mb-6">
@@ -174,6 +177,7 @@ export default async function HomePage(): Promise<ReactElement> {
         )}
       </main>
         </div>
+      </div>
       </div>
     </div>
   );

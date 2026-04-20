@@ -34,9 +34,6 @@ export function CharacterSheet({
   template,
   initialSheet,
   canWriteAll,
-  displayName,
-  portraitUrl,
-  roleLabel,
   provider,
 }: {
   path: string;
@@ -44,9 +41,6 @@ export function CharacterSheet({
   template: NoteTemplate;
   initialSheet: SheetValues;
   canWriteAll: boolean;
-  displayName: string;
-  portraitUrl: string | null;
-  roleLabel: string;
   /** Note's collab provider — used only for awareness broadcasts so
    *  peers see sheet edits before PATCH. All persistence still
    *  flows through /api/notes/sheet. */
@@ -185,56 +179,18 @@ export function CharacterSheet({
 
   const savingAny = Object.keys(pending).length > 0;
 
-  const tagline = useMemo(() => {
-    const level = toInt(sheet.level);
-    const klass = toStr(sheet.class);
-    const parts: string[] = [];
-    if (level != null) parts.push(`Level ${level}`);
-    if (klass) parts.push(klass);
-    return parts.join(' · ');
-  }, [sheet]);
-
   return (
     <section
       aria-label="Character sheet"
       className="mb-6 rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-4"
     >
-      <header className="mb-4 flex items-center gap-4">
-        <div
-          className="h-16 w-16 shrink-0 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#F4EDE0]"
-          style={portraitUrl ? undefined : { backgroundColor: '#EAE1CF' }}
-        >
-          {portraitUrl ? (
-            <img
-              src={portraitUrl}
-              alt=""
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center text-2xl font-semibold text-[#5A4F42]">
-              {displayName.slice(0, 1).toUpperCase()}
-            </div>
-          )}
-        </div>
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h2 className="truncate text-base font-semibold text-[#2A241E]">
-              {displayName}
-            </h2>
-            <span className="rounded-full border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[#5A4F42]">
-              {roleLabel}
-            </span>
-          </div>
-          {tagline && (
-            <p className="mt-0.5 text-xs text-[#5A4F42]">{tagline}</p>
-          )}
-        </div>
-        <div className="ml-auto text-xs text-[#5A4F42]">
-          {savingAny ? 'Saving…' : flash ? (
+      {(savingAny || flash) && (
+        <div className="mb-3 text-right text-xs text-[#5A4F42]">
+          {savingAny ? 'Saving…' : (
             <span className="text-[#8B4A52]">{flash}</span>
-          ) : null}
+          )}
         </div>
-      </header>
+      )}
 
       <div className="space-y-4">
         {template.schema.sections.map((section) => (

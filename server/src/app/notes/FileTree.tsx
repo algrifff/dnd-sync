@@ -107,9 +107,9 @@ function getContextualOptions(folderPath: string | undefined): {
     return { kinds: ['campaign'], isUpload: false, labelOverrides: {} };
   }
 
-  // Campaign root (Campaigns/<slug>) — allow custom sub-folders
+  // Campaign root (Campaigns/<slug>) — all entity kinds + subfolder
   if (/^Campaigns\/[^/]+$/.test(folderPath)) {
-    return { kinds: ['folder'], isUpload: false, labelOverrides: { folder: 'New subfolder' } };
+    return { kinds: ['pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'folder'], isUpload: false, labelOverrides: { folder: 'New subfolder' } };
   }
 
   // Per-campaign canonical sub-folders
@@ -246,11 +246,28 @@ export function FileTree({
         return;
       }
       setError(null);
-      setCreatingIn({ parent, kind });
-      // Ensure the target folder is expanded so the inline row is
-      // visible immediately.
-      if (parent) {
-        setOpen((prev) => new Set(prev).add(parent));
+      // When creating an entity from the campaign root, auto-route to the
+      // correct canonical subfolder so the note lands in the right place.
+      const KIND_SUBFOLDER: Partial<Record<CreateKind, string>> = {
+        pc: 'PCs', npc: 'NPCs', ally: 'Allies', villain: 'Villains',
+        item: 'Items', session: 'Sessions', location: 'Locations',
+      };
+      let resolvedParent = parent;
+      if (/^Campaigns\/[^/]+$/.test(parent) && kind in KIND_SUBFOLDER) {
+        resolvedParent = `${parent}/${KIND_SUBFOLDER[kind as keyof typeof KIND_SUBFOLDER]}`;
+      }
+      setCreatingIn({ parent: resolvedParent, kind });
+      // Ensure the target folder is expanded so the inline row is visible.
+      if (resolvedParent) {
+        setOpen((prev) => {
+          const next = new Set(prev);
+          resolvedParent.split('/').reduce((acc, seg) => {
+            const p = acc ? `${acc}/${seg}` : seg;
+            next.add(p);
+            return p;
+          }, '');
+          return next;
+        });
       }
     },
     [],

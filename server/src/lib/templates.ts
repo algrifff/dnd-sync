@@ -72,6 +72,14 @@ export type TemplateSection = {
 export type TemplateSchema = {
   version: number;
   sections: TemplateSection[];
+  /** Field IDs from this template's sections to surface as a quick
+   *  summary line in the note page header (e.g. level, class, type). */
+  headerFields?: string[];
+  /** How to display the note's portrait image in the page header.
+   *  avatar = small circle left of title (characters, NPCs)
+   *  hero   = full-width banner below title (locations, monsters)
+   *  none   = no image slot */
+  imageLayout?: 'avatar' | 'hero' | 'none';
 };
 
 export type NoteTemplate = {
@@ -153,6 +161,8 @@ export function upsertTemplate(
 
 const DEFAULT_PC_SCHEMA: TemplateSchema = {
   version: 1,
+  headerFields: ['level', 'class', 'race'],
+  imageLayout: 'avatar',
   sections: [
     {
       id: 'basics',
@@ -215,6 +225,8 @@ const DEFAULT_PC_SCHEMA: TemplateSchema = {
 
 const DEFAULT_NPC_SCHEMA: TemplateSchema = {
   version: 1,
+  headerFields: ['tagline', 'role', 'race'],
+  imageLayout: 'avatar',
   sections: [
     {
       id: 'basics',
@@ -234,12 +246,10 @@ const DEFAULT_NPC_SCHEMA: TemplateSchema = {
     },
     {
       id: 'combat',
-      label: 'Combat (if relevant)',
+      label: 'Combat (if known)',
       fields: [
-        { id: 'hp_max', label: 'HP max', type: 'integer' },
-        { id: 'hp_current', label: 'HP current', type: 'integer', playerEditable: true },
+        { id: 'hp_current', label: 'HP (tracked)', type: 'integer', playerEditable: true },
         { id: 'ac', label: 'AC', type: 'integer' },
-        { id: 'cr', label: 'Challenge rating', type: 'text' },
       ],
     },
   ],
@@ -247,6 +257,8 @@ const DEFAULT_NPC_SCHEMA: TemplateSchema = {
 
 const DEFAULT_ALLY_SCHEMA: TemplateSchema = {
   version: 1,
+  headerFields: ['tagline', 'role', 'disposition'],
+  imageLayout: 'avatar',
   sections: [
     ...DEFAULT_NPC_SCHEMA.sections,
     {
@@ -269,8 +281,6 @@ const DEFAULT_ALLY_SCHEMA: TemplateSchema = {
           default: 5,
           hint: '0 = wary · 10 = would die for the party',
         },
-        { id: 'owes_party', label: 'Party is owed', type: 'longtext' },
-        { id: 'owed_to', label: 'Party owes them', type: 'longtext' },
       ],
     },
   ],
@@ -278,23 +288,17 @@ const DEFAULT_ALLY_SCHEMA: TemplateSchema = {
 
 const DEFAULT_VILLAIN_SCHEMA: TemplateSchema = {
   version: 1,
+  headerFields: ['tagline', 'role'],
+  imageLayout: 'avatar',
   sections: [
     ...DEFAULT_NPC_SCHEMA.sections,
-    {
-      id: 'ambitions',
-      label: 'Ambitions & resources',
-      fields: [
-        { id: 'goal', label: 'Immediate goal', type: 'longtext' },
-        { id: 'long_term', label: 'Long-term ambition', type: 'longtext' },
-        { id: 'resources', label: 'Resources', type: 'list<text>', hint: 'Allies, artefacts, strongholds' },
-        { id: 'weakness', label: 'Known weakness', type: 'longtext' },
-      ],
-    },
   ],
 };
 
 const DEFAULT_SESSION_SCHEMA: TemplateSchema = {
   version: 1,
+  headerFields: ['date', 'session_number'],
+  imageLayout: 'none',
   sections: [
     {
       id: 'meta',
@@ -302,17 +306,7 @@ const DEFAULT_SESSION_SCHEMA: TemplateSchema = {
       fields: [
         { id: 'date', label: 'Date', type: 'text', required: true, hint: 'YYYY-MM-DD' },
         { id: 'session_number', label: 'Session #', type: 'integer', min: 1 },
-        { id: 'title', label: 'Title', type: 'text' },
         { id: 'attendees', label: 'Attendees', type: 'list<text>' },
-      ],
-    },
-    {
-      id: 'summary',
-      label: 'Summary',
-      fields: [
-        { id: 'recap', label: 'Recap', type: 'longtext' },
-        { id: 'locations', label: 'Locations visited', type: 'list<text>' },
-        { id: 'outcomes', label: 'Outcomes / cliffhangers', type: 'longtext' },
       ],
     },
   ],
@@ -320,6 +314,8 @@ const DEFAULT_SESSION_SCHEMA: TemplateSchema = {
 
 const DEFAULT_ITEM_SCHEMA: TemplateSchema = {
   version: 1,
+  headerFields: ['type', 'rarity'],
+  imageLayout: 'none',
   sections: [
     {
       id: 'basics',
@@ -341,23 +337,7 @@ const DEFAULT_ITEM_SCHEMA: TemplateSchema = {
           default: 'common',
         },
         { id: 'attunement', label: 'Requires attunement', type: 'boolean', default: false },
-      ],
-    },
-    {
-      id: 'stats',
-      label: 'Stats',
-      fields: [
-        { id: 'weight', label: 'Weight (lb)', type: 'number', min: 0 },
-        { id: 'value', label: 'Value (gp)', type: 'integer', min: 0 },
         { id: 'charges', label: 'Charges', type: 'integer', min: 0 },
-      ],
-    },
-    {
-      id: 'description',
-      label: 'Description',
-      fields: [
-        { id: 'summary', label: 'Summary', type: 'longtext' },
-        { id: 'properties', label: 'Properties', type: 'list<text>' },
       ],
     },
   ],
@@ -365,6 +345,8 @@ const DEFAULT_ITEM_SCHEMA: TemplateSchema = {
 
 const DEFAULT_LOCATION_SCHEMA: TemplateSchema = {
   version: 1,
+  headerFields: ['type', 'region'],
+  imageLayout: 'hero',
   sections: [
     {
       id: 'basics',
@@ -379,15 +361,6 @@ const DEFAULT_LOCATION_SCHEMA: TemplateSchema = {
           default: 'town',
         },
         { id: 'region', label: 'Region', type: 'text' },
-        { id: 'population', label: 'Population', type: 'text', hint: 'e.g. 12k, mostly dwarves' },
-      ],
-    },
-    {
-      id: 'overview',
-      label: 'Overview',
-      fields: [
-        { id: 'summary', label: 'Summary', type: 'longtext' },
-        { id: 'notable', label: 'Notable features', type: 'list<text>' },
       ],
     },
   ],
@@ -395,6 +368,8 @@ const DEFAULT_LOCATION_SCHEMA: TemplateSchema = {
 
 const DEFAULT_MONSTER_SCHEMA: TemplateSchema = {
   version: 1,
+  headerFields: ['size', 'type', 'ac'],
+  imageLayout: 'hero',
   sections: [
     {
       id: 'basics',
@@ -419,69 +394,28 @@ const DEFAULT_MONSTER_SCHEMA: TemplateSchema = {
           options: ['tiny', 'small', 'medium', 'large', 'huge', 'gargantuan'],
           default: 'medium',
         },
-        { id: 'alignment', label: 'Alignment', type: 'text' },
-        { id: 'cr', label: 'Challenge rating', type: 'text', hint: 'e.g. 1/4, 5, 20' },
-        { id: 'xp', label: 'XP', type: 'integer', min: 0 },
       ],
     },
     {
       id: 'combat',
-      label: 'Combat',
+      label: 'Combat (observed)',
       fields: [
-        { id: 'ac', label: 'AC', type: 'integer', min: 0, default: 10 },
-        { id: 'ac_notes', label: 'AC notes', type: 'text', hint: 'e.g. natural armour' },
-        { id: 'hp_max', label: 'HP max', type: 'integer', min: 1 },
-        { id: 'hp_current', label: 'HP current', type: 'integer', min: 0, playerEditable: true },
-        { id: 'hit_dice', label: 'Hit dice', type: 'text', hint: 'e.g. 10d10+50' },
+        { id: 'ac', label: 'AC', type: 'integer', min: 0 },
+        { id: 'hp_current', label: 'HP (tracked)', type: 'integer', min: 0, playerEditable: true },
         { id: 'speed', label: 'Speed', type: 'text', hint: 'e.g. 30 ft., fly 60 ft.' },
-      ],
-    },
-    {
-      id: 'abilities',
-      label: 'Ability scores',
-      fields: [
-        { id: 'str', label: 'STR', type: 'integer', min: 1, max: 30, default: 10 },
-        { id: 'dex', label: 'DEX', type: 'integer', min: 1, max: 30, default: 10 },
-        { id: 'con', label: 'CON', type: 'integer', min: 1, max: 30, default: 10 },
-        { id: 'int', label: 'INT', type: 'integer', min: 1, max: 30, default: 10 },
-        { id: 'wis', label: 'WIS', type: 'integer', min: 1, max: 30, default: 10 },
-        { id: 'cha', label: 'CHA', type: 'integer', min: 1, max: 30, default: 10 },
-      ],
-    },
-    {
-      id: 'traits',
-      label: 'Traits',
-      fields: [
-        { id: 'saving_throws', label: 'Saving throw proficiencies', type: 'list<text>', hint: 'e.g. Str +5' },
-        { id: 'skills', label: 'Skill proficiencies', type: 'list<text>', hint: 'e.g. Perception +3' },
-        { id: 'damage_immunities', label: 'Damage immunities', type: 'list<text>' },
-        { id: 'damage_resistances', label: 'Damage resistances', type: 'list<text>' },
-        { id: 'damage_vulnerabilities', label: 'Damage vulnerabilities', type: 'list<text>' },
-        { id: 'condition_immunities', label: 'Condition immunities', type: 'list<text>' },
-        { id: 'senses', label: 'Senses', type: 'list<text>', hint: 'e.g. darkvision 60 ft.' },
-        { id: 'languages', label: 'Languages', type: 'list<text>' },
-      ],
-    },
-    {
-      id: 'actions',
-      label: 'Actions & abilities',
-      fields: [
-        { id: 'special_abilities', label: 'Special abilities', type: 'longtext', hint: 'Passive traits like Pack Tactics' },
-        { id: 'actions', label: 'Actions', type: 'longtext' },
-        { id: 'bonus_actions', label: 'Bonus actions', type: 'longtext' },
-        { id: 'reactions', label: 'Reactions', type: 'longtext' },
-        { id: 'legendary_actions', label: 'Legendary actions', type: 'longtext' },
-        { id: 'lair_actions', label: 'Lair actions', type: 'longtext' },
-      ],
-    },
-    {
-      id: 'lore',
-      label: 'Lore',
-      fields: [
-        { id: 'description', label: 'Description', type: 'longtext' },
-        { id: 'habitat', label: 'Habitat', type: 'list<text>', hint: 'e.g. forests, underdark' },
-        { id: 'tactics', label: 'Tactics', type: 'longtext' },
-        { id: 'treasure', label: 'Treasure', type: 'longtext' },
+        {
+          id: 'resistances',
+          label: 'Resistances / immunities',
+          type: 'list<text>',
+          hint: 'what you\'ve discovered',
+        },
+        {
+          id: 'conditions',
+          label: 'Conditions',
+          type: 'list<text>',
+          playerEditable: true,
+          hint: 'prone, poisoned, etc.',
+        },
       ],
     },
   ],

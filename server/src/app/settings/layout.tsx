@@ -8,6 +8,7 @@ import { readSession } from '@/lib/session';
 import { buildTree } from '@/lib/tree';
 import { listNoteKinds } from '@/lib/characters';
 import { AppHeader } from '../AppHeader';
+import { NoteTabBar } from '../NoteTabBar';
 import { WorldsSidebar } from '../WorldsSidebar';
 import { SidebarHeader } from '../SidebarHeader';
 import { SidebarFooter } from '../SidebarFooter';
@@ -35,7 +36,20 @@ export default async function SettingsLayout({
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
 
   return (
-    <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
+    <div className="flex h-screen flex-col bg-[#F4EDE0] text-[#2A241E]">
+      <AppHeader
+        role={session.role}
+        me={{
+            userId: session.userId,
+            displayName: session.displayName,
+            username: session.username,
+            accentColor: session.accentColor,
+          }}
+        csrfToken={session.csrfToken}
+        canCreate={session.role !== 'viewer'}
+        groupId={session.currentGroupId}
+        />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       <WorldsSidebar
           csrfToken={session.csrfToken}
           userId={session.userId}
@@ -62,18 +76,7 @@ export default async function SettingsLayout({
         <SidebarFooter username={session.username} />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <AppHeader
-          role={session.role}
-          me={{
-            userId: session.userId,
-            displayName: session.displayName,
-            username: session.username,
-            accentColor: session.accentColor,
-          }}
-          csrfToken={session.csrfToken}
-          canCreate={session.role !== 'viewer'}
-          groupId={session.currentGroupId}
-        />
+        <NoteTabBar canCreate={session.role !== 'viewer'} csrfToken={session.csrfToken} />
         <div className="flex-1 overflow-y-auto px-6 py-8">
           <div className="mx-auto max-w-3xl">
             <SettingsHeading />
@@ -81,6 +84,7 @@ export default async function SettingsLayout({
             <div className="mt-6">{children}</div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

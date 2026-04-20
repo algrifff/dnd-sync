@@ -14,7 +14,7 @@ import { NoteSurface, type SurfaceUser } from './NoteSurface';
 import { PointerOverlay } from './PointerOverlay';
 import { DrawingOverlay } from './DrawingOverlay';
 import { CharacterSheet } from './CharacterSheet';
-import type { NoteTemplate } from '@/lib/templates';
+import type { NoteTemplate, TemplateSchema } from '@/lib/templates';
 
 export type CharacterProp = {
   roleLabel: string;
@@ -84,32 +84,71 @@ export function NoteWorkspace({
     };
   }, [provider, ydoc]);
 
+  const imageLayout = character?.template.schema.imageLayout ?? 'none';
+  const quickSummary = character
+    ? buildQuickSummary(character.template.schema, character.sheet)
+    : [];
+
   return (
     <div className="relative">
       <div className="absolute right-0 top-0">
         <StatusDot state={authFailed ? 'error' : connected} />
       </div>
 
-      <TitleEditor ydoc={ydoc} />
-
-      {creator && createdAt > 0 && (
-        <p className="mt-1 text-xs text-[#5A4F42]">
-          Created by{' '}
-          <span className="font-medium text-[#2A241E]">
-            {creator.displayName || creator.username}
-          </span>{' '}
-          · {formatCreatedAt(createdAt)}
-        </p>
+      {/* ── Note header ─────────────────────────────────────────── */}
+      {imageLayout === 'avatar' && character ? (
+        <div className="mb-4 flex items-start gap-5">
+          <Avatar
+            portraitUrl={character.portraitUrl}
+            displayName={character.displayName}
+          />
+          <div className="min-w-0 flex-1 pt-1">
+            <TitleEditor ydoc={ydoc} />
+            <NoteMetaRow
+              roleLabel={character.roleLabel}
+              quickSummary={quickSummary}
+              creator={creator}
+              createdAt={createdAt}
+            />
+            <div className="mt-2">
+              <TagEditor path={path} initialTags={initialTags} csrfToken={csrfToken} canEdit={canEdit} />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="mb-4">
+          <TitleEditor ydoc={ydoc} />
+          {character && (
+            <NoteMetaRow
+              roleLabel={character.roleLabel}
+              quickSummary={quickSummary}
+              creator={creator}
+              createdAt={createdAt}
+            />
+          )}
+          {!character && creator && createdAt > 0 && (
+            <p className="mt-1 text-xs text-[#5A4F42]">
+              Created by{' '}
+              <span className="font-medium text-[#2A241E]">
+                {creator.displayName || creator.username}
+              </span>{' '}
+              · {formatCreatedAt(createdAt)}
+            </p>
+          )}
+          <div className="mt-2">
+            <TagEditor path={path} initialTags={initialTags} csrfToken={csrfToken} canEdit={canEdit} />
+          </div>
+          {imageLayout === 'hero' && character?.portraitUrl && (
+            <div className="mt-4 h-52 w-full overflow-hidden rounded-[12px] border border-[#D4C7AE]">
+              <img
+                src={character.portraitUrl}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            </div>
+          )}
+        </div>
       )}
-
-      <div className="mt-2">
-        <TagEditor
-          path={path}
-          initialTags={initialTags}
-          csrfToken={csrfToken}
-          canEdit={canEdit}
-        />
-      </div>
 
       {character && (
         <div className="mt-4">
@@ -119,9 +158,6 @@ export function NoteWorkspace({
             template={character.template}
             initialSheet={character.sheet}
             canWriteAll={character.canWriteAll}
-            displayName={character.displayName}
-            portraitUrl={character.portraitUrl}
-            roleLabel={character.roleLabel}
             provider={provider}
           />
         </div>
@@ -198,4 +234,84 @@ function buildCollabUrl(): string {
   if (typeof window === 'undefined') return 'ws://localhost/collab';
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${scheme}//${location.host}/collab`;
+}
+
+function Avatar({
+  portraitUrl,
+  displayName,
+}: {
+  portraitUrl: string | null;
+  displayName: string;
+}): React.JSX.Element {
+  return (
+    <div className="h-20 w-20 shrink-0 overflow-hidden rounded-full border-2 border-[#D4C7AE] bg-[#EAE1CF]">
+      {portraitUrl ? (
+        <img src={portraitUrl} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-3xl font-semibold text-[#5A4F42]">
+          {displayName.slice(0, 1).toUpperCase()}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NoteMetaRow({
+  roleLabel,
+  quickSummary,
+  creator,
+  createdAt,
+}: {
+  roleLabel: string;
+  quickSummary: string[];
+  creator: { displayName: string; username: string } | null;
+  createdAt: number;
+}): React.JSX.Element {
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      <span className="rounded-full border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#5A4F42]">
+        {roleLabel}
+      </span>
+      {quickSummary.map((s) => (
+        <span
+          key={s}
+          className="rounded-full border border-[#D4C7AE] bg-[#FBF5E8] px-2 py-0.5 text-[11px] text-[#2A241E]"
+        >
+          {s}
+        </span>
+      ))}
+      {creator && createdAt > 0 && (
+        <span className="text-[11px] text-[#5A4F42]">
+          · {creator.displayName || creator.username} · {formatCreatedAt(createdAt)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Extract display strings for the fields listed in schema.headerFields. */
+function buildQuickSummary(
+  schema: TemplateSchema,
+  sheet: Record<string, unknown>,
+): string[] {
+  if (!schema.headerFields?.length) return [];
+
+  const fieldMap = new Map(
+    schema.sections.flatMap((s) => s.fields.map((f) => [f.id, f])),
+  );
+
+  return schema.headerFields.flatMap((id) => {
+    const field = fieldMap.get(id);
+    const value = sheet[id];
+    if (!field || value === null || value === undefined || value === '') return [];
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      if (id === 'level') return [`Level ${Math.trunc(value)}`];
+      if (id === 'session_number') return [`#${Math.trunc(value)}`];
+      if (id === 'ac') return [`AC ${Math.trunc(value)}`];
+      return [String(Math.trunc(value))];
+    }
+    if (typeof value === 'string' && value.trim()) return [value.trim()];
+    return [];
+  });
 }

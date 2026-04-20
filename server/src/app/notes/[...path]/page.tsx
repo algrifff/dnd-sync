@@ -17,6 +17,7 @@ import { getTemplate, type NoteTemplate, type TemplateKind } from '@/lib/templat
 import { listNoteKinds } from '@/lib/characters';
 import { buildTree } from '@/lib/tree';
 import { AppHeader } from '../../AppHeader';
+import { NoteTabBar } from '../../NoteTabBar';
 import { WorldsSidebar } from '../../WorldsSidebar';
 import { SidebarHeader } from '../../SidebarHeader';
 import { SidebarFooter } from '../../SidebarFooter';
@@ -75,7 +76,20 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   const outline = extractOutline(contentJson);
 
   return (
-    <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
+    <div className="flex h-screen flex-col bg-[#F4EDE0] text-[#2A241E]">
+      <AppHeader
+        role={session.role}
+        me={{
+            userId: session.userId,
+            displayName: session.displayName,
+            username: session.username,
+            accentColor: session.accentColor,
+          }}
+        csrfToken={session.csrfToken}
+        canCreate={session.role !== 'viewer'}
+        groupId={session.currentGroupId}
+        />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       <WorldsSidebar
           csrfToken={session.csrfToken}
           userId={session.userId}
@@ -103,18 +117,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <AppHeader
-          role={session.role}
-          me={{
-            userId: session.userId,
-            displayName: session.displayName,
-            username: session.username,
-            accentColor: session.accentColor,
-          }}
-          csrfToken={session.csrfToken}
-          canCreate={session.role !== 'viewer'}
-          groupId={session.currentGroupId}
-        />
+        <NoteTabBar canCreate={session.role !== 'viewer'} csrfToken={session.csrfToken} />
 
         <div
           id="note-tools-anchor"
@@ -208,6 +211,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
           ? { campaignSlug: campaignSlugFromPath(path) }
           : {})}
       />
+      </div>
     </div>
   );
 }
@@ -244,7 +248,7 @@ function resolveCharacterView(args: {
   let templateKind: TemplateKind;
   if (fm.kind === 'character') {
     templateKind = deriveRole(fm, args.path);
-  } else if (fm.kind === 'item' || fm.kind === 'location') {
+  } else if (fm.kind === 'item' || fm.kind === 'location' || fm.kind === 'monster') {
     templateKind = fm.kind;
   } else {
     return null;
