@@ -1,7 +1,3 @@
-// Protocol-level constants shared between server and plugin.
-
-export const WS_PATH = '/sync' as const;
-
 export const MARKDOWN_EXTENSIONS = ['.md', '.canvas'] as const;
 export const BINARY_EXTENSIONS = [
   // images

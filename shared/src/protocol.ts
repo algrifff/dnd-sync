@@ -1,5 +1,4 @@
-// Zod schemas for every message that crosses the server/plugin boundary.
-// Import these in both packages so protocol drift is a compile error.
+// Shared Zod schemas used across the server.
 
 import { z } from 'zod';
 
@@ -74,34 +73,7 @@ export const ChangePasswordRequestSchema = z.object({
 });
 export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequestSchema>;
 
-// ── Plugin sync API ──────────────────────────────────────────────────────
-
-export const InventoryTextDocSchema = z.object({
-  path: z.string(),
-  updatedAt: z.number().int(),
-  bytes: z.number().int().nonnegative(),
-});
-
-export const InventoryBinaryFileSchema = z.object({
-  path: z.string(),
-  mimeType: z.string(),
-  size: z.number().int().nonnegative(),
-  updatedAt: z.number().int(),
-  contentHash: z.string(),
-});
-
-export const InventoryResponseSchema = z.object({
-  textDocs: z.array(InventoryTextDocSchema),
-  binaryFiles: z.array(InventoryBinaryFileSchema),
-});
-export type InventoryResponse = z.infer<typeof InventoryResponseSchema>;
-
-export const PluginVersionSchema = z.object({
-  hash: z.string(),
-});
-export type PluginVersion = z.infer<typeof PluginVersionSchema>;
-
-// ── Chat (Phase 3) ───────────────────────────────────────────────────────────
+// ── Chat ─────────────────────────────────────────────────────────────────────
 
 export const ChatMessageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system']),

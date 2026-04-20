@@ -4,7 +4,7 @@
 
 **Compendium** — a self-hosted D&D note-taking web app for players and DMs. Think Obsidian, but purpose-built for tabletop campaigns: real-time collaborative notes, character sheets, session logs, knowledge graph, and an AI assistant that understands the game context.
 
-Players connect via a web dashboard or an Obsidian plugin. Notes sync live across all clients via Yjs CRDTs over WebSocket. Multiple groups (worlds/campaigns) are supported; users can belong to several.
+Players connect via a web dashboard. Notes sync live across all clients via Yjs CRDTs over WebSocket. Multiple groups (worlds/campaigns) are supported; users can belong to several.
 
 ## Monorepo layout
 

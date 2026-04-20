@@ -3,14 +3,13 @@
 // (useful for CI / local testing / emergency override).
 //
 // Keys:
-//   admin_token     — dashboard login, creates invites, can regenerate.
-//   player_token    — baked into friend installers, authenticates WS + HTTP.
-//   installer_key   — query-param gate on /install/* endpoints. Rotatable.
+//   admin_token  — legacy bearer token for admin API access.
+//   player_token — legacy bearer token for player API access.
 
 import { randomBytes } from 'node:crypto';
 import { getDb } from './db';
 
-export type ConfigKey = 'admin_token' | 'player_token' | 'installer_key';
+export type ConfigKey = 'admin_token' | 'player_token';
 
 type Row = { value: string };
 
@@ -20,8 +19,6 @@ function envNameFor(key: ConfigKey): string {
       return 'ADMIN_TOKEN';
     case 'player_token':
       return 'PLAYER_TOKEN';
-    case 'installer_key':
-      return 'INSTALLER_KEY';
   }
 }
 
@@ -56,7 +53,7 @@ export function getConfigValue(key: ConfigKey): string {
   return stored;
 }
 
-/** Force a new value for a config key (e.g. rotating installer_key). */
+/** Force a new value for a config key. */
 export function setConfigValue(key: ConfigKey, value: string): void {
   writeRow(key, value);
 }
@@ -74,7 +71,7 @@ export function regenerateConfigValue(key: ConfigKey): string {
  * DM can grab it from Railway logs.
  */
 export function ensureConfig(): void {
-  const bootstrap: ConfigKey[] = ['admin_token', 'player_token', 'installer_key'];
+  const bootstrap: ConfigKey[] = ['admin_token', 'player_token'];
   const firstTimeAdmin = !readRow('admin_token') && !process.env.ADMIN_TOKEN;
 
   for (const key of bootstrap) {

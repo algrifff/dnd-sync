@@ -1,24 +1,18 @@
-// Aggregates server stats for the dashboard. Pure read-only — every call
-// is a quick SQLite query + a live-connections snapshot.
+// Aggregates server stats for the admin dashboard. Pure read-only.
 
 import { statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { getDb } from './db';
 import { LATEST_SCHEMA_VERSION } from './migrations';
-import { getLiveStats } from '@/ws/stats';
 
 export type ServerStats = {
   uptimeSeconds: number;
   schemaVersion: number;
   commit: string | null;
   dbSizeBytes: number;
-  textDocs: { count: number; totalBytes: number };
-  binaryFiles: { count: number; totalBytes: number };
-  connections: {
-    total: number;
-    byDoc: Array<{ path: string; connections: number }>;
-  };
-  recentDocs: Array<{ path: string; updatedAt: number; bytes: number }>;
+  notes: { count: number };
+  assets: { count: number; totalBytes: number };
+  recentDocs: Array<{ path: string; updatedAt: number }>;
 };
 
 function dbSize(): number {
@@ -33,41 +27,29 @@ function dbSize(): number {
 export function collectStats(): ServerStats {
   const db = getDb();
 
-  const text = db
-    .query<{ count: number; bytes: number }, []>(
-      'SELECT COUNT(*) AS count, COALESCE(SUM(length(yjs_state)), 0) AS bytes FROM text_docs',
-    )
-    .get() ?? { count: 0, bytes: 0 };
+  const notes = db
+    .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM notes')
+    .get() ?? { count: 0 };
 
-  const bin = db
+  const assets = db
     .query<{ count: number; bytes: number }, []>(
-      'SELECT COUNT(*) AS count, COALESCE(SUM(size), 0) AS bytes FROM binary_files',
+      'SELECT COUNT(*) AS count, COALESCE(SUM(size), 0) AS bytes FROM assets',
     )
     .get() ?? { count: 0, bytes: 0 };
 
   const recent = db
-    .query<{ path: string; updated_at: number; bytes: number }, []>(
-      `SELECT path, updated_at, length(yjs_state) AS bytes
-         FROM text_docs
-         ORDER BY updated_at DESC
-         LIMIT 10`,
+    .query<{ path: string; updated_at: number }, []>(
+      `SELECT path, updated_at FROM notes ORDER BY updated_at DESC LIMIT 10`,
     )
     .all();
-
-  const live = getLiveStats();
 
   return {
     uptimeSeconds: Math.round(process.uptime()),
     schemaVersion: LATEST_SCHEMA_VERSION,
     commit: process.env.RAILWAY_GIT_COMMIT_SHA ?? null,
     dbSizeBytes: dbSize(),
-    textDocs: { count: text.count, totalBytes: text.bytes },
-    binaryFiles: { count: bin.count, totalBytes: bin.bytes },
-    connections: { total: live.totalConnections, byDoc: live.byDoc },
-    recentDocs: recent.map((r) => ({
-      path: r.path,
-      updatedAt: r.updated_at,
-      bytes: r.bytes,
-    })),
+    notes: { count: notes.count },
+    assets: { count: assets.count, totalBytes: assets.bytes },
+    recentDocs: recent.map((r) => ({ path: r.path, updatedAt: r.updated_at })),
   };
 }

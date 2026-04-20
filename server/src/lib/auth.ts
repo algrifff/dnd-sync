@@ -4,7 +4,6 @@
 
 import { timingSafeEqual } from 'node:crypto';
 import { getConfigValue } from './config';
-import { isFriendToken } from './friends';
 
 export type Role = 'admin' | 'player';
 
@@ -21,7 +20,6 @@ export function verifyToken(token: string | null | undefined): Role | null {
   try {
     if (safeEqual(token, getConfigValue('admin_token'))) return 'admin';
     if (safeEqual(token, getConfigValue('player_token'))) return 'player';
-    if (isFriendToken(token)) return 'player';
   } catch {
     // config not ready — treat as unauthorized rather than crashing
   }

@@ -38,6 +38,7 @@ import {
   Sword,
   Upload,
   UserRound,
+  X,
 } from 'lucide-react';
 import type { Tree, TreeDir } from '@/lib/tree';
 import { broadcastTreeChange } from '@/lib/tree-sync';
@@ -55,6 +56,7 @@ const KindMapContext = createContext<KindMap>({});
 type CreateKind =
   | 'page'
   | 'folder'
+  | 'campaign'
   | 'pc'
   | 'npc'
   | 'ally'
@@ -72,6 +74,7 @@ const NEW_ENTRY_OPTIONS: Array<{
 }> = [
   { kind: 'page', label: 'Page', icon: FileText, placeholder: 'Untitled' },
   { kind: 'folder', label: 'Folder', icon: FolderPlus, placeholder: 'New folder' },
+  { kind: 'campaign', label: 'New campaign', icon: Shield, placeholder: 'Campaign name' },
   { kind: 'pc', label: 'Player character', icon: Sword, placeholder: 'New PC' },
   { kind: 'npc', label: 'NPC', icon: UserRound, placeholder: 'New NPC' },
   { kind: 'ally', label: 'Ally', icon: Heart, placeholder: 'New ally' },
@@ -99,9 +102,9 @@ function getContextualOptions(folderPath: string | undefined): {
     return { kinds: [], isUpload: true, labelOverrides: {} };
   }
 
-  // Top-level Campaigns — only create a new campaign folder
+  // Top-level Campaigns — opens the campaign creation dialog
   if (folderPath === 'Campaigns') {
-    return { kinds: ['folder'], isUpload: false, labelOverrides: { folder: 'New campaign' } };
+    return { kinds: ['campaign'], isUpload: false, labelOverrides: {} };
   }
 
   // Campaign root (Campaigns/<slug>) — allow custom sub-folders
@@ -186,6 +189,7 @@ export function FileTree({
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [showCampaignDialog, setShowCampaignDialog] = useState<boolean>(false);
 
   // HTML5 DnD. dragging = the source row; dragOver = the folder path
   // currently being hovered, or '' for the implicit root drop zone.
@@ -237,6 +241,10 @@ export function FileTree({
 
   const startCreate = useCallback(
     (parent: string, kind: CreateKind) => {
+      if (kind === 'campaign') {
+        setShowCampaignDialog(true);
+        return;
+      }
       setError(null);
       setCreatingIn({ parent, kind });
       // Ensure the target folder is expanded so the inline row is
@@ -480,6 +488,18 @@ export function FileTree({
       aria-label="Note tree"
       className="min-h-0 flex-1 overflow-y-auto border-r border-[#D4C7AE] py-3 text-sm"
     >
+      {showCampaignDialog && (
+        <CampaignCreateDialog
+          csrfToken={csrfToken}
+          onClose={() => setShowCampaignDialog(false)}
+          onCreated={(campaignPath) => {
+            setShowCampaignDialog(false);
+            setOpen((prev) => new Set(prev).add('Campaigns').add(campaignPath));
+            router.refresh();
+            broadcastTreeChange();
+          }}
+        />
+      )}
       {canCreate && (
         <div className="mb-1 px-2">
           <NewEntryDropdown
@@ -1086,6 +1106,172 @@ function NewEntryRow({
       {error && (
         <p className="ml-[30px] mt-1 text-xs text-[#8B4A52]">{error}</p>
       )}
+    </div>
+  );
+}
+
+const CAMPAIGN_SUBFOLDERS = [
+  'PCs', 'NPCs', 'Allies', 'Villains', 'Items', 'Sessions', 'Locations',
+] as const;
+type CampaignSubfolder = typeof CAMPAIGN_SUBFOLDERS[number];
+
+function CampaignCreateDialog({
+  csrfToken,
+  onClose,
+  onCreated,
+}: {
+  csrfToken: string;
+  onClose: () => void;
+  onCreated: (campaignPath: string) => void;
+}): React.JSX.Element {
+  const nameRef = useRef<HTMLInputElement>(null);
+  const [name, setName] = useState<string>('');
+  const [selected, setSelected] = useState<Set<CampaignSubfolder>>(
+    () => new Set(CAMPAIGN_SUBFOLDERS),
+  );
+  const [pending, setPending] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    nameRef.current?.focus();
+  }, []);
+
+  const allSelected = selected.size === CAMPAIGN_SUBFOLDERS.length;
+
+  const toggleSubfolder = (sf: CampaignSubfolder): void => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(sf)) next.delete(sf);
+      else next.add(sf);
+      return next;
+    });
+  };
+
+  const postFolder = async (parent: string, folderName: string): Promise<{ ok: boolean; error?: string }> => {
+    const res = await fetch('/api/folders/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      body: JSON.stringify({ parent, name: folderName }),
+    });
+    return res.json().catch(() => ({ ok: false })) as Promise<{ ok: boolean; error?: string }>;
+  };
+
+  const submit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
+    e.preventDefault();
+    const clean = name.trim();
+    if (!clean || pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      const root = await postFolder('Campaigns', clean);
+      if (!root.ok) {
+        setError(
+          root.error === 'exists'
+            ? 'A campaign with that name already exists.'
+            : (root.error ?? 'Failed to create campaign folder.'),
+        );
+        return;
+      }
+      const campaignPath = 'Campaigns/' + clean;
+      for (const sf of CAMPAIGN_SUBFOLDERS) {
+        if (selected.has(sf)) await postFolder(campaignPath, sf);
+      }
+      onCreated(campaignPath);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'network error');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="campaign-dialog-title"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#2A241E]/50 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <form
+        onSubmit={submit}
+        className="w-full max-w-sm rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-4 shadow-[0_16px_48px_rgba(42,36,30,0.3)]"
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h3 id="campaign-dialog-title" className="text-sm font-semibold text-[#2A241E]">
+            New campaign
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-[6px] p-1 text-[#5A4F42] transition hover:bg-[#F4EDE0]"
+          >
+            <X size={14} aria-hidden />
+          </button>
+        </div>
+
+        <label className="mb-3 block">
+          <span className="mb-1 block text-xs font-medium text-[#5A4F42]">Name</span>
+          <input
+            ref={nameRef}
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. The Sunken Crown"
+            maxLength={200}
+            className="w-full rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1.5 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
+          />
+        </label>
+
+        <div className="mb-3">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-xs font-medium text-[#5A4F42]">Subfolders</span>
+            <button
+              type="button"
+              onClick={() =>
+                setSelected(allSelected ? new Set() : new Set(CAMPAIGN_SUBFOLDERS))
+              }
+              className="text-[11px] text-[#5A4F42] underline-offset-2 hover:underline"
+            >
+              {allSelected ? 'None' : 'All'}
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            {CAMPAIGN_SUBFOLDERS.map((sf) => (
+              <label key={sf} className="flex cursor-pointer items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={selected.has(sf)}
+                  onChange={() => toggleSubfolder(sf)}
+                  className="h-3.5 w-3.5 accent-[#D4A85A]"
+                />
+                <span className="text-xs text-[#2A241E]">{sf}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {error && <p className="mb-3 text-xs text-[#8B4A52]">{error}</p>}
+
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-[6px] px-3 py-1.5 text-xs font-medium text-[#5A4F42] transition hover:text-[#2A241E]"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={pending || !name.trim()}
+            className="rounded-[6px] bg-[#2A241E] px-3 py-1.5 text-xs font-medium text-[#F4EDE0] transition hover:bg-[#3A342E] disabled:opacity-50"
+          >
+            {pending ? 'Creating…' : 'Create'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

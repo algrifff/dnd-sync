@@ -14,12 +14,10 @@ import { securityHeaders } from '@/lib/security-headers';
 import { sessionCookieName } from '@/lib/session-public';
 
 /** Paths that must NOT redirect to /login when unauthenticated. Covers
- *  the login surface itself, API routes (self-authing), static assets,
- *  Next internals, and the legacy plugin install endpoints. */
+ *  the login surface itself, API routes (self-authing), and static assets. */
 const PUBLIC_PATTERNS: readonly RegExp[] = [
   /^\/login(\/|$)/,
   /^\/api\//,
-  /^\/install\//,
   /^\/_next\//,
   /^\/public\//,
   /^\/textures\//,
