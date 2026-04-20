@@ -1,22 +1,18 @@
 # Build context is the `compendium-ai/` folder (set via railway.toml).
 #
-# One considered split, not a back-and-forth:
+# Three-stage split:
 #
-#   * Install with Bun — honours bun.lockb, resolves the `workspace:*`
-#     protocol natively, fast. Requires python3+make+g++ in the image
-#     because a missing prebuild for argon2 / better-sqlite3 falls back
-#     to node-gyp compile, which node:22-slim has but oven/bun doesn't
-#     out of the box.
-#   * Build + runtime on Node — Next 15's production SSR runs under
-#     Bun's Node-compat layer with opaque "SyntaxError: Unexpected
-#     token ','" failures on any route that evaluates a heavy import
-#     chain. The app code is already Bun-free after the
-#     bun:sqlite / Bun.password / Bun.file swaps, so Node runtime is
-#     the right endpoint.
+#   1. deps   — Bun installs packages (understands bun.lockb + workspace:*).
+#               Native modules (better-sqlite3, argon2) are compiled here
+#               against Bun's embedded Node ABI — NOT the same as Node 22.
 #
-# Native modules compiled during the install stage target Node-API,
-# which is ABI-stable across Node majors, so they load cleanly under
-# node:22-slim at runtime without a rebuild step.
+#   2. build  — Node 22 rebuilds better-sqlite3 against its own ABI, then
+#               runs the Next.js production build. better-sqlite3 uses V8
+#               API (not N-API), so the ABI is version-specific and must
+#               match the runtime exactly.
+#
+#   3. runtime — Slim Node 22 image; receives the rebuilt node_modules and
+#                the Next.js build output.
 
 # --- Stage 1: install on Bun + build tools for native module fallback ---
 FROM oven/bun:1.3.11 AS deps
@@ -37,6 +33,13 @@ RUN bun install --frozen-lockfile
 FROM node:22-trixie-slim AS build
 WORKDIR /app
 
+# Build tools needed to recompile better-sqlite3 against Node 22's ABI.
+# The binary from the Bun deps stage was linked against Bun's embedded
+# Node (v23 ABI) and cannot be dlopen'd by Node 22.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=deps /app/node_modules       ./node_modules
 COPY --from=deps /app/package.json       ./package.json
 COPY --from=deps /app/bun.lockb          ./bun.lockb
@@ -44,6 +47,9 @@ COPY --from=deps /app/tsconfig.base.json ./tsconfig.base.json
 COPY shared ./shared
 COPY plugin ./plugin
 COPY server ./server
+
+# Recompile better-sqlite3 for Node 22 (V8 ABI 127).
+RUN npm rebuild better-sqlite3
 
 WORKDIR /app/plugin
 RUN node esbuild.config.mjs --production

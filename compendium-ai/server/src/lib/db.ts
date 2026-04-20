@@ -2,12 +2,15 @@
 // migrations, and returns a ready handle.
 //
 // Backing store is runtime-adaptive:
-//   - bun:sqlite  when running under Bun  (tests, local dev)
-//   - better-sqlite3 when running under Node.js  (production via Dockerfile)
+//   - bun:sqlite      when running under Bun  (tests, local dev)
+//   - better-sqlite3  when running under Node.js  (production via Dockerfile)
 //
-// Both back-ends expose the same `Database` interface (query/get/all/run)
-// so every call site in the codebase works unchanged regardless of
-// which runtime is in use.
+// better-sqlite3 uses V8 API (not N-API) so its .node binary is Node
+// version-specific. The Dockerfile's build stage rebuilds it against
+// Node 22 after copying node_modules from the Bun install stage.
+//
+// Both back-ends expose the same Database interface (query/get/all/run)
+// so every call site works unchanged regardless of which runtime is in use.
 
 import BetterSqlite3 from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
