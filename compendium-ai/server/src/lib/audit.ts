@@ -26,6 +26,7 @@ export type AuditAction =
   | 'session.rotate'
   | 'group.create'
   | 'group.delete'
+  | 'group.join'
   | 'group.switch';
 
 export type AuditEntry = {
