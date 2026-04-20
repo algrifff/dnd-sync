@@ -14,6 +14,7 @@ import { SidebarFooter } from '../SidebarFooter';
 import { FileTree } from '../notes/FileTree';
 import { ActiveCharacterBlock } from '../notes/ActiveCharacterBlock';
 import { SettingsTabs } from './SettingsTabs';
+import { SettingsHeading } from './SettingsHeading';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,15 +72,7 @@ export default async function SettingsLayout({
         />
         <div className="flex-1 overflow-y-auto px-6 py-8">
           <div className="mx-auto max-w-3xl">
-            <h1
-              className="mb-1 text-3xl font-bold"
-              style={{ fontFamily: '"Fraunces", Georgia, serif' }}
-            >
-              Settings
-            </h1>
-            <p className="mb-6 text-sm text-[#5A4F42]">
-              Change how you look and what you sign in with.
-            </p>
+            <SettingsHeading />
             <SettingsTabs />
             <div className="mt-6">{children}</div>
           </div>
