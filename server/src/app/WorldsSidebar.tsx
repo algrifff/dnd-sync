@@ -10,7 +10,8 @@
 // component re-reads session.currentGroupId.
 
 import { useEffect, useRef, useState } from 'react';
-import { Pencil, Plus, X } from 'lucide-react';
+import Link from 'next/link';
+import { Check, Link2, Pencil, Plus, X } from 'lucide-react';
 
 type World = {
   id: string;
@@ -21,8 +22,20 @@ type World = {
 
 export function WorldsSidebar({
   csrfToken,
+  userId,
+  displayName,
+  accentColor,
+  avatarVersion,
+  role,
+  worldId,
 }: {
   csrfToken: string;
+  userId: string;
+  displayName: string;
+  accentColor: string;
+  avatarVersion: number;
+  role: 'admin' | 'editor' | 'viewer';
+  worldId: string;
 }): React.JSX.Element {
   const [worlds, setWorlds] = useState<World[] | null>(null);
   const [creating, setCreating] = useState<boolean>(false);
@@ -113,6 +126,17 @@ export function WorldsSidebar({
         >
           <Plus size={18} aria-hidden />
         </button>
+        <div className="flex-1" />
+        {role === 'admin' && (
+          <ShareLinkButton worldId={worldId} csrfToken={csrfToken} />
+        )}
+        <ProfileAvatar
+          userId={userId}
+          displayName={displayName}
+          accentColor={accentColor}
+          avatarVersion={avatarVersion}
+        />
+        <div className="pb-1" />
       </aside>
       {creating && (
         <NewWorldDialog
@@ -296,6 +320,105 @@ function NewWorldDialog({
         </div>
       </form>
     </div>
+  );
+}
+
+function ShareLinkButton({
+  worldId,
+  csrfToken,
+}: {
+  worldId: string;
+  csrfToken: string;
+}): React.JSX.Element {
+  const [copied, setCopied] = useState<boolean>(false);
+  const [busy, setBusy] = useState<boolean>(false);
+
+  const share = async (): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      let token: string | null = null;
+      const getRes = await fetch(`/api/worlds/${worldId}/invite`);
+      if (getRes.ok) {
+        const data = (await getRes.json()) as { token?: string | null };
+        token = data.token ?? null;
+      }
+      if (!token) {
+        const postRes = await fetch(`/api/worlds/${worldId}/invite`, {
+          method: 'POST',
+          headers: { 'X-CSRF-Token': csrfToken },
+        });
+        if (postRes.ok) {
+          const data = (await postRes.json()) as { token?: string };
+          token = data.token ?? null;
+        }
+      }
+      if (token) {
+        await navigator.clipboard.writeText(
+          `${window.location.origin}/join/${token}`,
+        );
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={() => void share()}
+      title={copied ? 'Link copied!' : 'Copy invite link'}
+      aria-label={copied ? 'Link copied!' : 'Copy invite link'}
+      className={
+        'flex h-10 w-10 items-center justify-center rounded-full transition-all ' +
+        (copied
+          ? 'bg-[#7B8A5F] text-[#F4EDE0] ring-2 ring-[#7B8A5F]/50'
+          : 'bg-[#5A4F42]/40 text-[#F4EDE0] hover:rounded-[14px] hover:bg-[#7B8A5F]')
+      }
+    >
+      {copied ? <Check size={16} aria-hidden /> : <Link2 size={16} aria-hidden />}
+    </button>
+  );
+}
+
+function ProfileAvatar({
+  userId,
+  displayName,
+  accentColor,
+  avatarVersion,
+}: {
+  userId: string;
+  displayName: string;
+  accentColor: string;
+  avatarVersion: number;
+}): React.JSX.Element {
+  const hasAvatar = avatarVersion > 0;
+  const initial = displayName.trim()[0]?.toUpperCase() ?? '?';
+
+  return (
+    <Link
+      href="/settings/profile"
+      title={`Profile · ${displayName}`}
+      aria-label="Profile settings"
+      className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full transition-all hover:rounded-[14px] hover:ring-2 hover:ring-[#F4EDE0]/20"
+    >
+      {hasAvatar ? (
+        <img
+          src={`/api/users/${userId}/avatar?v=${avatarVersion}`}
+          alt={displayName}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <span
+          className="flex h-full w-full items-center justify-center text-sm font-semibold text-[#F4EDE0]"
+          style={{ backgroundColor: accentColor }}
+        >
+          {initial}
+        </span>
+      )}
+    </Link>
   );
 }
 

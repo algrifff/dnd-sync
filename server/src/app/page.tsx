@@ -47,7 +47,15 @@ export default async function HomePage(): Promise<ReactElement> {
 
   return (
     <div className="flex h-screen bg-[#F4EDE0] text-[#2A241E]">
-      <WorldsSidebar csrfToken={session.csrfToken} />
+      <WorldsSidebar
+          csrfToken={session.csrfToken}
+          userId={session.userId}
+          displayName={session.displayName}
+          accentColor={session.accentColor}
+          avatarVersion={session.avatarVersion}
+          role={session.role}
+          worldId={session.currentGroupId}
+        />
       <aside className="hidden h-full w-[260px] shrink-0 flex-col bg-[#EAE1CF]/60 md:flex">
         <ActiveCharacterBlock
           csrfToken={session.csrfToken}
@@ -62,12 +70,7 @@ export default async function HomePage(): Promise<ReactElement> {
           canCreate={session.role !== 'viewer'}
           kindMap={kindMap}
         />
-        <SidebarFooter
-          displayName={session.displayName}
-          username={session.username}
-          role={session.role}
-          accentColor={session.accentColor}
-        />
+        <SidebarFooter username={session.username} />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <AppHeader
