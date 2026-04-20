@@ -35,9 +35,7 @@ export default async function TagDetailPage({ params }: Ctx): Promise<ReactEleme
   if (!session) notFound();
 
   const notes = listNotesByTag(session.currentGroupId, tag);
-  const tree = buildTree(session.currentGroupId, {
-    hideDmOnly: session.role === 'viewer',
-  });
+  const tree = buildTree(session.currentGroupId);
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
 
   return (

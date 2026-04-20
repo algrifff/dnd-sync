@@ -28,9 +28,7 @@ export default async function TagsIndexPage(): Promise<ReactElement> {
   if (!session) notFound();
 
   const tags = listAllTags(session.currentGroupId);
-  const tree = buildTree(session.currentGroupId, {
-    hideDmOnly: session.role === 'viewer',
-  });
+  const tree = buildTree(session.currentGroupId);
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
 
   return (

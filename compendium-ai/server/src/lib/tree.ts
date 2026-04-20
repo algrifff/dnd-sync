@@ -20,6 +20,7 @@ const DEFAULT_FOLDERS: readonly string[] = [
   'Campaigns/Campaign 1/Sessions',
   'Campaigns/Campaign 1/Locations',
   'Lore',
+  'Lore/Monsters',
   'Lore/Quests',
   'Lore/World Info',
   'Assets',
@@ -42,7 +43,7 @@ export function isSystemFolder(path: string): boolean {
   // Per-campaign canonical folders
   if (/^Campaigns\/[^/]+\/(PCs|NPCs|Allies|Villains|Items|Sessions|Locations)$/.test(path)) return true;
   // Lore canonical sub-folders
-  return /^Lore\/(Quests|World Info)$/.test(path);
+  return /^Lore\/(Quests|World Info|Monsters)$/.test(path);
 }
 
 /** Seed the default folder skeleton if the group has no notes and no

@@ -42,6 +42,7 @@ const KIND_LABELS: Record<TemplateKind, string> = {
   session: 'Session',
   item: 'Item',
   location: 'Location',
+  monster: 'Monster',
 };
 
 type Flash = { kind: 'ok' | 'error'; message: string } | null;

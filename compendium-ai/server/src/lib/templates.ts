@@ -24,7 +24,8 @@ export type TemplateKind =
   | 'villain'
   | 'session'
   | 'item'
-  | 'location';
+  | 'location'
+  | 'monster';
 
 export const TEMPLATE_KINDS: readonly TemplateKind[] = [
   'pc',
@@ -34,6 +35,7 @@ export const TEMPLATE_KINDS: readonly TemplateKind[] = [
   'session',
   'item',
   'location',
+  'monster',
 ] as const;
 
 export type TemplateFieldType =
@@ -391,6 +393,100 @@ const DEFAULT_LOCATION_SCHEMA: TemplateSchema = {
   ],
 };
 
+const DEFAULT_MONSTER_SCHEMA: TemplateSchema = {
+  version: 1,
+  sections: [
+    {
+      id: 'basics',
+      label: 'Basics',
+      fields: [
+        { id: 'name', label: 'Name', type: 'text', required: true },
+        {
+          id: 'type',
+          label: 'Type',
+          type: 'enum',
+          options: [
+            'aberration', 'beast', 'celestial', 'construct', 'dragon',
+            'elemental', 'fey', 'fiend', 'giant', 'humanoid',
+            'monstrosity', 'ooze', 'plant', 'undead',
+          ],
+          default: 'monstrosity',
+        },
+        {
+          id: 'size',
+          label: 'Size',
+          type: 'enum',
+          options: ['tiny', 'small', 'medium', 'large', 'huge', 'gargantuan'],
+          default: 'medium',
+        },
+        { id: 'alignment', label: 'Alignment', type: 'text' },
+        { id: 'cr', label: 'Challenge rating', type: 'text', hint: 'e.g. 1/4, 5, 20' },
+        { id: 'xp', label: 'XP', type: 'integer', min: 0 },
+      ],
+    },
+    {
+      id: 'combat',
+      label: 'Combat',
+      fields: [
+        { id: 'ac', label: 'AC', type: 'integer', min: 0, default: 10 },
+        { id: 'ac_notes', label: 'AC notes', type: 'text', hint: 'e.g. natural armour' },
+        { id: 'hp_max', label: 'HP max', type: 'integer', min: 1 },
+        { id: 'hp_current', label: 'HP current', type: 'integer', min: 0, playerEditable: true },
+        { id: 'hit_dice', label: 'Hit dice', type: 'text', hint: 'e.g. 10d10+50' },
+        { id: 'speed', label: 'Speed', type: 'text', hint: 'e.g. 30 ft., fly 60 ft.' },
+      ],
+    },
+    {
+      id: 'abilities',
+      label: 'Ability scores',
+      fields: [
+        { id: 'str', label: 'STR', type: 'integer', min: 1, max: 30, default: 10 },
+        { id: 'dex', label: 'DEX', type: 'integer', min: 1, max: 30, default: 10 },
+        { id: 'con', label: 'CON', type: 'integer', min: 1, max: 30, default: 10 },
+        { id: 'int', label: 'INT', type: 'integer', min: 1, max: 30, default: 10 },
+        { id: 'wis', label: 'WIS', type: 'integer', min: 1, max: 30, default: 10 },
+        { id: 'cha', label: 'CHA', type: 'integer', min: 1, max: 30, default: 10 },
+      ],
+    },
+    {
+      id: 'traits',
+      label: 'Traits',
+      fields: [
+        { id: 'saving_throws', label: 'Saving throw proficiencies', type: 'list<text>', hint: 'e.g. Str +5' },
+        { id: 'skills', label: 'Skill proficiencies', type: 'list<text>', hint: 'e.g. Perception +3' },
+        { id: 'damage_immunities', label: 'Damage immunities', type: 'list<text>' },
+        { id: 'damage_resistances', label: 'Damage resistances', type: 'list<text>' },
+        { id: 'damage_vulnerabilities', label: 'Damage vulnerabilities', type: 'list<text>' },
+        { id: 'condition_immunities', label: 'Condition immunities', type: 'list<text>' },
+        { id: 'senses', label: 'Senses', type: 'list<text>', hint: 'e.g. darkvision 60 ft.' },
+        { id: 'languages', label: 'Languages', type: 'list<text>' },
+      ],
+    },
+    {
+      id: 'actions',
+      label: 'Actions & abilities',
+      fields: [
+        { id: 'special_abilities', label: 'Special abilities', type: 'longtext', hint: 'Passive traits like Pack Tactics' },
+        { id: 'actions', label: 'Actions', type: 'longtext' },
+        { id: 'bonus_actions', label: 'Bonus actions', type: 'longtext' },
+        { id: 'reactions', label: 'Reactions', type: 'longtext' },
+        { id: 'legendary_actions', label: 'Legendary actions', type: 'longtext' },
+        { id: 'lair_actions', label: 'Lair actions', type: 'longtext' },
+      ],
+    },
+    {
+      id: 'lore',
+      label: 'Lore',
+      fields: [
+        { id: 'description', label: 'Description', type: 'longtext' },
+        { id: 'habitat', label: 'Habitat', type: 'list<text>', hint: 'e.g. forests, underdark' },
+        { id: 'tactics', label: 'Tactics', type: 'longtext' },
+        { id: 'treasure', label: 'Treasure', type: 'longtext' },
+      ],
+    },
+  ],
+};
+
 const DEFAULT_TEMPLATES: Array<{
   kind: TemplateKind;
   name: string;
@@ -403,6 +499,7 @@ const DEFAULT_TEMPLATES: Array<{
   { kind: 'session', name: 'Session log', schema: DEFAULT_SESSION_SCHEMA },
   { kind: 'item', name: 'Item', schema: DEFAULT_ITEM_SCHEMA },
   { kind: 'location', name: 'Location', schema: DEFAULT_LOCATION_SCHEMA },
+  { kind: 'monster', name: 'Monster', schema: DEFAULT_MONSTER_SCHEMA },
 ];
 
 /** Populate note_templates on first boot. Idempotent — if a row for

@@ -32,9 +32,7 @@ export default async function AssetsPage(): Promise<ReactElement> {
   const session = readSession(cookieHeader);
   if (!session) redirect('/login?next=/assets');
 
-  const tree = buildTree(session.currentGroupId, {
-    hideDmOnly: session.role === 'viewer',
-  });
+  const tree = buildTree(session.currentGroupId);
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
   const assets = listGroupAssets(session.currentGroupId);
 

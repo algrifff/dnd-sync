@@ -36,9 +36,7 @@ export default async function CharactersPage(): Promise<ReactElement> {
   const session = readSession(cookieHeader);
   if (!session) redirect('/login?next=/characters');
 
-  const tree = buildTree(session.currentGroupId, {
-    hideDmOnly: session.role === 'viewer',
-  });
+  const tree = buildTree(session.currentGroupId);
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
   const campaigns = listCampaigns(session.currentGroupId);
   const mine = listCharacters(session.currentGroupId, {

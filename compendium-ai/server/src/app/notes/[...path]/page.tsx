@@ -46,16 +46,10 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
   const note = loadNote(session.currentGroupId, path);
   if (!note) notFound();
-  // DM-only notes are invisible to viewers. notFound() keeps them
-  // indistinguishable from "no such note" to avoid leaking the path.
-  const hideDm = session.role === 'viewer';
-  if (hideDm && note.dm_only === 1) notFound();
 
-  const tree = buildTree(session.currentGroupId, { hideDmOnly: hideDm });
+  const tree = buildTree(session.currentGroupId);
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
-  const backlinks = loadBacklinks(session.currentGroupId, path, {
-    hideDmOnly: hideDm,
-  });
+  const backlinks = loadBacklinks(session.currentGroupId, path);
   const tags = loadTags(session.currentGroupId, path);
   const creator = note.created_by ? loadUser(note.created_by) : null;
 
@@ -329,6 +323,7 @@ const ROLE_LABELS: Record<TemplateKind, string> = {
   session: 'Session',
   item: 'Item',
   location: 'Location',
+  monster: 'Monster',
 };
 
 export type CharacterView = {
