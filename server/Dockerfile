@@ -25,7 +25,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package.json bun.lockb tsconfig.base.json ./
 COPY shared/package.json ./shared/
 COPY server/package.json ./server/
-COPY plugin/package.json ./plugin/
 RUN bun install --frozen-lockfile
 
 
@@ -45,14 +44,10 @@ COPY --from=deps /app/package.json       ./package.json
 COPY --from=deps /app/bun.lockb          ./bun.lockb
 COPY --from=deps /app/tsconfig.base.json ./tsconfig.base.json
 COPY shared ./shared
-COPY plugin ./plugin
 COPY server ./server
 
 # Recompile better-sqlite3 for Node 22 (V8 ABI 127).
 RUN npm rebuild better-sqlite3
-
-WORKDIR /app/plugin
-RUN node esbuild.config.mjs --production
 
 WORKDIR /app/server
 ENV NODE_ENV=production
@@ -66,17 +61,14 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 ENV DATA_DIR=/data
-ENV PLUGIN_BUNDLE_DIR=/app/plugin-bundle
 
-RUN mkdir -p /data /app/plugin-bundle
+RUN mkdir -p /data
 
 COPY --from=build /app/node_modules             ./node_modules
 COPY --from=build /app/package.json             ./package.json
 COPY --from=build /app/tsconfig.base.json       ./tsconfig.base.json
 COPY --from=build /app/shared                   ./shared
 COPY --from=build /app/server                   ./server
-COPY --from=build /app/plugin/main.js           ./plugin-bundle/main.js
-COPY --from=build /app/plugin/manifest.json     ./plugin-bundle/manifest.json
 
 WORKDIR /app/server
 EXPOSE 3000
