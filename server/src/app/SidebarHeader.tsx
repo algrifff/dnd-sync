@@ -12,7 +12,7 @@ import {
   UserRound,
   CalendarDays,
   Image as ImageIcon,
-  Crown,
+  Settings2,
 } from 'lucide-react';
 
 export function SidebarHeader({
@@ -29,7 +29,7 @@ export function SidebarHeader({
       <IconLink href="/sessions" label="Sessions" icon={<CalendarDays size={16} aria-hidden />} />
       <IconLink href="/assets" label="Assets" icon={<ImageIcon size={16} aria-hidden />} />
       {role === 'admin' && (
-        <IconLink href="/admin" label="DM Panel" icon={<Crown size={16} aria-hidden />} />
+        <IconLink href="/settings/world" label="World settings" icon={<Settings2 size={16} aria-hidden />} />
       )}
     </div>
   );

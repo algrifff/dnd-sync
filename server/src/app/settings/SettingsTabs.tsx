@@ -5,22 +5,9 @@ import { usePathname } from 'next/navigation';
 
 type Tab = { href: string; label: string };
 
-export function SettingsTabs({
-  role,
-}: {
-  role: 'admin' | 'editor' | 'viewer';
-}): React.JSX.Element {
+export function SettingsTabs(): React.JSX.Element {
   const pathname = usePathname() ?? '';
-  const tabs: Tab[] = [
-    { href: '/settings/profile', label: 'Profile' },
-    ...(role === 'admin'
-      ? [
-          { href: '/settings/world', label: 'World' },
-          { href: '/settings/templates', label: 'Templates' },
-          { href: '/settings/vault', label: 'Import Vault' },
-        ]
-      : []),
-  ];
+  const tabs: Tab[] = [{ href: '/settings/profile', label: 'Profile' }];
 
   return (
     <div
