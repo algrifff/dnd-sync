@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.53",
     "@compendium/shared": "workspace:*",
     "@hocuspocus/extension-database": "^3.4.4",
     "@hocuspocus/extension-logger": "^3.4.4",
@@ -32,6 +33,7 @@
     "@tiptap/starter-kit": "^3.22.4",
     "@types/adm-zip": "^0.5.8",
     "adm-zip": "^0.5.17",
+    "ai": "^6.0.168",
     "better-sqlite3": "^12.9.0",
     "graphology": "^0.26.0",
     "graphology-layout-forceatlas2": "^0.10.1",
