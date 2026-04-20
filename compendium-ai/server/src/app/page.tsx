@@ -7,7 +7,6 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
-import { DEFAULT_GROUP_ID } from '@/lib/users';
 import { getDb } from '@/lib/db';
 import { recentlyUpdated } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
@@ -38,11 +37,11 @@ export default async function HomePage(): Promise<ReactElement> {
          (SELECT COUNT(*) FROM notes  WHERE group_id = ?) AS notes,
          (SELECT COUNT(*) FROM assets WHERE group_id = ?) AS assets`,
     )
-    .get(DEFAULT_GROUP_ID, DEFAULT_GROUP_ID) ?? { notes: 0, assets: 0 };
+    .get(session.currentGroupId, session.currentGroupId) ?? { notes: 0, assets: 0 };
 
-  const recent = recentlyUpdated(DEFAULT_GROUP_ID, 12);
-  const tree = buildTree(DEFAULT_GROUP_ID);
-  const kindMap = Object.fromEntries(listNoteKinds(DEFAULT_GROUP_ID));
+  const recent = recentlyUpdated(session.currentGroupId, 12);
+  const tree = buildTree(session.currentGroupId);
+  const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
   const openJobs = listOpenJobsForUser(session.currentGroupId, session.userId);
   const topFolders = tree.root.children.filter((c) => c.kind === 'dir').slice(0, 6);
 
