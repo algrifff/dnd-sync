@@ -1,23 +1,11 @@
 import type { ReactElement } from 'react';
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
-import { readSession } from '@/lib/session';
-import { DEFAULT_GROUP_ID, listUsersInGroup, type UserWithRole } from '@/lib/users';
+import { listUsersInGroup, DEFAULT_GROUP_ID, type UserWithRole } from '@/lib/users';
 import { CreateUserForm } from '@/app/settings/users/CreateUserForm';
 import { RevokeButton } from '@/app/settings/users/RevokeButton';
 
 export const dynamic = 'force-dynamic';
 
-export default async function AdminUsersPage(): Promise<ReactElement> {
-  const jar = await cookies();
-  const cookieHeader = jar
-    .getAll()
-    .map((c) => `${c.name}=${c.value}`)
-    .join('; ');
-  const session = readSession(cookieHeader);
-  if (!session) redirect('/login?next=/admin/users');
-  if (session.role !== 'admin') redirect('/');
-
+export default function AdminUsersPage(): ReactElement {
   const users = listUsersInGroup(DEFAULT_GROUP_ID);
 
   return (
@@ -29,18 +17,12 @@ export default async function AdminUsersPage(): Promise<ReactElement> {
 
       <CreateUserForm />
 
-      <UserTable users={users} currentUserId={session.userId} />
+      <UserTable users={users} />
     </div>
   );
 }
 
-function UserTable({
-  users,
-  currentUserId,
-}: {
-  users: UserWithRole[];
-  currentUserId: string;
-}): ReactElement {
+function UserTable({ users }: { users: UserWithRole[] }): ReactElement {
   return (
     <section className="overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8]">
       <table className="w-full text-left text-sm">
@@ -88,11 +70,7 @@ function UserTable({
                   : '—'}
               </td>
               <td className="px-4 py-3 text-right">
-                {u.id === currentUserId ? (
-                  <span className="text-xs text-[#5A4F42]">(you)</span>
-                ) : (
-                  <RevokeButton userId={u.id} username={u.username} />
-                )}
+                <RevokeButton userId={u.id} username={u.username} />
               </td>
             </tr>
           ))}

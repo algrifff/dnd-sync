@@ -17,6 +17,7 @@ import { sessionCookieName } from '@/lib/session-public';
  *  the login surface itself, API routes (self-authing), and static assets. */
 const PUBLIC_PATTERNS: readonly RegExp[] = [
   /^\/login(\/|$)/,
+  /^\/admin\/login(\/|$)/,
   /^\/api\//,
   /^\/_next\//,
   /^\/public\//,
@@ -34,6 +35,23 @@ export function middleware(req: NextRequest): NextResponse {
   const { pathname } = req.nextUrl;
 
   const headers = securityHeaders();
+
+  // /admin/* (excluding /admin/login) is gated by the __sa super-admin cookie,
+  // not a regular user session. Redirect to the admin login page if absent.
+  if (/^\/admin(\/|$)/.test(pathname) && !/^\/admin\/login(\/|$)/.test(pathname)) {
+    const sa = req.cookies.get('__sa')?.value;
+    if (!sa) {
+      const url = req.nextUrl.clone();
+      url.pathname = '/admin/login';
+      url.search = '';
+      const res = NextResponse.redirect(url);
+      for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
+      return res;
+    }
+    const res = NextResponse.next();
+    for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
+    return res;
+  }
 
   if (!isPublic(pathname)) {
     const sid = req.cookies.get(sessionCookieName())?.value;

@@ -13,7 +13,13 @@ export function SettingsTabs({
   const pathname = usePathname() ?? '';
   const tabs: Tab[] = [
     { href: '/settings/profile', label: 'Profile' },
-    ...(role === 'admin' ? [{ href: '/settings/world', label: 'World' }] : []),
+    ...(role === 'admin'
+      ? [
+          { href: '/settings/world', label: 'World' },
+          { href: '/settings/templates', label: 'Templates' },
+          { href: '/settings/vault', label: 'Import Vault' },
+        ]
+      : []),
   ];
 
   return (
