@@ -28,7 +28,7 @@ export function AbilityScoreBox({
         {label}
       </span>
       {readOnly || !onCommit ? (
-        <span className="font-serif text-3xl font-semibold leading-tight text-[#2A241E]">
+        <span className="font-serif text-3xl font-normal leading-tight text-[#2A241E]">
           {score}
         </span>
       ) : (
@@ -40,8 +40,8 @@ export function AbilityScoreBox({
           // Same classes on both display button and edit input so the
           // font / size / weight stay identical whether you're editing
           // or just looking at the number.
-          className="font-serif text-3xl font-semibold leading-tight text-[#2A241E]"
-          inputClassName="font-serif text-3xl font-semibold leading-tight w-16 text-[#2A241E]"
+          className="font-serif text-3xl font-normal leading-tight text-[#2A241E]"
+          inputClassName="font-serif text-3xl font-normal leading-tight w-16 text-[#2A241E]"
           ariaLabel={label}
         />
       )}

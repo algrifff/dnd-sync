@@ -73,8 +73,8 @@ export function LocationHeader({
                 <InlineText
                   value={name}
                   readOnly={!canEdit}
-                  className="font-serif text-2xl font-semibold text-[#2A241E]"
-                  inputClassName="font-serif text-2xl font-semibold text-[#2A241E]"
+                  className="font-serif text-4xl font-semibold leading-tight text-[#2A241E]"
+                  inputClassName="font-serif text-4xl font-semibold leading-tight text-[#2A241E]"
                   onCommit={(next) => patchSheet({ name: next })}
                   ariaLabel="Location name"
                 />

@@ -156,8 +156,8 @@ export function ItemHeader({
               <InlineText
                 value={name}
                 readOnly={!canEdit}
-                className="font-serif text-xl font-semibold text-[#2A241E]"
-                inputClassName="font-serif text-xl font-semibold text-[#2A241E]"
+                className="font-serif text-3xl font-semibold leading-tight text-[#2A241E]"
+                inputClassName="font-serif text-3xl font-semibold leading-tight text-[#2A241E]"
                 onCommit={(next) => patchSheet({ name: next })}
                 ariaLabel="Item name"
               />
