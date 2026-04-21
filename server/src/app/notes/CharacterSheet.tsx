@@ -1,22 +1,22 @@
 'use client';
 
 // CharacterSheet — rendered above the prose body on any note whose
-// frontmatter declares `kind: character`. The form shape comes from
-// the template registered for the note's role (pc / npc / ally /
-// villain); values live in frontmatter.sheet and sync to the server
-// via PATCH /api/notes/sheet on blur.
+// frontmatter declares `kind: character`. The SheetHeader above owns
+// identity, HP/AC/Speed, and the ability-score strip; this panel
+// hosts everything else (skills, inventory, features, background
+// etc.) as a tabbed layout so a long PC sheet doesn't blow out the
+// whole note page.
 //
-// Editability is a mix of role + ownership + per-field
-// playerEditable. The server applies the same rules and drops any
-// unauthorised field writes, so the client is allowed to be a bit
-// optimistic here.
+// The form shape for Inventory / Features / Extras still comes from
+// the admin-editable template (one copy per role). Skills are
+// rendered directly from the canonical 5e list keyed off
+// `sheet.skills` + `sheet.proficiency_bonus` — no template entry
+// required, so every character gets the same single-column skill
+// list regardless of the template they were created against.
 //
-// Real-time collab for HP / conditions and the like: every local
-// change broadcasts the new value on the note's existing hocuspocus
-// awareness channel so peers currently viewing the same note get
-// an instant visual update, before the PATCH round-trip. Server
-// persistence remains authoritative — a refresh shows exactly what
-// the server accepted.
+// Values live in frontmatter.sheet and sync via PATCH
+// /api/notes/sheet on blur, with a peer-awareness broadcast so
+// multi-tab edits are near-instant before the round-trip.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HocuspocusProvider } from '@hocuspocus/provider';
@@ -24,9 +24,88 @@ import type {
   NoteTemplate,
   TemplateField,
   TemplateSchema,
+  TemplateSection,
 } from '@/lib/templates';
+import {
+  abilityModifier,
+  formatModifier,
+  readAbilityScores,
+} from './sheet-header/util';
 
 export type SheetValues = Record<string, unknown>;
+
+// ── Tab layout ─────────────────────────────────────────────────────────
+
+type TabId =
+  | 'actions'
+  | 'skills'
+  | 'inventory'
+  | 'features'
+  | 'background'
+  | 'extras';
+
+const TABS: Array<{ id: TabId; label: string }> = [
+  { id: 'actions', label: 'Actions' },
+  { id: 'skills', label: 'Skills' },
+  { id: 'inventory', label: 'Inventory' },
+  { id: 'features', label: 'Features & Traits' },
+  { id: 'background', label: 'Background' },
+  { id: 'extras', label: 'Extras' },
+];
+
+/** Map a template section.id to a tab. Unknown ids fall through to
+ *  'extras' so nothing in the schema ever disappears. */
+function sectionTab(sectionId: string): TabId {
+  const id = sectionId.toLowerCase();
+  if (id === 'combat' || id === 'actions') return 'actions';
+  if (id === 'inventory' || id === 'gear' || id === 'equipment') return 'inventory';
+  if (id === 'features' || id === 'traits' || id === 'features_traits')
+    return 'features';
+  if (id === 'basics' || id === 'background' || id === 'relationship')
+    return 'background';
+  return 'extras';
+}
+
+// ── 5e skill catalogue (must match shared/schemas/dnd5e/primitives) ────
+
+const SKILL_CATALOG: Array<{
+  key: string;
+  label: string;
+  ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+}> = [
+  { key: 'acrobatics', label: 'Acrobatics', ability: 'dex' },
+  { key: 'animal_handling', label: 'Animal Handling', ability: 'wis' },
+  { key: 'arcana', label: 'Arcana', ability: 'int' },
+  { key: 'athletics', label: 'Athletics', ability: 'str' },
+  { key: 'deception', label: 'Deception', ability: 'cha' },
+  { key: 'history', label: 'History', ability: 'int' },
+  { key: 'insight', label: 'Insight', ability: 'wis' },
+  { key: 'intimidation', label: 'Intimidation', ability: 'cha' },
+  { key: 'investigation', label: 'Investigation', ability: 'int' },
+  { key: 'medicine', label: 'Medicine', ability: 'wis' },
+  { key: 'nature', label: 'Nature', ability: 'int' },
+  { key: 'perception', label: 'Perception', ability: 'wis' },
+  { key: 'performance', label: 'Performance', ability: 'cha' },
+  { key: 'persuasion', label: 'Persuasion', ability: 'cha' },
+  { key: 'religion', label: 'Religion', ability: 'int' },
+  { key: 'sleight_of_hand', label: 'Sleight of Hand', ability: 'dex' },
+  { key: 'stealth', label: 'Stealth', ability: 'dex' },
+  { key: 'survival', label: 'Survival', ability: 'wis' },
+];
+
+// Field IDs whose editing lives in the SheetHeader above — filtered
+// out of every tab so there's one source of truth per field.
+const HEADER_OWNED_FIELDS = new Set<string>([
+  'name',
+  'race',
+  'class',
+  'background',
+  'portrait',
+  'str', 'dex', 'con', 'int', 'wis', 'cha',
+  'ac', 'armor_class',
+  'hp_current', 'hp_max', 'hp_temporary',
+  'speed',
+]);
 
 export function CharacterSheet({
   path,
@@ -49,6 +128,7 @@ export function CharacterSheet({
   const [sheet, setSheet] = useState<SheetValues>(initialSheet);
   const [pending, setPending] = useState<Record<string, true>>({});
   const [flash, setFlash] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<TabId>('actions');
   const savingRef = useRef<Promise<void> | null>(null);
 
   const playerEditable = useMemo(
@@ -64,73 +144,32 @@ export function CharacterSheet({
     [canWriteAll],
   );
 
+  // Group template sections by tab, dropping header-owned fields and
+  // any section that ends up empty.
+  const sectionsByTab = useMemo(() => {
+    const out: Record<TabId, TemplateSection[]> = {
+      actions: [],
+      skills: [],
+      inventory: [],
+      features: [],
+      background: [],
+      extras: [],
+    };
+    for (const section of template.schema.sections) {
+      const visibleFields = section.fields.filter(
+        (f) => !HEADER_OWNED_FIELDS.has(f.id),
+      );
+      if (visibleFields.length === 0) continue;
+      const tab = sectionTab(section.id);
+      out[tab].push({ ...section, fields: visibleFields });
+    }
+    return out;
+  }, [template]);
+
   // Coalesce rapid edits into one PATCH; multiple fields may change
   // in a burst (pressing Tab through the ability scores, etc.).
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPatchRef = useRef<Record<string, unknown>>({});
-
-  const commit = useCallback(
-    (fieldId: string, value: unknown) => {
-      setSheet((prev) => ({ ...prev, [fieldId]: value }));
-      pendingPatchRef.current[fieldId] = value;
-      setPending((p) => ({ ...p, [fieldId]: true }));
-      // Broadcast over awareness so peers' sheets update instantly.
-      // Writes are keyed by a monotonic counter so hocuspocus's
-      // awareness diff sees every consecutive change (same payload
-      // shape twice in a row gets deduped otherwise).
-      const aw = provider.awareness;
-      if (aw) {
-        const seq = Date.now();
-        aw.setLocalStateField('sheetEdit', {
-          path,
-          seq,
-          fields: { [fieldId]: value },
-        });
-      }
-      if (flushTimer.current) clearTimeout(flushTimer.current);
-      flushTimer.current = setTimeout(() => {
-        void flush();
-      }, 400);
-    },
-    // flush is stable — deliberately omitted to avoid re-registering
-    // the timer on every render.
-    [path, provider],
-  );
-
-  // Listen for peer sheet edits on the same note and merge into
-  // local state. We ignore our own client's awareness entry so the
-  // local commit path doesn't bounce back through the observer.
-  useEffect(() => {
-    const aw = provider.awareness;
-    if (!aw) return;
-    const seen = new Map<number, number>(); // clientId → last seen seq
-    const onChange = (): void => {
-      for (const [clientId, state] of aw.getStates().entries()) {
-        if (clientId === aw.clientID) continue;
-        const s = state as
-          | {
-              sheetEdit?: {
-                path?: string;
-                seq?: number;
-                fields?: Record<string, unknown>;
-              };
-            }
-          | undefined;
-        const edit = s?.sheetEdit;
-        if (!edit || edit.path !== path || typeof edit.seq !== 'number') {
-          continue;
-        }
-        const last = seen.get(clientId);
-        if (last === edit.seq) continue;
-        seen.set(clientId, edit.seq);
-        if (edit.fields && typeof edit.fields === 'object') {
-          setSheet((prev) => ({ ...prev, ...edit.fields! }));
-        }
-      }
-    };
-    aw.on('change', onChange);
-    return () => aw.off('change', onChange);
-  }, [provider, path]);
 
   const flush = useCallback(async (): Promise<void> => {
     if (savingRef.current) {
@@ -177,7 +216,135 @@ export function CharacterSheet({
     savingRef.current = null;
   }, [csrfToken, path]);
 
+  const commit = useCallback(
+    (fieldId: string, value: unknown) => {
+      setSheet((prev) => ({ ...prev, [fieldId]: value }));
+      pendingPatchRef.current[fieldId] = value;
+      setPending((p) => ({ ...p, [fieldId]: true }));
+      // Broadcast over awareness so peers' sheets update instantly.
+      const aw = provider.awareness;
+      if (aw) {
+        const seq = Date.now();
+        aw.setLocalStateField('sheetEdit', {
+          path,
+          seq,
+          fields: { [fieldId]: value },
+        });
+      }
+      if (flushTimer.current) clearTimeout(flushTimer.current);
+      flushTimer.current = setTimeout(() => {
+        void flush();
+      }, 400);
+    },
+    [path, provider, flush],
+  );
+
+  // Listen for peer sheet edits on the same note and merge into
+  // local state. We ignore our own client's awareness entry so the
+  // local commit path doesn't bounce back through the observer.
+  useEffect(() => {
+    const aw = provider.awareness;
+    if (!aw) return;
+    const seen = new Map<number, number>();
+    const onChange = (): void => {
+      for (const [clientId, state] of aw.getStates().entries()) {
+        if (clientId === aw.clientID) continue;
+        const s = state as
+          | {
+              sheetEdit?: {
+                path?: string;
+                seq?: number;
+                fields?: Record<string, unknown>;
+              };
+            }
+          | undefined;
+        const edit = s?.sheetEdit;
+        if (!edit || edit.path !== path || typeof edit.seq !== 'number') {
+          continue;
+        }
+        const last = seen.get(clientId);
+        if (last === edit.seq) continue;
+        seen.set(clientId, edit.seq);
+        if (edit.fields && typeof edit.fields === 'object') {
+          setSheet((prev) => ({ ...prev, ...edit.fields! }));
+        }
+      }
+    };
+    aw.on('change', onChange);
+    return () => aw.off('change', onChange);
+  }, [provider, path]);
+
   const savingAny = Object.keys(pending).length > 0;
+
+  const renderSection = (section: TemplateSection): React.JSX.Element => (
+    <section key={section.id} className="mb-3 last:mb-0">
+      <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+        {section.label}
+      </h3>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+        {section.fields.map((field) => (
+          <FieldControl
+            key={field.id}
+            field={field}
+            value={sheet[field.id]}
+            onCommit={(v) => commit(field.id, v)}
+            readOnly={!fieldEditable(field)}
+            isPlayerField={playerEditable.has(field.id) && !canWriteAll}
+          />
+        ))}
+      </div>
+    </section>
+  );
+
+  const renderTab = (tab: TabId): React.JSX.Element => {
+    if (tab === 'skills') {
+      return (
+        <SkillsPanel
+          sheet={sheet}
+          canEdit={canWriteAll}
+          onToggleProficient={(key) => {
+            const current = readSkillEntry(sheet, key);
+            const next = {
+              ...(sheet.skills as Record<string, unknown> | undefined),
+              [key]: { ...current, proficient: !current.proficient },
+            };
+            commit('skills', next);
+          }}
+          onToggleExpertise={(key) => {
+            const current = readSkillEntry(sheet, key);
+            const next = {
+              ...(sheet.skills as Record<string, unknown> | undefined),
+              [key]: {
+                ...current,
+                // Expertise implies proficient.
+                proficient: current.expertise ? current.proficient : true,
+                expertise: !current.expertise,
+              },
+            };
+            commit('skills', next);
+          }}
+        />
+      );
+    }
+    const sections = sectionsByTab[tab];
+    if (sections.length === 0) {
+      return (
+        <div className="rounded-[8px] border border-dashed border-[#D4C7AE] bg-[#F4EDE0] p-4 text-center text-xs text-[#8A7E6B]">
+          Nothing here yet.
+        </div>
+      );
+    }
+    return <div>{sections.map(renderSection)}</div>;
+  };
+
+  // Hide tabs that would render empty (except Skills — it's always
+  // populated from the canonical 5e list).
+  const availableTabs = TABS.filter(
+    (t) => t.id === 'skills' || sectionsByTab[t.id].length > 0,
+  );
+  const effectiveTab = availableTabs.some((t) => t.id === activeTab)
+    ? activeTab
+    : availableTabs[0]?.id ?? 'skills';
 
   return (
     <section
@@ -185,60 +352,178 @@ export function CharacterSheet({
       className="mb-6 rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-4"
     >
       <div
-        className="mb-3 h-4 text-right text-xs text-[#5A4F42] transition-opacity"
+        className="mb-2 h-4 text-right text-xs text-[#5A4F42] transition-opacity"
         style={{ opacity: savingAny || flash ? 1 : 0 }}
         aria-live="polite"
       >
-        {savingAny ? 'Saving…' : flash ? (
+        {savingAny ? (
+          'Saving…'
+        ) : flash ? (
           <span className="text-[#8B4A52]">{flash}</span>
         ) : null}
       </div>
 
-      <div className="space-y-4">
-        {template.schema.sections.map((section) => {
-          const visibleFields = section.fields.filter(
-            (f) => !HEADER_OWNED_FIELDS.has(f.id),
-          );
-          if (visibleFields.length === 0) return null;
+      <div
+        role="tablist"
+        aria-label="Character sheet sections"
+        className="mb-3 flex flex-wrap gap-1 border-b border-[#D4C7AE]"
+      >
+        {availableTabs.map((t) => {
+          const on = t.id === effectiveTab;
           return (
-            <section key={section.id}>
-              <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
-                {section.label}
-              </h3>
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                {visibleFields.map((field) => (
-                  <FieldControl
-                    key={field.id}
-                    field={field}
-                    value={sheet[field.id]}
-                    onCommit={(v) => commit(field.id, v)}
-                    readOnly={!fieldEditable(field)}
-                    isPlayerField={playerEditable.has(field.id) && !canWriteAll}
-                  />
-                ))}
-              </div>
-            </section>
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={on}
+              type="button"
+              onClick={() => setActiveTab(t.id)}
+              className={
+                '-mb-px rounded-t border px-3 py-1 text-[11px] font-medium transition-colors ' +
+                (on
+                  ? 'border-[#D4C7AE] border-b-[#FBF5E8] bg-[#FBF5E8] text-[#2A241E]'
+                  : 'border-transparent text-[#5A4F42] hover:bg-[#F4EDE0]')
+              }
+            >
+              {t.label}
+            </button>
           );
         })}
       </div>
+
+      {renderTab(effectiveTab)}
     </section>
   );
 }
 
-/** Field IDs whose editing now lives in the SheetHeader above the prose
- *  body. We filter them out of the side-panel form so there's one
- *  source of truth per field. Kept in sync with CharacterHeader. */
-const HEADER_OWNED_FIELDS = new Set<string>([
-  'name',
-  'race',
-  'class',
-  'background',
-  'portrait',
-  'str', 'dex', 'con', 'int', 'wis', 'cha',
-  'ac', 'armor_class',
-  'hp_current', 'hp_max', 'hp_temporary',
-  'speed',
-]);
+// ── Skills panel ───────────────────────────────────────────────────────
+
+function SkillsPanel({
+  sheet,
+  canEdit,
+  onToggleProficient,
+  onToggleExpertise,
+}: {
+  sheet: SheetValues;
+  canEdit: boolean;
+  onToggleProficient: (key: string) => void;
+  onToggleExpertise: (key: string) => void;
+}): React.JSX.Element {
+  const scores =
+    readAbilityScores(sheet) ??
+    { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
+  const profBonus =
+    typeof sheet.proficiency_bonus === 'number' ? sheet.proficiency_bonus : 2;
+
+  return (
+    <ul className="divide-y divide-[#D4C7AE]/60 rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0]">
+      {SKILL_CATALOG.map((s) => {
+        const entry = readSkillEntry(sheet, s.key);
+        const abilityMod = abilityModifier(scores[s.ability]);
+        const bonus = entry.expertise
+          ? profBonus * 2
+          : entry.proficient
+            ? profBonus
+            : 0;
+        const total = abilityMod + bonus;
+        return (
+          <li
+            key={s.key}
+            className="flex items-center gap-2 px-3 py-1.5 text-[12px]"
+          >
+            <ProfDot
+              state={
+                entry.expertise
+                  ? 'expertise'
+                  : entry.proficient
+                    ? 'proficient'
+                    : 'none'
+              }
+              canEdit={canEdit}
+              onClick={() => onToggleProficient(s.key)}
+              onDoubleClick={() => onToggleExpertise(s.key)}
+            />
+            <span className="flex-1 text-[#2A241E]">{s.label}</span>
+            <span className="w-10 text-right text-[10px] uppercase tracking-wide text-[#5A4F42]">
+              {s.ability}
+            </span>
+            <span className="w-10 text-right font-serif text-[14px] font-semibold tabular-nums text-[#2A241E]">
+              {formatModifier(total)}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function ProfDot({
+  state,
+  canEdit,
+  onClick,
+  onDoubleClick,
+}: {
+  state: 'none' | 'proficient' | 'expertise';
+  canEdit: boolean;
+  onClick: () => void;
+  onDoubleClick: () => void;
+}): React.JSX.Element {
+  const fill =
+    state === 'expertise'
+      ? '#2A241E'
+      : state === 'proficient'
+        ? '#8A7E6B'
+        : 'transparent';
+  const ring =
+    state === 'expertise' ? '#2A241E' : '#8A7E6B';
+  if (!canEdit) {
+    return (
+      <span
+        aria-label={state}
+        title={state}
+        className="inline-block h-3 w-3 rounded-full border"
+        style={{ backgroundColor: fill, borderColor: ring }}
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onDoubleClick={onDoubleClick}
+      aria-label={`Toggle proficiency (${state}); double-click for expertise`}
+      title="Click: proficient · Double-click: expertise"
+      className="inline-block h-3 w-3 rounded-full border transition-transform hover:scale-110"
+      style={{ backgroundColor: fill, borderColor: ring }}
+    />
+  );
+}
+
+function readSkillEntry(
+  sheet: SheetValues,
+  key: string,
+): { proficient: boolean; expertise: boolean } {
+  const skills = sheet.skills;
+  if (skills && typeof skills === 'object') {
+    const entry = (skills as Record<string, unknown>)[key];
+    if (entry && typeof entry === 'object') {
+      const o = entry as Record<string, unknown>;
+      return {
+        proficient: o.proficient === true,
+        expertise: o.expertise === true,
+      };
+    }
+  }
+  // Legacy: a flat `proficient_skills: string[]` shape.
+  if (Array.isArray(sheet.proficient_skills)) {
+    return {
+      proficient: (sheet.proficient_skills as unknown[]).includes(key),
+      expertise: false,
+    };
+  }
+  return { proficient: false, expertise: false };
+}
+
+// ── Shared form helpers ───────────────────────────────────────────────
 
 function collectPlayerEditable(schema: TemplateSchema): Set<string> {
   const out = new Set<string>();
@@ -456,8 +741,7 @@ function ListTextInput({
 }
 
 /** Small helper for controlled inputs that resync when the upstream
- *  value changes (e.g. the server echo arrives). Separate from plain
- *  useState so onBlur-commit doesn't trip over a stale local state. */
+ *  value changes (e.g. the server echo arrives). */
 function useControlled(initial: string): [string, (v: string) => void] {
   const [val, setVal] = useState<string>(initial);
   const lastInitial = useRef<string>(initial);
@@ -474,10 +758,5 @@ function toStr(v: unknown): string | null {
 
 function toNum(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
-  return null;
-}
-
-function toInt(v: unknown): number | null {
-  if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v);
   return null;
 }
