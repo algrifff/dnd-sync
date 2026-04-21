@@ -9,6 +9,7 @@ import { readSession } from '@/lib/session';
 import {
   decodePath,
   loadBacklinks,
+  loadOutgoingLinks,
   loadNote,
   loadTags,
   loadUser,
@@ -51,6 +52,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   const tree = buildTree(session.currentGroupId);
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
   const backlinks = loadBacklinks(session.currentGroupId, path);
+  const outgoingLinks = loadOutgoingLinks(session.currentGroupId, path);
   const tags = loadTags(session.currentGroupId, path);
   const creator = note.created_by ? loadUser(note.created_by) : null;
 
@@ -199,8 +201,10 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
             <NoteSidebar
               path={path}
               backlinks={backlinks}
+              outgoingLinks={outgoingLinks}
               tags={tags}
               outline={outline}
+              csrfToken={session.csrfToken}
             />
           </aside>
         </div>

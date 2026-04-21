@@ -1,44 +1,50 @@
 'use client';
 
-// "+" button in the Backlinks section of the note sidebar. Opens a
-// note picker; on selection, dispatches a DOM custom event that
-// NoteSurface listens for and inserts a wikilink at the editor's
-// caret. That decoupling keeps the server-component sidebar free of
-// direct editor refs.
+// "+" button in the Backlinks section of the note sidebar. Opens a note
+// picker; on selection it POSTs to /api/notes/backlink which appends a
+// [[wikilink]] to the *selected* note pointing at the current note — so
+// the selected note appears in the current note's backlinks list.
+// router.refresh() re-runs the server component to show the new entry.
 
 import { useCallback, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { NotePicker } from './NotePicker';
 
-export const INSERT_WIKILINK_EVENT = 'compendium:insert-wikilink';
-
-export type InsertWikilinkDetail = {
-  target: string;
-  label?: string;
-};
-
-export function AddBacklink({ currentPath }: { currentPath: string }): React.JSX.Element {
+export function AddBacklink({
+  currentPath,
+  csrfToken,
+}: {
+  currentPath: string;
+  csrfToken: string;
+}): React.JSX.Element {
   const btnRef = useRef<HTMLButtonElement>(null);
   const [picker, setPicker] = useState<{ left: number; top: number } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
 
-  const open = useCallback(() => {
+  const open = useCallback((): void => {
     const rect = btnRef.current?.getBoundingClientRect();
     if (!rect) return;
     setPicker({ left: rect.right + 6, top: rect.top });
   }, []);
-  const close = useCallback(() => setPicker(null), []);
+
+  const close = useCallback((): void => setPicker(null), []);
 
   const onSelect = useCallback(
-    (path: string) => {
-      const target = path.replace(/\.(md|canvas)$/i, '');
-      document.dispatchEvent(
-        new CustomEvent<InsertWikilinkDetail>(INSERT_WIKILINK_EVENT, {
-          detail: { target },
-        }),
-      );
+    (path: string): void => {
       close();
+      setLoading(true);
+      void fetch('/api/notes/backlink', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ fromPath: path, toPath: currentPath }),
+      }).finally(() => {
+        setLoading(false);
+        router.refresh();
+      });
     },
-    [close],
+    [close, csrfToken, currentPath, router],
   );
 
   return (
@@ -47,9 +53,10 @@ export function AddBacklink({ currentPath }: { currentPath: string }): React.JSX
         ref={btnRef}
         type="button"
         onClick={open}
-        title="Link to another note"
-        aria-label="Link to another note"
-        className="rounded-[4px] p-0.5 text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]"
+        disabled={loading}
+        title="Add a note that links here"
+        aria-label="Add a note that links here"
+        className="rounded-[4px] p-0.5 text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E] disabled:opacity-40"
       >
         <Plus size={12} aria-hidden />
       </button>

@@ -15,12 +15,9 @@ import type { HocuspocusProvider } from '@hocuspocus/provider';
 import type * as Y from 'yjs';
 import { BASE_EXTENSIONS } from '@/lib/pm-schema';
 import { SlashMenu } from './SlashMenu';
+import { AtMentionMenu } from './AtMentionMenu';
 import { TableToolbar } from './TableToolbar';
 import { imageFilesFromDataTransfer, uploadImageAsset } from '@/lib/image-upload';
-import {
-  INSERT_WIKILINK_EVENT,
-  type InsertWikilinkDetail,
-} from './AddBacklink';
 
 export type SurfaceUser = {
   userId: string;
@@ -203,33 +200,6 @@ export function NoteSurface({
     };
   }, [canEdit, editor, csrfToken]);
 
-  // Sidebar "+ backlink" and slash "Link to note" both dispatch this
-  // event with { target, label? }. Insert a wikilink node at the
-  // current caret — or at the end of the body if the editor hasn't
-  // been focused yet (typical path from the sidebar).
-  useEffect(() => {
-    if (!canEdit || !editor) return;
-    const handler = (e: Event): void => {
-      const detail = (e as CustomEvent<InsertWikilinkDetail>).detail;
-      if (!detail?.target) return;
-      editor
-        .chain()
-        .focus()
-        .insertContent({
-          type: 'wikilink',
-          attrs: {
-            target: detail.target,
-            label: detail.label ?? '',
-            orphan: false,
-          },
-        })
-        .insertContent(' ')
-        .run();
-    };
-    document.addEventListener(INSERT_WIKILINK_EVENT, handler);
-    return () => document.removeEventListener(INSERT_WIKILINK_EVENT, handler);
-  }, [canEdit, editor]);
-
   return (
     <>
       <article
@@ -241,6 +211,7 @@ export function NoteSurface({
         <EditorContent editor={editor} />
       </article>
       {canEdit && <SlashMenu editor={editor} csrfToken={csrfToken} />}
+      {canEdit && <AtMentionMenu editor={editor} excludePath={path} />}
       {canEdit && <TableToolbar editor={editor} />}
     </>
   );

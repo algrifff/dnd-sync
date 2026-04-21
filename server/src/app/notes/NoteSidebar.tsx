@@ -4,7 +4,7 @@
 
 import type { ReactElement } from 'react';
 import Link from 'next/link';
-import type { BacklinkRow } from '@/lib/notes';
+import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
 import { MiniGraph } from './MiniGraph';
 import { AddBacklink } from './AddBacklink';
 
@@ -13,20 +13,24 @@ export type OutlineItem = { level: number; text: string };
 export function NoteSidebar({
   path,
   backlinks,
+  outgoingLinks,
   tags,
   outline,
+  csrfToken,
 }: {
   path: string;
   backlinks: BacklinkRow[];
+  outgoingLinks: OutgoingLinkRow[];
   tags: string[];
   outline: OutlineItem[];
+  csrfToken: string;
 }): ReactElement {
   return (
     <aside className="h-full overflow-y-auto border-l border-[#D4C7AE] bg-[#EAE1CF]/40 px-4 py-4 text-sm">
       <Section
         title="Backlinks"
         empty="No backlinks yet."
-        actions={<AddBacklink currentPath={path} />}
+        actions={<AddBacklink currentPath={path} csrfToken={csrfToken} />}
       >
         {backlinks.length > 0 && (
           <ul className="flex flex-wrap gap-1.5">
@@ -38,6 +42,24 @@ export function NoteSidebar({
                   className="inline-block max-w-full truncate rounded-full border border-[#D4C7AE] bg-[#FBF5E8] px-2.5 py-0.5 text-xs text-[#2A241E] transition hover:-translate-y-px hover:border-[#D4A85A] hover:bg-[#F4EDE0]"
                 >
                   {b.title || baseName(b.from_path)}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
+      <Section title="Links to" empty="No outgoing links.">
+        {outgoingLinks.length > 0 && (
+          <ul className="flex flex-wrap gap-1.5">
+            {outgoingLinks.map((l) => (
+              <li key={l.to_path}>
+                <Link
+                  href={'/notes/' + encodePath(l.to_path)}
+                  title={l.to_path}
+                  className="inline-block max-w-full truncate rounded-full border border-[#D4C7AE] bg-[#FBF5E8] px-2.5 py-0.5 text-xs text-[#2A241E] transition hover:-translate-y-px hover:border-[#D4A85A] hover:bg-[#F4EDE0]"
+                >
+                  {l.title || baseName(l.to_path)}
                 </Link>
               </li>
             ))}

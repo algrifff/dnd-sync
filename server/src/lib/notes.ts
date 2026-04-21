@@ -36,6 +36,11 @@ export type BacklinkRow = {
   title: string;
 };
 
+export type OutgoingLinkRow = {
+  to_path: string;
+  title: string;
+};
+
 export type TagRow = {
   path: string;
   tag: string;
@@ -93,6 +98,18 @@ export function loadBacklinks(
         ORDER BY nl.from_path`,
     )
     .all(groupId, path);
+}
+
+export function loadOutgoingLinks(groupId: string, fromPath: string): OutgoingLinkRow[] {
+  return getDb()
+    .query<OutgoingLinkRow, [string, string]>(
+      `SELECT nl.to_path AS to_path, COALESCE(n.title, nl.to_path) AS title
+         FROM note_links nl
+         LEFT JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.to_path
+        WHERE nl.group_id = ? AND nl.from_path = ?
+        ORDER BY nl.to_path`,
+    )
+    .all(groupId, fromPath);
 }
 
 export function loadTags(groupId: string, path: string): string[] {
