@@ -187,7 +187,7 @@ export function CharacterHeader({
                   value={hp.current}
                   onCommit={setHpCurrent}
                   readOnly={!canEdit}
-                  inputClassName="font-serif text-lg font-semibold w-12"
+                  inputClassName="text-lg w-12"
                   ariaLabel="HP current"
                 />
                 <span className="text-xs text-[#5A4F42]">/</span>
@@ -195,7 +195,7 @@ export function CharacterHeader({
                   value={hp.max}
                   onCommit={setHpMax}
                   readOnly={!canEdit}
-                  inputClassName="font-serif text-lg font-semibold w-12"
+                  inputClassName="text-lg w-12"
                   ariaLabel="HP max"
                 />
               </StatTile>
@@ -206,7 +206,7 @@ export function CharacterHeader({
                 onCommit={canEdit ? setSpeed : undefined}
               />
               <StatTile label="Init">
-                <span className="font-serif text-lg text-[#2A241E]">
+                <span className="text-lg text-[#2A241E]">
                   {init == null
                     ? formatModifier(abilityModifier(scores.dex))
                     : formatModifier(init)}

@@ -27,14 +27,14 @@ export function StatTile({
       <span className="text-[10px] font-semibold uppercase tracking-wide text-[#5A4F42]">
         {label}
       </span>
-      <span className="flex items-center gap-1 font-serif text-lg font-semibold text-[#2A241E]">
+      <span className="flex items-center gap-1 text-lg font-semibold text-[#2A241E]">
         {children ? (
           children
         ) : onCommit && !readOnly ? (
           <InlineNumber
             value={value ?? null}
             onCommit={onCommit}
-            inputClassName="font-serif text-lg font-semibold"
+            inputClassName="text-lg"
             ariaLabel={label}
           />
         ) : (
