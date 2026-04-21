@@ -376,3 +376,12 @@ html, body {
   outline: 2px solid var(--candlelight);
   outline-offset: 2px;
 }
+
+/* Sheet header inline editors render their own bottom-stroke focus
+   style in the per-world accent colour, so opt them out of the global
+   candlelight focus ring. Specificity (class + *) beats the global
+   *:focus-visible rule above. */
+.sheet-header *:focus,
+.sheet-header *:focus-visible {
+  outline: none;
+}

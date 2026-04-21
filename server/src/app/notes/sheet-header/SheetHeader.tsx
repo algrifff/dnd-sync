@@ -64,7 +64,13 @@ export function SheetHeader({
   // colour still get a visible underline instead of nothing.
   const accent = accentColor ?? '#8A7E6B';
   return (
-    <div style={{ '--world-accent': accent } as React.CSSProperties}>
+    // `sheet-header` marker lets globals.css opt this subtree out of
+    // the universal candlelight focus ring — inline editors draw their
+    // own bottom stroke in --world-accent instead.
+    <div
+      className="sheet-header"
+      style={{ '--world-accent': accent } as React.CSSProperties}
+    >
       {inner}
     </div>
   );
