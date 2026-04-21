@@ -97,7 +97,7 @@ export function CreatureHeader({
 
   return (
     <>
-      <section className="mb-4 rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-5">
+      <section className="mb-4 p-5">
         <div className="flex items-start gap-4">
           <CreaturePortrait
             url={pUrl}

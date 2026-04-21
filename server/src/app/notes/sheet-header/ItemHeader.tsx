@@ -143,7 +143,7 @@ export function ItemHeader({
 
   return (
     <>
-      <section className="mb-4 rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-4">
+      <section className="mb-4 p-4">
         <div className="flex items-start gap-4">
           <IconBox
             url={pUrl}

@@ -65,7 +65,7 @@ export function LocationHeader({
 
   return (
     <>
-      <section className="mb-4 overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8]">
+      <section className="mb-4">
         <div className="p-5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
@@ -151,7 +151,7 @@ export function LocationHeader({
             onClick={() => canEdit && setPickerOpen(true)}
             aria-label={canEdit ? 'Change hero image' : 'Hero image'}
             disabled={!canEdit}
-            className="block w-full border-t border-[#D4C7AE] bg-[#EAE1CF]"
+            className="block w-full overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#EAE1CF]"
           >
             <img
               src={pUrl}

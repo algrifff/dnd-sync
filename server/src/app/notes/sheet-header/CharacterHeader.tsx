@@ -108,7 +108,11 @@ export function CharacterHeader({
 
   return (
     <>
-      <section className="mb-4 rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-5">
+      {/* Header sits flush on the page — no card chrome — so it reads
+       *  like ink on the notebook, not a UI panel. Inner tiles
+       *  (stat tiles, ability boxes) keep their own borders so
+       *  they still feel like objects on the page. */}
+      <section className="mb-4 p-5">
         <div className="flex items-start gap-5">
           <Portrait
             url={pUrl}
