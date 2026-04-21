@@ -7,6 +7,7 @@ import Link from 'next/link';
 import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
 import { MiniGraph } from './MiniGraph';
 import { BacklinksPanel } from './BacklinksPanel';
+import { AddOutgoingLink } from './AddOutgoingLink';
 
 export type OutlineItem = { level: number; text: string };
 
@@ -33,7 +34,11 @@ export function NoteSidebar({
         csrfToken={csrfToken}
       />
 
-      <Section title="Links to" empty="No outgoing links.">
+      <Section
+        title="Links to"
+        empty="No outgoing links."
+        actions={<AddOutgoingLink currentPath={path} csrfToken={csrfToken} />}
+      >
         {outgoingLinks.length > 0 && (
           <ul className="flex flex-wrap gap-1.5">
             {outgoingLinks.map((l) => (

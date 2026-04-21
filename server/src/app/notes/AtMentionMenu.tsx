@@ -79,12 +79,15 @@ export function AtMentionMenu({
     (path: string): void => {
       const t = triggerRef.current;
       if (!editor || !t) return;
-      const target = path.replace(/\.(md|canvas)$/i, '');
+      // Keep the full path (e.g. "characters/Aldric.md") as the target so
+      // derive.ts writes the correct path to note_links and the JOIN against
+      // notes.path succeeds. The wikilink renderer strips the extension for
+      // display via niceWikilinkLabel, so the prose still reads as "Aldric".
       editor
         .chain()
         .focus()
         .deleteRange({ from: t.from, to: t.to })
-        .insertContent({ type: 'wikilink', attrs: { target, label: '', orphan: false } })
+        .insertContent({ type: 'wikilink', attrs: { target: path, label: '', orphan: false } })
         .insertContent(' ')
         .run();
       close();
