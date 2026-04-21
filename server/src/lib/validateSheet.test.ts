@@ -36,4 +36,32 @@ describe('validateSheet', () => {
     const res = validateSheet(undefined, { any: 'thing' });
     expect(res.ok).toBe(true);
   });
+
+  test('legacy PC sheet with scalar race/background/speed validates', () => {
+    // Old PC notes stored these as plain strings / an integer. The
+    // PATCH endpoint re-validates the merged sheet on every edit; if
+    // the schema rejects these the UI reports "invalid_sheet".
+    const res = validateSheet('character', {
+      name: 'Legacy',
+      race: 'Half-Elf',
+      background: 'Sage',
+      speed: 30,
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      const d = res.data as Record<string, unknown>;
+      expect(d.race).toEqual({ ref: { name: 'Half-Elf' } });
+      expect(d.background).toEqual({ ref: { name: 'Sage' } });
+      expect(d.speed).toEqual({ walk: 30 });
+    }
+  });
+
+  test('legacy creature sheet with scalar speed validates', () => {
+    const res = validateSheet('creature', { name: 'Goblin', speed: 30 });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      const d = res.data as Record<string, unknown>;
+      expect(d.speed).toEqual({ walk: 30 });
+    }
+  });
 });

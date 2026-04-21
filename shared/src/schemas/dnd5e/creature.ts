@@ -98,7 +98,18 @@ export const CreatureSheet = z
         formula: z.string().optional(),
       })
       .optional(),
-    speed: Speed.default({ walk: 30 }),
+    // Legacy creature notes stored speed as a plain integer. Accept
+    // either scalar or Speed object; scalar coerces to `{ walk: n }`.
+    speed: z
+      .union([
+        z
+          .number()
+          .int()
+          .min(0)
+          .transform((walk) => ({ walk })),
+        Speed,
+      ])
+      .default({ walk: 30 }),
     senses: Senses.optional(),
     languages: z.array(z.string()).default([]),
     challenge_rating: z.number().min(0).max(30).default(0),

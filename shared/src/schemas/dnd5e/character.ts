@@ -121,9 +121,28 @@ export const CharacterSheet = z
     alignment: z.string().optional(),
 
     // origins
-    race: z.object({ ref: Ref, subrace: z.string().optional() }).optional(),
+    //
+    // Legacy character notes stored these as a plain display string
+    // ("Half-Elf", "Sage"). Accept either that scalar shape or the
+    // new nested-ref shape, and coerce legacy strings up to the new
+    // shape on read so consumers only ever see `{ ref: { name } }`.
+    race: z
+      .union([
+        z
+          .string()
+          .min(1)
+          .transform((name) => ({ ref: { name } })),
+        z.object({ ref: Ref, subrace: z.string().optional() }),
+      ])
+      .optional(),
     background: z
-      .object({ ref: Ref, variant: z.string().optional() })
+      .union([
+        z
+          .string()
+          .min(1)
+          .transform((name) => ({ ref: { name } })),
+        z.object({ ref: Ref, variant: z.string().optional() }),
+      ])
       .optional(),
 
     // classes (supports multiclass)
@@ -147,7 +166,20 @@ export const CharacterSheet = z
         temporary: z.number().int().min(0).default(0),
       })
       .optional(),
-    speed: Speed.optional(),
+    // Legacy character notes stored speed as a plain integer (e.g.
+    // 30). Accept either that scalar or the new Speed object, and
+    // coerce the scalar up to `{ walk: n }` so downstream code only
+    // has one shape to worry about.
+    speed: z
+      .union([
+        z
+          .number()
+          .int()
+          .min(0)
+          .transform((walk) => ({ walk })),
+        Speed,
+      ])
+      .optional(),
     senses: Senses.optional(),
     initiative_bonus: z.number().int().default(0),
     death_saves: DeathSaves.default({ successes: 0, failures: 0 }),
