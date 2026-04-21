@@ -20,6 +20,8 @@ import {
 import { ChevronRight, Loader2, Send, Sparkles, X } from 'lucide-react';
 import { SessionReviewPanel, type SessionProposal } from './SessionReviewPanel';
 
+const HOME_CHAT_KEY = 'compendium-home-chat-v1';
+
 // ── Public component ───────────────────────────────────────────────────
 
 export function ChatPane({
@@ -33,6 +35,7 @@ export function ChatPane({
 }): ReactElement {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
+  const [loaded, setLoaded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const transport = useMemo(
@@ -47,9 +50,34 @@ export function ChatPane({
     [groupId, campaignSlug],
   );
 
-  const { messages, status, sendMessage } = useChat({ transport });
+  const { messages, status, sendMessage, setMessages } = useChat({ transport });
 
   const isStreaming = status === 'submitted' || status === 'streaming';
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(HOME_CHAT_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as UIMessage[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed);
+        }
+      }
+    } catch {
+      // Ignore local storage failures.
+    } finally {
+      setLoaded(true);
+    }
+  }, [setMessages]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      window.localStorage.setItem(HOME_CHAT_KEY, JSON.stringify(messages));
+    } catch {
+      // Ignore local storage failures.
+    }
+  }, [loaded, messages]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });

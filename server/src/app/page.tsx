@@ -11,7 +11,6 @@ import { getDb } from '@/lib/db';
 import { recentlyUpdated } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
 import { listNoteKinds } from '@/lib/characters';
-import { listOpenJobsForUser } from '@/lib/imports';
 import { AppHeader } from './AppHeader';
 import { NoteTabBar } from './NoteTabBar';
 import { WorldsSidebar } from './WorldsSidebar';
@@ -42,7 +41,6 @@ export default async function HomePage(): Promise<ReactElement> {
   const recent = recentlyUpdated(session.currentGroupId, 12);
   const tree = buildTree(session.currentGroupId);
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
-  const openJobs = listOpenJobsForUser(session.currentGroupId, session.userId);
   const topFolders = tree.root.children.filter((c) => c.kind === 'dir').slice(0, 6);
 
   return (
@@ -118,9 +116,7 @@ export default async function HomePage(): Promise<ReactElement> {
 
         <section className="mb-10">
           <HomeChat
-            csrfToken={session.csrfToken}
-            canImport={session.role !== 'viewer'}
-            initialOpenJobs={openJobs}
+            groupId={session.currentGroupId}
           />
         </section>
 

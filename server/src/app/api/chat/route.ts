@@ -9,7 +9,6 @@
 
 import { createOpenAI } from '@ai-sdk/openai';
 import { streamText, stepCountIs } from 'ai';
-import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { getDb } from '@/lib/db';
@@ -18,16 +17,11 @@ import { getToolsForRole, type ToolContext } from '@/lib/ai/tools';
 
 export const dynamic = 'force-dynamic';
 
-const MessageSchema = z.object({
-  role: z.enum(['user', 'assistant']),
-  content: z.string(),
-});
-
-const BodySchema = z.object({
-  messages:     z.array(MessageSchema).min(1).max(100),
-  groupId:      z.string().min(1),
-  campaignSlug: z.string().optional(),
-});
+type ParsedBody = {
+  groupId: string;
+  campaignSlug?: string;
+  messages: unknown[];
+};
 
 export async function POST(req: NextRequest): Promise<Response> {
   const session = requireSession(req);
@@ -38,12 +32,8 @@ export async function POST(req: NextRequest): Promise<Response> {
     return json({ error: 'forbidden', reason: 'groupId mismatch' }, 403);
   }
 
-  let body: z.infer<typeof BodySchema>;
-  try {
-    body = BodySchema.parse(await req.json());
-  } catch (err) {
-    return json({ error: 'invalid_body', detail: err instanceof Error ? err.message : 'bad' }, 400);
-  }
+  const body = await parseBody(req);
+  if (body instanceof Response) return body;
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -53,7 +43,12 @@ export async function POST(req: NextRequest): Promise<Response> {
   const role: 'dm' | 'player' =
     session.role === 'admin' || session.role === 'editor' ? 'dm' : 'player';
 
-  const lastUserMessage = body.messages
+  const normalizedMessages = normalizeMessages(body.messages);
+  if (normalizedMessages.length === 0) {
+    return json({ error: 'invalid_body', detail: 'messages must include at least one text entry' }, 400);
+  }
+
+  const lastUserMessage = normalizedMessages
     .slice()
     .reverse()
     .find((m) => m.role === 'user')?.content ?? '';
@@ -90,7 +85,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       ...(body.campaignSlug !== undefined ? { campaignSlug: body.campaignSlug } : {}),
       ...(campaignName !== undefined     ? { campaignName }                     : {}),
     }),
-    messages: body.messages,
+    messages: normalizedMessages,
     tools:    getToolsForRole(toolCtx),
     stopWhen: stepCountIs(8),
   });
@@ -116,4 +111,85 @@ function json(body: unknown, status: number): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function normalizeMessages(
+  messages: unknown[],
+): Array<{ role: 'user' | 'assistant' | 'system'; content: string }> {
+  return messages
+    .map((msg) => {
+      if (!msg || typeof msg !== 'object') return null;
+      const role = typeof (msg as { role?: unknown }).role === 'string'
+        ? (msg as { role: string }).role
+        : '';
+      if (role !== 'user' && role !== 'assistant' && role !== 'system') return null;
+
+      const directContent = (msg as { content?: unknown }).content;
+      if (typeof directContent === 'string' && directContent.trim()) {
+        return {
+          role,
+          content: directContent,
+        };
+      }
+
+      const rawParts = (msg as { parts?: unknown }).parts;
+      const parts = Array.isArray(rawParts) ? rawParts : [];
+      const content = parts
+        .filter((p: { type?: unknown; text?: unknown }) => p.type === 'text' && typeof p.text === 'string')
+        .map((p: { text?: unknown }) => String(p.text ?? ''))
+        .join('')
+        .trim();
+
+      if (!content) return null;
+      return {
+        role,
+        content,
+      };
+    })
+    .filter((m): m is { role: 'user' | 'assistant' | 'system'; content: string } => Boolean(m));
+}
+
+async function parseBody(req: NextRequest): Promise<ParsedBody | Response> {
+  try {
+    const raw = await req.json() as Record<string, unknown>;
+    const nestedBody = (raw.body && typeof raw.body === 'object')
+      ? raw.body as Record<string, unknown>
+      : null;
+    const nestedData = (raw.data && typeof raw.data === 'object')
+      ? raw.data as Record<string, unknown>
+      : null;
+
+    const groupId =
+      (typeof raw.groupId === 'string' ? raw.groupId : null) ??
+      (nestedBody && typeof nestedBody.groupId === 'string' ? nestedBody.groupId : null) ??
+      (nestedData && typeof nestedData.groupId === 'string' ? nestedData.groupId : null) ??
+      '';
+
+    const campaignSlug =
+      (typeof raw.campaignSlug === 'string' ? raw.campaignSlug : undefined) ??
+      (nestedBody && typeof nestedBody.campaignSlug === 'string' ? nestedBody.campaignSlug : undefined) ??
+      (nestedData && typeof nestedData.campaignSlug === 'string' ? nestedData.campaignSlug : undefined);
+
+    const messages =
+      (Array.isArray(raw.messages) ? raw.messages : null) ??
+      (nestedBody && Array.isArray(nestedBody.messages) ? nestedBody.messages : null) ??
+      (nestedData && Array.isArray(nestedData.messages) ? nestedData.messages : null) ??
+      (raw.message ? [raw.message] : null) ??
+      (typeof raw.input === 'string' ? [{ role: 'user', content: raw.input }] : null) ??
+      (typeof raw.text === 'string' ? [{ role: 'user', content: raw.text }] : null) ??
+      (typeof raw.prompt === 'string' ? [{ role: 'user', content: raw.prompt }] : null) ??
+      [];
+
+    if (!groupId || messages.length === 0) {
+      return json({ error: 'invalid_body', detail: 'groupId and messages are required' }, 400);
+    }
+
+    return {
+      groupId,
+      ...(campaignSlug !== undefined ? { campaignSlug } : {}),
+      messages,
+    };
+  } catch (err) {
+    return json({ error: 'invalid_body', detail: err instanceof Error ? err.message : 'bad' }, 400);
+  }
 }
