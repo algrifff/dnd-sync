@@ -5,7 +5,7 @@ import type { HocuspocusProvider } from '@hocuspocus/provider';
 import { MapPin } from 'lucide-react';
 import { InlineText } from './InlineText';
 import { ChipSelect } from './ChipSelect';
-import { PathPicker } from './PathPicker';
+import { NoteAutocomplete } from './NoteAutocomplete';
 import { PortraitPicker } from './PortraitPicker';
 import { SaveIndicator } from './SaveIndicator';
 import { usePatchSheet } from './usePatchSheet';
@@ -104,12 +104,13 @@ export function LocationHeader({
                 <span className="inline-flex items-center gap-1 text-[#5A4F42]">
                   <MapPin size={11} /> Parent:
                 </span>
-                <PathPicker
+                <NoteAutocomplete
                   value={parentPath}
                   readOnly={!canEdit}
+                  kind="location"
                   onCommit={(next) => patchSheet({ parent_path: next })}
-                  placeholder="e.g. Places/sword-coast"
-                  ariaLabel="Parent path"
+                  placeholder="Link a parent location…"
+                  ariaLabel="Parent link"
                   className="font-mono text-[11px] text-[#2A241E]"
                 />
               </div>

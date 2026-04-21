@@ -5,7 +5,7 @@ import type { HocuspocusProvider } from '@hocuspocus/provider';
 import { User } from 'lucide-react';
 import { InlineText } from './InlineText';
 import { ChipSelect } from './ChipSelect';
-import { PathPicker } from './PathPicker';
+import { NoteAutocomplete } from './NoteAutocomplete';
 import { PortraitPicker } from './PortraitPicker';
 import { SaveIndicator } from './SaveIndicator';
 import { usePatchSheet } from './usePatchSheet';
@@ -104,12 +104,13 @@ export function PersonHeader({
               />
               <span className="text-[#5A4F42]">·</span>
               <span className="text-[#5A4F42]">Location:</span>
-              <PathPicker
+              <NoteAutocomplete
                 value={locationPath}
                 readOnly={!canEdit}
+                kind="location"
                 onCommit={(next) => patchSheet({ location_path: next })}
-                placeholder="e.g. Places/bree"
-                ariaLabel="Location path"
+                placeholder="Link a location…"
+                ariaLabel="Location link"
                 className="font-mono text-[11px] text-[#2A241E]"
               />
             </div>
