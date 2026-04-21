@@ -14,7 +14,9 @@ import { NoteSurface, type SurfaceUser } from './NoteSurface';
 import { PointerOverlay } from './PointerOverlay';
 import { DrawingOverlay } from './DrawingOverlay';
 import { CharacterSheet } from './CharacterSheet';
-import type { NoteTemplate, TemplateSchema } from '@/lib/templates';
+import { SheetHeader } from './sheet-header/SheetHeader';
+import { normalizeKind } from './sheet-header/util';
+import type { NoteTemplate } from '@/lib/templates';
 
 export type CharacterProp = {
   roleLabel: string;
@@ -23,6 +25,9 @@ export type CharacterProp = {
   displayName: string;
   portraitUrl: string | null;
   canWriteAll: boolean;
+  /** Original frontmatter kind string (canonical or legacy) — used
+   *  to pick the right SheetHeader variant. */
+  rawKind: string | undefined;
 };
 
 export function NoteWorkspace({
@@ -84,10 +89,7 @@ export function NoteWorkspace({
     };
   }, [provider, ydoc]);
 
-  const imageLayout = character?.template.schema.imageLayout ?? 'none';
-  const quickSummary = character
-    ? buildQuickSummary(character.template.schema, character.sheet)
-    : [];
+  const showSheetHeader = !!character && !!normalizeKind(character.rawKind);
 
   return (
     <div className="relative">
@@ -96,37 +98,34 @@ export function NoteWorkspace({
       </div>
 
       {/* ── Note header ─────────────────────────────────────────── */}
-      {imageLayout === 'avatar' && character ? (
-        <div className="mb-4 flex items-start gap-5">
-          <Avatar
-            portraitUrl={character.portraitUrl}
+      {showSheetHeader && character ? (
+        <>
+          <SheetHeader
+            rawKind={character.rawKind}
+            initialSheet={character.sheet}
+            notePath={path}
+            csrfToken={csrfToken}
+            provider={provider}
+            canEdit={character.canWriteAll}
             displayName={character.displayName}
           />
-          <div className="min-w-0 flex-1 pt-1">
-            <TitleEditor ydoc={ydoc} />
-            <NoteMetaRow
-              roleLabel={character.roleLabel}
-              quickSummary={quickSummary}
-              creator={creator}
-              createdAt={createdAt}
-            />
-            <div className="mt-2">
-              <TagEditor path={path} initialTags={initialTags} csrfToken={csrfToken} canEdit={canEdit} />
-            </div>
+          <div className="mb-4">
+            {creator && createdAt > 0 && (
+              <p className="mb-2 text-[11px] text-[#5A4F42]">
+                Created by{' '}
+                <span className="font-medium text-[#2A241E]">
+                  {creator.displayName || creator.username}
+                </span>{' '}
+                · {formatCreatedAt(createdAt)}
+              </p>
+            )}
+            <TagEditor path={path} initialTags={initialTags} csrfToken={csrfToken} canEdit={canEdit} />
           </div>
-        </div>
+        </>
       ) : (
         <div className="mb-4">
           <TitleEditor ydoc={ydoc} />
-          {character && (
-            <NoteMetaRow
-              roleLabel={character.roleLabel}
-              quickSummary={quickSummary}
-              creator={creator}
-              createdAt={createdAt}
-            />
-          )}
-          {!character && creator && createdAt > 0 && (
+          {creator && createdAt > 0 && (
             <p className="mt-1 text-xs text-[#5A4F42]">
               Created by{' '}
               <span className="font-medium text-[#2A241E]">
@@ -138,19 +137,12 @@ export function NoteWorkspace({
           <div className="mt-2">
             <TagEditor path={path} initialTags={initialTags} csrfToken={csrfToken} canEdit={canEdit} />
           </div>
-          {imageLayout === 'hero' && character?.portraitUrl && (
-            <div className="mt-4 h-52 w-full overflow-hidden rounded-[12px] border border-[#D4C7AE]">
-              <img
-                src={character.portraitUrl}
-                alt=""
-                className="h-full w-full object-cover"
-              />
-            </div>
-          )}
         </div>
       )}
 
-      {character && (
+      {/* Only character kinds get the side-panel form; person / creature /
+       *  item / location are header-inline-editable only this pass. */}
+      {character && normalizeKind(character.rawKind) === 'character' && (
         <div className="mt-4">
           <CharacterSheet
             path={path}
@@ -236,82 +228,3 @@ function buildCollabUrl(): string {
   return `${scheme}//${location.host}/collab`;
 }
 
-function Avatar({
-  portraitUrl,
-  displayName,
-}: {
-  portraitUrl: string | null;
-  displayName: string;
-}): React.JSX.Element {
-  return (
-    <div className="h-20 w-20 shrink-0 overflow-hidden rounded-full border-2 border-[#D4C7AE] bg-[#EAE1CF]">
-      {portraitUrl ? (
-        <img src={portraitUrl} alt="" className="h-full w-full object-cover" />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center text-3xl font-semibold text-[#5A4F42]">
-          {displayName.slice(0, 1).toUpperCase()}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NoteMetaRow({
-  roleLabel,
-  quickSummary,
-  creator,
-  createdAt,
-}: {
-  roleLabel: string;
-  quickSummary: string[];
-  creator: { displayName: string; username: string } | null;
-  createdAt: number;
-}): React.JSX.Element {
-  return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-      <span className="rounded-full border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#5A4F42]">
-        {roleLabel}
-      </span>
-      {quickSummary.map((s) => (
-        <span
-          key={s}
-          className="rounded-full border border-[#D4C7AE] bg-[#FBF5E8] px-2 py-0.5 text-[11px] text-[#2A241E]"
-        >
-          {s}
-        </span>
-      ))}
-      {creator && createdAt > 0 && (
-        <span className="text-[11px] text-[#5A4F42]">
-          · {creator.displayName || creator.username} · {formatCreatedAt(createdAt)}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/** Extract display strings for the fields listed in schema.headerFields. */
-function buildQuickSummary(
-  schema: TemplateSchema,
-  sheet: Record<string, unknown>,
-): string[] {
-  if (!schema.headerFields?.length) return [];
-
-  const fieldMap = new Map(
-    schema.sections.flatMap((s) => s.fields.map((f) => [f.id, f])),
-  );
-
-  return schema.headerFields.flatMap((id) => {
-    const field = fieldMap.get(id);
-    const value = sheet[id];
-    if (!field || value === null || value === undefined || value === '') return [];
-
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      if (id === 'level') return [`Level ${Math.trunc(value)}`];
-      if (id === 'session_number') return [`#${Math.trunc(value)}`];
-      if (id === 'ac') return [`AC ${Math.trunc(value)}`];
-      return [String(Math.trunc(value))];
-    }
-    if (typeof value === 'string' && value.trim()) return [value.trim()];
-    return [];
-  });
-}

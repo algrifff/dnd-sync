@@ -249,7 +249,13 @@ function resolveCharacterView(args: {
   let templateKind: TemplateKind;
   if (fm.kind === 'character') {
     templateKind = deriveRole(fm, args.path);
-  } else if (fm.kind === 'item' || fm.kind === 'location' || fm.kind === 'monster') {
+  } else if (
+    fm.kind === 'item' ||
+    fm.kind === 'location' ||
+    fm.kind === 'monster' ||
+    fm.kind === 'person' ||
+    fm.kind === 'creature'
+  ) {
     templateKind = fm.kind;
   } else {
     return null;
@@ -287,6 +293,7 @@ function resolveCharacterView(args: {
     displayName,
     portraitUrl,
     canWriteAll,
+    rawKind: typeof fm.kind === 'string' ? fm.kind : undefined,
   };
 }
 
@@ -346,5 +353,6 @@ export type CharacterView = {
   displayName: string;
   portraitUrl: string | null;
   canWriteAll: boolean;
+  rawKind: string | undefined;
 };
 

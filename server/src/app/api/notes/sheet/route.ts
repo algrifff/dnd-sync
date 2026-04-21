@@ -31,16 +31,11 @@ export const dynamic = 'force-dynamic';
 
 const Body = z.object({
   path: z.string().min(1).max(512),
-  sheet: z.record(
-    z.string(),
-    z.union([
-      z.string(),
-      z.number(),
-      z.boolean(),
-      z.array(z.string()),
-      z.null(),
-    ]),
-  ),
+  // Values may be any JSON shape — nested objects (hit_points, armor_class,
+  // ability_scores, …) are valid for the new data model. Merge is shallow
+  // per top-level key, so clients must send whole sub-objects when touching
+  // a nested field.
+  sheet: z.record(z.string(), z.unknown()),
 });
 
 const CHARACTER_KINDS: readonly TemplateKind[] = ['pc', 'npc', 'ally', 'villain'];
@@ -75,7 +70,13 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   let role: TemplateKind | null = null;
   if (fm.kind === 'character') {
     role = inferRole(fm, body.path);
-  } else if (fm.kind === 'item' || fm.kind === 'location' || fm.kind === 'monster') {
+  } else if (
+    fm.kind === 'item' ||
+    fm.kind === 'location' ||
+    fm.kind === 'monster' ||
+    fm.kind === 'person' ||
+    fm.kind === 'creature'
+  ) {
     role = fm.kind as TemplateKind;
   }
   if (!role) return json({ error: 'no_structured_sheet' }, 400);
