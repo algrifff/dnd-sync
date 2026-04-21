@@ -17,6 +17,7 @@ import {
 import { getTemplate, type NoteTemplate, type TemplateKind } from '@/lib/templates';
 import { listNoteKinds } from '@/lib/characters';
 import { buildTree } from '@/lib/tree';
+import { getWorldHeader } from '@/lib/groups';
 import { AppHeader } from '../../AppHeader';
 import { NoteTabBar } from '../../NoteTabBar';
 import { WorldsSidebar } from '../../WorldsSidebar';
@@ -47,6 +48,11 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
   const note = loadNote(session.currentGroupId, path);
   if (!note) notFound();
+
+  // Per-world accent colour threaded into the sheet-header CSS variable
+  // so focus / hover underlines pick up the group's chosen highlight.
+  const worldHeader = getWorldHeader(session.currentGroupId);
+  const accentColor = worldHeader.headerColor;
 
   const tree = buildTree(session.currentGroupId);
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
@@ -188,6 +194,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
               }
               createdAt={note.created_at}
               character={character}
+              accentColor={accentColor}
             />
           </div>
           </div>

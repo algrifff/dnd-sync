@@ -40,6 +40,7 @@ export function NoteWorkspace({
   creator,
   createdAt,
   character,
+  accentColor,
 }: {
   path: string;
   initialContent: { type: string } & Record<string, unknown>;
@@ -50,6 +51,9 @@ export function NoteWorkspace({
   creator: { displayName: string; username: string } | null;
   createdAt: number;
   character: CharacterProp | null;
+  /** Per-world accent colour (groups.header_color); falls back to a
+   *  parchment-friendly default in the sheet header. */
+  accentColor: string | null;
 }): React.JSX.Element {
   const ydoc = useMemo(() => new Y.Doc(), [path]);
   const provider = useMemo(
@@ -108,6 +112,7 @@ export function NoteWorkspace({
             provider={provider}
             canEdit={character.canWriteAll}
             displayName={character.displayName}
+            accentColor={accentColor}
           />
           <div className="mb-4">
             {creator && createdAt > 0 && (

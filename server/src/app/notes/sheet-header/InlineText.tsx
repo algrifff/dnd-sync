@@ -50,12 +50,15 @@ export function InlineText({
   }
 
   if (!editing) {
+    // min-w-[4ch] guarantees a click target even for single-character
+    // values; border-b-2 transparent reserves space so the hover
+    // underline doesn't shift layout when it appears.
     return (
       <button
         type="button"
         onClick={() => setEditing(true)}
         aria-label={ariaLabel ?? 'Edit'}
-        className={`text-left hover:outline hover:outline-1 hover:outline-offset-2 hover:outline-[#D4C7AE] rounded ${className ?? ''}`}
+        className={`text-left min-w-[4ch] border-b-2 border-transparent hover:border-[var(--world-accent,#8A7E6B)] ${className ?? ''}`}
       >
         {value || <span className="text-[#8A7E6B]">{placeholder ?? 'Click to edit'}</span>}
       </button>
@@ -87,12 +90,12 @@ export function InlineText({
       }
     },
     maxLength,
-    // No click-chrome: transparent bg, no border, no padding — so the
-    // input sits in place of the button with zero visual shift. Width
-    // comes from the multiline branch below (w-full on textarea) or
-    // the consumer's inputClassName for singleline; default to 100%
-    // of the parent the button occupied via min-w-0 + intrinsic size.
-    className: `border-0 bg-transparent p-0 outline-none focus:outline-none focus:ring-0 ${
+    // Bottom-stroke-only chrome in the world accent colour: kills the
+    // full-border UA style, reserves 2px with a transparent bottom so
+    // there's no layout pop on focus, and lights up the underline on
+    // focus. outline-0 on top of outline-none belts-and-braces the
+    // browser focus ring.
+    className: `bg-transparent p-0 border-0 border-b-2 border-transparent focus:border-[var(--world-accent,#8A7E6B)] outline-none focus:outline-0 focus-visible:outline-0 focus:ring-0 ${
       multiline ? 'w-full' : 'min-w-0'
     } ${inputClassName ?? ''}`,
     'aria-label': ariaLabel ?? 'Edit',

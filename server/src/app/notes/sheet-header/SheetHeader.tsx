@@ -19,6 +19,7 @@ export function SheetHeader({
   provider,
   canEdit,
   displayName,
+  accentColor,
 }: {
   rawKind: string | undefined;
   initialSheet: Record<string, unknown>;
@@ -27,6 +28,10 @@ export function SheetHeader({
   provider: HocuspocusProvider;
   canEdit: boolean;
   displayName: string;
+  /** Per-world highlight colour. Exposed to every descendant via the
+   *  `--world-accent` CSS variable so inline editors can pick it up
+   *  for hover / focus underlines without prop-drilling. */
+  accentColor: string | null;
 }): React.JSX.Element | null {
   const kind = normalizeKind(rawKind);
   if (!kind) return null;
@@ -40,16 +45,27 @@ export function SheetHeader({
     displayName,
   };
 
-  switch (kind) {
-    case 'character':
-      return <CharacterHeader {...common} />;
-    case 'person':
-      return <PersonHeader {...common} />;
-    case 'creature':
-      return <CreatureHeader {...common} />;
-    case 'item':
-      return <ItemHeader {...common} />;
-    case 'location':
-      return <LocationHeader {...common} />;
-  }
+  const inner = ((): React.JSX.Element => {
+    switch (kind) {
+      case 'character':
+        return <CharacterHeader {...common} />;
+      case 'person':
+        return <PersonHeader {...common} />;
+      case 'creature':
+        return <CreatureHeader {...common} />;
+      case 'item':
+        return <ItemHeader {...common} />;
+      case 'location':
+        return <LocationHeader {...common} />;
+    }
+  })();
+
+  // Fallback matches parchment ink-soft so notes without a custom world
+  // colour still get a visible underline instead of nothing.
+  const accent = accentColor ?? '#8A7E6B';
+  return (
+    <div style={{ '--world-accent': accent } as React.CSSProperties}>
+      {inner}
+    </div>
+  );
 }

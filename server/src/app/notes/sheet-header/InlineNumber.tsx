@@ -56,12 +56,15 @@ export function InlineNumber({
   }
 
   if (!editing) {
+    // min-w-[3ch] gives a decent click target even for single-digit
+    // values; border-b-2 reserves 2px so the hover underline doesn't
+    // shift layout.
     return (
       <button
         type="button"
         onClick={() => setEditing(true)}
         aria-label={ariaLabel ?? 'Edit'}
-        className={`text-left hover:outline hover:outline-1 hover:outline-offset-2 hover:outline-[#D4C7AE] rounded ${className ?? ''}`}
+        className={`text-center min-w-[3ch] border-b-2 border-transparent hover:border-[var(--world-accent,#8A7E6B)] ${className ?? ''}`}
       >
         {display}
       </button>
@@ -105,9 +108,11 @@ export function InlineNumber({
         }
       }}
       aria-label={ariaLabel ?? 'Edit number'}
-      // No click-chrome: transparent bg, no border, no padding; spinners
-      // hidden so the input renders at the same size as the button.
-      className={`border-0 bg-transparent p-0 text-center outline-none focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${inputClassName ?? ''}`}
+      // Bottom-stroke-only chrome in the world accent colour — no full
+      // border, no UA focus ring, just the underline lighting up on
+      // focus. Native number spinners hidden so the input doesn't
+      // change width when clicked.
+      className={`bg-transparent p-0 text-center border-0 border-b-2 border-transparent focus:border-[var(--world-accent,#8A7E6B)] outline-none focus:outline-0 focus-visible:outline-0 focus:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${inputClassName ?? ''}`}
     />
   );
 }
