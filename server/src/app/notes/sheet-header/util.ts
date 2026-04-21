@@ -154,6 +154,41 @@ function numOrNull(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
+/** Initiative = DEX modifier + optional `initiative_bonus`. Returns null
+ *  when no ability scores are present. */
+export function readInitiative(
+  sheet: Record<string, unknown>,
+): number | null {
+  const scores = readAbilityScores(sheet);
+  if (!scores) return null;
+  const dexMod = abilityModifier(scores.dex);
+  const bonus = numOrNull(sheet.initiative_bonus) ?? 0;
+  return dexMod + bonus;
+}
+
+/** Round-trip a "Warlock 3 / Sorcerer 2" style label back into the
+ *  nested `classes: [{ ref: { name }, level }]` shape. If the string
+ *  doesn't match that pattern, we still store each `/`-delimited chunk
+ *  as `{ ref: { name: chunk } }` so nothing is lost. */
+export function parseClassList(label: string): Array<{
+  ref: { name: string };
+  level?: number;
+}> {
+  return label
+    .split('/')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((chunk) => {
+      const m = /^(.*?)(?:\s+(\d+))?$/.exec(chunk);
+      const name = (m?.[1] ?? chunk).trim();
+      const levelStr = m?.[2];
+      const level = levelStr ? Number(levelStr) : undefined;
+      return level !== undefined
+        ? { ref: { name }, level }
+        : { ref: { name } };
+    });
+}
+
 /** Rarity → parchment-palette colour variable name. */
 export const RARITY_COLOR: Record<string, string> = {
   common: '--ink-soft',

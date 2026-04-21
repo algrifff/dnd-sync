@@ -1,7 +1,9 @@
 'use client';
 
-// Two-row character header: identity strip (portrait + name + pills
-// + AC/HP/Speed tiles) over the ability-score strip.
+// Character header: portrait + name / race / class (inline-edit, name-
+// style) over AC / HP / Speed / Init tiles, with an editable ability
+// strip beneath. Mirrors HP / ability edits to the legacy flat fields
+// so the CharacterSheet side panel stays in sync during transition.
 
 import { useState } from 'react';
 import type { HocuspocusProvider } from '@hocuspocus/provider';
@@ -10,16 +12,19 @@ import { InlineText } from './InlineText';
 import { InlineNumber } from './InlineNumber';
 import { StatTile } from './StatTile';
 import { AbilityScoreStrip } from './AbilityScoreStrip';
-import { Pill } from './Pill';
 import { PortraitPicker } from './PortraitPicker';
 import { SaveIndicator } from './SaveIndicator';
 import { usePatchSheet } from './usePatchSheet';
 import {
+  abilityModifier,
   formatClassList,
+  formatModifier,
+  parseClassList,
   portraitUrl,
   readAbilityScores,
   readArmorClass,
   readHitPoints,
+  readInitiative,
   readSpeed,
   refName,
 } from './util';
@@ -55,20 +60,22 @@ export function CharacterHeader({
   const hp = readHitPoints(sheet);
   const ac = readArmorClass(sheet);
   const speed = readSpeed(sheet);
-  const scores = readAbilityScores(sheet);
+  const init = readInitiative(sheet);
+  const scores =
+    readAbilityScores(sheet) ?? { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
 
   const portraitRaw =
     typeof sheet.portrait === 'string' ? sheet.portrait : null;
   const pUrl = portraitUrl(portraitRaw);
 
+  // Legacy flat fields stay in sync so the template-driven CharacterSheet
+  // side panel keeps working.
   const setHpCurrent = (n: number | null): void => {
     const next = {
       current: n ?? 0,
       max: hp.max ?? 0,
       temporary: hp.temporary ?? 0,
     };
-    // Also mirror to legacy flat fields so the CharacterSheet side
-    // panel (template-driven) keeps showing the same value.
     patchSheet({ hit_points: next, hp_current: next.current });
   };
   const setHpMax = (n: number | null): void => {
@@ -78,6 +85,25 @@ export function CharacterHeader({
       temporary: hp.temporary ?? 0,
     };
     patchSheet({ hit_points: next, hp_max: next.max });
+  };
+  const setAc = (n: number | null): void => {
+    patchSheet({ armor_class: { value: n ?? 0 }, ac: n ?? 0 });
+  };
+  const setSpeed = (n: number | null): void => {
+    patchSheet({ speed: { walk: n ?? 0 } });
+  };
+  const setScores = (next: typeof scores): void => {
+    // Mirror each score to the legacy flat keys the old CharacterSheet
+    // template still reads (str/dex/con/int/wis/cha).
+    patchSheet({
+      ability_scores: next,
+      str: next.str,
+      dex: next.dex,
+      con: next.con,
+      int: next.int,
+      wis: next.wis,
+      cha: next.cha,
+    });
   };
 
   return (
@@ -104,41 +130,95 @@ export function CharacterHeader({
               <SaveIndicator saving={saving} error={error} />
             </div>
 
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[#5A4F42]">
-              {classesLabel && <Pill>{classesLabel}</Pill>}
-              {raceName && <Pill>{raceName}</Pill>}
-              {backgroundName && <Pill>{backgroundName}</Pill>}
+            {/* Race / class / background — serif, see-through buttons so
+             *  they read as part of the title block, not as pills. */}
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1 font-serif text-base text-[#5A4F42]">
+              <InlineText
+                value={raceName ?? ''}
+                readOnly={!canEdit}
+                className="font-serif"
+                inputClassName="font-serif text-base"
+                placeholder={canEdit ? 'Race' : ''}
+                onCommit={(next) =>
+                  patchSheet({ race: next ? { ref: { name: next } } : null })
+                }
+                ariaLabel="Race"
+              />
+              <span aria-hidden className="text-[#8A7E6B]">
+                ·
+              </span>
+              <InlineText
+                value={classesLabel}
+                readOnly={!canEdit}
+                className="font-serif"
+                inputClassName="font-serif text-base"
+                placeholder={canEdit ? 'Class (e.g. Warlock 3)' : ''}
+                onCommit={(next) =>
+                  patchSheet({ classes: next ? parseClassList(next) : [] })
+                }
+                ariaLabel="Classes"
+              />
+              <span aria-hidden className="text-[#8A7E6B]">
+                ·
+              </span>
+              <InlineText
+                value={backgroundName ?? ''}
+                readOnly={!canEdit}
+                className="font-serif"
+                inputClassName="font-serif text-base"
+                placeholder={canEdit ? 'Background' : ''}
+                onCommit={(next) =>
+                  patchSheet({
+                    background: next ? { ref: { name: next } } : null,
+                  })
+                }
+                ariaLabel="Background"
+              />
             </div>
-          </div>
 
-          <div className="flex shrink-0 gap-2">
-            <StatTile label="AC" value={ac} />
-            <StatTile label="HP">
-              <InlineNumber
-                value={hp.current}
-                onCommit={setHpCurrent}
-                readOnly={!canEdit}
-                inputClassName="font-serif text-lg w-12"
-                ariaLabel="HP current"
+            <div className="mt-3 flex flex-wrap gap-2">
+              <StatTile label="AC" value={ac} onCommit={canEdit ? setAc : undefined} />
+              <StatTile label="HP">
+                <InlineNumber
+                  value={hp.current}
+                  onCommit={setHpCurrent}
+                  readOnly={!canEdit}
+                  inputClassName="font-serif text-lg w-12"
+                  ariaLabel="HP current"
+                />
+                <span className="text-xs text-[#5A4F42]">/</span>
+                <InlineNumber
+                  value={hp.max}
+                  onCommit={setHpMax}
+                  readOnly={!canEdit}
+                  inputClassName="font-serif text-lg w-12"
+                  ariaLabel="HP max"
+                />
+              </StatTile>
+              <StatTile
+                label="Speed"
+                value={speed}
+                suffix="ft"
+                onCommit={canEdit ? setSpeed : undefined}
               />
-              <span className="text-xs text-[#5A4F42]">/</span>
-              <InlineNumber
-                value={hp.max}
-                onCommit={setHpMax}
-                readOnly={!canEdit}
-                inputClassName="font-serif text-lg w-12"
-                ariaLabel="HP max"
-              />
-            </StatTile>
-            <StatTile label="Speed" value={speed} suffix="ft" />
+              <StatTile label="Init">
+                <span className="font-serif text-lg text-[#2A241E]">
+                  {init == null
+                    ? formatModifier(abilityModifier(scores.dex))
+                    : formatModifier(init)}
+                </span>
+              </StatTile>
+            </div>
           </div>
         </div>
 
-        {scores && (
-          <div className="mt-4 border-t border-[#D4C7AE] pt-4">
-            <AbilityScoreStrip scores={scores} readOnly />
-          </div>
-        )}
+        <div className="mt-4 border-t border-[#D4C7AE] pt-4">
+          <AbilityScoreStrip
+            scores={scores}
+            readOnly={!canEdit}
+            onChange={canEdit ? setScores : undefined}
+          />
+        </div>
       </section>
 
       <PortraitPicker
@@ -164,14 +244,15 @@ function Portrait({
   onOpen: () => void;
 }): React.JSX.Element {
   const inner = url ? (
-    <img src={url} alt="" className="h-full w-full object-cover" />
+    // object-contain so the portrait is never cropped
+    <img src={url} alt="" className="h-full w-full object-contain" />
   ) : (
-    <div className="flex h-full w-full items-center justify-center text-3xl font-semibold text-[#5A4F42]">
-      {displayName.slice(0, 1).toUpperCase() || <User size={32} />}
+    <div className="flex h-full w-full items-center justify-center text-5xl font-semibold text-[#5A4F42]">
+      {displayName.slice(0, 1).toUpperCase() || <User size={48} />}
     </div>
   );
   const cls =
-    'h-24 w-24 shrink-0 overflow-hidden rounded-full border-2 border-[#D4C7AE] bg-[#EAE1CF]';
+    'h-44 w-44 shrink-0 overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#EAE1CF]';
   if (!canEdit) return <div className={cls}>{inner}</div>;
   return (
     <button
