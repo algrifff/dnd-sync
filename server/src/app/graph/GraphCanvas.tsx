@@ -141,6 +141,8 @@ export function GraphCanvas({
   // cursors at their latest screen positions (camera pan/zoom,
   // dragged nodes, physics — all update the graph→viewport mapping).
   const [renderTick, setRenderTick] = useState<number>(0);
+  // nodeScale is persisted in metaMap ('nodeScale' key) so all peers
+  // share the same value; the observer below keeps local state in sync.
   const [nodeScale, setNodeScale] = useState<number>(1);
   const nodeScaleRef = useRef<number>(1);
 
@@ -247,8 +249,16 @@ export function GraphCanvas({
   }, [scopeParam]);
 
   useEffect(() => {
+    // Seed local nodeScale from whatever a peer already set (e.g. joining
+    // after someone else changed the slider).
+    const stored = metaMap.get('nodeScale');
+    if (typeof stored === 'number' && stored > 0) setNodeScale(stored);
+
     const onMeta = (): void => {
       if (metaMap.has('graphDirty')) void addNewEdges();
+      // Sync nodeScale from any peer that changed it.
+      const v = metaMap.get('nodeScale');
+      if (typeof v === 'number' && v > 0) setNodeScale(v);
     };
     metaMap.observe(onMeta);
     return () => metaMap.unobserve(onMeta);
@@ -1024,7 +1034,7 @@ export function GraphCanvas({
           aria-checked={linkMode}
           onClick={() => setLinkMode((m) => !m)}
           title={linkMode ? 'Weave mode — drag between nodes to forge a link' : 'Roam mode — drag to explore'}
-          className="relative flex h-10 w-56 select-none items-center rounded-full border border-[#D4C7AE] bg-[#FBF5E8] p-1 shadow-[0_4px_14px_rgba(42,36,30,0.14)] transition-shadow hover:shadow-[0_6px_18px_rgba(42,36,30,0.18)]"
+          className="relative flex h-12 w-64 select-none items-center rounded-full border border-[#D4C7AE] bg-[#FBF5E8] p-1 shadow-[0_4px_14px_rgba(42,36,30,0.14)] transition-shadow hover:shadow-[0_6px_18px_rgba(42,36,30,0.18)]"
         >
           {/* Sliding pill */}
           <span
@@ -1036,19 +1046,21 @@ export function GraphCanvas({
           />
           <span
             className={[
-              'relative z-10 flex-1 text-center text-xs font-semibold tracking-wide transition-colors',
+              'relative z-10 flex flex-1 flex-col items-center justify-center leading-tight transition-colors',
               !linkMode ? 'text-[#2A241E]' : 'text-[#5A4F42]/70',
             ].join(' ')}
           >
-            ⚔ Roam
+            <span className="text-lg">⚔</span>
+            <span className="text-[10px] font-semibold uppercase tracking-widest">Roam</span>
           </span>
           <span
             className={[
-              'relative z-10 flex-1 text-center text-xs font-semibold tracking-wide transition-colors',
+              'relative z-10 flex flex-1 flex-col items-center justify-center leading-tight transition-colors',
               linkMode ? 'text-white' : 'text-[#5A4F42]/70',
             ].join(' ')}
           >
-            ✦ Weave
+            <span className="text-lg">✦</span>
+            <span className="text-[10px] font-semibold uppercase tracking-widest">Weave</span>
           </span>
         </button>
       </div>
@@ -1128,7 +1140,7 @@ export function GraphCanvas({
                 max={3}
                 step={0.1}
                 value={nodeScale}
-                onChange={(e) => setNodeScale(Number(e.target.value))}
+                onChange={(e) => metaMap.set('nodeScale', Number(e.target.value))}
                 className="w-full accent-[#8B4A52]"
               />
             </div>
