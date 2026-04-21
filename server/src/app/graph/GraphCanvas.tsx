@@ -98,6 +98,7 @@ export function GraphCanvas({
   groupId,
   allTags,
   me,
+  csrfToken,
 }: {
   groupId: string;
   allTags: string[];
@@ -108,6 +109,7 @@ export function GraphCanvas({
     cursorMode: 'color' | 'image';
     avatarVersion: number;
   };
+  csrfToken: string;
 }): React.JSX.Element {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -143,6 +145,18 @@ export function GraphCanvas({
   const [graphVersion, setGraphVersion] = useState<number>(0);
   const [nodeScale, setNodeScale] = useState<number>(1);
   const nodeScaleRef = useRef<number>(1);
+
+  // Link-draw mode: toggle button switches between pan/drag and
+  // rubber-band link creation. Refs keep the interaction handlers
+  // (defined once in the main effect) up-to-date without re-running.
+  const [linkMode, setLinkMode] = useState<boolean>(false);
+  const linkModeRef = useRef<boolean>(false);
+  const linkSourceRef = useRef<string | null>(null);
+  const hoveredNodeRef = useRef<string | null>(null);
+  const [rubberBand, setRubberBand] = useState<{
+    from: { x: number; y: number };
+    to: { x: number; y: number };
+  } | null>(null);
 
   // ── shared graph state (synced across connected peers) ─────────────
   // Two providers: one ephemeral (pins/colours/anchors/awareness),
@@ -613,6 +627,12 @@ export function GraphCanvas({
         // barely moved.
         let downScreenPos: { x: number; y: number } | null = null;
         renderer.on('clickNode', ({ node, event }) => {
+          // In link mode clicks don't navigate — they're handled by
+          // downNode + mouseup instead.
+          if (linkModeRef.current) {
+            event?.preventSigmaDefault?.();
+            return;
+          }
           const ev = event?.original as MouseEvent | undefined;
           if (downScreenPos && ev) {
             const dx = ev.clientX - downScreenPos.x;
@@ -623,6 +643,18 @@ export function GraphCanvas({
         });
 
         renderer.on('enterNode', ({ node }) => {
+          hoveredNodeRef.current = node;
+          // In link mode skip the neighbour-fade; just highlight the
+          // hovered node as a potential target.
+          if (linkModeRef.current) {
+            renderer.setSetting('nodeReducer', (n, data) => {
+              if (n === linkSourceRef.current)
+                return { ...data, color: '#D4A85A', highlighted: true };
+              if (n === node) return { ...data, color: '#8B4A52' };
+              return data;
+            });
+            return;
+          }
           const neighbours = new Set<string>(g.neighbors(node));
           neighbours.add(node);
           renderer.setSetting('nodeReducer', (n, data) => {
@@ -638,6 +670,7 @@ export function GraphCanvas({
           });
         });
         renderer.on('leaveNode', () => {
+          hoveredNodeRef.current = null;
           renderer.setSetting('nodeReducer', null);
           renderer.setSetting('edgeReducer', null);
         });
@@ -661,14 +694,36 @@ export function GraphCanvas({
         renderer.on('downNode', ({ node, event }) => {
           const ev = event?.original as MouseEvent | undefined;
           downScreenPos = ev ? { x: ev.clientX, y: ev.clientY } : null;
+
+          if (linkModeRef.current) {
+            // Start a rubber-band from this node.
+            linkSourceRef.current = node;
+            const attrs = g.getNodeAttributes(node) as { x: number; y: number };
+            const vp = renderer.graphToViewport({ x: attrs.x, y: attrs.y });
+            setRubberBand({ from: vp, to: vp });
+            event?.preventSigmaDefault?.();
+            return;
+          }
+
           shiftHeld = !!ev?.shiftKey;
           const { x, y } = g.getNodeAttributes(node) as { x: number; y: number };
           draggedRef.current = { node, x, y };
           broadcastDrag();
           event?.preventSigmaDefault?.();
         });
+
         const stage = renderer.getMouseCaptor();
         stage.on('mousemovebody', (e) => {
+          if (linkModeRef.current) {
+            const src = linkSourceRef.current;
+            if (!src || !g.hasNode(src)) return;
+            const attrs = g.getNodeAttributes(src) as { x: number; y: number };
+            const fromVp = renderer.graphToViewport({ x: attrs.x, y: attrs.y });
+            setRubberBand({ from: fromVp, to: { x: e.x, y: e.y } });
+            e.preventSigmaDefault();
+            return;
+          }
+
           const dragged = draggedRef.current;
           if (!dragged) return;
           const p = renderer.viewportToGraph({ x: e.x, y: e.y });
@@ -679,7 +734,31 @@ export function GraphCanvas({
           e.original.preventDefault();
           e.original.stopPropagation();
         });
+
         stage.on('mouseup', (upEvent) => {
+          if (linkModeRef.current) {
+            const source = linkSourceRef.current;
+            const target = hoveredNodeRef.current;
+            linkSourceRef.current = null;
+            setRubberBand(null);
+            renderer.setSetting('nodeReducer', null);
+
+            if (source && target && source !== target) {
+              void fetch('/api/notes/backlink', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-CSRF-Token': csrfToken,
+                },
+                body: JSON.stringify({ fromPath: source, toPath: target }),
+              }).then(() => {
+                // Signal the graph to re-fetch edges.
+                metaMap.set('graphDirty', Date.now());
+              });
+            }
+            return;
+          }
+
           const dragged = draggedRef.current;
           draggedRef.current = null;
           provider.awareness?.setLocalStateField('dragging', null);
@@ -704,13 +783,8 @@ export function GraphCanvas({
           }
           if (shiftHeld) {
             pinsMap.set(dragged.node, { x: dragged.x, y: dragged.y });
-            // Hard pin overrides any prior soft anchor.
             anchorsMap.delete(dragged.node);
           } else {
-            // Plain drag: write a soft anchor. The node hovers
-            // around this position from now on; physics still acts
-            // on it so the graph keeps feeling alive, but it no
-            // longer snaps back to FA2's unconstrained equilibrium.
             anchorsMap.set(dragged.node, { x: dragged.x, y: dragged.y });
           }
           shiftHeld = false;
@@ -786,6 +860,16 @@ export function GraphCanvas({
     }
   }, [labelMode]);
 
+  // Keep link-mode ref in sync with state so interaction handlers
+  // (defined once inside the main effect) always read the latest value.
+  useEffect(() => {
+    linkModeRef.current = linkMode;
+    if (!linkMode) {
+      linkSourceRef.current = null;
+      setRubberBand(null);
+    }
+  }, [linkMode]);
+
   // Apply node scale changes without rebuilding the graph.
   useEffect(() => {
     nodeScaleRef.current = nodeScale;
@@ -846,6 +930,7 @@ export function GraphCanvas({
         ref={containerRef}
         id={GRAPH_SCOPE_ID}
         className="absolute inset-0 bg-[#F4EDE0]"
+        style={linkMode ? { cursor: 'crosshair' } : undefined}
       />
 
       {/* Peer cursors in graph space. Each peer broadcasts their
@@ -854,6 +939,41 @@ export function GraphCanvas({
           tracks exactly alongside the node they're dragging
           regardless of how either viewer is zoomed or panned. */}
       <GraphCursors sigmaRef={sigmaRef} remotes={remoteCursors} tick={renderTick} />
+
+      {/* Rubber-band line drawn while dragging in link mode. */}
+      {rubberBand && (
+        <svg
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{ zIndex: 7 }}
+          width="100%"
+          height="100%"
+        >
+          <defs>
+            <marker
+              id="rb-arrow"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0, 8 3, 0 6" fill="#8B4A52" />
+            </marker>
+          </defs>
+          <line
+            x1={rubberBand.from.x}
+            y1={rubberBand.from.y}
+            x2={rubberBand.to.x}
+            y2={rubberBand.to.y}
+            stroke="#8B4A52"
+            strokeWidth={2}
+            strokeDasharray="7 4"
+            strokeLinecap="round"
+            markerEnd="url(#rb-arrow)"
+          />
+        </svg>
+      )}
 
       <div className="pointer-events-none absolute left-4 top-4 w-64 space-y-2 text-sm">
         <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
@@ -930,6 +1050,12 @@ export function GraphCanvas({
             onClick={() => setPalette((p) => !p)}
             label={palette ? 'Hide' : 'Colours'}
             title="Tag colour overrides"
+          />
+          <ToolButton
+            onClick={() => setLinkMode((m) => !m)}
+            label="Link"
+            title={linkMode ? 'Exit link mode (drag between nodes to connect)' : 'Link mode — drag from one node to another to connect them'}
+            active={linkMode}
           />
         </div>
 
@@ -1010,12 +1136,17 @@ export function GraphCanvas({
 
         <div className="pointer-events-none text-xs text-[#5A4F42]">
           {status === 'loading' && 'Loading graph…'}
-          {status === 'ready' && (
+          {status === 'ready' && !linkMode && (
             <>
               {counts.nodes} node{counts.nodes === 1 ? '' : 's'} ·{' '}
               {counts.edges} edge{counts.edges === 1 ? '' : 's'} · drag to
               anchor · shift-drag to pin · double-click to release
             </>
+          )}
+          {status === 'ready' && linkMode && (
+            <span className="font-medium text-[#8B4A52]">
+              Link mode — drag from one node to another to connect them
+            </span>
           )}
           {status === 'error' && <span className="text-[#8B4A52]">Error: {error}</span>}
         </div>
@@ -1185,10 +1316,12 @@ function ToolButton({
   label,
   title,
   onClick,
+  active = false,
 }: {
   label: string;
   title: string;
   onClick: () => void;
+  active?: boolean;
 }): React.JSX.Element {
   return (
     <button
@@ -1196,7 +1329,13 @@ function ToolButton({
       onClick={onClick}
       title={title}
       aria-label={title}
-      className="rounded-[6px] px-2 py-1 text-xs font-medium text-[#5A4F42] transition hover:bg-[#D4A85A]/15 hover:text-[#2A241E]"
+      aria-pressed={active}
+      className={
+        'rounded-[6px] px-2 py-1 text-xs font-medium transition ' +
+        (active
+          ? 'bg-[#8B4A52]/15 text-[#8B4A52] hover:bg-[#8B4A52]/25'
+          : 'text-[#5A4F42] hover:bg-[#D4A85A]/15 hover:text-[#2A241E]')
+      }
     >
       {label}
     </button>
