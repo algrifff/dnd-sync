@@ -87,7 +87,9 @@ export function InlineText({
       }
     },
     maxLength,
-    className: `w-full rounded border border-[#D4C7AE] bg-white px-2 py-1 outline-none focus:border-[#2A241E] ${inputClassName ?? ''}`,
+    // No click-chrome: transparent bg, no border, no padding — so the
+    // input sits in place of the button with zero visual shift.
+    className: `w-full bg-transparent p-0 outline-none ${inputClassName ?? ''}`,
     'aria-label': ariaLabel ?? 'Edit',
   };
 

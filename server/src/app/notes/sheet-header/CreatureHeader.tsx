@@ -111,7 +111,7 @@ export function CreatureHeader({
                 value={name}
                 readOnly={!canEdit}
                 className="font-serif text-2xl font-semibold text-[#2A241E]"
-                inputClassName="font-serif text-2xl"
+                inputClassName="font-serif text-2xl font-semibold text-[#2A241E]"
                 onCommit={(next) => patchSheet({ name: next })}
                 ariaLabel="Creature name"
               />
@@ -157,7 +157,7 @@ export function CreatureHeader({
                   value={hp.current}
                   onCommit={(n) => setHp(n, hp.max)}
                   readOnly={!canEdit}
-                  inputClassName="text-lg w-12"
+                  inputClassName="font-serif text-lg font-semibold w-12 text-[#2A241E]"
                   ariaLabel="HP current"
                 />
                 <span className="text-xs text-[#5A4F42]">/</span>
@@ -165,7 +165,7 @@ export function CreatureHeader({
                   value={hp.max}
                   onCommit={(n) => setHp(hp.current, n)}
                   readOnly={!canEdit}
-                  inputClassName="text-lg w-12"
+                  inputClassName="font-serif text-lg font-semibold w-12 text-[#2A241E]"
                   ariaLabel="HP max"
                 />
               </StatTile>

@@ -157,7 +157,7 @@ export function ItemHeader({
                 value={name}
                 readOnly={!canEdit}
                 className="font-serif text-xl font-semibold text-[#2A241E]"
-                inputClassName="font-serif text-xl"
+                inputClassName="font-serif text-xl font-semibold text-[#2A241E]"
                 onCommit={(next) => patchSheet({ name: next })}
                 ariaLabel="Item name"
               />

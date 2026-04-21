@@ -127,7 +127,7 @@ export function CharacterHeader({
                 value={name}
                 readOnly={!canEdit}
                 className="font-serif text-2xl font-semibold text-[#2A241E]"
-                inputClassName="font-serif text-2xl"
+                inputClassName="font-serif text-2xl font-semibold text-[#2A241E]"
                 onCommit={(next) => patchSheet({ name: next })}
                 ariaLabel="Character name"
               />
@@ -187,7 +187,7 @@ export function CharacterHeader({
                   value={hp.current}
                   onCommit={setHpCurrent}
                   readOnly={!canEdit}
-                  inputClassName="text-lg w-12"
+                  inputClassName="font-serif text-lg font-semibold w-12 text-[#2A241E]"
                   ariaLabel="HP current"
                 />
                 <span className="text-xs text-[#5A4F42]">/</span>
@@ -195,7 +195,7 @@ export function CharacterHeader({
                   value={hp.max}
                   onCommit={setHpMax}
                   readOnly={!canEdit}
-                  inputClassName="text-lg w-12"
+                  inputClassName="font-serif text-lg font-semibold w-12 text-[#2A241E]"
                   ariaLabel="HP max"
                 />
               </StatTile>
@@ -206,7 +206,7 @@ export function CharacterHeader({
                 onCommit={canEdit ? setSpeed : undefined}
               />
               <StatTile label="Init">
-                <span className="text-lg text-[#2A241E]">
+                <span className="font-serif text-lg font-semibold text-[#2A241E]">
                   {init == null
                     ? formatModifier(abilityModifier(scores.dex))
                     : formatModifier(init)}
