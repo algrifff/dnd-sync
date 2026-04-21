@@ -208,11 +208,25 @@ export function FileTree({
       const parsed = raw ? (JSON.parse(raw) as unknown) : null;
       if (Array.isArray(parsed)) {
         setOpen(new Set(parsed.filter((x): x is string => typeof x === 'string')));
+        return;
       }
     } catch {
       /* ignore */
     }
-  }, [storageKey]);
+    // First visit for this world — seed the persisted open-set with
+    // every campaign subfolder so the whole Campaigns tree is visible
+    // by default. After this, toggles from the user are respected.
+    const defaults = new Set<string>();
+    const walk = (dir: TreeDir): void => {
+      for (const child of dir.children) {
+        if (child.kind !== 'dir') continue;
+        if (child.path.startsWith('Campaigns/')) defaults.add(child.path);
+        walk(child);
+      }
+    };
+    walk(tree.root);
+    if (defaults.size > 0) setOpen(defaults);
+  }, [storageKey, tree.root]);
 
   useEffect(() => {
     if (!activePath) return;
@@ -501,22 +515,14 @@ export function FileTree({
     [csrfToken, router],
   );
 
-  // The Campaigns folder (and every descendant) is always expanded —
-  // it's the primary navigation surface, so we override the user's
-  // persisted open set for that subtree rather than making them
-  // re-expand it on every page load.
+  // The top-level Campaigns folder is always expanded — it's the
+  // primary navigation surface, so we force it open regardless of
+  // the persisted state. Individual campaign subfolders remain
+  // toggleable (they're seeded open on first visit via the effect
+  // above, but the user is free to collapse them afterwards).
   const items = useMemo(() => {
     const effective = new Set(open);
-    const walk = (dir: TreeDir): void => {
-      for (const child of dir.children) {
-        if (child.kind !== 'dir') continue;
-        if (child.path === 'Campaigns' || child.path.startsWith('Campaigns/')) {
-          effective.add(child.path);
-        }
-        walk(child);
-      }
-    };
-    walk(tree.root);
+    effective.add('Campaigns');
     return flatten(tree.root, effective, 0);
   }, [tree.root, open]);
 
