@@ -11,14 +11,6 @@ import { CreatureHeader } from './CreatureHeader';
 import { ItemHeader } from './ItemHeader';
 import { LocationHeader } from './LocationHeader';
 
-const ROLE_LABEL: Record<string, string> = {
-  character: 'Player character',
-  person: 'Person',
-  creature: 'Creature',
-  item: 'Item',
-  location: 'Location',
-};
-
 export function SheetHeader({
   rawKind,
   initialSheet,
@@ -50,7 +42,7 @@ export function SheetHeader({
 
   switch (kind) {
     case 'character':
-      return <CharacterHeader {...common} roleLabel={ROLE_LABEL.character!} />;
+      return <CharacterHeader {...common} />;
     case 'person':
       return <PersonHeader {...common} />;
     case 'creature':

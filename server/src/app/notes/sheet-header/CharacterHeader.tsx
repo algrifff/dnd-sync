@@ -30,7 +30,6 @@ export function CharacterHeader({
   csrfToken,
   provider,
   canEdit,
-  roleLabel,
   displayName,
 }: {
   initialSheet: Record<string, unknown>;
@@ -38,7 +37,6 @@ export function CharacterHeader({
   csrfToken: string;
   provider: HocuspocusProvider;
   canEdit: boolean;
-  roleLabel: string;
   displayName: string;
 }): React.JSX.Element {
   const { sheet, patchSheet, saving, error } = usePatchSheet({
@@ -107,7 +105,6 @@ export function CharacterHeader({
             </div>
 
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[#5A4F42]">
-              <Pill>{roleLabel}</Pill>
               {classesLabel && <Pill>{classesLabel}</Pill>}
               {raceName && <Pill>{raceName}</Pill>}
               {backgroundName && <Pill>{backgroundName}</Pill>}

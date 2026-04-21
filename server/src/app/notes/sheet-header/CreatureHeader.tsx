@@ -7,7 +7,6 @@ import { InlineNumber } from './InlineNumber';
 import { ChipSelect } from './ChipSelect';
 import { StatTile } from './StatTile';
 import { AbilityScoreStrip } from './AbilityScoreStrip';
-import { TagChips } from './TagChips';
 import { PortraitPicker } from './PortraitPicker';
 import { SaveIndicator } from './SaveIndicator';
 import { usePatchSheet } from './usePatchSheet';
@@ -72,9 +71,6 @@ export function CreatureHeader({
   const type = typeof sheet.type === 'string' ? sheet.type : null;
   const cr =
     typeof sheet.challenge_rating === 'number' ? sheet.challenge_rating : null;
-  const tags = Array.isArray(sheet.tags)
-    ? (sheet.tags as unknown[]).filter((t): t is string => typeof t === 'string')
-    : [];
 
   const hp = readHitPoints(sheet);
   const ac = readArmorClass(sheet);
@@ -181,15 +177,6 @@ export function CreatureHeader({
                 scores={scores}
                 readOnly={!canEdit}
                 onChange={canEdit ? (next) => patchSheet({ ability_scores: next }) : undefined}
-              />
-            </div>
-
-            <div className="mt-3">
-              <TagChips
-                tags={tags}
-                readOnly={!canEdit}
-                onChange={canEdit ? (next) => patchSheet({ tags: next }) : undefined}
-                placeholder="add tag…"
               />
             </div>
           </div>
