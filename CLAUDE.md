@@ -114,6 +114,10 @@ All queries include `group_id` — no table-level tenant isolation, just strict 
 | `server/src/collab/server.ts` | Hocuspocus server for web editing |
 | `server/server.ts` | Entry point — Next.js + WebSocket on the same port |
 | `server/next.config.ts` | `serverExternalPackages` for Yjs/Tiptap/graph libs — touch carefully |
+| `server/src/app/notes/sheet-header/SheetHeader.tsx` | Per-kind header dispatcher (character / person / creature / item / location) |
+| `server/src/app/notes/sheet-header/usePatchSheet.ts` | Debounced shallow-merge PATCH hook + Hocuspocus awareness mirror |
+| `server/src/app/notes/sheet-header/util.ts` | `normalizeKind`, `titleSizeClass`, ability/HP/AC readers, rarity/disposition palette |
+| `server/src/app/api/notes/sheet/route.ts` | PATCH endpoint: shallow-merge sheet patch → `validateSheet()` → write |
 
 ## API route conventions
 
@@ -163,6 +167,14 @@ Pattern: AAA (Arrange → Act → Assert). Real in-memory SQLite — no DB mocki
 
 **`yjs_state` is a raw binary blob** — `Y.encodeStateAsUpdate()` format. The DB is the only backup of real-time edit history.
 
+**Sheet headers are inline-editable, CharacterSheet is the side panel** — the header strip above the TipTap body lets players edit name / HP / portrait / class / etc. directly. It calls `usePatchSheet`, which debounces 400ms and PATCHes a **partial** `{ sheet: { ...fields } }` to `/api/notes/sheet`. The route shallow-merges into existing `frontmatter.sheet` before validation. Nested fields (`hit_points`, `armor_class`, `speed`, `ability_scores`) are **replaced wholesale** — always send the full nested object.
+
+**Legacy flat sheet keys still exist** — `hp_current`, `ac`, `str`/`dex`/…. `CharacterHeader` writes BOTH the new nested shape and the legacy flat keys in one patch so the old `CharacterSheet` side-panel template keeps rendering. Do the same on any new character-touching write path during the transition.
+
+**Kind normaliser lives in two places, must stay in sync** — `server/src/lib/ai/tools.ts` (server/AI) and `server/src/app/notes/sheet-header/util.ts#normalizeKind` (UI). Legacy aliases: `pc|ally` → `character`, `npc|villain` → `person`, `monster` → `creature`. Unknown kinds return `null` and the SheetHeader renders nothing — this is what keeps lore/session/plain notes unaffected.
+
+**Per-world accent colour flows via CSS variable** — `groups.header_color` → page.tsx reads via `getWorldHeader()` → passed to `SheetHeader` → set as `--world-accent` on the wrapper div. Inline editors read it through `var(--world-accent, #8A7E6B)` — **do not prop-drill**. Also note: a scoped `.sheet-header *:focus-visible { outline: none }` rule in `globals.css` opts the subtree out of the app-wide candlelight focus ring. If you add another global focus style, scope it out too.
+
 ## Deployment
 
 Railway: `railway.toml` at repo root, Dockerfile at `server/Dockerfile`. Build context is repo root.
@@ -179,6 +191,7 @@ Optional: `OPENAI_API_KEY` (enables AI chat + import), `ANTHROPIC_API_KEY`.
 | `security-audit` | OWASP Top 10 scan, auth/input validation focus |
 | `refactor-plan` | Strategic refactoring with risk assessment |
 | `rigor-audit` | Combined quality + security check |
+| `sheet-header` | Add / review a per-kind note header (character / person / creature / item / location) |
 
 Full docs: [`.claude/skills/README.md`](.claude/skills/README.md)
 

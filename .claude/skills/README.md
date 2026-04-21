@@ -20,6 +20,7 @@ Skills are pre-defined templates that give Claude structured output formats for 
 | [security-audit](security-audit.md) | OWASP Top 10 security scan | `/skill:security-audit [scope]` |
 | [refactor-plan](refactor-plan.md) | Strategic refactoring | `/skill:refactor-plan [target]` |
 | [rigor-audit](rigor-audit.md) | Combined quality check | `/skill:rigor-audit [scope]` |
+| [sheet-header](sheet-header.md) | Add / review a per-kind note header in `server/src/app/notes/sheet-header/` | `/skill:sheet-header [scope]` |
 
 ## Skill Structure
 
