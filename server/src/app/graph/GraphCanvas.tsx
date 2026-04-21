@@ -1034,7 +1034,7 @@ export function GraphCanvas({
           aria-checked={linkMode}
           onClick={() => setLinkMode((m) => !m)}
           title={linkMode ? 'Weave mode — drag between nodes to forge a link' : 'Roam mode — drag to explore'}
-          className="relative flex h-12 w-64 select-none items-center rounded-full border border-[#D4C7AE] bg-[#FBF5E8] p-1 shadow-[0_4px_14px_rgba(42,36,30,0.14)] transition-shadow hover:shadow-[0_6px_18px_rgba(42,36,30,0.18)]"
+          className="relative flex h-11 w-60 select-none items-center rounded-full border border-[#D4C7AE] bg-[#FBF5E8] p-1 shadow-[0_4px_14px_rgba(42,36,30,0.14)] transition-shadow hover:shadow-[0_6px_18px_rgba(42,36,30,0.18)]"
         >
           {/* Sliding pill */}
           <span
@@ -1046,21 +1046,21 @@ export function GraphCanvas({
           />
           <span
             className={[
-              'relative z-10 flex flex-1 flex-col items-center justify-center leading-tight transition-colors',
+              'relative z-10 flex flex-1 items-center justify-center gap-1.5 transition-colors',
               !linkMode ? 'text-[#2A241E]' : 'text-[#5A4F42]/70',
             ].join(' ')}
           >
-            <span className="text-lg">⚔</span>
-            <span className="text-[10px] font-semibold uppercase tracking-widest">Roam</span>
+            <span className="text-2xl leading-none">⚔</span>
+            <span className="text-sm font-semibold">Roam</span>
           </span>
           <span
             className={[
-              'relative z-10 flex flex-1 flex-col items-center justify-center leading-tight transition-colors',
+              'relative z-10 flex flex-1 items-center justify-center gap-1.5 transition-colors',
               linkMode ? 'text-white' : 'text-[#5A4F42]/70',
             ].join(' ')}
           >
-            <span className="text-lg">✦</span>
-            <span className="text-[10px] font-semibold uppercase tracking-widest">Weave</span>
+            <span className="text-2xl leading-none">✦</span>
+            <span className="text-sm font-semibold">Weave</span>
           </span>
         </button>
       </div>
