@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "compendium-server",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["--filter", "@compendium/server", "dev"],
+      "port": 3000
+    }
+  ]
+}

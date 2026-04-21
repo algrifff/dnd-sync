@@ -1,6 +1,8 @@
 // Custom entry that runs Next.js + the Hocuspocus WebSocket server on the same port.
 // `bun run server.ts` in dev, production starts the same file with NODE_ENV=production.
 
+import './env-bootstrap';
+
 import { createServer } from 'node:http';
 import next from 'next';
 import { WebSocketServer } from 'ws';
