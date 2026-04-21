@@ -75,7 +75,10 @@ export function LocationHeader({
                   readOnly={!canEdit}
                   className={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
                   inputClassName={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
-                  onCommit={(next) => patchSheet({ name: next })}
+                  onCommit={(next) => {
+                    const trimmed = next.trim();
+                    if (trimmed) patchSheet({ name: trimmed });
+                  }}
                   ariaLabel="Location name"
                 />
                 <SaveIndicator saving={saving} error={error} />

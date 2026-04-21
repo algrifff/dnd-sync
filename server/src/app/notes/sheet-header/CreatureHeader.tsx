@@ -113,7 +113,10 @@ export function CreatureHeader({
                 readOnly={!canEdit}
                 className={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
                 inputClassName={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
-                onCommit={(next) => patchSheet({ name: next })}
+                onCommit={(next) => {
+                  const trimmed = next.trim();
+                  if (trimmed) patchSheet({ name: trimmed });
+                }}
                 ariaLabel="Creature name"
               />
               <SaveIndicator saving={saving} error={error} />

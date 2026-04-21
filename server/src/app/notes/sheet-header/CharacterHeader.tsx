@@ -129,7 +129,12 @@ export function CharacterHeader({
                 readOnly={!canEdit}
                 className={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
                 inputClassName={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
-                onCommit={(next) => patchSheet({ name: next })}
+                onCommit={(next) => {
+                  // Schema requires a non-empty name; a blank clear
+                  // would otherwise bounce the whole PATCH as invalid.
+                  const trimmed = next.trim();
+                  if (trimmed) patchSheet({ name: trimmed });
+                }}
                 ariaLabel="Character name"
               />
               <SaveIndicator saving={saving} error={error} />

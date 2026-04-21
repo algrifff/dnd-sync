@@ -158,7 +158,10 @@ export function ItemHeader({
                 readOnly={!canEdit}
                 className={`font-serif ${titleSizeClass(name, 'compact')} font-semibold leading-tight text-[#2A241E]`}
                 inputClassName={`font-serif ${titleSizeClass(name, 'compact')} font-semibold leading-tight text-[#2A241E]`}
-                onCommit={(next) => patchSheet({ name: next })}
+                onCommit={(next) => {
+                  const trimmed = next.trim();
+                  if (trimmed) patchSheet({ name: trimmed });
+                }}
                 ariaLabel="Item name"
               />
               <SaveIndicator saving={saving} error={error} />
