@@ -107,10 +107,16 @@ export function loadBacklinks(
 export function loadOutgoingLinks(groupId: string, fromPath: string): OutgoingLinkRow[] {
   return getDb()
     .query<OutgoingLinkRow, [string, string]>(
+      // INNER JOIN so only links where the target note actually exists are
+      // returned — dangling references and __orphan__: wikilinks (written to
+      // note_links when the target doesn't exist yet) are omitted because the
+      // graph can't draw an edge to a non-existent node either, and the ugly
+      // "__orphan__:..." path string is meaningless to the reader.
       `SELECT nl.to_path AS to_path, COALESCE(n.title, nl.to_path) AS title
          FROM note_links nl
-         LEFT JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.to_path
+         JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.to_path
         WHERE nl.group_id = ? AND nl.from_path = ?
+          AND nl.to_path NOT LIKE '__orphan__%'
         ORDER BY nl.to_path`,
     )
     .all(groupId, fromPath);
