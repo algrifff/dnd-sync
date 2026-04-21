@@ -66,18 +66,6 @@ export function LocationHeader({
   return (
     <>
       <section className="mb-4 overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8]">
-        {pUrl && (
-          <button
-            type="button"
-            onClick={() => canEdit && setPickerOpen(true)}
-            aria-label={canEdit ? 'Change hero image' : 'Hero image'}
-            disabled={!canEdit}
-            className="block h-52 w-full overflow-hidden"
-          >
-            <img src={pUrl} alt="" className="h-full w-full object-cover" />
-          </button>
-        )}
-
         <div className="p-5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
@@ -153,6 +141,24 @@ export function LocationHeader({
             />
           </div>
         </div>
+
+        {/* Hero image sits BELOW the header fields, full-width of the note
+         *  column. object-contain so the art is never clipped. */}
+        {pUrl && (
+          <button
+            type="button"
+            onClick={() => canEdit && setPickerOpen(true)}
+            aria-label={canEdit ? 'Change hero image' : 'Hero image'}
+            disabled={!canEdit}
+            className="block w-full border-t border-[#D4C7AE] bg-[#EAE1CF]"
+          >
+            <img
+              src={pUrl}
+              alt=""
+              className="mx-auto block max-h-[520px] w-full object-contain"
+            />
+          </button>
+        )}
       </section>
 
       <PortraitPicker

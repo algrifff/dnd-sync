@@ -140,14 +140,15 @@ function PortraitSmall({
   onOpen: () => void;
 }): React.JSX.Element {
   const inner = url ? (
-    <img src={url} alt="" className="h-full w-full object-cover" />
+    // object-contain so the character is never cropped
+    <img src={url} alt="" className="h-full w-full object-contain" />
   ) : (
-    <div className="flex h-full w-full items-center justify-center text-xl font-semibold text-[#5A4F42]">
-      {displayName.slice(0, 1).toUpperCase() || <User size={20} />}
+    <div className="flex h-full w-full items-center justify-center text-5xl font-semibold text-[#5A4F42]">
+      {displayName.slice(0, 1).toUpperCase() || <User size={48} />}
     </div>
   );
   const cls =
-    'h-16 w-16 shrink-0 overflow-hidden rounded-full border-2 border-[#D4C7AE] bg-[#EAE1CF]';
+    'h-44 w-44 shrink-0 overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#EAE1CF]';
   if (!canEdit) return <div className={cls}>{inner}</div>;
   return (
     <button

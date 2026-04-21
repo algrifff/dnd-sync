@@ -223,12 +223,13 @@ function IconBox({
   onOpen: () => void;
 }): React.JSX.Element {
   const inner = url ? (
-    <img src={url} alt="" className="h-full w-full object-cover" />
+    // object-contain so the item art is never cropped — showcase it
+    <img src={url} alt="" className="h-full w-full object-contain p-2" />
   ) : (
-    <Package size={22} className="text-[#5A4F42]" />
+    <Package size={56} className="text-[#5A4F42]" />
   );
   const cls =
-    'flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-[8px] border border-[#D4C7AE] bg-[#EAE1CF]';
+    'flex h-44 w-44 shrink-0 items-center justify-center overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#EAE1CF]';
   if (!canEdit) return <div className={cls}>{inner}</div>;
   return (
     <button

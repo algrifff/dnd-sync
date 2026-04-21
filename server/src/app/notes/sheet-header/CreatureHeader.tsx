@@ -101,114 +101,97 @@ export function CreatureHeader({
 
   return (
     <>
-      <section className="mb-4 overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8]">
-        {pUrl && (
-          <button
-            type="button"
-            onClick={() => canEdit && setPickerOpen(true)}
-            aria-label={canEdit ? 'Change portrait' : 'Portrait'}
-            disabled={!canEdit}
-            className="block h-40 w-full overflow-hidden"
-          >
-            <img src={pUrl} alt="" className="h-full w-full object-cover" />
-          </button>
-        )}
+      <section className="mb-4 rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-5">
+        <div className="flex items-start gap-4">
+          <CreaturePortrait
+            url={pUrl}
+            canEdit={canEdit}
+            onOpen={() => setPickerOpen(true)}
+          />
 
-        <div className="p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline justify-between gap-3">
-                <InlineText
-                  value={name}
-                  readOnly={!canEdit}
-                  className="font-serif text-2xl font-semibold text-[#2A241E]"
-                  inputClassName="font-serif text-2xl"
-                  onCommit={(next) => patchSheet({ name: next })}
-                  ariaLabel="Creature name"
-                />
-                <SaveIndicator saving={saving} error={error} />
-              </div>
-
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[#5A4F42]">
-                <ChipSelect
-                  value={size}
-                  options={SIZES}
-                  readOnly={!canEdit}
-                  onCommit={(next) => patchSheet({ size: next })}
-                  placeholder="Size"
-                  ariaLabel="Size"
-                />
-                <ChipSelect
-                  value={type}
-                  options={TYPES}
-                  readOnly={!canEdit}
-                  onCommit={(next) => patchSheet({ type: next })}
-                  placeholder="Type"
-                  ariaLabel="Type"
-                />
-                <span className="text-[#5A4F42]">·</span>
-                <span className="text-[#5A4F42]">CR</span>
-                <InlineNumber
-                  value={cr}
-                  readOnly={!canEdit}
-                  onCommit={(n) => patchSheet({ challenge_rating: n })}
-                  min={0}
-                  max={30}
-                  step={0.125}
-                  allowNull
-                  inputClassName="w-16"
-                  ariaLabel="Challenge rating"
-                />
-              </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline justify-between gap-3">
+              <InlineText
+                value={name}
+                readOnly={!canEdit}
+                className="font-serif text-2xl font-semibold text-[#2A241E]"
+                inputClassName="font-serif text-2xl"
+                onCommit={(next) => patchSheet({ name: next })}
+                ariaLabel="Creature name"
+              />
+              <SaveIndicator saving={saving} error={error} />
             </div>
-            {!pUrl && canEdit && (
-              <button
-                type="button"
-                onClick={() => setPickerOpen(true)}
-                className="rounded border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1 text-xs text-[#2A241E] hover:bg-[#EAE1CF]"
-              >
-                Add image
-              </button>
-            )}
-          </div>
 
-          <div className="mt-3 flex flex-wrap gap-2">
-            <StatTile label="AC" value={ac} onCommit={canEdit ? setAc : undefined} />
-            <StatTile label="HP">
-              <InlineNumber
-                value={hp.current}
-                onCommit={(n) => setHp(n, hp.max)}
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[#5A4F42]">
+              <ChipSelect
+                value={size}
+                options={SIZES}
                 readOnly={!canEdit}
-                inputClassName="font-serif text-lg w-12"
-                ariaLabel="HP current"
+                onCommit={(next) => patchSheet({ size: next })}
+                placeholder="Size"
+                ariaLabel="Size"
               />
-              <span className="text-xs text-[#5A4F42]">/</span>
-              <InlineNumber
-                value={hp.max}
-                onCommit={(n) => setHp(hp.current, n)}
+              <ChipSelect
+                value={type}
+                options={TYPES}
                 readOnly={!canEdit}
-                inputClassName="font-serif text-lg w-12"
-                ariaLabel="HP max"
+                onCommit={(next) => patchSheet({ type: next })}
+                placeholder="Type"
+                ariaLabel="Type"
               />
-            </StatTile>
-            <StatTile label="Speed" value={speed} suffix="ft" />
-          </div>
+              <span className="text-[#5A4F42]">·</span>
+              <span className="text-[#5A4F42]">CR</span>
+              <InlineNumber
+                value={cr}
+                readOnly={!canEdit}
+                onCommit={(n) => patchSheet({ challenge_rating: n })}
+                min={0}
+                max={30}
+                step={0.125}
+                allowNull
+                inputClassName="w-16"
+                ariaLabel="Challenge rating"
+              />
+            </div>
 
-          <div className="mt-3 border-t border-[#D4C7AE] pt-3">
-            <AbilityScoreStrip
-              scores={scores}
-              readOnly={!canEdit}
-              onChange={canEdit ? (next) => patchSheet({ ability_scores: next }) : undefined}
-            />
-          </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <StatTile label="AC" value={ac} onCommit={canEdit ? setAc : undefined} />
+              <StatTile label="HP">
+                <InlineNumber
+                  value={hp.current}
+                  onCommit={(n) => setHp(n, hp.max)}
+                  readOnly={!canEdit}
+                  inputClassName="font-serif text-lg w-12"
+                  ariaLabel="HP current"
+                />
+                <span className="text-xs text-[#5A4F42]">/</span>
+                <InlineNumber
+                  value={hp.max}
+                  onCommit={(n) => setHp(hp.current, n)}
+                  readOnly={!canEdit}
+                  inputClassName="font-serif text-lg w-12"
+                  ariaLabel="HP max"
+                />
+              </StatTile>
+              <StatTile label="Speed" value={speed} suffix="ft" />
+            </div>
 
-          <div className="mt-3">
-            <TagChips
-              tags={tags}
-              readOnly={!canEdit}
-              onChange={canEdit ? (next) => patchSheet({ tags: next }) : undefined}
-              placeholder="add tag…"
-            />
+            <div className="mt-3 border-t border-[#D4C7AE] pt-3">
+              <AbilityScoreStrip
+                scores={scores}
+                readOnly={!canEdit}
+                onChange={canEdit ? (next) => patchSheet({ ability_scores: next }) : undefined}
+              />
+            </div>
+
+            <div className="mt-3">
+              <TagChips
+                tags={tags}
+                readOnly={!canEdit}
+                onChange={canEdit ? (next) => patchSheet({ tags: next }) : undefined}
+                placeholder="add tag…"
+              />
+            </div>
           </div>
         </div>
       </section>
@@ -221,5 +204,35 @@ export function CreatureHeader({
         onPick={(value) => patchSheet({ portrait: value })}
       />
     </>
+  );
+}
+
+function CreaturePortrait({
+  url,
+  canEdit,
+  onOpen,
+}: {
+  url: string | null;
+  canEdit: boolean;
+  onOpen: () => void;
+}): React.JSX.Element {
+  const inner = url ? (
+    // object-contain — never clip the art
+    <img src={url} alt="" className="h-full w-full object-contain" />
+  ) : (
+    <span className="text-sm text-[#8A7E6B]">No image</span>
+  );
+  const cls =
+    'flex h-52 w-52 shrink-0 items-center justify-center overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#EAE1CF]';
+  if (!canEdit) return <div className={cls}>{inner}</div>;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={url ? 'Change image' : 'Add image'}
+      className={`${cls} hover:border-[#2A241E]`}
+    >
+      {inner}
+    </button>
   );
 }
