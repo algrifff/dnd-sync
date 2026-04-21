@@ -330,6 +330,30 @@ export function listCampaigns(groupId: string): CampaignRow[] {
     .map((r) => ({ slug: r.slug, name: r.name, folderPath: r.folder_path }));
 }
 
+/** Resolve a campaign row by slug (case-insensitive). Slug is normalised
+ *  the same way as `Campaigns/<segment>/` path derivation so UI + AI
+ *  can pass either the stored slug or a human phrase that slugifies
+ *  to the same key. */
+export function getCampaignBySlug(
+  groupId: string,
+  rawSlug: string,
+): CampaignRow | null {
+  const slug = slugify(rawSlug.trim());
+  if (!slug) return null;
+  const row = getDb()
+    .query<
+      { slug: string; name: string; folder_path: string },
+      [string, string]
+    >(
+      `SELECT slug, name, folder_path
+         FROM campaigns
+        WHERE group_id = ? AND lower(slug) = lower(?)`,
+    )
+    .get(groupId, slug);
+  if (!row) return null;
+  return { slug: row.slug, name: row.name, folderPath: row.folder_path };
+}
+
 // ── Permission helper ──────────────────────────────────────────────────
 
 /** True when a viewer-role user owns this character via frontmatter

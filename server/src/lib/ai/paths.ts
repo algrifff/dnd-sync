@@ -24,8 +24,13 @@ export type EntityKind =
 export function canonicalFolder(opts: {
   kind: EntityKind;
   campaignSlug?: string | undefined;
+  /** When set (from `campaigns.folder_path`), used as the campaign root
+   *  instead of synthesising `Campaigns/${campaignSlug}`. */
+  campaignRoot?: string | undefined;
 }): string {
-  const base = opts.campaignSlug ? `Campaigns/${opts.campaignSlug}` : null;
+  const base =
+    opts.campaignRoot ??
+    (opts.campaignSlug ? `Campaigns/${opts.campaignSlug}` : null);
 
   switch (opts.kind) {
     case 'character':
@@ -47,9 +52,14 @@ export function canonicalFolder(opts: {
 export function canonicalPath(opts: {
   kind: EntityKind;
   campaignSlug?: string | undefined;
+  campaignRoot?: string | undefined;
   name: string;
 }): string {
-  const folder = canonicalFolder({ kind: opts.kind, campaignSlug: opts.campaignSlug });
+  const folder = canonicalFolder({
+    kind: opts.kind,
+    campaignSlug: opts.campaignSlug,
+    campaignRoot: opts.campaignRoot,
+  });
   const slug = nameToSlug(opts.name);
   return `${folder}/${slug}.md`;
 }

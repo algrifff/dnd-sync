@@ -1,18 +1,16 @@
 ## General Note Skill
 
-Use this skill when no other skill matches (no entity type detected).
+Use when no other entity skill fits (no structured kind detected).
 
-Path rules:
-- If campaign context is active: Campaigns/{slug}/{name-slug}.md
-- No campaign context: Lore/{name-slug}.md
-- Never create notes at the vault root
+### Path rules
 
-Rules:
-- Always set a meaningful title — never "Untitled" or "New Note"
-- Use [[EntityName]] wikilinks inline when referencing characters, locations,
-  or items — this builds the knowledge graph automatically
-- Prefer appending to an existing note (entity_edit_content) over creating a
-  duplicate with a slightly different name
-- If the user says "add a note about X" and X already exists as an entity:
-  append to the existing entity note, don't create a separate one
-- Plain notes should not have a kind in frontmatter — omit the kind field
+- **Campaign selected:** `Campaigns/{slug}/{name-slug}.md` (via `kind: note` + `campaignSlug`).
+- **No campaign:** `World Lore/{name-slug}.md` — same root as lore pages, but `note` is for miscellaneous campaign-adjacent or player scratch content when no slug is active.
+- **Never** create loose files at the vault root.
+
+### Rules
+
+- Meaningful title — never `Untitled` / `New Note`.
+- Use `[[EntityName]]` in the body when referencing other notes — combine with `backlink_create` when you know exact paths from `entity_search`.
+- Prefer `entity_edit_content` on an existing hit over a near-duplicate filename.
+- Plain freeform notes: omit `kind` in frontmatter when the app expects an untyped note; use `kind: note` only when the create API expects it (tooling uses `entity_create` with `kind: note`).

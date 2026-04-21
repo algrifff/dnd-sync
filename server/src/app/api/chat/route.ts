@@ -8,7 +8,7 @@
 // match the session's current_group_id — no cross-group data access.
 
 import { createOpenAI } from '@ai-sdk/openai';
-import { streamText, stepCountIs } from 'ai';
+import { streamText, stepCountIs, convertToModelMessages, type UIMessage, type ModelMessage } from 'ai';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { getDb } from '@/lib/db';
@@ -43,17 +43,23 @@ export async function POST(req: NextRequest): Promise<Response> {
   const role: 'dm' | 'player' =
     session.role === 'admin' || session.role === 'editor' ? 'dm' : 'player';
 
-  const normalizedMessages = normalizeMessages(body.messages);
-  if (normalizedMessages.length === 0) {
+  // Extract last user message text for skill detection before conversion
+  const lastUserMessage = extractLastUserText(body.messages);
+  if (!lastUserMessage) {
     return json({ error: 'invalid_body', detail: 'messages must include at least one text entry' }, 400);
   }
-
-  const lastUserMessage = normalizedMessages
-    .slice()
-    .reverse()
-    .find((m) => m.role === 'user')?.content ?? '';
-
   const skills = detectSkills(lastUserMessage);
+
+  // Convert UIMessages → ModelMessages (preserves full tool-call/result history for multi-turn)
+  let modelMessages: ModelMessage[];
+  try {
+    modelMessages = await convertToModelMessages(body.messages as UIMessage[]);
+  } catch {
+    return json({ error: 'invalid_body', detail: 'Invalid message format' }, 400);
+  }
+  if (modelMessages.length === 0) {
+    return json({ error: 'invalid_body', detail: 'messages must include at least one entry' }, 400);
+  }
 
   // Look up campaign display name for the prompt context
   let campaignName: string | undefined;
@@ -85,7 +91,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       ...(body.campaignSlug !== undefined ? { campaignSlug: body.campaignSlug } : {}),
       ...(campaignName !== undefined     ? { campaignName }                     : {}),
     }),
-    messages: normalizedMessages,
+    messages: modelMessages,
     tools:    getToolsForRole(toolCtx),
     stopWhen: stepCountIs(8),
   });
@@ -113,40 +119,27 @@ function json(body: unknown, status: number): Response {
   });
 }
 
-function normalizeMessages(
-  messages: unknown[],
-): Array<{ role: 'user' | 'assistant' | 'system'; content: string }> {
-  return messages
-    .map((msg) => {
-      if (!msg || typeof msg !== 'object') return null;
-      const role = typeof (msg as { role?: unknown }).role === 'string'
-        ? (msg as { role: string }).role
-        : '';
-      if (role !== 'user' && role !== 'assistant' && role !== 'system') return null;
+// Extract text from the last user message for skill detection.
+// Reads from raw client-supplied messages before convertToModelMessages.
+function extractLastUserText(messages: unknown[]): string {
+  const arr = Array.isArray(messages) ? messages : [];
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const m = arr[i] as Record<string, unknown> | null;
+    if (!m || m.role !== 'user') continue;
 
-      const directContent = (msg as { content?: unknown }).content;
-      if (typeof directContent === 'string' && directContent.trim()) {
-        return {
-          role,
-          content: directContent,
-        };
-      }
+    // Direct string content
+    if (typeof m.content === 'string' && m.content.trim()) return m.content.trim();
 
-      const rawParts = (msg as { parts?: unknown }).parts;
-      const parts = Array.isArray(rawParts) ? rawParts : [];
-      const content = parts
-        .filter((p: { type?: unknown; text?: unknown }) => p.type === 'text' && typeof p.text === 'string')
-        .map((p: { text?: unknown }) => String(p.text ?? ''))
-        .join('')
-        .trim();
-
-      if (!content) return null;
-      return {
-        role,
-        content,
-      };
-    })
-    .filter((m): m is { role: 'user' | 'assistant' | 'system'; content: string } => Boolean(m));
+    // Parts-based content (UIMessage v6 format)
+    const parts = Array.isArray(m.parts) ? (m.parts as Array<Record<string, unknown>>) : [];
+    const text = parts
+      .filter((p) => p.type === 'text' && typeof p.text === 'string')
+      .map((p) => String(p.text))
+      .join(' ')
+      .trim();
+    if (text) return text;
+  }
+  return '';
 }
 
 async function parseBody(req: NextRequest): Promise<ParsedBody | Response> {

@@ -1,22 +1,18 @@
 ## Lore Skill
 
-Lore paths:
-- World-level (any campaign): Lore/{name-slug}.md
-- Campaign-specific: Campaigns/{slug}/{name-slug}.md
+### Paths
 
-No required sheet fields — lore is freeform prose.
+- **`kind: lore`** always resolves to **`World Lore/{name-slug}.md`** — there is no campaign-prefixed variant for lore kind.
+- For **campaign-specific** freeform pages (quests, rumours tied to one table), use **`kind: note`** with `campaignSlug` so the file lands under `Campaigns/{slug}/`.
 
-Suggested tags (add via entity_edit_sheet if the note supports tags, or
-mention in the prose body):
-  #quest  #faction  #history  #prophecy  #myth  #rumour
+No required sheet fields — lore is mostly prose. Add `tags` in frontmatter if the template supports them, or tag inside the body.
 
-Rules:
-- Always call backlink_create to connect lore entries to relevant characters
-  and locations — lore without links is an island
-- Quests should reference all involved characters via [[CharacterName]] in body
-- When creating a faction: also search for existing NPCs who belong to it and
-  call backlink_create linking them to the faction note
-- When a quest is completed or failed: call entity_edit_content to append a
-  resolution note — do not overwrite the original lore
-- History entries: use entity_edit_content to append dated entries rather than
-  creating new notes for every event
+Suggested body / tag hints: `#quest` `#faction` `#history` `#prophecy` `#myth` `#rumour`
+
+### Rules
+
+- Call `backlink_create` to connect lore to characters, locations, items, factions — **lore without links is an island** in the graph.
+- Quests: reference involved characters with `[[Name]]` in the body **and** add `backlink_create` where you know the target path from search.
+- Factions: search for member NPCs, then link faction ↔ NPC.
+- When a quest completes: `entity_edit_content` to append a resolution section — do not wipe the original text.
+- History / chronicle style: prefer appending dated entries with `entity_edit_content` over spawning duplicate notes.

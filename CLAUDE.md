@@ -85,8 +85,9 @@ All queries include `group_id` — no table-level tenant isolation, just strict 
 - Context injected: groupId, campaignSlug, activeCharacterName, openSessionPath, role
 
 **Tools available to the AI**
+- `campaign_list` — list registered campaigns (slug + name); `entity_create` only accepts these slugs
 - `entity_search` — search before creating (prevent duplicates)
-- `entity_create` — create notes (characters, items, locations, lore)
+- `entity_create` — create notes under existing campaigns only (characters, items, locations, lore)
 - `entity_edit_sheet` — update structured frontmatter fields (stats, HP, level)
 - `entity_edit_content` — append prose to note body
 - `backlink_create` — add knowledge graph edges
@@ -98,7 +99,7 @@ All queries include `group_id` — no table-level tenant isolation, just strict 
 2. `import-analyse.ts` → classify + extract entities → `plan_json`
 3. User reviews plan → `import-apply.ts` commits to DB
 
-**Skill injection** — per-kind markdown prompts (`character.md`, `session.md`, `item.md`, `location.md`, `lore.md`, `note.md`) are loaded dynamically based on keyword detection in the user's message.
+**Skill injection** — per-kind markdown prompts (`character.md`, `creature.md`, `session.md`, `item.md`, `location.md`, `lore.md`, `note.md`) are loaded dynamically based on keyword detection in the user's message.
 
 ## Key files
 

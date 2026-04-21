@@ -15,6 +15,7 @@ import * as Y from 'yjs';
 import { getDb } from '@/lib/db';
 import { getPmSchema } from '@/lib/pm-schema';
 import { loadNote } from '@/lib/notes';
+import { getCampaignBySlug, listCampaigns } from '@/lib/characters';
 import { canonicalFolder, nameToSlug, type EntityKind } from '@/lib/ai/paths';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
@@ -33,6 +34,7 @@ export type ToolContext = {
 
 export function createTools(ctx: ToolContext) {
   return {
+    campaign_list:       campaignList(ctx),
     entity_search:       entitySearch(ctx),
     entity_create:       entityCreate(ctx),
     entity_edit_sheet:   entityEditSheet(ctx),
@@ -54,6 +56,8 @@ export function getToolsForRole(ctx: ToolContext) {
 
 // ── Schemas ────────────────────────────────────────────────────────────
 
+const CampaignListSchema = z.object({});
+
 const SearchSchema = z.object({
   query: z.string().describe('Name or keywords to search'),
   limit: z.number().int().positive().max(20).optional().default(10),
@@ -67,16 +71,23 @@ const CreateSchema = z.object({
     'pc', 'npc', 'ally', 'villain', 'monster',
   ]),
   name: z.string().min(1).max(200),
-  campaignSlug: z.string().optional().describe('Campaign slug — omit for world-level entities'),
+  campaignSlug: z
+    .string()
+    .optional()
+    .describe(
+      'Registered campaign slug (see campaign_list). Required for campaign-scoped kinds. Omit only for lore or for notes under World Lore.',
+    ),
   sheet: z.record(z.unknown()).optional().describe('Frontmatter sheet fields to pre-fill'),
   dmOnly: z.boolean().optional().default(false),
 });
 
 const EditSheetSchema = z.object({
   path: z.string().min(1).max(512).describe('Full note path'),
-  updates: z.record(
-    z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()]),
-  ).describe('Field key→value pairs to merge into the sheet'),
+  updates: z
+    .record(z.unknown())
+    .describe(
+      'Field key→value pairs to merge into the sheet. Values may be strings, numbers, booleans, arrays, nested objects, or null to delete a field.',
+    ),
 });
 
 const EditContentSchema = z.object({
@@ -114,6 +125,31 @@ const SessionApplySchema = z.object({
     approved: z.boolean(),
   })).describe('Per-change approval decisions from the review panel'),
 });
+
+// ── campaign_list ────────────────────────────────────────────────────
+
+function campaignList(ctx: ToolContext) {
+  return tool({
+    description:
+      'List campaigns registered for this world. Call before entity_create when no campaign is selected — entity_create only accepts slugs from this list and cannot create new campaign folders.',
+    inputSchema: CampaignListSchema,
+    execute: async (_input: z.infer<typeof CampaignListSchema>) => {
+      const campaigns = listCampaigns(ctx.groupId);
+      return {
+        ok: true as const,
+        campaigns: campaigns.map((c) => ({
+          slug: c.slug,
+          name: c.name,
+          folderPath: c.folderPath,
+        })),
+        hint:
+          campaigns.length === 0
+            ? 'No campaigns yet — an admin must create a campaign folder from the file tree before the AI can add campaign notes.'
+            : undefined,
+      };
+    },
+  });
+}
 
 // ── entity_search ─────────────────────────────────────────────────────
 
@@ -153,11 +189,56 @@ function entitySearch(ctx: ToolContext) {
 function entityCreate(ctx: ToolContext) {
   return tool({
     description:
-      'Create a new structured entity. Path is auto-assigned — never guess a path.',
+      'Create a new structured entity. Path is auto-assigned from kind + a registered campaign (see campaign_list). Cannot create new campaigns — slug must already exist.',
     inputSchema: CreateSchema,
     execute: async ({ kind, name, campaignSlug, sheet, dmOnly }: z.infer<typeof CreateSchema>) => {
-      const slug = campaignSlug ?? ctx.campaignSlug;
-      const folder = canonicalFolder({ kind: kind as EntityKind, campaignSlug: slug });
+      const slugParam = (campaignSlug?.trim() ?? ctx.campaignSlug?.trim()) || undefined;
+      const k = kind as EntityKind;
+      const canonical = normalizeKind(k);
+
+      let campaignRoot: string | undefined;
+
+      if (canonical === 'lore' || kind === 'lore') {
+        /* world-level only */
+      } else if (canonical === 'note' || kind === 'note') {
+        if (slugParam) {
+          const row = getCampaignBySlug(ctx.groupId, slugParam);
+          if (!row) {
+            return {
+              ok: false as const,
+              error: 'unknown_campaign',
+              message:
+                `No registered campaign for slug "${slugParam}". Call campaign_list — only existing campaigns may receive notes.`,
+            };
+          }
+          campaignRoot = row.folderPath;
+        }
+      } else {
+        if (!slugParam) {
+          return {
+            ok: false as const,
+            error: 'campaign_required',
+            message:
+              'This kind must be created under a registered campaign. Pass campaignSlug or set the active campaign in the app, or call campaign_list and ask the user which slug to use.',
+          };
+        }
+        const row = getCampaignBySlug(ctx.groupId, slugParam);
+        if (!row) {
+          return {
+            ok: false as const,
+            error: 'unknown_campaign',
+            message:
+              `No registered campaign for slug "${slugParam}". Call campaign_list and use an existing slug — new campaign folders cannot be created via this tool.`,
+          };
+        }
+        campaignRoot = row.folderPath;
+      }
+
+      const folder = canonicalFolder({
+        kind: k,
+        campaignSlug: slugParam,
+        campaignRoot,
+      });
       const path = `${folder}/${nameToSlug(name)}.md`;
 
       const db = getDb();
@@ -220,7 +301,13 @@ function entityCreate(ctx: ToolContext) {
 
 function entityEditSheet(ctx: ToolContext) {
   return tool({
-    description: 'Update structured frontmatter fields on an existing entity.',
+    description:
+      'Update structured frontmatter fields on an existing entity. ' +
+      'For character sheets you may pass either nested objects ' +
+      '(ability_scores:{str,dex,con,int,wis,cha}, hit_points:{max,current,temporary}, ' +
+      'armor_class:{value}, speed:{walk}, classes:[{ref:{name},level}]) ' +
+      'OR flat legacy keys (str/dex/…, hp_max/hp_current, ac, speed as number, class+level) — ' +
+      'both are accepted and automatically coerced.',
     inputSchema: EditSheetSchema,
     execute: async ({ path, updates }: z.infer<typeof EditSheetSchema>) => {
       const note = loadNote(ctx.groupId, path);
@@ -235,12 +322,15 @@ function entityEditSheet(ctx: ToolContext) {
           ? { ...(fm.sheet as Record<string, unknown>) }
           : {};
 
-      for (const [k, v] of Object.entries(updates)) {
+      // Coerce flat template-style keys → nested Zod-compatible shape before merging
+      const fmKind = typeof fm.kind === 'string' ? fm.kind : undefined;
+      const coerced = normaliseSheetUpdates(fmKind, updates as Record<string, unknown>, sheet);
+
+      for (const [k, v] of Object.entries(coerced)) {
         if (v === null) delete sheet[k];
         else sheet[k] = v;
       }
 
-      const fmKind = typeof fm.kind === 'string' ? fm.kind : undefined;
       const vr = validateSheet(fmKind, sheet);
       if (!vr.ok) {
         return {
@@ -322,7 +412,7 @@ function entityMove(ctx: ToolContext) {
     description: 'Move or rename a note to a new path.',
     inputSchema: MoveSchema,
     execute: async ({ from, to }: z.infer<typeof MoveSchema>) => {
-      if (from === to) return { ok: true as const };
+      if (from === to) return { ok: true as const, path: from };
       const db = getDb();
       if (!loadNote(ctx.groupId, from)) return { ok: false as const, error: `Not found: ${from}` };
       const conflict = db
@@ -340,7 +430,7 @@ function entityMove(ctx: ToolContext) {
         db.query(`UPDATE note_links SET to_path=? WHERE group_id=? AND to_path=?`).run(to, ctx.groupId, from);
       })();
 
-      return { ok: true as const };
+      return { ok: true as const, path: to };
     },
   });
 }
@@ -533,6 +623,118 @@ function sessionApply(ctx: ToolContext) {
   });
 }
 
+// ── Sheet update normaliser ────────────────────────────────────────────
+//
+// Accepts flat template-style keys (str/dex/…, hp_max, ac, level, class)
+// OR the correct nested Zod shape — merges both gracefully so the AI
+// never needs to know which convention the model picked.
+
+function normaliseSheetUpdates(
+  kind: string | undefined,
+  updates: Record<string, unknown>,
+  existingSheet: Record<string, unknown>,
+): Record<string, unknown> {
+  const r = { ...updates };
+
+  // ── 1. Flat ability scores → ability_scores block ─────────────────
+  const ABILS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
+  const flatAbils: Record<string, number> = {};
+  let hasFlatAbils = false;
+  for (const k of ABILS) {
+    if (typeof r[k] === 'number') {
+      flatAbils[k] = r[k] as number;
+      delete r[k];
+      hasFlatAbils = true;
+    }
+  }
+  if (hasFlatAbils) {
+    const existing = obj(existingSheet.ability_scores);
+    const inbound  = obj(r.ability_scores);
+    r.ability_scores = {
+      str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10,
+      ...existing, ...inbound, ...flatAbils,
+    };
+  }
+
+  // ── 2. Flat HP keys → hit_points block ───────────────────────────
+  if (typeof r.hp_max === 'number' || typeof r.hp_current === 'number' || typeof r.hp_temporary === 'number') {
+    const existing = obj(existingSheet.hit_points);
+    const inbound  = obj(r.hit_points);
+    r.hit_points = {
+      max: existing.max ?? 0,
+      current: existing.current ?? 0,
+      temporary: existing.temporary ?? 0,
+      ...inbound,
+      ...(typeof r.hp_max       === 'number' ? { max:       r.hp_max }       : {}),
+      ...(typeof r.hp_current   === 'number' ? { current:   r.hp_current }   : {}),
+      ...(typeof r.hp_temporary === 'number' ? { temporary: r.hp_temporary } : {}),
+    };
+    delete r.hp_max; delete r.hp_current; delete r.hp_temporary;
+  }
+
+  // ── 3. Flat ac → armor_class block ───────────────────────────────
+  if (typeof r.ac === 'number') {
+    const existing = obj(existingSheet.armor_class);
+    const inbound  = obj(r.armor_class);
+    r.armor_class = Object.assign({ value: 10 }, existing, inbound, { value: r.ac });
+    delete r.ac;
+  }
+
+  // ── 4. Flat speed number → Speed object ──────────────────────────
+  if (typeof r.speed === 'number') {
+    r.speed = { walk: r.speed as number };
+  }
+
+  // ── 5. Character-only: flat class + level → classes array ─────────
+  if (kind === 'character') {
+    const flatClass =
+      typeof r.class === 'string' && r.class.trim() ? r.class.trim() : null;
+    const flatLevel =
+      typeof r.level === 'number' && Number.isFinite(r.level as number)
+        ? Math.trunc(r.level as number)
+        : null;
+
+    if (flatClass !== null || flatLevel !== null) {
+      const existing = Array.isArray(existingSheet.classes)
+        ? (existingSheet.classes as Array<Record<string, unknown>>)
+        : [];
+      const first = existing[0] as Record<string, unknown> | undefined;
+      const existingRef = first?.ref && typeof first.ref === 'object'
+        ? (first.ref as Record<string, unknown>)
+        : null;
+
+      const nextRef   = flatClass !== null ? { name: flatClass } : (existingRef ?? { name: 'Adventurer' });
+      const nextLevel = flatLevel ?? (typeof first?.level === 'number' ? first.level : 1);
+      r.classes = [{ ref: nextRef, level: nextLevel }, ...existing.slice(1)];
+      if (flatClass  !== null) delete r.class;
+      if (flatLevel  !== null) delete r.level;
+    }
+
+    // ── 6. classes items without ref wrapper → fix { name, level } ──
+    if (Array.isArray(r.classes)) {
+      r.classes = (r.classes as Array<unknown>).map((item) => {
+        if (!item || typeof item !== 'object') return item;
+        const c = item as Record<string, unknown>;
+        if (c.ref && typeof c.ref === 'object') return c;
+        if (typeof c.name === 'string') {
+          const { name, level, ...rest } = c;
+          return { ref: { name }, level: level ?? 1, ...rest };
+        }
+        return c;
+      });
+    }
+  }
+
+  return r;
+}
+
+/** Safely cast a value to a plain object (returns {} for non-objects). */
+function obj(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : {};
+}
+
 // ── ProseMirror helpers ────────────────────────────────────────────────
 
 type PmNode = {
@@ -602,7 +804,94 @@ function buildFrontmatter(
     }
   }
 
+  if (canonical === 'character') {
+    hydrateCharacterSheetFromTemplateDefaults(sheet);
+  }
+
   const fm: Record<string, unknown> = { kind: canonical, template: canonical, sheet };
   if (canonical === 'character') fm.player = username;
   return fm;
+}
+
+/** Template defaults still seed legacy flat keys (`str`, `level`, `class`,
+ *  `hp_max`). The sheet header + Zod shape expect nested objects — bridge
+ *  them here so AI-created PCs render immediately. */
+function hydrateCharacterSheetFromTemplateDefaults(sheet: Record<string, unknown>): void {
+  const ab = sheet.ability_scores;
+  const hasAbilityBlock =
+    ab &&
+    typeof ab === 'object' &&
+    (['str', 'dex', 'con', 'int', 'wis', 'cha'] as const).some(
+      (k) => typeof (ab as Record<string, unknown>)[k] === 'number',
+    );
+  if (!hasAbilityBlock) {
+    const keys = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
+    const scores: Partial<Record<(typeof keys)[number], number>> = {};
+    let any = false;
+    for (const k of keys) {
+      const v = sheet[k];
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        scores[k] = v;
+        any = true;
+      }
+    }
+    if (any) {
+      sheet.ability_scores = {
+        str: scores.str ?? 10,
+        dex: scores.dex ?? 10,
+        con: scores.con ?? 10,
+        int: scores.int ?? 10,
+        wis: scores.wis ?? 10,
+        cha: scores.cha ?? 10,
+      };
+    }
+  }
+
+  const hasClasses = Array.isArray(sheet.classes) && sheet.classes.length > 0;
+  if (!hasClasses) {
+    const className =
+      typeof sheet.class === 'string' && sheet.class.trim() ? sheet.class.trim() : null;
+    let level: number | null = null;
+    if (typeof sheet.level === 'number' && sheet.level > 0) level = Math.trunc(sheet.level);
+    else if (typeof sheet.level === 'string') {
+      const n = Number(sheet.level);
+      if (Number.isFinite(n) && n > 0) level = Math.trunc(n);
+    }
+    if (className || level !== null) {
+      sheet.classes = [{ ref: { name: className ?? 'Adventurer' }, level: level ?? 1 }];
+    }
+  }
+
+  const hp = sheet.hit_points;
+  const hasHpBlock =
+    hp &&
+    typeof hp === 'object' &&
+    typeof (hp as Record<string, unknown>).max === 'number';
+  if (!hasHpBlock) {
+    const max = typeof sheet.hp_max === 'number' ? sheet.hp_max : null;
+    const cur = typeof sheet.hp_current === 'number' ? sheet.hp_current : null;
+    if (max !== null || cur !== null) {
+      sheet.hit_points = {
+        max: max ?? cur ?? 0,
+        current: cur ?? max ?? 0,
+        temporary:
+          typeof sheet.hp_temporary === 'number' && Number.isFinite(sheet.hp_temporary)
+            ? sheet.hp_temporary
+            : 0,
+      };
+    }
+  }
+
+  const ac = sheet.armor_class;
+  const hasAcBlock =
+    ac &&
+    typeof ac === 'object' &&
+    typeof (ac as Record<string, unknown>).value === 'number';
+  if (!hasAcBlock && typeof sheet.ac === 'number' && Number.isFinite(sheet.ac)) {
+    sheet.armor_class = { value: sheet.ac };
+  }
+
+  if (typeof sheet.speed === 'number' && Number.isFinite(sheet.speed)) {
+    sheet.speed = { walk: sheet.speed };
+  }
 }
