@@ -112,14 +112,14 @@ function getContextualOptions(folderPath: string | undefined): {
     return { kinds: ['session', 'npc', 'villain', 'item', 'location', 'monster'], isUpload: false, labelOverrides: {} };
   }
 
-  // Per-campaign canonical sub-folders
-  if (/^Campaigns\/[^/]+\/Characters$/.test(folderPath))    return { kinds: ['pc', 'folder'],              isUpload: false, labelOverrides: {} };
-  if (/^Campaigns\/[^/]+\/People$/.test(folderPath))        return { kinds: ['npc', 'folder'],             isUpload: false, labelOverrides: {} };
-  if (/^Campaigns\/[^/]+\/Enemies$/.test(folderPath))       return { kinds: ['villain', 'folder'],         isUpload: false, labelOverrides: {} };
-  if (/^Campaigns\/[^/]+\/Loot$/.test(folderPath))          return { kinds: ['item', 'folder'],            isUpload: false, labelOverrides: {} };
-  if (/^Campaigns\/[^/]+\/Adventure Log$/.test(folderPath)) return { kinds: ['session', 'folder'],         isUpload: false, labelOverrides: {} };
-  if (/^Campaigns\/[^/]+\/Places$/.test(folderPath))        return { kinds: ['location', 'folder'],        isUpload: false, labelOverrides: {} };
-  if (/^Campaigns\/[^/]+\/Creatures$/.test(folderPath))     return { kinds: ['monster', 'folder'],         isUpload: false, labelOverrides: {} };
+  // Per-campaign canonical sub-folders (and any depth within them)
+  if (/^Campaigns\/[^/]+\/Characters(\/|$)/.test(folderPath))    return { kinds: ['pc', 'folder'],      isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/People(\/|$)/.test(folderPath))        return { kinds: ['npc', 'folder'],     isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Enemies(\/|$)/.test(folderPath))       return { kinds: ['villain', 'folder'], isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Loot(\/|$)/.test(folderPath))          return { kinds: ['item', 'folder'],    isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Adventure Log(\/|$)/.test(folderPath)) return { kinds: ['session', 'folder'], isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Places(\/|$)/.test(folderPath))        return { kinds: ['location', 'folder'],isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Creatures(\/|$)/.test(folderPath))     return { kinds: ['monster', 'folder'], isUpload: false, labelOverrides: {} };
 
   // World Lore section
   if (folderPath === 'World Lore') {
