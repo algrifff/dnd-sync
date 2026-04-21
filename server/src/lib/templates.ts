@@ -18,23 +18,32 @@
 import { getDb } from './db';
 
 export type TemplateKind =
+  // canonical
+  | 'character'
+  | 'person'
+  | 'creature'
+  | 'session'
+  | 'item'
+  | 'location'
+  // legacy kinds kept so existing templates and notes continue to work
   | 'pc'
   | 'npc'
   | 'ally'
   | 'villain'
-  | 'session'
-  | 'item'
-  | 'location'
   | 'monster';
 
 export const TEMPLATE_KINDS: readonly TemplateKind[] = [
+  'character',
+  'person',
+  'creature',
+  'session',
+  'item',
+  'location',
+  // legacy
   'pc',
   'npc',
   'ally',
   'villain',
-  'session',
-  'item',
-  'location',
   'monster',
 ] as const;
 
@@ -421,18 +430,58 @@ const DEFAULT_MONSTER_SCHEMA: TemplateSchema = {
   ],
 };
 
+const DEFAULT_PERSON_SCHEMA: TemplateSchema = {
+  version: 1,
+  headerFields: ['tagline', 'disposition'],
+  imageLayout: 'avatar',
+  sections: [
+    {
+      id: 'basics',
+      label: 'Basics',
+      fields: [
+        { id: 'name', label: 'Name', type: 'text', required: true },
+        {
+          id: 'tagline',
+          label: 'Tagline',
+          type: 'text',
+          hint: "Short descriptor — 'grizzled innkeeper'",
+        },
+        { id: 'location_path', label: 'Where they are', type: 'text' },
+        {
+          id: 'disposition',
+          label: 'Disposition',
+          type: 'enum',
+          options: ['friendly', 'neutral', 'hostile', 'unknown'],
+          default: 'unknown',
+        },
+      ],
+    },
+  ],
+};
+
+// `character` / `creature` default to the legacy PC / Monster form
+// until the dedicated nested-field UI lands. Validation still happens
+// on save; the template only drives the flat form UI.
+const DEFAULT_CHARACTER_SCHEMA: TemplateSchema = DEFAULT_PC_SCHEMA;
+const DEFAULT_CREATURE_SCHEMA: TemplateSchema = DEFAULT_MONSTER_SCHEMA;
+
 const DEFAULT_TEMPLATES: Array<{
   kind: TemplateKind;
   name: string;
   schema: TemplateSchema;
 }> = [
+  { kind: 'character', name: 'D&D 5e — Character', schema: DEFAULT_CHARACTER_SCHEMA },
+  { kind: 'person', name: 'Person (NPC)', schema: DEFAULT_PERSON_SCHEMA },
+  { kind: 'creature', name: 'Creature', schema: DEFAULT_CREATURE_SCHEMA },
+  { kind: 'session', name: 'Session log', schema: DEFAULT_SESSION_SCHEMA },
+  { kind: 'item', name: 'Item', schema: DEFAULT_ITEM_SCHEMA },
+  { kind: 'location', name: 'Location', schema: DEFAULT_LOCATION_SCHEMA },
+  // legacy — keep so existing notes keep rendering, but won't be offered
+  // in the "new entry" menu once UIs reference the canonical kinds.
   { kind: 'pc', name: 'D&D 5e — Player character', schema: DEFAULT_PC_SCHEMA },
   { kind: 'npc', name: 'NPC', schema: DEFAULT_NPC_SCHEMA },
   { kind: 'ally', name: 'Ally', schema: DEFAULT_ALLY_SCHEMA },
   { kind: 'villain', name: 'Villain', schema: DEFAULT_VILLAIN_SCHEMA },
-  { kind: 'session', name: 'Session log', schema: DEFAULT_SESSION_SCHEMA },
-  { kind: 'item', name: 'Item', schema: DEFAULT_ITEM_SCHEMA },
-  { kind: 'location', name: 'Location', schema: DEFAULT_LOCATION_SCHEMA },
   { kind: 'monster', name: 'Monster', schema: DEFAULT_MONSTER_SCHEMA },
 ];
 

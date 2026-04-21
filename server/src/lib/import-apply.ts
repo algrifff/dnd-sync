@@ -38,11 +38,7 @@ import {
   type ImportJob,
 } from './imports';
 import type { ImportPlan, ParsedAsset } from './import-parse';
-import {
-  deriveCharacterFromFrontmatter,
-  ensureCampaignForPath,
-} from './characters';
-import { deriveSessionFromFrontmatter } from './sessions';
+import { deriveAllIndexes } from './derive-indexes';
 import { getPmSchema } from './pm-schema';
 import { ingestMarkdown, type IngestContext, type NoteIngest } from './md-to-pm';
 import { pmToMarkdown } from './pm-to-md';
@@ -583,13 +579,7 @@ function writeNote(opts: WriteOpts): void {
 
   // Structured-note derivation + campaign auto-registration.
   try {
-    ensureCampaignForPath(opts.groupId, opts.path);
-    deriveCharacterFromFrontmatter({
-      groupId: opts.groupId,
-      notePath: opts.path,
-      frontmatterJson: JSON.stringify(ingest.frontmatter),
-    });
-    deriveSessionFromFrontmatter({
+    deriveAllIndexes({
       groupId: opts.groupId,
       notePath: opts.path,
       frontmatterJson: JSON.stringify(ingest.frontmatter),

@@ -17,11 +17,8 @@ import { getPmSchema } from '@/lib/pm-schema';
 import { loadNote } from '@/lib/notes';
 import { canonicalFolder, nameToSlug, type EntityKind } from '@/lib/ai/paths';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
-import {
-  deriveCharacterFromFrontmatter,
-  ensureCampaignForPath,
-} from '@/lib/characters';
-import { deriveSessionFromFrontmatter } from '@/lib/sessions';
+import { deriveAllIndexes } from '@/lib/derive-indexes';
+import { validateSheet } from '@/lib/validateSheet';
 
 // ── Context ────────────────────────────────────────────────────────────
 
@@ -63,7 +60,12 @@ const SearchSchema = z.object({
 });
 
 const CreateSchema = z.object({
-  kind: z.enum(['pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'lore', 'note']),
+  kind: z.enum([
+    'character', 'person', 'creature',
+    'item', 'location', 'session', 'lore', 'note',
+    // legacy aliases — mapped to canonical kinds in normalizeKind()
+    'pc', 'npc', 'ally', 'villain', 'monster',
+  ]),
   name: z.string().min(1).max(200),
   campaignSlug: z.string().optional().describe('Campaign slug — omit for world-level entities'),
   sheet: z.record(z.unknown()).optional().describe('Frontmatter sheet fields to pre-fill'),
@@ -169,6 +171,18 @@ function entityCreate(ctx: ToolContext) {
       }
 
       const frontmatter = buildFrontmatter(kind as EntityKind, name, sheet ?? {}, ctx.userId);
+      const fmKind = typeof frontmatter.kind === 'string' ? frontmatter.kind : undefined;
+      const vr = validateSheet(fmKind, frontmatter.sheet);
+      if (!vr.ok) {
+        return {
+          ok: false as const,
+          error: `invalid_sheet for kind ${fmKind}`,
+          issues: vr.issues,
+        };
+      }
+      if (frontmatter.sheet && typeof frontmatter.sheet === 'object') {
+        frontmatter.sheet = vr.data as Record<string, unknown>;
+      }
       const emptyDoc = { type: 'doc', content: [{ type: 'paragraph' }] };
       const ydoc = prosemirrorJSONToYDoc(getPmSchema(), emptyDoc, 'default');
       ydoc.getText('title').insert(0, name);
@@ -189,17 +203,10 @@ function entityCreate(ctx: ToolContext) {
       );
 
       try {
-        ensureCampaignForPath(ctx.groupId, path);
-        deriveCharacterFromFrontmatter({
+        deriveAllIndexes({
           groupId: ctx.groupId, notePath: path,
           frontmatterJson: JSON.stringify(frontmatter),
         });
-        if (kind === 'session') {
-          deriveSessionFromFrontmatter({
-            groupId: ctx.groupId, notePath: path,
-            frontmatterJson: JSON.stringify(frontmatter),
-          });
-        }
       } catch (err) {
         console.error('[ai/tools] derive failed after entity_create:', err);
       }
@@ -233,14 +240,23 @@ function entityEditSheet(ctx: ToolContext) {
         else sheet[k] = v;
       }
 
-      const nextFm = { ...fm, sheet };
+      const fmKind = typeof fm.kind === 'string' ? fm.kind : undefined;
+      const vr = validateSheet(fmKind, sheet);
+      if (!vr.ok) {
+        return {
+          ok: false as const,
+          error: `invalid_sheet for kind ${fmKind}`,
+          issues: vr.issues,
+        };
+      }
+      const nextSheet = vr.data as Record<string, unknown>;
+      const nextFm = { ...fm, sheet: nextSheet };
       getDb()
         .query(`UPDATE notes SET frontmatter_json=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
         .run(JSON.stringify(nextFm), Date.now(), ctx.userId, ctx.groupId, path);
 
       try {
-        ensureCampaignForPath(ctx.groupId, path);
-        deriveCharacterFromFrontmatter({
+        deriveAllIndexes({
           groupId: ctx.groupId, notePath: path,
           frontmatterJson: JSON.stringify(nextFm),
         });
@@ -248,7 +264,7 @@ function entityEditSheet(ctx: ToolContext) {
         console.error('[ai/tools] derive failed after entity_edit_sheet:', err);
       }
 
-      return { ok: true as const, sheet };
+      return { ok: true as const, sheet: nextSheet };
     },
   });
 }
@@ -410,7 +426,7 @@ function inventoryAdd(ctx: ToolContext) {
         .run(JSON.stringify(nextFm), Date.now(), ctx.userId, ctx.groupId, characterPath);
 
       try {
-        deriveCharacterFromFrontmatter({
+        deriveAllIndexes({
           groupId: ctx.groupId, notePath: characterPath,
           frontmatterJson: JSON.stringify(nextFm),
         });
@@ -551,17 +567,30 @@ type SessionProposal = {
 
 // ── Frontmatter builder ────────────────────────────────────────────────
 
+function normalizeKind(kind: EntityKind): EntityKind {
+  // Collapse legacy aliases onto the canonical set. Old tool calls
+  // from saved transcripts still use pc/npc/ally/villain/monster; new
+  // calls use character/person/creature.
+  if (kind === 'pc') return 'character';
+  if (kind === 'npc' || kind === 'ally') return 'person';
+  if (kind === 'villain') return 'creature';
+  if (kind === 'monster') return 'creature';
+  return kind;
+}
+
 function buildFrontmatter(
   kind: EntityKind,
   name: string,
   extraSheet: Record<string, unknown>,
   username: string,
 ): Record<string, unknown> {
-  const charKinds: EntityKind[] = ['pc', 'npc', 'ally', 'villain'];
-  const hasTemplate = charKinds.includes(kind) || kind === 'item' || kind === 'location' || kind === 'session';
-  if (!hasTemplate) return {};
+  const canonical = normalizeKind(kind);
+  const templated: EntityKind[] = [
+    'character', 'person', 'creature', 'item', 'location', 'session',
+  ];
+  if (!templated.includes(canonical)) return {};
 
-  const template = getTemplate(kind as TemplateKind);
+  const template = getTemplate(canonical as TemplateKind);
   const sheet: Record<string, unknown> = { name, ...extraSheet };
   if (template) {
     for (const section of template.schema.sections) {
@@ -573,10 +602,7 @@ function buildFrontmatter(
     }
   }
 
-  if (charKinds.includes(kind)) {
-    const fm: Record<string, unknown> = { kind: 'character', role: kind, template: kind, sheet };
-    if (kind === 'pc') fm.player = username;
-    return fm;
-  }
-  return { kind, template: kind, sheet };
+  const fm: Record<string, unknown> = { kind: canonical, template: canonical, sheet };
+  if (canonical === 'character') fm.player = username;
+  return fm;
 }

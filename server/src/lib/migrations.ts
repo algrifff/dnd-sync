@@ -462,6 +462,117 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE note_links ADD COLUMN is_manual INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 24,
+    description:
+      'compendium_entries: canonical cross-world library (5e + future rulesets)',
+    sql: `
+      -- Global library shared by every world. group_id NULL = official
+      -- content (SRD etc.); non-null = per-world homebrew. The ruleset
+      -- column lets the same DB host multiple TTRPG systems later.
+      CREATE TABLE compendium_entries (
+        id          TEXT PRIMARY KEY,
+        ruleset     TEXT NOT NULL DEFAULT 'dnd5e',
+        kind        TEXT NOT NULL,
+        name        TEXT NOT NULL,
+        slug        TEXT NOT NULL,
+        data_json   TEXT NOT NULL,
+        source      TEXT,
+        group_id    TEXT,
+        version     INTEGER NOT NULL DEFAULT 1,
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL
+      );
+      CREATE UNIQUE INDEX compendium_unique
+        ON compendium_entries(ruleset, kind, slug, IFNULL(group_id, ''));
+      CREATE INDEX compendium_ruleset_kind
+        ON compendium_entries(ruleset, kind);
+      CREATE INDEX compendium_group
+        ON compendium_entries(group_id);
+      CREATE INDEX compendium_name
+        ON compendium_entries(ruleset, kind, name COLLATE NOCASE);
+    `,
+  },
+  {
+    version: 25,
+    description: 'items: derived index of kind:item notes',
+    sql: `
+      CREATE TABLE items (
+        group_id      TEXT NOT NULL,
+        note_path     TEXT NOT NULL,
+        name          TEXT NOT NULL,
+        category      TEXT,
+        rarity        TEXT,
+        attunement    INTEGER NOT NULL DEFAULT 0,
+        weight        REAL,
+        cost_gp       REAL,
+        compendium_id TEXT,
+        updated_at    INTEGER NOT NULL,
+        PRIMARY KEY (group_id, note_path),
+        FOREIGN KEY (group_id, note_path)
+          REFERENCES notes(group_id, path) ON DELETE CASCADE
+      ) WITHOUT ROWID;
+      CREATE INDEX items_group_cat ON items(group_id, category);
+      CREATE INDEX items_name ON items(group_id, name COLLATE NOCASE);
+    `,
+  },
+  {
+    version: 26,
+    description: 'locations: derived index of kind:location notes',
+    sql: `
+      CREATE TABLE locations (
+        group_id    TEXT NOT NULL,
+        note_path   TEXT NOT NULL,
+        name        TEXT NOT NULL,
+        type        TEXT,
+        region      TEXT,
+        parent_path TEXT,
+        updated_at  INTEGER NOT NULL,
+        PRIMARY KEY (group_id, note_path),
+        FOREIGN KEY (group_id, note_path)
+          REFERENCES notes(group_id, path) ON DELETE CASCADE
+      ) WITHOUT ROWID;
+      CREATE INDEX locations_parent
+        ON locations(group_id, parent_path);
+      CREATE INDEX locations_name
+        ON locations(group_id, name COLLATE NOCASE);
+    `,
+  },
+  {
+    version: 27,
+    description:
+      'creatures: derived index of kind:creature (and legacy kind:monster) notes',
+    sql: `
+      CREATE TABLE creatures (
+        group_id      TEXT NOT NULL,
+        note_path     TEXT NOT NULL,
+        name          TEXT NOT NULL,
+        type          TEXT,
+        size          TEXT,
+        cr            REAL,
+        ac            INTEGER,
+        hp_max        INTEGER,
+        compendium_id TEXT,
+        updated_at    INTEGER NOT NULL,
+        PRIMARY KEY (group_id, note_path),
+        FOREIGN KEY (group_id, note_path)
+          REFERENCES notes(group_id, path) ON DELETE CASCADE
+      ) WITHOUT ROWID;
+      CREATE INDEX creatures_cr ON creatures(group_id, cr);
+      CREATE INDEX creatures_name ON creatures(group_id, name COLLATE NOCASE);
+    `,
+  },
+  {
+    version: 28,
+    description:
+      'characters: ac/hp_max/hp_current/proficiency_bonus for quick reads',
+    sql: `
+      ALTER TABLE characters ADD COLUMN ac INTEGER;
+      ALTER TABLE characters ADD COLUMN hp_max INTEGER;
+      ALTER TABLE characters ADD COLUMN hp_current INTEGER;
+      ALTER TABLE characters ADD COLUMN proficiency_bonus INTEGER;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

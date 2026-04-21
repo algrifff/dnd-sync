@@ -6,16 +6,20 @@
 // from accumulating arbitrary folder structures when the AI operates.
 
 export type EntityKind =
+  | 'character'
+  | 'person'
+  | 'creature'
+  | 'item'
+  | 'location'
+  | 'session'
+  | 'lore'
+  | 'note'
+  // legacy aliases kept for back-compat with older tool calls
   | 'pc'
   | 'npc'
   | 'ally'
   | 'villain'
-  | 'item'
-  | 'location'
-  | 'session'
-  | 'monster'
-  | 'lore'
-  | 'note';
+  | 'monster';
 
 export function canonicalFolder(opts: {
   kind: EntityKind;
@@ -24,13 +28,16 @@ export function canonicalFolder(opts: {
   const base = opts.campaignSlug ? `Campaigns/${opts.campaignSlug}` : null;
 
   switch (opts.kind) {
+    case 'character':
     case 'pc':       return base ? `${base}/Characters`    : 'Characters';
-    case 'npc':      return base ? `${base}/People`        : 'People';
+    case 'person':
+    case 'npc':
     case 'ally':     return base ? `${base}/People`        : 'People';
     case 'villain':  return base ? `${base}/Enemies`       : 'Enemies';
     case 'item':     return base ? `${base}/Loot`          : 'Loot';
     case 'location': return base ? `${base}/Places`        : 'Places';
     case 'session':  return base ? `${base}/Adventure Log` : 'Adventure Log';
+    case 'creature':
     case 'monster':  return base ? `${base}/Creatures`     : 'Creatures';
     case 'lore':     return 'World Lore';
     case 'note':     return base ?? 'World Lore';

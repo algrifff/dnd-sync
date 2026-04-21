@@ -35,13 +35,17 @@ const FIELD_TYPES: readonly TemplateFieldType[] = [
 ] as const;
 
 const KIND_LABELS: Record<TemplateKind, string> = {
+  character: 'Character',
+  person: 'Person',
+  creature: 'Creature',
+  session: 'Session',
+  item: 'Item',
+  location: 'Location',
+  // legacy
   pc: 'Player character',
   npc: 'NPC',
   ally: 'Ally',
   villain: 'Villain',
-  session: 'Session',
-  item: 'Item',
-  location: 'Location',
   monster: 'Monster',
 };
 

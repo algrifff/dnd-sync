@@ -23,8 +23,7 @@ import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { getPmSchema } from '@/lib/pm-schema';
 import { logAudit } from '@/lib/audit';
-import { ensureCampaignForPath } from '@/lib/characters';
-import { deriveSessionFromFrontmatter } from '@/lib/sessions';
+import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { getTemplate } from '@/lib/templates';
 
 export const dynamic = 'force-dynamic';
@@ -130,8 +129,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   );
 
   try {
-    ensureCampaignForPath(session.currentGroupId, path);
-    deriveSessionFromFrontmatter({
+    deriveAllIndexes({
       groupId: session.currentGroupId,
       notePath: path,
       frontmatterJson: JSON.stringify(frontmatter),

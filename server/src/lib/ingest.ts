@@ -27,11 +27,7 @@ import { getPmSchema } from './pm-schema';
 import { ingestMarkdown, type IngestContext, type NoteIngest } from './md-to-pm';
 import { pmToMarkdown } from './pm-to-md';
 import { sniffMime, isSupportedMime, assetPath } from './assets';
-import {
-  deriveCharacterFromFrontmatter,
-  ensureCampaignForPath,
-} from './characters';
-import { deriveSessionFromFrontmatter } from './sessions';
+import { deriveAllIndexes } from './derive-indexes';
 import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { logAudit } from './audit';
 
@@ -352,13 +348,7 @@ export async function ingestZip(opts: IngestOptions): Promise<IngestSummary> {
   // vault ingest.
   for (const p of prepared) {
     try {
-      ensureCampaignForPath(opts.groupId, p.ingest.path);
-      deriveCharacterFromFrontmatter({
-        groupId: opts.groupId,
-        notePath: p.ingest.path,
-        frontmatterJson: JSON.stringify(p.ingest.frontmatter),
-      });
-      deriveSessionFromFrontmatter({
+      deriveAllIndexes({
         groupId: opts.groupId,
         notePath: p.ingest.path,
         frontmatterJson: JSON.stringify(p.ingest.frontmatter),

@@ -23,10 +23,8 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { loadNote } from '@/lib/notes';
-import {
-  deriveCharacterFromFrontmatter,
-  ensureCampaignForPath,
-} from '@/lib/characters';
+import { deriveAllIndexes } from '@/lib/derive-indexes';
+import { validateSheet } from '@/lib/validateSheet';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
 
 export const dynamic = 'force-dynamic';
@@ -113,7 +111,13 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     else currentSheet[k] = v;
   }
 
-  const nextFm = { ...fm, sheet: currentSheet };
+  const fmKind = typeof fm.kind === 'string' ? fm.kind : undefined;
+  const vr = validateSheet(fmKind, currentSheet);
+  if (!vr.ok) {
+    return json({ error: 'invalid_sheet', issues: vr.issues }, 400);
+  }
+  const validatedSheet = vr.data as Record<string, unknown>;
+  const nextFm = { ...fm, sheet: validatedSheet };
   const db = getDb();
   const now = Date.now();
   db.query(
@@ -130,8 +134,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   // Re-derive the index so display_name / level / class etc. reflect
   // the new sheet values immediately.
   try {
-    ensureCampaignForPath(session.currentGroupId, body.path);
-    deriveCharacterFromFrontmatter({
+    deriveAllIndexes({
       groupId: session.currentGroupId,
       notePath: body.path,
       frontmatterJson: JSON.stringify(nextFm),
@@ -140,7 +143,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     console.error('[api/notes/sheet] derive failed:', err);
   }
 
-  return json({ ok: true, sheet: currentSheet, canWriteAll });
+  return json({ ok: true, sheet: validatedSheet, canWriteAll });
 }
 
 function inferRole(

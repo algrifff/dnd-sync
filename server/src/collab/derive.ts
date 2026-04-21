@@ -14,11 +14,7 @@ import { yDocToProsemirrorJSON } from 'y-prosemirror';
 import { getDb } from '@/lib/db';
 import { pmToMarkdown } from '@/lib/pm-to-md';
 import { extractPlaintext, type PmNode } from '@/lib/md-to-pm';
-import {
-  deriveCharacterFromFrontmatter,
-  ensureCampaignForPath,
-} from '@/lib/characters';
-import { deriveSessionFromFrontmatter } from '@/lib/sessions';
+import { deriveAllIndexes } from '@/lib/derive-indexes';
 
 export function deriveAndPersist(opts: {
   groupId: string;
@@ -97,13 +93,7 @@ export function deriveAndPersist(opts: {
   // Both calls are idempotent and cheap no-ops for non-character,
   // non-campaign paths.
   try {
-    ensureCampaignForPath(opts.groupId, opts.path);
-    deriveCharacterFromFrontmatter({
-      groupId: opts.groupId,
-      notePath: opts.path,
-      frontmatterJson: fmRow?.frontmatter_json ?? '{}',
-    });
-    deriveSessionFromFrontmatter({
+    deriveAllIndexes({
       groupId: opts.groupId,
       notePath: opts.path,
       frontmatterJson: fmRow?.frontmatter_json ?? '{}',

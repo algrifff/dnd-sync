@@ -79,15 +79,24 @@ export function deriveCharacterFromFrontmatter(opts: {
 
   const displayName =
     strOrNull(sheet.name) ?? filenameDisplayName(opts.notePath);
-  const level = intOrNull(sheet.level);
-  const klass = strOrNull(sheet.class);
-  const race = strOrNull(sheet.race);
-  const portraitPath = strOrNull(fm.portrait);
+  // New sheet shape has sheet.classes[0] + sheet.race.ref.name;
+  // legacy shape has sheet.class + sheet.race as plain strings.
+  const level = intOrNull(sheet.level) ?? extractPrimaryLevel(sheet.classes);
+  const klass = strOrNull(sheet.class) ?? extractPrimaryClassName(sheet.classes);
+  const race = strOrNull(sheet.race) ?? extractRefName(sheet.race);
+  const portraitPath =
+    strOrNull(fm.portrait) ?? strOrNull(sheet.portrait);
+  const ac = extractAc(sheet);
+  const hpMax = extractHp(sheet, 'max') ?? intOrNull(sheet.hp_max);
+  const hpCurrent = extractHp(sheet, 'current') ?? intOrNull(sheet.hp_current);
+  const proficiencyBonus = intOrNull(sheet.proficiency_bonus);
 
+  // The player field can be on the sheet (new) or on frontmatter (legacy).
+  const playerRaw =
+    (typeof fm.player === 'string' ? fm.player : null) ??
+    (typeof sheet.player === 'string' ? (sheet.player as string) : null);
   const playerUserId =
-    role === 'pc' && typeof fm.player === 'string'
-      ? resolvePlayerUserId(fm.player)
-      : null;
+    role === 'pc' && playerRaw ? resolvePlayerUserId(playerRaw) : null;
 
   const campaignsExplicit = Array.isArray(fm.campaigns)
     ? fm.campaigns.filter((c): c is string => typeof c === 'string').map(slugify)
@@ -104,17 +113,22 @@ export function deriveCharacterFromFrontmatter(opts: {
     db.query(
       `INSERT INTO characters
          (group_id, note_path, kind, player_user_id, display_name,
-          portrait_path, level, class, race, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          portrait_path, level, class, race, ac, hp_max, hp_current,
+          proficiency_bonus, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (group_id, note_path) DO UPDATE SET
-         kind           = excluded.kind,
-         player_user_id = excluded.player_user_id,
-         display_name   = excluded.display_name,
-         portrait_path  = excluded.portrait_path,
-         level          = excluded.level,
-         class          = excluded.class,
-         race           = excluded.race,
-         updated_at     = excluded.updated_at`,
+         kind              = excluded.kind,
+         player_user_id    = excluded.player_user_id,
+         display_name      = excluded.display_name,
+         portrait_path     = excluded.portrait_path,
+         level             = excluded.level,
+         class             = excluded.class,
+         race              = excluded.race,
+         ac                = excluded.ac,
+         hp_max            = excluded.hp_max,
+         hp_current        = excluded.hp_current,
+         proficiency_bonus = excluded.proficiency_bonus,
+         updated_at        = excluded.updated_at`,
     ).run(
       opts.groupId,
       opts.notePath,
@@ -125,6 +139,10 @@ export function deriveCharacterFromFrontmatter(opts: {
       level,
       klass,
       race,
+      ac,
+      hpMax,
+      hpCurrent,
+      proficiencyBonus,
       now,
     );
 
@@ -178,6 +196,10 @@ export type CharacterListRow = {
   level: number | null;
   class: string | null;
   race: string | null;
+  ac: number | null;
+  hpMax: number | null;
+  hpCurrent: number | null;
+  proficiencyBonus: number | null;
   campaigns: string[];
   updatedAt: number;
 };
@@ -191,6 +213,10 @@ type CharacterDbRow = {
   level: number | null;
   class: string | null;
   race: string | null;
+  ac: number | null;
+  hp_max: number | null;
+  hp_current: number | null;
+  proficiency_bonus: number | null;
   updated_at: number;
 };
 
@@ -207,6 +233,10 @@ function rowToListEntry(
     level: r.level,
     class: r.class,
     race: r.race,
+    ac: r.ac,
+    hpMax: r.hp_max,
+    hpCurrent: r.hp_current,
+    proficiencyBonus: r.proficiency_bonus,
     campaigns,
     updatedAt: r.updated_at,
   };
@@ -231,7 +261,8 @@ export function listCharacters(
   const rows = db
     .query<CharacterDbRow, string[]>(
       `SELECT note_path, kind, player_user_id, display_name, portrait_path,
-              level, class, race, updated_at
+              level, class, race, ac, hp_max, hp_current, proficiency_bonus,
+              updated_at
          FROM characters
         WHERE ${wheres.join(' AND ')}
         ORDER BY display_name COLLATE NOCASE`,
@@ -323,11 +354,12 @@ export function isPcOwnedBy(
 function detectRole(fm: FrontmatterShape, path: string): CharacterKind {
   if (isCharacterKind(fm.role)) return fm.role;
   const p = path.toLowerCase();
-  if (/(^|\/)pcs\//.test(p)) return 'pc';
+  if (/(^|\/)(pcs|characters)\//.test(p)) return 'pc';
   if (/(^|\/)allies\//.test(p)) return 'ally';
-  if (/(^|\/)villains\//.test(p)) return 'villain';
-  if (/(^|\/)npcs\//.test(p)) return 'npc';
-  return 'npc';
+  if (/(^|\/)(villains|enemies)\//.test(p)) return 'villain';
+  if (/(^|\/)(npcs|people)\//.test(p)) return 'npc';
+  // New model: kind:character without an explicit role is a PC.
+  return 'pc';
 }
 
 function resolvePlayerUserId(username: string): string | null {
@@ -373,4 +405,45 @@ function intOrNull(v: unknown): number | null {
     if (Number.isFinite(n)) return Math.trunc(n);
   }
   return null;
+}
+
+/** New-shape sheet.classes is an array of `{ ref: { name }, level }`.
+ *  We surface the first entry's level in the quick-read column. */
+function extractPrimaryLevel(classes: unknown): number | null {
+  if (!Array.isArray(classes) || classes.length === 0) return null;
+  const first = classes[0] as { level?: unknown };
+  return intOrNull(first?.level);
+}
+
+function extractPrimaryClassName(classes: unknown): string | null {
+  if (!Array.isArray(classes) || classes.length === 0) return null;
+  return extractRefName((classes[0] as { ref?: unknown })?.ref);
+}
+
+/** New-shape race is `{ ref: { name } }`. Returns the ref name or null. */
+function extractRefName(v: unknown): string | null {
+  if (!v || typeof v !== 'object') return null;
+  const ref = (v as { ref?: unknown }).ref ?? v;
+  if (!ref || typeof ref !== 'object') return null;
+  const name = (ref as { name?: unknown }).name;
+  return typeof name === 'string' && name.trim().length > 0 ? name.trim() : null;
+}
+
+function extractAc(sheet: Record<string, unknown>): number | null {
+  const newShape = sheet.armor_class;
+  if (newShape && typeof newShape === 'object') {
+    const v = (newShape as { value?: unknown }).value;
+    const n = intOrNull(v);
+    if (n !== null) return n;
+  }
+  return intOrNull(sheet.ac);
+}
+
+function extractHp(
+  sheet: Record<string, unknown>,
+  key: 'max' | 'current',
+): number | null {
+  const hp = sheet.hit_points;
+  if (!hp || typeof hp !== 'object') return null;
+  return intOrNull((hp as Record<string, unknown>)[key]);
 }

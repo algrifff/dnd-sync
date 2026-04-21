@@ -12,10 +12,7 @@ import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { getPmSchema } from '@/lib/pm-schema';
 import { logAudit } from '@/lib/audit';
-import {
-  deriveCharacterFromFrontmatter,
-  ensureCampaignForPath,
-} from '@/lib/characters';
+import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
 
 export const dynamic = 'force-dynamic';
@@ -124,8 +121,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   // Run the derive pipeline so the characters / campaigns index
   // rows catch up without waiting for the first collab save.
   try {
-    ensureCampaignForPath(session.currentGroupId, path);
-    deriveCharacterFromFrontmatter({
+    deriveAllIndexes({
       groupId: session.currentGroupId,
       notePath: path,
       frontmatterJson: JSON.stringify(frontmatter),

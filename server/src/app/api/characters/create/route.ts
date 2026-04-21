@@ -29,11 +29,8 @@ import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { getPmSchema } from '@/lib/pm-schema';
 import { logAudit } from '@/lib/audit';
-import {
-  deriveCharacterFromFrontmatter,
-  ensureCampaignForPath,
-  type CharacterKind,
-} from '@/lib/characters';
+import { type CharacterKind } from '@/lib/characters';
+import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { getTemplate, type TemplateField } from '@/lib/templates';
 
 export const dynamic = 'force-dynamic';
@@ -165,8 +162,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   // dashboard + sidebar dropdown without needing the first collab
   // save.
   try {
-    ensureCampaignForPath(session.currentGroupId, path);
-    deriveCharacterFromFrontmatter({
+    deriveAllIndexes({
       groupId: session.currentGroupId,
       notePath: path,
       frontmatterJson: JSON.stringify(frontmatter),
