@@ -48,6 +48,15 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!cleanName) return json({ error: 'invalid_name' }, 400);
   const path = (parent ? parent + '/' : '') + cleanName;
 
+  // Only the world owner (group admin) may start a new campaign —
+  // editors can populate existing campaigns but not create them.
+  if (parent === 'Campaigns' && session.role !== 'admin') {
+    return json(
+      { error: 'forbidden', reason: 'only the world owner can create campaigns' },
+      403,
+    );
+  }
+
   const db = getDb();
 
   // Conflicts: a note or another marker already sitting at this path.

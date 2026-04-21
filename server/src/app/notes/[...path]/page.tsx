@@ -110,6 +110,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
           groupId={session.currentGroupId}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
+          isWorldOwner={session.role === 'admin'}
           kindMap={kindMap}
         />
         <SidebarFooter username={session.username} />

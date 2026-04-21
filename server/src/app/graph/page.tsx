@@ -66,6 +66,7 @@ export default async function GraphPage(): Promise<ReactElement> {
           groupId={session.currentGroupId}
           csrfToken={session.csrfToken}
           canCreate={session.role !== 'viewer'}
+          isWorldOwner={session.role === 'admin'}
           kindMap={kindMap}
         />
         <SidebarFooter username={session.username} />

@@ -88,7 +88,7 @@ const NEW_ENTRY_OPTIONS: Array<{
 /** Returns the subset of CreateKinds appropriate for a given folder path,
  *  plus optional label overrides. 'upload' is a special marker for the
  *  Assets section, handled via file input rather than a note kind. */
-function getContextualOptions(folderPath: string | undefined): {
+function getContextualOptions(folderPath: string | undefined, isWorldOwner: boolean): {
   kinds: CreateKind[];
   isUpload: boolean;
   labelOverrides: Partial<Record<CreateKind, string>>;
@@ -102,9 +102,13 @@ function getContextualOptions(folderPath: string | undefined): {
     return { kinds: [], isUpload: true, labelOverrides: {} };
   }
 
-  // Top-level Campaigns — opens the campaign creation dialog
+  // Top-level Campaigns — only the world owner can spawn a new campaign.
   if (folderPath === 'Campaigns') {
-    return { kinds: ['campaign'], isUpload: false, labelOverrides: {} };
+    return {
+      kinds: isWorldOwner ? ['campaign'] : [],
+      isUpload: false,
+      labelOverrides: {},
+    };
   }
 
   // Campaign root (Campaigns/<slug>) — entity kinds only, no folder creation
@@ -164,6 +168,7 @@ export function FileTree({
   groupId,
   csrfToken,
   canCreate,
+  isWorldOwner,
   kindMap,
 }: {
   tree: Tree;
@@ -171,6 +176,9 @@ export function FileTree({
   groupId: string;
   csrfToken: string;
   canCreate: boolean;
+  /** True when the current user is the group admin. Gates actions
+   *  reserved to the world owner (e.g. creating a new campaign). */
+  isWorldOwner: boolean;
   /** Path → note kind. Rows with a kind get a small icon so the
    *  sidebar reads like a roster at a glance. */
   kindMap?: KindMap;
@@ -493,7 +501,24 @@ export function FileTree({
     [csrfToken, router],
   );
 
-  const items = useMemo(() => flatten(tree.root, open, 0), [tree.root, open]);
+  // The Campaigns folder (and every descendant) is always expanded —
+  // it's the primary navigation surface, so we override the user's
+  // persisted open set for that subtree rather than making them
+  // re-expand it on every page load.
+  const items = useMemo(() => {
+    const effective = new Set(open);
+    const walk = (dir: TreeDir): void => {
+      for (const child of dir.children) {
+        if (child.kind !== 'dir') continue;
+        if (child.path === 'Campaigns' || child.path.startsWith('Campaigns/')) {
+          effective.add(child.path);
+        }
+        walk(child);
+      }
+    };
+    walk(tree.root);
+    return flatten(tree.root, effective, 0);
+  }, [tree.root, open]);
 
   return (
     <KindMapContext.Provider value={kindMap ?? EMPTY_KIND_MAP}>
@@ -520,6 +545,7 @@ export function FileTree({
             onUpload={(files) => void uploadAsset(files, '')}
             variant="wide"
             folderPath=""
+            isWorldOwner={isWorldOwner}
           />
         </div>
       )}
@@ -575,6 +601,7 @@ export function FileTree({
             item={item}
             activePath={activePath}
             canCreate={canCreate}
+            isWorldOwner={isWorldOwner}
             csrfToken={csrfToken}
             isRenaming={renamingPath === item.path}
             renameDisabled={renaming}
@@ -705,6 +732,7 @@ function TreeRow({
   item,
   activePath,
   canCreate,
+  isWorldOwner,
   csrfToken,
   isRenaming,
   renameDisabled,
@@ -726,6 +754,7 @@ function TreeRow({
   item: FlatRow;
   activePath: string;
   canCreate: boolean;
+  isWorldOwner: boolean;
   csrfToken: string;
   isRenaming: boolean;
   renameDisabled: boolean;
@@ -848,6 +877,7 @@ function TreeRow({
                 variant="compact"
                 folderName={item.name}
                 folderPath={item.path}
+                isWorldOwner={isWorldOwner}
               />
               {isSystem ? (
                 <span
@@ -930,18 +960,20 @@ function NewEntryDropdown({
   variant,
   folderName,
   folderPath,
+  isWorldOwner,
 }: {
   onPick: (kind: CreateKind) => void;
   onUpload?: (files: FileList) => void;
   variant: 'wide' | 'compact';
   folderName?: string;
   folderPath?: string;
-}): React.JSX.Element {
+  isWorldOwner: boolean;
+}): React.JSX.Element | null {
   const [open, setOpen] = useState<boolean>(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { kinds, isUpload, labelOverrides } = getContextualOptions(folderPath);
+  const { kinds, isUpload, labelOverrides } = getContextualOptions(folderPath, isWorldOwner);
 
   useEffect(() => {
     if (!open) return;
@@ -996,6 +1028,10 @@ function NewEntryDropdown({
   }
 
   const visibleOptions = NEW_ENTRY_OPTIONS.filter((o) => kinds.includes(o.kind));
+
+  // Nothing to offer here (e.g. non-owner hovering the Campaigns folder) —
+  // hide the "+" affordance entirely rather than render a dead button.
+  if (visibleOptions.length === 0) return null;
 
   return (
     <div ref={wrapRef} className="relative">
