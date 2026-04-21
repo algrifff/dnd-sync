@@ -88,8 +88,13 @@ export function InlineText({
     },
     maxLength,
     // No click-chrome: transparent bg, no border, no padding — so the
-    // input sits in place of the button with zero visual shift.
-    className: `w-full bg-transparent p-0 outline-none ${inputClassName ?? ''}`,
+    // input sits in place of the button with zero visual shift. Width
+    // comes from the multiline branch below (w-full on textarea) or
+    // the consumer's inputClassName for singleline; default to 100%
+    // of the parent the button occupied via min-w-0 + intrinsic size.
+    className: `border-0 bg-transparent p-0 outline-none focus:outline-none focus:ring-0 ${
+      multiline ? 'w-full' : 'min-w-0'
+    } ${inputClassName ?? ''}`,
     'aria-label': ariaLabel ?? 'Edit',
   };
 

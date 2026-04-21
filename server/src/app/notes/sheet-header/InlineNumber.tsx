@@ -107,7 +107,7 @@ export function InlineNumber({
       aria-label={ariaLabel ?? 'Edit number'}
       // No click-chrome: transparent bg, no border, no padding; spinners
       // hidden so the input renders at the same size as the button.
-      className={`bg-transparent p-0 text-center outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${inputClassName ?? ''}`}
+      className={`border-0 bg-transparent p-0 text-center outline-none focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${inputClassName ?? ''}`}
     />
   );
 }
