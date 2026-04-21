@@ -34,6 +34,7 @@ export function StatTile({
           <InlineNumber
             value={value ?? null}
             onCommit={onCommit}
+            className="font-serif text-lg font-semibold text-[#2A241E]"
             inputClassName="font-serif text-lg font-semibold w-12 text-[#2A241E]"
             ariaLabel={label}
           />

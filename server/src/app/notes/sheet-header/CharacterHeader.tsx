@@ -187,6 +187,7 @@ export function CharacterHeader({
                   value={hp.current}
                   onCommit={setHpCurrent}
                   readOnly={!canEdit}
+                  className="font-serif text-lg font-semibold text-[#2A241E]"
                   inputClassName="font-serif text-lg font-semibold w-12 text-[#2A241E]"
                   ariaLabel="HP current"
                 />
@@ -195,6 +196,7 @@ export function CharacterHeader({
                   value={hp.max}
                   onCommit={setHpMax}
                   readOnly={!canEdit}
+                  className="font-serif text-lg font-semibold text-[#2A241E]"
                   inputClassName="font-serif text-lg font-semibold w-12 text-[#2A241E]"
                   ariaLabel="HP max"
                 />

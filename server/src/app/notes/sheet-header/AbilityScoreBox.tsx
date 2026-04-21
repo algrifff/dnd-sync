@@ -37,6 +37,10 @@ export function AbilityScoreBox({
           onCommit={(n) => onCommit(n ?? 10)}
           min={1}
           max={30}
+          // Same classes on both display button and edit input so the
+          // font / size / weight stay identical whether you're editing
+          // or just looking at the number.
+          className="font-serif text-3xl font-semibold leading-tight text-[#2A241E]"
           inputClassName="font-serif text-3xl font-semibold leading-tight w-16 text-[#2A241E]"
           ariaLabel={label}
         />
