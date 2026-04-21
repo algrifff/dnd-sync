@@ -15,7 +15,10 @@ export function AbilityScoreStrip({
   onChange?: ((next: Record<AbilityKey, number>) => void) | undefined;
 }): React.JSX.Element {
   return (
-    <div className="flex flex-wrap gap-1.5">
+    // 6-column grid so the boxes fill the full header width and stay
+    // evenly spaced at any column width; `aspect-square` on each box
+    // preserves the ~1:1 ratio as the row grows.
+    <div className="grid grid-cols-6 gap-3">
       {KEYS.map((k) => (
         <AbilityScoreBox
           key={k}
