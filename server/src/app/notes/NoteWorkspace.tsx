@@ -9,7 +9,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import * as Y from 'yjs';
 import { TitleEditor } from './TitleEditor';
-import { TagEditor } from './TagEditor';
 import { NoteSurface, type SurfaceUser } from './NoteSurface';
 import { PointerOverlay } from './PointerOverlay';
 import { DrawingOverlay } from './DrawingOverlay';
@@ -33,23 +32,17 @@ export type CharacterProp = {
 export function NoteWorkspace({
   path,
   initialContent,
-  initialTags,
   user,
   canEdit,
   csrfToken,
-  creator,
-  createdAt,
   character,
   accentColor,
 }: {
   path: string;
   initialContent: { type: string } & Record<string, unknown>;
-  initialTags: string[];
   user: SurfaceUser;
   canEdit: boolean;
   csrfToken: string;
-  creator: { displayName: string; username: string } | null;
-  createdAt: number;
   character: CharacterProp | null;
   /** Per-world accent colour (groups.header_color); falls back to a
    *  parchment-friendly default in the sheet header. */
@@ -103,45 +96,19 @@ export function NoteWorkspace({
 
       {/* ── Note header ─────────────────────────────────────────── */}
       {showSheetHeader && character ? (
-        <>
-          <SheetHeader
-            rawKind={character.rawKind}
-            initialSheet={character.sheet}
-            notePath={path}
-            csrfToken={csrfToken}
-            provider={provider}
-            canEdit={character.canWriteAll}
-            displayName={character.displayName}
-            accentColor={accentColor}
-          />
-          <div className="mb-4">
-            {creator && createdAt > 0 && (
-              <p className="mb-2 text-[11px] text-[#5A4F42]">
-                Created by{' '}
-                <span className="font-medium text-[#2A241E]">
-                  {creator.displayName || creator.username}
-                </span>{' '}
-                · {formatCreatedAt(createdAt)}
-              </p>
-            )}
-            <TagEditor path={path} initialTags={initialTags} csrfToken={csrfToken} canEdit={canEdit} />
-          </div>
-        </>
+        <SheetHeader
+          rawKind={character.rawKind}
+          initialSheet={character.sheet}
+          notePath={path}
+          csrfToken={csrfToken}
+          provider={provider}
+          canEdit={character.canWriteAll}
+          displayName={character.displayName}
+          accentColor={accentColor}
+        />
       ) : (
         <div className="mb-4">
           <TitleEditor ydoc={ydoc} />
-          {creator && createdAt > 0 && (
-            <p className="mt-1 text-xs text-[#5A4F42]">
-              Created by{' '}
-              <span className="font-medium text-[#2A241E]">
-                {creator.displayName || creator.username}
-              </span>{' '}
-              · {formatCreatedAt(createdAt)}
-            </p>
-          )}
-          <div className="mt-2">
-            <TagEditor path={path} initialTags={initialTags} csrfToken={csrfToken} canEdit={canEdit} />
-          </div>
         </div>
       )}
 
@@ -216,15 +183,6 @@ function StatusDot({
       style={{ backgroundColor: color }}
     />
   );
-}
-
-function formatCreatedAt(ts: number): string {
-  const d = new Date(ts);
-  return d.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
 }
 
 function buildCollabUrl(): string {

@@ -26,6 +26,7 @@ import { SidebarFooter } from '../../SidebarFooter';
 import { FileTree } from '../FileTree';
 import { NoteMenu } from '../NoteMenu';
 import { NoteWorkspace } from '../NoteWorkspace';
+import { TagEditor } from '../TagEditor';
 import { NoteSidebar, extractOutline } from '../NoteSidebar';
 import { ChatPane } from '../../ChatPane';
 
@@ -138,7 +139,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
             className="relative w-[1600px] shrink-0 self-start"
           >
           <div className="relative mx-auto max-w-[720px]">
-            <header className="mb-4 flex items-center justify-between gap-3">
+            <header className="mb-2 flex items-center justify-between gap-3">
               <p className="text-xs text-[#5A4F42]">
                 <code>{path}</code>
               </p>
@@ -166,10 +167,35 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
               )}
             </header>
 
+            {/* Page-level metadata: creator + tags sit directly under the
+             *  filepath so tags can span the full column width regardless
+             *  of the per-kind SheetHeader layout below. */}
+            <div className="mb-4">
+              {creator && note.created_at > 0 && (
+                <p className="mb-2 text-[11px] text-[#5A4F42]">
+                  Created by{' '}
+                  <span className="font-medium text-[#2A241E]">
+                    {creator.displayName || creator.username}
+                  </span>{' '}
+                  · {formatCreatedAt(note.created_at)}
+                </p>
+              )}
+              <TagEditor
+                path={path}
+                initialTags={tags}
+                csrfToken={session.csrfToken}
+                canEdit={canEditNote({
+                  role: session.role,
+                  userId: session.userId,
+                  createdBy: note.created_by,
+                  character,
+                })}
+              />
+            </div>
+
             <NoteWorkspace
               path={path}
               initialContent={contentJson as { type: string } & Record<string, unknown>}
-              initialTags={tags}
               user={{
                 userId: session.userId,
                 displayName: session.displayName,
@@ -184,15 +210,6 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                 character,
               })}
               csrfToken={session.csrfToken}
-              creator={
-                creator
-                  ? {
-                      displayName: creator.displayName,
-                      username: creator.username,
-                    }
-                  : null
-              }
-              createdAt={note.created_at}
               character={character}
               accentColor={accentColor}
             />
@@ -228,6 +245,15 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
 function campaignSlugFromPath(path: string): string | undefined {
   return /^Campaigns\/([^/]+)\//.exec(path)?.[1];
+}
+
+function formatCreatedAt(ts: number): string {
+  const d = new Date(ts);
+  return d.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
 const CHARACTER_KINDS_BY_PATH: Array<[RegExp, TemplateKind]> = [
