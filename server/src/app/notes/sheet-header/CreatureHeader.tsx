@@ -157,7 +157,7 @@ export function CreatureHeader({
                   value={hp.current}
                   onCommit={(n) => setHp(n, hp.max)}
                   readOnly={!canEdit}
-                  inputClassName="font-serif text-lg w-12"
+                  inputClassName="font-serif text-lg font-semibold w-12"
                   ariaLabel="HP current"
                 />
                 <span className="text-xs text-[#5A4F42]">/</span>
@@ -165,7 +165,7 @@ export function CreatureHeader({
                   value={hp.max}
                   onCommit={(n) => setHp(hp.current, n)}
                   readOnly={!canEdit}
-                  inputClassName="font-serif text-lg w-12"
+                  inputClassName="font-serif text-lg font-semibold w-12"
                   ariaLabel="HP max"
                 />
               </StatTile>

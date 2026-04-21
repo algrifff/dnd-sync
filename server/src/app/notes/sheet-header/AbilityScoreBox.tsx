@@ -28,7 +28,7 @@ export function AbilityScoreBox({
         {label}
       </span>
       {readOnly || !onCommit ? (
-        <span className="font-serif text-3xl leading-tight text-[#2A241E]">
+        <span className="font-serif text-3xl font-semibold leading-tight text-[#2A241E]">
           {score}
         </span>
       ) : (
@@ -37,11 +37,13 @@ export function AbilityScoreBox({
           onCommit={(n) => onCommit(n ?? 10)}
           min={1}
           max={30}
-          inputClassName="font-serif text-3xl w-16 text-center"
+          inputClassName="font-serif text-3xl font-semibold w-16 text-center"
           ariaLabel={label}
         />
       )}
-      <span className="text-sm text-[#5A4F42]">{formatModifier(mod)}</span>
+      <span className="text-sm font-medium text-[#5A4F42]">
+        {formatModifier(mod)}
+      </span>
     </div>
   );
 }

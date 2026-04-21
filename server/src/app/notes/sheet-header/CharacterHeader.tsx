@@ -187,7 +187,7 @@ export function CharacterHeader({
                   value={hp.current}
                   onCommit={setHpCurrent}
                   readOnly={!canEdit}
-                  inputClassName="font-serif text-lg w-12"
+                  inputClassName="font-serif text-lg font-semibold w-12"
                   ariaLabel="HP current"
                 />
                 <span className="text-xs text-[#5A4F42]">/</span>
@@ -195,7 +195,7 @@ export function CharacterHeader({
                   value={hp.max}
                   onCommit={setHpMax}
                   readOnly={!canEdit}
-                  inputClassName="font-serif text-lg w-12"
+                  inputClassName="font-serif text-lg font-semibold w-12"
                   ariaLabel="HP max"
                 />
               </StatTile>
