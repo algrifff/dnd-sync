@@ -26,7 +26,6 @@ import { FileTree } from '../FileTree';
 import { NoteMenu } from '../NoteMenu';
 import { NoteWorkspace } from '../NoteWorkspace';
 import { NoteSidebar, extractOutline } from '../NoteSidebar';
-import { ActiveCharacterBlock } from '../ActiveCharacterBlock';
 import { ChatPane } from '../../ChatPane';
 
 export const dynamic = 'force-dynamic';
@@ -104,10 +103,6 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
         />
       <div className="flex min-h-0 flex-1 overflow-hidden">
       <aside className="hidden h-full w-[260px] shrink-0 flex-col bg-[#EAE1CF]/60 md:flex">
-        <ActiveCharacterBlock
-          csrfToken={session.csrfToken}
-          initialActivePath={session.activeCharacterPath}
-        />
         <SidebarHeader role={session.role} />
         <FileTree
           tree={tree}

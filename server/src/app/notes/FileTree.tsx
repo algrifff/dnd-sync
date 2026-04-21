@@ -71,17 +71,18 @@ const NEW_ENTRY_OPTIONS: Array<{
   icon: typeof FileText;
   placeholder: string;
 }> = [
+  { kind: 'session', label: 'Adventure log', icon: CalendarDays, placeholder: 'Session notes' },
+  { kind: 'npc', label: 'Person', icon: UserRound, placeholder: 'New person' },
+  { kind: 'villain', label: 'Enemy', icon: Skull, placeholder: 'New enemy' },
+  { kind: 'item', label: 'Loot', icon: Package, placeholder: 'New item' },
+  { kind: 'location', label: 'Place', icon: MapIcon, placeholder: 'New place' },
+  { kind: 'monster', label: 'Creature', icon: Ghost, placeholder: 'New creature' },
+  // kept for canonical subfolder + rename flows; not surfaced in general menus
   { kind: 'page', label: 'Page', icon: FileText, placeholder: 'Untitled' },
   { kind: 'folder', label: 'Folder', icon: FolderPlus, placeholder: 'New folder' },
   { kind: 'campaign', label: 'New campaign', icon: Shield, placeholder: 'Campaign name' },
   { kind: 'pc', label: 'Player character', icon: Sword, placeholder: 'New PC' },
-  { kind: 'npc', label: 'Person (NPC)', icon: UserRound, placeholder: 'New person' },
   { kind: 'ally', label: 'Ally', icon: UserRound, placeholder: 'New ally' },
-  { kind: 'villain', label: 'Enemy', icon: Skull, placeholder: 'New enemy' },
-  { kind: 'item', label: 'Loot', icon: Package, placeholder: 'New item' },
-  { kind: 'location', label: 'Place', icon: MapIcon, placeholder: 'New place' },
-  { kind: 'session', label: 'Adventure log', icon: CalendarDays, placeholder: 'Session notes' },
-  { kind: 'monster', label: 'Creature', icon: Ghost, placeholder: 'New creature' },
 ];
 
 /** Returns the subset of CreateKinds appropriate for a given folder path,
@@ -93,7 +94,7 @@ function getContextualOptions(folderPath: string | undefined): {
   labelOverrides: Partial<Record<CreateKind, string>>;
 } {
   if (!folderPath) {
-    return { kinds: ['page', 'folder', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'monster'], isUpload: false, labelOverrides: {} };
+    return { kinds: ['session', 'npc', 'villain', 'item', 'location', 'monster'], isUpload: false, labelOverrides: {} };
   }
 
   // Assets section — file upload only
@@ -106,14 +107,14 @@ function getContextualOptions(folderPath: string | undefined): {
     return { kinds: ['campaign'], isUpload: false, labelOverrides: {} };
   }
 
-  // Campaign root (Campaigns/<slug>) — all entity kinds + subfolder
+  // Campaign root (Campaigns/<slug>) — entity kinds only, no folder creation
   if (/^Campaigns\/[^/]+$/.test(folderPath)) {
-    return { kinds: ['pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'monster', 'folder'], isUpload: false, labelOverrides: { folder: 'New subfolder' } };
+    return { kinds: ['session', 'npc', 'villain', 'item', 'location', 'monster'], isUpload: false, labelOverrides: {} };
   }
 
   // Per-campaign canonical sub-folders
   if (/^Campaigns\/[^/]+\/Characters$/.test(folderPath))    return { kinds: ['pc', 'folder'],              isUpload: false, labelOverrides: {} };
-  if (/^Campaigns\/[^/]+\/People$/.test(folderPath))        return { kinds: ['npc', 'ally', 'folder'],     isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/People$/.test(folderPath))        return { kinds: ['npc', 'folder'],             isUpload: false, labelOverrides: {} };
   if (/^Campaigns\/[^/]+\/Enemies$/.test(folderPath))       return { kinds: ['villain', 'folder'],         isUpload: false, labelOverrides: {} };
   if (/^Campaigns\/[^/]+\/Loot$/.test(folderPath))          return { kinds: ['item', 'folder'],            isUpload: false, labelOverrides: {} };
   if (/^Campaigns\/[^/]+\/Adventure Log$/.test(folderPath)) return { kinds: ['session', 'folder'],         isUpload: false, labelOverrides: {} };
@@ -131,8 +132,8 @@ function getContextualOptions(folderPath: string | undefined): {
     return { kinds: ['page', 'folder'], isUpload: false, labelOverrides: {} };
   }
 
-  // Default — all options
-  return { kinds: ['page', 'folder', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'monster'], isUpload: false, labelOverrides: {} };
+  // Default
+  return { kinds: ['session', 'npc', 'villain', 'item', 'location', 'monster'], isUpload: false, labelOverrides: {} };
 }
 
 type LucideIcon = typeof Sword;

@@ -9,8 +9,6 @@ import {
   Home,
   Tag,
   Share2,
-  UserRound,
-  CalendarDays,
   Image as ImageIcon,
 } from 'lucide-react';
 
@@ -24,8 +22,6 @@ export function SidebarHeader({
       <IconLink href="/" label="Home" icon={<Home size={16} aria-hidden />} />
       <IconLink href="/tags" label="Tags" icon={<Tag size={16} aria-hidden />} />
       <IconLink href="/graph" label="Graph" icon={<Share2 size={16} aria-hidden />} />
-      <IconLink href="/characters" label="Cast" icon={<UserRound size={16} aria-hidden />} />
-      <IconLink href="/sessions" label="Sessions" icon={<CalendarDays size={16} aria-hidden />} />
       <IconLink href="/assets" label="Assets" icon={<ImageIcon size={16} aria-hidden />} />
     </div>
   );
