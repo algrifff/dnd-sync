@@ -140,9 +140,6 @@ export function GraphCanvas({
   // cursors at their latest screen positions (camera pan/zoom,
   // dragged nodes, physics — all update the graph→viewport mapping).
   const [renderTick, setRenderTick] = useState<number>(0);
-  // Incremented when the server signals that note_links changed so we
-  // re-fetch graph data without a full page reload.
-  const [graphVersion, setGraphVersion] = useState<number>(0);
   const [nodeScale, setNodeScale] = useState<number>(1);
   const nodeScaleRef = useRef<number>(1);
 
@@ -202,14 +199,7 @@ export function GraphCanvas({
     [groupsYdoc],
   );
 
-  // Re-fetch graph data when the server signals note_links changed.
-  useEffect(() => {
-    const onMeta = (): void => {
-      if (metaMap.has('graphDirty')) setGraphVersion((v) => v + 1);
-    };
-    metaMap.observe(onMeta);
-    return () => metaMap.unobserve(onMeta);
-  }, [metaMap]);
+  // addNewEdges + its observer are defined after scopeParam (below).
 
   useEffect(() => {
     return () => {
@@ -224,6 +214,43 @@ export function GraphCanvas({
     if (scope.kind === 'tag') return `tag:${scope.tag}`;
     return 'all';
   }, [scope]);
+
+  // When the server signals note_links changed, add only NEW edges to
+  // the live graph without rebuilding Sigma (avoids the flash/reset).
+  const addNewEdges = useCallback(async (): Promise<void> => {
+    const g = graphRef.current;
+    if (!g) return;
+    try {
+      const res = await fetch(`/api/graph?scope=${encodeURIComponent(scopeParam)}`, {
+        cache: 'no-store',
+      });
+      if (!res.ok) return;
+      const payload = (await res.json()) as GraphPayload;
+      let changed = false;
+      for (const e of payload.edges) {
+        if (!g.hasNode(e.source) || !g.hasNode(e.target)) continue;
+        const key = `${e.source}→${e.target}`;
+        if (!g.hasEdge(key)) {
+          g.addEdgeWithKey(key, e.source, e.target, {
+            size: 1,
+            color: 'rgba(42, 36, 30, 0.4)',
+          });
+          changed = true;
+        }
+      }
+      if (changed) setCounts({ nodes: g.order, edges: g.size });
+    } catch {
+      /* ignore — stale graph is better than a crash */
+    }
+  }, [scopeParam]);
+
+  useEffect(() => {
+    const onMeta = (): void => {
+      if (metaMap.has('graphDirty')) void addNewEdges();
+    };
+    metaMap.observe(onMeta);
+    return () => metaMap.unobserve(onMeta);
+  }, [metaMap, addNewEdges]);
 
   // Resolve a node's colour in this order:
   //   1. group membership — first matching group wins. A node matches
@@ -744,6 +771,17 @@ export function GraphCanvas({
             renderer.setSetting('nodeReducer', null);
 
             if (source && target && source !== target) {
+              // Add the edge immediately to the live graph for instant
+              // feedback — no Sigma rebuild, no flash.
+              const key = `${source}→${target}`;
+              if (g.hasNode(source) && g.hasNode(target) && !g.hasEdge(key)) {
+                g.addEdgeWithKey(key, source, target, {
+                  size: 1,
+                  color: 'rgba(42, 36, 30, 0.4)',
+                });
+                setCounts({ nodes: g.order, edges: g.size });
+              }
+              // Persist to DB then signal remote peers to pull the new edge.
               void fetch('/api/notes/backlink', {
                 method: 'POST',
                 headers: {
@@ -752,7 +790,6 @@ export function GraphCanvas({
                 },
                 body: JSON.stringify({ fromPath: source, toPath: target }),
               }).then(() => {
-                // Signal the graph to re-fetch edges.
                 metaMap.set('graphDirty', Date.now());
               });
             }
@@ -835,7 +872,6 @@ export function GraphCanvas({
     me.accentColor,
     me.cursorMode,
     me.avatarVersion,
-    graphVersion,
   ]);
 
   // Live re-colour when tag overrides change without rebuilding the

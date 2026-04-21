@@ -68,15 +68,20 @@ export function BacklinksPanel({
               >
                 {b.title || baseName(b.from_path)}
               </Link>
-              <button
-                type="button"
-                onClick={() => remove(b.from_path)}
-                title={`Remove link from ${baseName(b.from_path)}`}
-                aria-label={`Remove backlink from ${baseName(b.from_path)}`}
-                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[#5A4F42] opacity-0 transition hover:bg-[#8B4A52]/15 hover:text-[#8B4A52] group-hover:opacity-100"
-              >
-                <X size={10} aria-hidden />
-              </button>
+              {/* Only manual links (added via + or graph drag) can be removed
+                  here. Body-derived links (is_manual=0) must be edited in the
+                  source note's content. */}
+              {b.is_manual === 1 && (
+                <button
+                  type="button"
+                  onClick={() => remove(b.from_path)}
+                  title={`Remove link from ${baseName(b.from_path)}`}
+                  aria-label={`Remove backlink from ${baseName(b.from_path)}`}
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[#5A4F42] opacity-0 transition hover:bg-[#8B4A52]/15 hover:text-[#8B4A52] group-hover:opacity-100"
+                >
+                  <X size={10} aria-hidden />
+                </button>
+              )}
             </li>
           ))}
         </ul>

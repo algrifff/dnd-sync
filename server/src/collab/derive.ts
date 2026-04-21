@@ -70,10 +70,12 @@ export function deriveAndPersist(opts: {
       opts.path,
     );
 
-    db.query('DELETE FROM note_links WHERE group_id = ? AND from_path = ?').run(
-      opts.groupId,
-      opts.path,
-    );
+    // Only delete body-derived links (is_manual = 0). Manual links created
+    // via the sidebar "+" or graph link-draw mode survive re-derive so they
+    // persist even when a note is saved without the wikilink in its body.
+    db.query(
+      'DELETE FROM note_links WHERE group_id = ? AND from_path = ? AND is_manual = 0',
+    ).run(opts.groupId, opts.path);
     db.query('DELETE FROM tags WHERE group_id = ? AND path = ?').run(
       opts.groupId,
       opts.path,

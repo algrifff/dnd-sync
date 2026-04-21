@@ -455,6 +455,13 @@ const MIGRATIONS: readonly Migration[] = [
     description: 'groups: header_color for custom world name colour in the top bar',
     sql: `ALTER TABLE groups ADD COLUMN header_color TEXT;`,
   },
+  {
+    version: 23,
+    description: 'note_links: is_manual flag for explicit sidebar/graph links',
+    sql: `
+      ALTER TABLE note_links ADD COLUMN is_manual INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

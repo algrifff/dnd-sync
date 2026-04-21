@@ -81,6 +81,7 @@ export default async function GraphPage(): Promise<ReactElement> {
           <GraphCanvas
             groupId={session.currentGroupId}
             allTags={allTags}
+            csrfToken={session.csrfToken}
             me={{
               userId: session.userId,
               displayName: session.displayName,

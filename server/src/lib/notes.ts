@@ -34,6 +34,8 @@ export type NotePreview = {
 export type BacklinkRow = {
   from_path: string;
   title: string;
+  /** 1 = created via sidebar/graph UI; 0 = derived from [[wikilink]] in body */
+  is_manual: number;
 };
 
 export type OutgoingLinkRow = {
@@ -91,7 +93,9 @@ export function loadBacklinks(
     : '';
   return getDb()
     .query<BacklinkRow, [string, string]>(
-      `SELECT nl.from_path AS from_path, COALESCE(n.title, nl.from_path) AS title
+      `SELECT nl.from_path AS from_path,
+              COALESCE(n.title, nl.from_path) AS title,
+              nl.is_manual AS is_manual
          FROM note_links nl
          LEFT JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.from_path
         WHERE nl.group_id = ? AND nl.to_path = ?${dmFilter}
