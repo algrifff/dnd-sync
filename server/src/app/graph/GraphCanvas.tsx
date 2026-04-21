@@ -31,6 +31,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Menu, X } from 'lucide-react';
 import * as Y from 'yjs';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import Graph from 'graphology';
@@ -146,6 +147,7 @@ export function GraphCanvas({
   // Link-draw mode: toggle button switches between pan/drag and
   // rubber-band link creation. Refs keep the interaction handlers
   // (defined once in the main effect) up-to-date without re-running.
+  const [menuOpen, setMenuOpen] = useState<boolean>(true);
   const [linkMode, setLinkMode] = useState<boolean>(false);
   const linkModeRef = useRef<boolean>(false);
   const linkSourceRef = useRef<string | null>(null);
@@ -1011,181 +1013,231 @@ export function GraphCanvas({
         </svg>
       )}
 
-      <div className="pointer-events-none absolute left-4 top-4 w-64 space-y-2 text-sm">
-        <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
-            Scope
-          </label>
-          <select
-            value={scope.kind === 'tag' ? `tag:${scope.tag}` : 'all'}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === 'all') setScope({ kind: 'all' });
-              else if (v.startsWith('tag:')) setScope({ kind: 'tag', tag: v.slice(4) });
-            }}
-            className="w-full rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
+      {/* ── Roam / Weave mode toggle — top centre ──────────────────── */}
+      <div
+        className="pointer-events-auto absolute left-1/2 top-4 -translate-x-1/2"
+        style={{ zIndex: 8 }}
+      >
+        <button
+          type="button"
+          role="switch"
+          aria-checked={linkMode}
+          onClick={() => setLinkMode((m) => !m)}
+          title={linkMode ? 'Weave mode — drag between nodes to forge a link' : 'Roam mode — drag to explore'}
+          className="relative flex h-10 w-56 select-none items-center rounded-full border border-[#D4C7AE] bg-[#FBF5E8] p-1 shadow-[0_4px_14px_rgba(42,36,30,0.14)] transition-shadow hover:shadow-[0_6px_18px_rgba(42,36,30,0.18)]"
+        >
+          {/* Sliding pill */}
+          <span
+            aria-hidden
+            className={[
+              'absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-full transition-all duration-200',
+              linkMode ? 'left-[calc(50%+0px)] bg-[#8B4A52]' : 'left-1 bg-[#D4A85A]',
+            ].join(' ')}
+          />
+          <span
+            className={[
+              'relative z-10 flex-1 text-center text-xs font-semibold tracking-wide transition-colors',
+              !linkMode ? 'text-[#2A241E]' : 'text-[#5A4F42]/70',
+            ].join(' ')}
           >
-            <option value="all">All notes</option>
-            {allTags.length > 0 && (
-              <optgroup label="By tag">
-                {allTags.map((t) => (
-                  <option key={t} value={`tag:${t}`}>
-                    #{t}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </select>
-        </div>
+            ⚔ Roam
+          </span>
+          <span
+            className={[
+              'relative z-10 flex-1 text-center text-xs font-semibold tracking-wide transition-colors',
+              linkMode ? 'text-white' : 'text-[#5A4F42]/70',
+            ].join(' ')}
+          >
+            ✦ Weave
+          </span>
+        </button>
+      </div>
 
-        <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
-          <div className="mb-1 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
-              Labels
-            </span>
-            <span className="text-xs text-[#5A4F42]">{labelModeLabel(labelMode)}</span>
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={2}
-            step={1}
-            value={labelMode === 'none' ? 0 : labelMode === 'some' ? 1 : 2}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              setLabelMode(v === 0 ? 'none' : v === 1 ? 'some' : 'all');
-            }}
-            className="w-full accent-[#8B4A52]"
-          />
-        </div>
+      {/* ── Left control panel ─────────────────────────────────────── */}
+      <div className="pointer-events-none absolute left-4 top-4 flex flex-col gap-2 text-sm">
+        {/* Burger — always visible */}
+        <button
+          type="button"
+          onClick={() => setMenuOpen((o) => !o)}
+          title={menuOpen ? 'Hide controls' : 'Show controls'}
+          aria-label={menuOpen ? 'Hide controls' : 'Show controls'}
+          className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] text-[#5A4F42] shadow-[0_6px_18px_rgba(42,36,30,0.08)] transition hover:bg-[#F4EDE0] hover:text-[#2A241E]"
+        >
+          {menuOpen ? <X size={15} aria-hidden /> : <Menu size={15} aria-hidden />}
+        </button>
 
-        <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
-          <div className="mb-1 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
-              Node size
-            </span>
-            <span className="text-xs text-[#5A4F42]">{nodeScale.toFixed(1)}×</span>
-          </div>
-          <input
-            type="range"
-            min={0.5}
-            max={3}
-            step={0.1}
-            value={nodeScale}
-            onChange={(e) => setNodeScale(Number(e.target.value))}
-            className="w-full accent-[#8B4A52]"
-          />
-        </div>
-
-        <div className="pointer-events-auto flex items-center gap-1 rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-1 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
-          <ToolButton onClick={() => zoomBy(1 / 1.4)} label="−" title="Zoom in" />
-          <ToolButton onClick={() => zoomBy(1.4)} label="＋" title="Zoom out" />
-          <ToolButton onClick={fit} label="Fit" title="Recentre" />
-          <ToolButton onClick={clearPins} label="Unpin" title="Clear all pins" />
-          <ToolButton
-            onClick={() => setPalette((p) => !p)}
-            label={palette ? 'Hide' : 'Colours'}
-            title="Tag colour overrides"
-          />
-          <ToolButton
-            onClick={() => setLinkMode((m) => !m)}
-            label="Link"
-            title={linkMode ? 'Exit link mode (drag between nodes to connect)' : 'Link mode — drag from one node to another to connect them'}
-            active={linkMode}
-          />
-        </div>
-
-        {palette && (
-          <div className="pointer-events-auto max-h-64 overflow-y-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
-            <div className="mb-2 text-xs text-[#5A4F42]">
-              Override the colour for any tag. Reset to default by clicking ⟲.
-            </div>
-            {paletteTags.length === 0 ? (
-              <div className="text-xs text-[#5A4F42]">No tags yet.</div>
-            ) : (
-              <ul className="space-y-1">
-                {paletteTags.map((t) => {
-                  const current = tagColors[t] ?? colorForTags([t]);
-                  const isOverride = t in tagColors;
-                  return (
-                    <li key={t} className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={current}
-                        onChange={(e) => coloursMap.set(t, e.target.value)}
-                        className="h-6 w-6 cursor-pointer rounded-[4px] border border-[#D4C7AE] bg-transparent p-0"
-                      />
-                      <span className="flex-1 truncate text-xs text-[#2A241E]">#{t}</span>
-                      {isOverride && (
-                        <button
-                          type="button"
-                          onClick={() => coloursMap.delete(t)}
-                          title="Reset"
-                          aria-label={`Reset colour for #${t}`}
-                          className="rounded-[4px] px-1 text-xs text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]"
-                        >
-                          ⟲
-                        </button>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        )}
-
-        {palette && (
-          <div className="pointer-events-auto max-h-72 overflow-y-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
-                Groups
-              </span>
-              <button
-                type="button"
-                onClick={createGroup}
-                className="rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-0.5 text-xs text-[#5A4F42] transition hover:bg-[#EAE1CF] hover:text-[#2A241E]"
+        {menuOpen && (
+          <div className="flex w-64 flex-col gap-2">
+            <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+                Scope
+              </label>
+              <select
+                value={scope.kind === 'tag' ? `tag:${scope.tag}` : 'all'}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === 'all') setScope({ kind: 'all' });
+                  else if (v.startsWith('tag:')) setScope({ kind: 'tag', tag: v.slice(4) });
+                }}
+                className="w-full rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
               >
-                + New
-              </button>
+                <option value="all">All notes</option>
+                {allTags.length > 0 && (
+                  <optgroup label="By tag">
+                    {allTags.map((t) => (
+                      <option key={t} value={`tag:${t}`}>
+                        #{t}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
             </div>
-            {groups.length === 0 ? (
-              <div className="text-xs text-[#5A4F42]">
-                Create a group to paint multiple tags or specific notes the
-                same colour.
+
+            <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+                  Labels
+                </span>
+                <span className="text-xs text-[#5A4F42]">{labelModeLabel(labelMode)}</span>
               </div>
-            ) : (
-              <ul className="space-y-2">
-                {groups.map((g) => (
-                  <GroupEditor
-                    key={g.id}
-                    group={g}
-                    paletteTags={paletteTags}
-                    onUpdate={(next) => groupsMap.set(g.id, next)}
-                    onDelete={() => groupsMap.delete(g.id)}
-                  />
-                ))}
-              </ul>
+              <input
+                type="range"
+                min={0}
+                max={2}
+                step={1}
+                value={labelMode === 'none' ? 0 : labelMode === 'some' ? 1 : 2}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setLabelMode(v === 0 ? 'none' : v === 1 ? 'some' : 'all');
+                }}
+                className="w-full accent-[#8B4A52]"
+              />
+            </div>
+
+            <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+                  Node size
+                </span>
+                <span className="text-xs text-[#5A4F42]">{nodeScale.toFixed(1)}×</span>
+              </div>
+              <input
+                type="range"
+                min={0.5}
+                max={3}
+                step={0.1}
+                value={nodeScale}
+                onChange={(e) => setNodeScale(Number(e.target.value))}
+                className="w-full accent-[#8B4A52]"
+              />
+            </div>
+
+            <div className="pointer-events-auto flex items-center gap-1 rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-1 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
+              <ToolButton onClick={() => zoomBy(1 / 1.4)} label="−" title="Zoom in" />
+              <ToolButton onClick={() => zoomBy(1.4)} label="＋" title="Zoom out" />
+              <ToolButton onClick={fit} label="Fit" title="Recentre" />
+              <ToolButton onClick={clearPins} label="Unpin" title="Clear all pins" />
+              <ToolButton
+                onClick={() => setPalette((p) => !p)}
+                label={palette ? 'Hide' : 'Colours'}
+                title="Tag colour overrides"
+              />
+            </div>
+
+            {palette && (
+              <div className="pointer-events-auto max-h-64 overflow-y-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
+                <div className="mb-2 text-xs text-[#5A4F42]">
+                  Override the colour for any tag. Reset to default by clicking ⟲.
+                </div>
+                {paletteTags.length === 0 ? (
+                  <div className="text-xs text-[#5A4F42]">No tags yet.</div>
+                ) : (
+                  <ul className="space-y-1">
+                    {paletteTags.map((t) => {
+                      const current = tagColors[t] ?? colorForTags([t]);
+                      const isOverride = t in tagColors;
+                      return (
+                        <li key={t} className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={current}
+                            onChange={(e) => coloursMap.set(t, e.target.value)}
+                            className="h-6 w-6 cursor-pointer rounded-[4px] border border-[#D4C7AE] bg-transparent p-0"
+                          />
+                          <span className="flex-1 truncate text-xs text-[#2A241E]">#{t}</span>
+                          {isOverride && (
+                            <button
+                              type="button"
+                              onClick={() => coloursMap.delete(t)}
+                              title="Reset"
+                              aria-label={`Reset colour for #${t}`}
+                              className="rounded-[4px] px-1 text-xs text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]"
+                            >
+                              ⟲
+                            </button>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
             )}
+
+            {palette && (
+              <div className="pointer-events-auto max-h-72 overflow-y-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+                    Groups
+                  </span>
+                  <button
+                    type="button"
+                    onClick={createGroup}
+                    className="rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-0.5 text-xs text-[#5A4F42] transition hover:bg-[#EAE1CF] hover:text-[#2A241E]"
+                  >
+                    + New
+                  </button>
+                </div>
+                {groups.length === 0 ? (
+                  <div className="text-xs text-[#5A4F42]">
+                    Create a group to paint multiple tags or specific notes the
+                    same colour.
+                  </div>
+                ) : (
+                  <ul className="space-y-2">
+                    {groups.map((g) => (
+                      <GroupEditor
+                        key={g.id}
+                        group={g}
+                        paletteTags={paletteTags}
+                        onUpdate={(next) => groupsMap.set(g.id, next)}
+                        onDelete={() => groupsMap.delete(g.id)}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            <div className="pointer-events-none text-xs text-[#5A4F42]">
+              {status === 'loading' && 'Loading graph…'}
+              {status === 'ready' && !linkMode && (
+                <>
+                  {counts.nodes} node{counts.nodes === 1 ? '' : 's'} ·{' '}
+                  {counts.edges} edge{counts.edges === 1 ? '' : 's'} · drag to
+                  anchor · shift-drag to pin · double-click to release
+                </>
+              )}
+              {status === 'ready' && linkMode && (
+                <span className="font-medium text-[#8B4A52]">
+                  Weave mode — drag from one node to another to forge a link
+                </span>
+              )}
+              {status === 'error' && <span className="text-[#8B4A52]">Error: {error}</span>}
+            </div>
           </div>
         )}
-
-        <div className="pointer-events-none text-xs text-[#5A4F42]">
-          {status === 'loading' && 'Loading graph…'}
-          {status === 'ready' && !linkMode && (
-            <>
-              {counts.nodes} node{counts.nodes === 1 ? '' : 's'} ·{' '}
-              {counts.edges} edge{counts.edges === 1 ? '' : 's'} · drag to
-              anchor · shift-drag to pin · double-click to release
-            </>
-          )}
-          {status === 'ready' && linkMode && (
-            <span className="font-medium text-[#8B4A52]">
-              Link mode — drag from one node to another to connect them
-            </span>
-          )}
-          {status === 'error' && <span className="text-[#8B4A52]">Error: {error}</span>}
-        </div>
       </div>
     </>
   );
