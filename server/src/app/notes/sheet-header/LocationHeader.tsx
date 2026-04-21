@@ -9,7 +9,7 @@ import { NoteAutocomplete } from './NoteAutocomplete';
 import { PortraitPicker } from './PortraitPicker';
 import { SaveIndicator } from './SaveIndicator';
 import { usePatchSheet } from './usePatchSheet';
-import { portraitUrl } from './util';
+import { portraitUrl, titleSizeClass } from './util';
 
 const TYPES = [
   { value: 'plane', label: 'Plane' },
@@ -73,8 +73,8 @@ export function LocationHeader({
                 <InlineText
                   value={name}
                   readOnly={!canEdit}
-                  className="font-serif text-4xl font-semibold leading-tight text-[#2A241E]"
-                  inputClassName="font-serif text-4xl font-semibold leading-tight text-[#2A241E]"
+                  className={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
+                  inputClassName={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
                   onCommit={(next) => patchSheet({ name: next })}
                   ariaLabel="Location name"
                 />

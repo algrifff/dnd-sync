@@ -16,6 +16,7 @@ import {
   readArmorClass,
   readHitPoints,
   readSpeed,
+  titleSizeClass,
 } from './util';
 
 const SIZES = [
@@ -110,8 +111,8 @@ export function CreatureHeader({
               <InlineText
                 value={name}
                 readOnly={!canEdit}
-                className="font-serif text-4xl font-semibold leading-tight text-[#2A241E]"
-                inputClassName="font-serif text-4xl font-semibold leading-tight text-[#2A241E]"
+                className={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
+                inputClassName={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
                 onCommit={(next) => patchSheet({ name: next })}
                 ariaLabel="Creature name"
               />

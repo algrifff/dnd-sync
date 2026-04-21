@@ -27,6 +27,7 @@ import {
   readInitiative,
   readSpeed,
   refName,
+  titleSizeClass,
 } from './util';
 
 export function CharacterHeader({
@@ -126,8 +127,8 @@ export function CharacterHeader({
               <InlineText
                 value={name}
                 readOnly={!canEdit}
-                className="font-serif text-4xl font-semibold leading-tight text-[#2A241E]"
-                inputClassName="font-serif text-4xl font-semibold leading-tight text-[#2A241E]"
+                className={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
+                inputClassName={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
                 onCommit={(next) => patchSheet({ name: next })}
                 ariaLabel="Character name"
               />
@@ -208,11 +209,25 @@ export function CharacterHeader({
                 onCommit={canEdit ? setSpeed : undefined}
               />
               <StatTile label="Init">
-                <span className="font-serif text-lg font-semibold text-[#2A241E]">
-                  {init == null
-                    ? formatModifier(abilityModifier(scores.dex))
-                    : formatModifier(init)}
-                </span>
+                <InlineNumber
+                  value={init ?? abilityModifier(scores.dex)}
+                  readOnly={!canEdit}
+                  // Editing the total, not the bonus — so the user types
+                  // the initiative they want and we back out the bonus
+                  // from DEX mod. Keeps the bonus stable when DEX later
+                  // changes (total follows DEX the way 5e rules expect).
+                  onCommit={(n) =>
+                    n == null
+                      ? undefined
+                      : patchSheet({
+                          initiative_bonus: n - abilityModifier(scores.dex),
+                        })
+                  }
+                  format={(n) => (n == null ? '—' : formatModifier(n))}
+                  className="font-serif text-lg font-semibold text-[#2A241E]"
+                  inputClassName="font-serif text-lg font-semibold w-12 text-[#2A241E]"
+                  ariaLabel="Initiative"
+                />
               </StatTile>
             </div>
           </div>

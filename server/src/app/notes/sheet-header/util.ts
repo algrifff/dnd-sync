@@ -206,3 +206,25 @@ export const DISPOSITION_COLOR: Record<string, string> = {
   hostile: '--wine',
   unknown: '--rule',
 };
+
+/** Pick a title font-size class for a name based on its length so a
+ *  really long character / creature name doesn't overflow or force a
+ *  wrap that breaks the header layout.
+ *
+ *  `hero` covers the big title on Character / Creature / Location;
+ *  `compact` covers Person / Item which sit in narrower rows. */
+export function titleSizeClass(
+  name: string,
+  tier: 'hero' | 'compact',
+): string {
+  const len = name.trim().length;
+  if (tier === 'hero') {
+    if (len <= 18) return 'text-4xl';
+    if (len <= 28) return 'text-3xl';
+    if (len <= 40) return 'text-2xl';
+    return 'text-xl';
+  }
+  if (len <= 22) return 'text-3xl';
+  if (len <= 34) return 'text-2xl';
+  return 'text-xl';
+}

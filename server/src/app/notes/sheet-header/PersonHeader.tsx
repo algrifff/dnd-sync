@@ -9,7 +9,7 @@ import { NoteAutocomplete } from './NoteAutocomplete';
 import { PortraitPicker } from './PortraitPicker';
 import { SaveIndicator } from './SaveIndicator';
 import { usePatchSheet } from './usePatchSheet';
-import { portraitUrl, DISPOSITION_COLOR } from './util';
+import { portraitUrl, titleSizeClass, DISPOSITION_COLOR } from './util';
 
 const DISPOSITION_OPTIONS = [
   { value: 'friendly', label: 'Friendly' },
@@ -72,8 +72,8 @@ export function PersonHeader({
               <InlineText
                 value={name}
                 readOnly={!canEdit}
-                className="font-serif text-3xl font-semibold leading-tight text-[#2A241E]"
-                inputClassName="font-serif text-3xl font-semibold leading-tight text-[#2A241E]"
+                className={`font-serif ${titleSizeClass(name, 'compact')} font-semibold leading-tight text-[#2A241E]`}
+                inputClassName={`font-serif ${titleSizeClass(name, 'compact')} font-semibold leading-tight text-[#2A241E]`}
                 onCommit={(next) => patchSheet({ name: next })}
                 ariaLabel="Person name"
               />

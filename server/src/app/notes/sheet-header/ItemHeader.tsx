@@ -16,7 +16,7 @@ import { PortraitPicker } from './PortraitPicker';
 import { SaveIndicator } from './SaveIndicator';
 import { CompendiumSearch } from './CompendiumSearch';
 import { usePatchSheet } from './usePatchSheet';
-import { portraitUrl, RARITY_COLOR } from './util';
+import { portraitUrl, titleSizeClass, RARITY_COLOR } from './util';
 
 const CATEGORIES = [
   { value: 'weapon', label: 'Weapon' },
@@ -156,8 +156,8 @@ export function ItemHeader({
               <InlineText
                 value={name}
                 readOnly={!canEdit}
-                className="font-serif text-3xl font-semibold leading-tight text-[#2A241E]"
-                inputClassName="font-serif text-3xl font-semibold leading-tight text-[#2A241E]"
+                className={`font-serif ${titleSizeClass(name, 'compact')} font-semibold leading-tight text-[#2A241E]`}
+                inputClassName={`font-serif ${titleSizeClass(name, 'compact')} font-semibold leading-tight text-[#2A241E]`}
                 onCommit={(next) => patchSheet({ name: next })}
                 ariaLabel="Item name"
               />
