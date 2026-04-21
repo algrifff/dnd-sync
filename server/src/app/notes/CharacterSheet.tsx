@@ -195,29 +195,50 @@ export function CharacterSheet({
       </div>
 
       <div className="space-y-4">
-        {template.schema.sections.map((section) => (
-          <section key={section.id}>
-            <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
-              {section.label}
-            </h3>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-              {section.fields.map((field) => (
-                <FieldControl
-                  key={field.id}
-                  field={field}
-                  value={sheet[field.id]}
-                  onCommit={(v) => commit(field.id, v)}
-                  readOnly={!fieldEditable(field)}
-                  isPlayerField={playerEditable.has(field.id) && !canWriteAll}
-                />
-              ))}
-            </div>
-          </section>
-        ))}
+        {template.schema.sections.map((section) => {
+          const visibleFields = section.fields.filter(
+            (f) => !HEADER_OWNED_FIELDS.has(f.id),
+          );
+          if (visibleFields.length === 0) return null;
+          return (
+            <section key={section.id}>
+              <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+                {section.label}
+              </h3>
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                {visibleFields.map((field) => (
+                  <FieldControl
+                    key={field.id}
+                    field={field}
+                    value={sheet[field.id]}
+                    onCommit={(v) => commit(field.id, v)}
+                    readOnly={!fieldEditable(field)}
+                    isPlayerField={playerEditable.has(field.id) && !canWriteAll}
+                  />
+                ))}
+              </div>
+            </section>
+          );
+        })}
       </div>
     </section>
   );
 }
+
+/** Field IDs whose editing now lives in the SheetHeader above the prose
+ *  body. We filter them out of the side-panel form so there's one
+ *  source of truth per field. Kept in sync with CharacterHeader. */
+const HEADER_OWNED_FIELDS = new Set<string>([
+  'name',
+  'race',
+  'class',
+  'background',
+  'portrait',
+  'str', 'dex', 'con', 'int', 'wis', 'cha',
+  'ac', 'armor_class',
+  'hp_current', 'hp_max', 'hp_temporary',
+  'speed',
+]);
 
 function collectPlayerEditable(schema: TemplateSchema): Set<string> {
   const out = new Set<string>();
