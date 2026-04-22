@@ -76,7 +76,7 @@ export function ImportLauncher({ csrfToken }: { csrfToken: string }): React.JSX.
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-2 rounded-[10px] bg-[#2A241E] px-4 py-2.5 text-sm font-medium text-[#F4EDE0] transition hover:scale-[1.015] hover:bg-[#3A342E]"
+        className="flex w-full items-center justify-center gap-2 rounded-[10px] bg-[#2A241E] px-4 py-3 text-sm font-medium text-[#F4EDE0] transition hover:bg-[#3A342E]"
       >
         <Sparkles size={14} aria-hidden />
         Import Notes

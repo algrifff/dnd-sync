@@ -49,6 +49,8 @@ export default async function SettingsVaultPage(): Promise<ReactElement> {
 
   return (
     <div className="space-y-6">
+      <ImportLauncher csrfToken={session.csrfToken} />
+
       <div>
         <p className="text-sm text-[#5A4F42]">
           Drop in a ZIP of your notes — Obsidian, Google Drive exports, OneNote, plain text files,
