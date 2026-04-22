@@ -8,7 +8,7 @@ import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { CreateUserRequestSchema, UserRoleSchema } from '@compendium/shared';
 import { isSuperAdmin } from '@/lib/superadmin';
-import { createUser, DEFAULT_GROUP_ID, revokeUser } from '@/lib/users';
+import { createUser, clearAllData, DEFAULT_GROUP_ID, deleteUserWithContent, revokeUser } from '@/lib/users';
 
 export type CreateUserResult =
   | { ok: true; username: string; password: string; message: string }
@@ -78,6 +78,20 @@ export async function revokeUserAction(userId: string): Promise<RevokeUserResult
   if (!(await requireSuperAdmin())) return { ok: false, error: 'forbidden' };
   const ok = revokeUser(userId, 'superadmin', DEFAULT_GROUP_ID);
   if (!ok) return { ok: false, error: 'user not found' };
+  revalidatePath('/admin/users');
+  return { ok: true };
+}
+
+export async function deleteUserWithContentAction(userId: string): Promise<RevokeUserResult> {
+  if (!(await requireSuperAdmin())) return { ok: false, error: 'forbidden' };
+  deleteUserWithContent(userId, 'superadmin');
+  revalidatePath('/admin/users');
+  return { ok: true };
+}
+
+export async function clearDatabaseAction(): Promise<RevokeUserResult> {
+  if (!(await requireSuperAdmin())) return { ok: false, error: 'forbidden' };
+  clearAllData();
   revalidatePath('/admin/users');
   return { ok: true };
 }

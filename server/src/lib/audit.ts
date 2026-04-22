@@ -32,7 +32,9 @@ export type AuditAction =
   | 'personality.update'
   | 'personality.delete'
   | 'world.icon.upload'
-  | 'world.icon.clear';
+  | 'world.icon.clear'
+  | 'user.deleteWithContent'
+  | 'db.wipe';
 
 export type AuditEntry = {
   action: AuditAction;

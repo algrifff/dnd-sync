@@ -107,6 +107,108 @@ export function countUsers(): number {
   return row?.n ?? 0;
 }
 
+export type UserStorageStats = {
+  userId: string;
+  notesBytes: number;
+  assetsBytes: number;
+  avatarBytes: number;
+  totalBytes: number;
+};
+
+export function getUserStorageStats(): UserStorageStats[] {
+  const db = getDb();
+  const rows = db
+    .query<
+      { user_id: string; notes_bytes: number; assets_bytes: number; avatar_bytes: number },
+      []
+    >(
+      `SELECT
+         u.id AS user_id,
+         COALESCE((SELECT SUM(n.byte_size) FROM notes n WHERE n.created_by = u.id), 0) AS notes_bytes,
+         COALESCE((SELECT SUM(a.size)      FROM assets a WHERE a.uploaded_by = u.id), 0) AS assets_bytes,
+         COALESCE(LENGTH(u.avatar_blob), 0) AS avatar_bytes
+       FROM users u`,
+    )
+    .all();
+  return rows.map((r) => ({
+    userId: r.user_id,
+    notesBytes: r.notes_bytes,
+    assetsBytes: r.assets_bytes,
+    avatarBytes: r.avatar_bytes,
+    totalBytes: r.notes_bytes + r.assets_bytes + r.avatar_bytes,
+  }));
+}
+
+/** Delete a user and all worlds (groups) where they are the sole admin.
+ *  The group CASCADE wipes all notes, assets, characters, etc. in those worlds.
+ *  Notes in shared worlds remain; sessions/memberships cascade from the user row. */
+export function deleteUserWithContent(userId: string, actorId: string): boolean {
+  const db = getDb();
+
+  // Find groups where this user is the only admin.
+  const soloAdminGroups = db
+    .query<{ group_id: string }, [string]>(
+      `SELECT gm.group_id
+         FROM group_members gm
+        WHERE gm.user_id = ? AND gm.role = 'admin'
+          AND (SELECT COUNT(*) FROM group_members gm2
+               WHERE gm2.group_id = gm.group_id AND gm2.role = 'admin') = 1`,
+    )
+    .all(userId);
+
+  db.transaction(() => {
+    for (const { group_id } of soloAdminGroups) {
+      db.query('DELETE FROM groups WHERE id = ?').run(group_id);
+    }
+    db.query('DELETE FROM users WHERE id = ?').run(userId);
+  })();
+
+  logAudit({
+    action: 'user.deleteWithContent',
+    actorId,
+    groupId: DEFAULT_GROUP_ID,
+    target: userId,
+    details: { worldsDeleted: soloAdminGroups.map((g) => g.group_id) },
+  });
+
+  return true;
+}
+
+/** Wipe all user-generated content — users, sessions, notes, assets, worlds
+ *  (except the default group shell and config). On next boot, ensureDefaultAdmin
+ *  will re-seed the admin account. Intended for testing only. */
+export function clearAllData(): void {
+  const db = getDb();
+  db.transaction(() => {
+    // Wipe content tables first to respect FK order.
+    for (const table of [
+      'import_jobs',
+      'group_invite_tokens',
+      'asset_tags',
+      'session_notes',
+      'character_campaigns',
+      'characters',
+      'campaigns',
+      'note_links',
+      'tags',
+      'aliases',
+      'folder_markers',
+      'graph_groups',
+      'assets',
+      'notes',
+      'audit_log',
+      'sessions',
+      'group_members',
+      'users',
+    ]) {
+      db.query(`DELETE FROM ${table}`).run();
+    }
+    // Keep the default group so sessions still have a valid current_group_id.
+    // Delete any extra worlds created during testing.
+    db.query(`DELETE FROM groups WHERE id != 'default'`).run();
+  })();
+}
+
 // ── Writes ─────────────────────────────────────────────────────────────
 
 export async function createUser(input: CreateUserInput): Promise<User> {
