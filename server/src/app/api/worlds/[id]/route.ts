@@ -9,12 +9,16 @@ import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { deleteWorld } from '@/lib/groups';
+import { setActivePersonality } from '@/lib/ai/personalities';
 
 export const dynamic = 'force-dynamic';
 
 const Body = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   headerColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
+  // null (or the built-in sentinel) reverts to the default scribe voice;
+  // any other string must be the id of a personality in this world.
+  activePersonalityId: z.string().min(1).nullable().optional(),
 });
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -47,7 +51,11 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
     return json({ error: 'forbidden' }, 403);
   }
 
-  if (body.name === undefined && body.headerColor === undefined) {
+  if (
+    body.name === undefined &&
+    body.headerColor === undefined &&
+    body.activePersonalityId === undefined
+  ) {
     return json({ error: 'invalid_body', detail: 'Nothing to update' }, 400);
   }
 
@@ -57,13 +65,26 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
   if (body.headerColor !== undefined) {
     db.query('UPDATE groups SET header_color = ? WHERE id = ?').run(body.headerColor, id);
   }
+  if (body.activePersonalityId !== undefined) {
+    const ok = setActivePersonality(id, body.activePersonalityId);
+    if (!ok) {
+      return json(
+        { error: 'not_found', detail: 'Unknown personality for this world.' },
+        404,
+      );
+    }
+  }
 
   logAudit({
     action: 'group.switch',
     actorId: session.userId,
     groupId: id,
     target: id,
-    details: { rename: body.name, headerColor: body.headerColor },
+    details: {
+      rename: body.name,
+      headerColor: body.headerColor,
+      activePersonalityId: body.activePersonalityId,
+    },
   });
 
   return json({ ok: true });

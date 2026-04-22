@@ -573,6 +573,46 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE characters ADD COLUMN proficiency_bonus INTEGER;
     `,
   },
+  {
+    version: 29,
+    description:
+      'ai_personalities: per-world AI voice presets + active selection on groups',
+    sql: `
+      -- Named AI voice presets a world admin can swap between. The
+      -- hardcoded "Grizzled Scribe" default lives in code
+      -- (DEFAULT_PERSONALITY) and is used when active_personality_id
+      -- is NULL, so the table can be empty on day one.
+      CREATE TABLE ai_personalities (
+        id         TEXT PRIMARY KEY,
+        group_id   TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        name       TEXT NOT NULL,
+        prompt     TEXT NOT NULL,
+        created_by TEXT REFERENCES users(id),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX ai_personalities_group ON ai_personalities(group_id);
+
+      -- NULL = use the built-in default. Not FK-constrained so we can
+      -- null it out manually when the target row is deleted (the API
+      -- layer handles that in the same transaction as the delete).
+      ALTER TABLE groups ADD COLUMN active_personality_id TEXT;
+    `,
+  },
+  {
+    version: 30,
+    description:
+      'groups: icon_blob/mime/updated_at for per-world sidebar icons',
+    sql: `
+      -- Mirror of users.avatar_*: store the (client-side resized)
+      -- image bytes on the row and use icon_updated_at as the ?v=
+      -- cache-buster the sidebar appends to the serve URL. 0 means
+      -- no icon (fall back to initials-on-colour chip).
+      ALTER TABLE groups ADD COLUMN icon_blob BLOB;
+      ALTER TABLE groups ADD COLUMN icon_mime TEXT;
+      ALTER TABLE groups ADD COLUMN icon_updated_at INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

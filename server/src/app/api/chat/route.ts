@@ -13,6 +13,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { getDb } from '@/lib/db';
 import { detectSkills, buildSystemPrompt } from '@/lib/ai/orchestrator';
+import { getActivePersonality } from '@/lib/ai/personalities';
 import { getToolsForRole, type ToolContext } from '@/lib/ai/tools';
 
 export const dynamic = 'force-dynamic';
@@ -82,12 +83,17 @@ export async function POST(req: NextRequest): Promise<Response> {
   const openai = createOpenAI({ apiKey });
   const model  = process.env.OPENAI_MODEL ?? 'gpt-5.4-mini';
 
+  // Per-world AI personality: admins can pick or author a Voice block
+  // in Settings → World. Falls back to the built-in scribe otherwise.
+  const personality = getActivePersonality(session.currentGroupId);
+
   const result = streamText({
     model: openai(model),
     system: buildSystemPrompt({
       groupId: session.currentGroupId,
       role,
       skills,
+      voice: personality.prompt,
       userDisplayName: session.displayName,
       ...(body.campaignSlug !== undefined ? { campaignSlug: body.campaignSlug } : {}),
       ...(campaignName !== undefined     ? { campaignName }                     : {}),
@@ -95,6 +101,15 @@ export async function POST(req: NextRequest): Promise<Response> {
     messages: modelMessages,
     tools:    getToolsForRole(toolCtx),
     stopWhen: stepCountIs(8),
+    experimental_telemetry: {
+      isEnabled: true,
+      functionId: 'compendium-chat',
+      metadata: {
+        posthog_distinct_id: session.userId,
+        role,
+        groupId: session.currentGroupId,
+      },
+    },
   });
 
   return result.toUIMessageStreamResponse();

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import posthog from '@/lib/posthog-web';
 
 type IngestSummary = {
   notes: number;
@@ -58,21 +59,34 @@ export function UploadForm({
       try {
         const body = JSON.parse(xhr.responseText);
         if (xhr.status >= 200 && xhr.status < 300 && body.ok) {
-          setState({ kind: 'ok', summary: body.summary as IngestSummary });
-        } else {
-          setState({
-            kind: 'error',
-            message:
-              body.error === 'rate_limited'
-                ? `Too many uploads. Wait ${Math.ceil((body.retryAfterMs ?? 0) / 60_000)} min.`
-                : (body.message ?? body.error ?? `HTTP ${xhr.status}`),
+          const summary = body.summary as IngestSummary;
+          setState({ kind: 'ok', summary });
+          posthog.capture('vault_upload_completed', {
+            notes: summary.notes,
+            assets: summary.assets,
+            assets_reused: summary.assetsReused,
+            links: summary.links,
+            tags: summary.tags,
+            duration_ms: summary.durationMs,
+            file_size_bytes: file.size,
           });
+        } else {
+          const errorMsg =
+            body.error === 'rate_limited'
+              ? `Too many uploads. Wait ${Math.ceil((body.retryAfterMs ?? 0) / 60_000)} min.`
+              : (body.message ?? body.error ?? `HTTP ${xhr.status}`);
+          setState({ kind: 'error', message: errorMsg });
+          posthog.capture('vault_upload_failed', { error: body.error ?? `HTTP ${xhr.status}`, file_size_bytes: file.size });
         }
       } catch {
         setState({ kind: 'error', message: `HTTP ${xhr.status}` });
+        posthog.capture('vault_upload_failed', { error: `HTTP ${xhr.status}`, file_size_bytes: file.size });
       }
     };
-    xhr.onerror = () => setState({ kind: 'error', message: 'network error' });
+    xhr.onerror = () => {
+      setState({ kind: 'error', message: 'network error' });
+      posthog.capture('vault_upload_failed', { error: 'network_error', file_size_bytes: file.size });
+    };
     xhr.send(fd);
     setState({ kind: 'uploading', percent: 0, bytesSent: 0, bytesTotal: file.size });
   };

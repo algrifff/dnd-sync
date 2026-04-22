@@ -6,6 +6,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DEFAULT_PERSONALITY } from './personalities';
 
 // ── Skill detection ────────────────────────────────────────────────────
 
@@ -56,13 +57,19 @@ export function detectSkills(message: string): string[] {
 
 const SKILLS_DIR = join(__dirname, 'skills');
 
+// Skill files are read from disk. In production we cache per-process so
+// each request is a free Map lookup; in development we bypass the cache
+// so editing a `.md` file takes effect on the next request without
+// needing to restart the dev server (the skill file isn't a JS module,
+// so Next's HMR won't invalidate it for us).
 const skillCache = new Map<string, string>();
+const IS_DEV = process.env.NODE_ENV !== 'production';
 
 function loadSkill(name: string): string {
-  if (skillCache.has(name)) return skillCache.get(name)!;
+  if (!IS_DEV && skillCache.has(name)) return skillCache.get(name)!;
   try {
     const content = readFileSync(join(SKILLS_DIR, `${name}.md`), 'utf8');
-    skillCache.set(name, content);
+    if (!IS_DEV) skillCache.set(name, content);
     return content;
   } catch {
     return '';
@@ -82,6 +89,12 @@ export type PromptContext = {
   skills: string[];
   /** Override today's date (YYYY-MM-DD). Defaults to the server's current date. */
   today?: string;
+  /**
+   * Voice/persona block injected under "## Voice". Admins configure this
+   * per-world via Settings → World → AI personality. Falls back to the
+   * built-in grizzled-scribe when unset.
+   */
+  voice?: string;
 };
 
 export function buildSystemPrompt(ctx: PromptContext): string {
@@ -100,17 +113,17 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     : '';
   const todayLine = `Today: ${ctx.today ?? new Date().toISOString().slice(0, 10)}`;
 
+  // The Voice block is configurable per world; the default is the
+  // grizzled-scribe that shipped with the app. We always append the
+  // "applies only to prose, never to tool data" guardrail so a custom
+  // voice can't accidentally corrupt tool arguments.
+  const voiceBody = (ctx.voice ?? DEFAULT_PERSONALITY.prompt).trim();
+
   const base = `You are the Compendium AI — a TTRPG campaign assistant embedded in a D&D note-taking app.
 You help ${roleLabel === 'Dungeon Master' ? 'the DM' : 'players'} manage campaign entities, session notes, and lore.
 
 ## Voice
-You speak as a grizzled old knight who hung up the sword and took up the quill — the party's campaign scribe. Battle-worn, plainspoken, quietly amused by the chaos of adventurers. A touch of medieval cadence ("aye", "well enough", "the deed is done", "so it is written") but NEVER purple, NEVER theatrical. Short sentences. Dry wit over flourish. You log and confirm; you do not narrate.
-
-Good: "Aye, Bram the fighter is inscribed — level three, blade at his hip. Gods keep him."
-Good: "Done. Flim Flam walks the ledger now."
-Good: "The waystone at Duskhallow is marked on the map. Nothing more to say."
-Bad: "I have successfully created the character and populated the following fields..." (too clinical)
-Bad: "Lo! A hero strides forth from the mists of Faerûn, destined to carve his name in legend!" (too purple)
+${voiceBody}
 
 Voice applies only to your final prose reply. Tool calls, arguments, and paths are plain machine data — never stylise those.
 

@@ -22,6 +22,7 @@ import {
   verifyPassword,
 } from '@/lib/session';
 import { DEFAULT_GROUP_ID, findUserByUsername } from '@/lib/users';
+import { getPostHogClient } from '@/lib/posthog-server';
 
 export type LoginState = { error: string | null; next: string };
 
@@ -111,6 +112,10 @@ export async function loginAction(
     details: { rotated: Boolean(oldSid) },
   });
 
+  const posthog = await getPostHogClient();
+  posthog.identify({ distinctId: user.id, properties: { username: user.username } });
+  posthog.capture({ distinctId: user.id, event: 'user_logged_in', properties: { username: user.username, rotated_session: Boolean(oldSid) } });
+
   redirect(next);
 }
 
@@ -133,6 +138,8 @@ export async function logoutAction(): Promise<void> {
         groupId: session.currentGroupId,
         target: session.username,
       });
+      const posthog = await getPostHogClient();
+      posthog.capture({ distinctId: session.userId, event: 'user_logged_out', properties: { username: session.username } });
     }
   }
 

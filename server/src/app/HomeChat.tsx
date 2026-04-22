@@ -16,12 +16,27 @@ import {
   type UITools,
   type FileUIPart,
 } from 'ai';
-import { Loader2, Send, Sparkles, X, Paperclip, FolderOpen, Trash2 } from 'lucide-react';
+import {
+  Loader2,
+  Send,
+  Sparkles,
+  X,
+  Paperclip,
+  FolderOpen,
+  Trash2,
+  CalendarDays,
+  Sword,
+  UserRound,
+  Skull,
+  Package,
+  Ghost,
+  type LucideIcon,
+} from 'lucide-react';
 import { ChatMarkdown } from './ChatMarkdown';
 import { SessionReviewPanel, type SessionProposal } from './SessionReviewPanel';
 import { noteEditorHref, useRefreshTreeOnAiNoteMutations } from './chat-tree-refresh';
-
-const HOME_CHAT_KEY = 'compendium-home-chat-v1';
+import { chatStorageKey, cleanupLegacyChatStorage } from './chat-storage';
+import posthog from '@/lib/posthog-web';
 
 // ── File attachment helpers (shared shape with ChatPane) ───────────────
 
@@ -88,8 +103,10 @@ async function uploadForExtraction(file: File): Promise<string> {
 
 export function HomeChat({
   groupId,
+  userId,
 }: {
   groupId: string;
+  userId: string;
 }): ReactElement {
   const [input, setInput] = useState('');
   const [loaded, setLoaded] = useState(false);
@@ -100,6 +117,11 @@ export function HomeChat({
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   const router = useRouter();
+
+  const storageKey = useMemo(
+    () => chatStorageKey(userId, groupId),
+    [userId, groupId],
+  );
 
   const transport = useMemo(
     () =>
@@ -119,29 +141,39 @@ export function HomeChat({
   const isStreaming = status === 'submitted' || status === 'streaming';
 
   useEffect(() => {
+    // Re-runs when storageKey changes (i.e. the active world or user
+    // changes). Reset in-memory messages first so the old world's chat
+    // does not flash in while we read the new one.
+    cleanupLegacyChatStorage();
+    setLoaded(false);
+    skipInitialScroll.current = true;
     try {
-      const raw = window.localStorage.getItem(HOME_CHAT_KEY);
+      const raw = window.localStorage.getItem(storageKey);
       if (raw) {
         const parsed = JSON.parse(raw) as UIMessage[];
         if (Array.isArray(parsed) && parsed.length > 0) {
           setMessages(parsed);
+        } else {
+          setMessages([]);
         }
+      } else {
+        setMessages([]);
       }
     } catch {
-      // Ignore local storage failures.
+      setMessages([]);
     } finally {
       setLoaded(true);
     }
-  }, [setMessages]);
+  }, [setMessages, storageKey]);
 
   useEffect(() => {
     if (!loaded) return;
     try {
-      window.localStorage.setItem(HOME_CHAT_KEY, JSON.stringify(messages));
+      window.localStorage.setItem(storageKey, JSON.stringify(messages));
     } catch {
       // Ignore local storage failures.
     }
-  }, [loaded, messages]);
+  }, [loaded, messages, storageKey]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -237,6 +269,13 @@ export function HomeChat({
     setInput('');
     setAttachedFiles([]);
 
+    posthog.capture('ai_message_sent', {
+      has_attachments: attachedFiles.length > 0,
+      attachment_count: attachedFiles.length,
+      has_images: imageFiles.length > 0,
+      role: 'dm',
+    });
+
     if (imageParts.length > 0) {
       void sendMessage({ text: fullText || 'Please look at the attached image(s).', files: imageParts });
     } else {
@@ -245,9 +284,10 @@ export function HomeChat({
   }
 
   function clearChat() {
+    posthog.capture('ai_chat_cleared');
     setMessages([]);
     try {
-      window.localStorage.removeItem(HOME_CHAT_KEY);
+      window.localStorage.removeItem(storageKey);
     } catch {
       // ignore
     }
@@ -265,7 +305,15 @@ export function HomeChat({
 
   const anyLoading = attachedFiles.some((f) => f.loading);
 
+  function quickSend(prompt: string) {
+    if (isStreaming) return;
+    const action = QUICK_ACTIONS.find((a) => a.prompt === prompt);
+    posthog.capture('ai_quick_action_triggered', { action_key: action?.key ?? 'unknown' });
+    void sendMessage({ text: prompt });
+  }
+
   return (
+    <div className="flex min-w-0 flex-col gap-4">
     <section className="relative flex min-w-0 flex-col rounded-[14px] border border-[#D4C7AE] bg-[#FBF5E8]">
       {/* Hidden file inputs */}
       <input
@@ -393,6 +441,67 @@ export function HomeChat({
         </button>
       </footer>
     </section>
+
+      {/* Quick-create shortcuts — one-click prompts that fire the AI's
+          entity_create flow. Tooltips are custom (instant) — no native
+          title delay. */}
+      <QuickActionsRow disabled={isStreaming} onPick={quickSend} />
+    </div>
+  );
+}
+
+// ── Quick actions ──────────────────────────────────────────────────────
+
+// Each quick action fills the button with a muted earth-tone drawn
+// from the app's parchment palette; the icon sits on top in cream
+// (#F4EDE0), the same light text colour used on every dark control in
+// the app (Send button, user chat bubbles). On hover the fill darkens
+// one step — no lifts or drop-shadows, to stay in the design system's
+// "calm, borders-first" register.
+const QUICK_ACTIONS: ReadonlyArray<{
+  key: string;
+  icon: LucideIcon;
+  label: string;
+  prompt: string;
+  /** Tailwind bg + hover-bg, kept literal so JIT emits them. */
+  tone: string;
+}> = [
+  { key: 'session',   icon: CalendarDays, label: 'New session',   prompt: 'Start a new session.',             tone: 'bg-[#B88832] hover:bg-[#9C6F22]' }, // muted gold ink
+  { key: 'character', icon: Sword,        label: 'New character', prompt: 'Create a new player character.',  tone: 'bg-[#5B6B8A] hover:bg-[#495775]' }, // dusty steel
+  { key: 'person',    icon: UserRound,    label: 'New person',    prompt: 'Create a new person (NPC).',       tone: 'bg-[#7A6249] hover:bg-[#624E38]' }, // walnut
+  { key: 'enemy',     icon: Skull,        label: 'New enemy',     prompt: 'Create a new enemy.',              tone: 'bg-[#8B4A52] hover:bg-[#743C43]' }, // app burgundy
+  { key: 'item',      icon: Package,      label: 'New item',      prompt: 'Create a new item.',               tone: 'bg-[#9C7A2E] hover:bg-[#836520]' }, // tarnished bronze
+  { key: 'creature',  icon: Ghost,        label: 'New creature',  prompt: 'Create a new creature.',           tone: 'bg-[#6B5B7A] hover:bg-[#574866]' }, // dusk violet
+];
+
+function QuickActionsRow({
+  disabled,
+  onPick,
+}: {
+  disabled: boolean;
+  onPick: (prompt: string) => void;
+}): ReactElement {
+  return (
+    <div className="flex w-full items-center justify-between gap-2 px-1">
+      {QUICK_ACTIONS.map(({ key, icon: Icon, label, prompt, tone }) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => onPick(prompt)}
+          disabled={disabled}
+          aria-label={label}
+          className={`group relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#F4EDE0] transition-colors duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 ${tone}`}
+        >
+          <Icon size={18} aria-hidden />
+          <span
+            role="tooltip"
+            className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-[6px] bg-[#2A241E] px-2 py-1 text-[11px] font-medium text-[#F4EDE0] opacity-0 shadow-lg group-hover:opacity-100 group-focus-visible:opacity-100"
+          >
+            {label}
+          </span>
+        </button>
+      ))}
+    </div>
   );
 }
 

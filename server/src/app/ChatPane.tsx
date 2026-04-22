@@ -24,8 +24,8 @@ import { Loader2, Send, Sparkles, X, Paperclip, FolderOpen, Trash2 } from 'lucid
 import { ChatMarkdown } from './ChatMarkdown';
 import { SessionReviewPanel, type SessionProposal } from './SessionReviewPanel';
 import { noteEditorHref, useRefreshTreeOnAiNoteMutations } from './chat-tree-refresh';
-
-const HOME_CHAT_KEY = 'compendium-home-chat-v1';
+import { chatStorageKey, cleanupLegacyChatStorage } from './chat-storage';
+import posthog from '@/lib/posthog-web';
 
 // ── File attachment types ───────────────────────────────────────────────
 
@@ -92,10 +92,12 @@ async function uploadForExtraction(file: File): Promise<string> {
 
 export function ChatPane({
   groupId,
+  userId,
   campaignSlug,
   role,
 }: {
   groupId: string;
+  userId: string;
   campaignSlug?: string | undefined;
   role: 'dm' | 'player';
 }): ReactElement {
@@ -108,6 +110,11 @@ export function ChatPane({
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   const router = useRouter();
+
+  const storageKey = useMemo(
+    () => chatStorageKey(userId, groupId),
+    [userId, groupId],
+  );
 
   const transport = useMemo(
     () =>
@@ -130,29 +137,38 @@ export function ChatPane({
   const isStreaming = status === 'submitted' || status === 'streaming';
 
   useEffect(() => {
+    // Re-runs when storageKey changes (i.e. the active world or user
+    // changes). Reset in-memory messages first so the old world's chat
+    // does not flash in while we read the new one.
+    cleanupLegacyChatStorage();
+    setLoaded(false);
     try {
-      const raw = window.localStorage.getItem(HOME_CHAT_KEY);
+      const raw = window.localStorage.getItem(storageKey);
       if (raw) {
         const parsed = JSON.parse(raw) as UIMessage[];
         if (Array.isArray(parsed) && parsed.length > 0) {
           setMessages(parsed);
+        } else {
+          setMessages([]);
         }
+      } else {
+        setMessages([]);
       }
     } catch {
-      // Ignore local storage failures.
+      setMessages([]);
     } finally {
       setLoaded(true);
     }
-  }, [setMessages]);
+  }, [setMessages, storageKey]);
 
   useEffect(() => {
     if (!loaded) return;
     try {
-      window.localStorage.setItem(HOME_CHAT_KEY, JSON.stringify(messages));
+      window.localStorage.setItem(storageKey, JSON.stringify(messages));
     } catch {
       // Ignore local storage failures.
     }
-  }, [loaded, messages]);
+  }, [loaded, messages, storageKey]);
 
   useEffect(() => {
     if (!open) return;
@@ -244,6 +260,13 @@ export function ChatPane({
     setInput('');
     setAttachedFiles([]);
 
+    posthog.capture('ai_message_sent', {
+      has_attachments: attachedFiles.length > 0,
+      attachment_count: attachedFiles.length,
+      has_images: imageFiles.length > 0,
+      role,
+    });
+
     if (imageParts.length > 0) {
       void sendMessage({ text: fullText || 'Please look at the attached image(s).', files: imageParts });
     } else {
@@ -254,7 +277,7 @@ export function ChatPane({
   function clearChat() {
     setMessages([]);
     try {
-      window.localStorage.removeItem(HOME_CHAT_KEY);
+      window.localStorage.removeItem(storageKey);
     } catch {
       // ignore
     }
@@ -266,6 +289,14 @@ export function ChatPane({
     sessionPath: string,
     approvedChanges: Array<{ id: string; approved: boolean }>,
   ) {
+    const approved = approvedChanges.filter((c) => c.approved).length;
+    const rejected = approvedChanges.length - approved;
+    posthog.capture('session_review_submitted', {
+      session_path: sessionPath,
+      approved_count: approved,
+      rejected_count: rejected,
+      role,
+    });
     const json = JSON.stringify(approvedChanges);
     void sendMessage({
       text: `Apply the approved session changes. Call session_apply with sessionPath="${sessionPath}" and approvedChanges=${json}`,
