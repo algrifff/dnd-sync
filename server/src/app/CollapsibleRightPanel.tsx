@@ -31,7 +31,7 @@ export function CollapsibleRightPanel({
     });
   }
 
-  const effectiveOpen = !ready || open;
+  const effectiveOpen = open;
 
   return (
     <div

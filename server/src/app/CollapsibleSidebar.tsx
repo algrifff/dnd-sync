@@ -37,9 +37,9 @@ export function CollapsibleSidebar({
     });
   }
 
-  // Before the layout effect runs (SSR / first hydration) render as open so
-  // no hydration mismatch — useLayoutEffect corrects it before paint.
-  const effectiveOpen = !ready || open;
+  // useLayoutEffect corrects `open` before the browser paints, so we use it
+  // directly. `ready` only gates whether transitions are active.
+  const effectiveOpen = open;
 
   return (
     <div
