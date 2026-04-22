@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Sparkles, Loader2, X } from 'lucide-react';
 
@@ -13,6 +14,8 @@ export function ImportLauncher({ csrfToken }: { csrfToken: string }): React.JSX.
   const [state, setState] = useState<UploadState>('idle');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   const reset = (): void => {
     setFile(null);
@@ -82,7 +85,7 @@ export function ImportLauncher({ csrfToken }: { csrfToken: string }): React.JSX.
         Import Notes
       </button>
 
-      {open && (
+      {open && mounted && createPortal(
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-[#2A241E]/60 backdrop-blur-sm"
           onClick={(e) => { if (e.target === e.currentTarget) close(); }}
@@ -175,7 +178,8 @@ export function ImportLauncher({ csrfToken }: { csrfToken: string }): React.JSX.
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
