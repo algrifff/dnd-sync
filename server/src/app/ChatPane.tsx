@@ -403,7 +403,7 @@ export function ChatPane({
             {messages.length === 0 && (
               <p className="mt-10 text-center text-xs text-[#5A4F42]">
                 Ask me anything about your campaign.<br />
-                <span className="text-[#5A4F42]/60">Attach files, images, or ZIP vaults.</span>
+                <span className="text-[#5A4F42]/60">Attach files, images, or ZIP archives.</span>
               </p>
             )}
 
@@ -655,7 +655,7 @@ function AssistantPart({
               href={noteEditorHref(output.path)}
               className="text-sm font-medium text-[#8B4A52] underline decoration-[rgba(139,74,82,0.45)] underline-offset-2 hover:text-[#6B2F38]"
             >
-              Open in vault →
+              Open note →
             </Link>
           </div>
         );
@@ -684,7 +684,7 @@ function AssistantPart({
               href={noteEditorHref(output.path)}
               className="text-sm font-medium text-[#8B4A52] underline decoration-[rgba(139,74,82,0.45)] underline-offset-2 hover:text-[#6B2F38]"
             >
-              Open in vault →
+              Open note →
             </Link>
           </div>
         );

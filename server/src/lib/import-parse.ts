@@ -59,8 +59,16 @@ const BINARY_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.pdf',
   '.mp4', '.webm', '.mov', '.mp3', '.wav', '.ogg',
 ]);
-const SKIP_PREFIXES = ['.obsidian/', '.trash/', '__MACOSX/', '.git/'];
-const SKIP_BASENAMES = new Set(['.DS_Store', 'Thumbs.db']);
+const SKIP_PREFIXES = [
+  '.obsidian/',      // Obsidian metadata
+  '.trash/',         // Obsidian trash
+  '__MACOSX/',       // macOS zip artifacts
+  '.git/',           // git metadata
+  '.file-revisions/',// OneDrive/SharePoint revision history
+  '.Trash/',         // Google Drive / generic trash
+  'node_modules/',   // stray dev folders
+];
+const SKIP_BASENAMES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini', '.localized']);
 const PER_FILE_CAP = 25 * 1024 * 1024;
 const TOTAL_UNCOMPRESSED_CAP = 1024 * 1024 * 1024;
 

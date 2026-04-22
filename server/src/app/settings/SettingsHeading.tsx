@@ -15,7 +15,7 @@ export function SettingsHeading(): React.JSX.Element {
 
   const title = isWorld ? 'World settings' : 'Settings';
   const subtitle = isWorld
-    ? 'Manage this world — members, templates, vault imports, invite links.'
+    ? 'Manage this world — members, templates, note imports, invite links.'
     : 'Change how you look and what you sign in with.';
 
   return (

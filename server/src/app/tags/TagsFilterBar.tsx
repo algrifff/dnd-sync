@@ -36,7 +36,7 @@ export function TagsFilterBar({ tags }: { tags: TagEntry[] }): React.JSX.Element
       {/* Tag count */}
       <p className="text-sm text-[#5A4F42]">
         {filtered.length === tags.length
-          ? `${tags.length} tag${tags.length === 1 ? '' : 's'} across the vault.`
+          ? `${tags.length} tag${tags.length === 1 ? '' : 's'} in this world.`
           : `${filtered.length} of ${tags.length} tag${tags.length === 1 ? '' : 's'} matching.`}
       </p>
 

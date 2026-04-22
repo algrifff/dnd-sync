@@ -64,7 +64,7 @@ export default async function AssetsPage(): Promise<ReactElement> {
                 Assets
               </h1>
               <p className="mb-6 text-sm text-[#5A4F42]">
-                Every image, map, and token uploaded to this vault. Click a tile to open a full-size
+                Every image, map, and token in this world. Click a tile to open a full-size
                 preview.
               </p>
               <AssetsGallery

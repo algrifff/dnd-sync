@@ -35,8 +35,8 @@ export default async function SettingsVaultPage(): Promise<ReactElement> {
     <div className="space-y-6">
       <div>
         <p className="text-sm text-[#5A4F42]">
-          Drop in a ZIP of your Obsidian vault and the AI will turn it into a fully structured
-          Compendium world — no manual sorting needed.
+          Drop in a ZIP of your notes — Obsidian, Google Drive exports, OneNote, plain text files,
+          or any mix — and the AI will turn it into a fully structured Compendium world.
         </p>
         <ul className="mt-3 space-y-1.5 text-sm text-[#5A4F42]">
           <li className="flex gap-2">
@@ -64,7 +64,7 @@ export default async function SettingsVaultPage(): Promise<ReactElement> {
 
       <div className="rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] px-5 py-4">
         <dl className="grid grid-cols-2 gap-2 text-sm">
-          <dt className="text-[#5A4F42]">Notes in vault</dt>
+          <dt className="text-[#5A4F42]">Notes</dt>
           <dd>{noteCount}</dd>
           <dt className="text-[#5A4F42]">Last upload</dt>
           <dd>
@@ -76,13 +76,13 @@ export default async function SettingsVaultPage(): Promise<ReactElement> {
       </div>
 
       <section className="rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-5">
-        <h2 className="mb-3 text-lg font-semibold text-[#2A241E]">Upload vault ZIP</h2>
+        <h2 className="mb-3 text-lg font-semibold text-[#2A241E]">Upload notes ZIP</h2>
         <UploadForm csrfToken={session.csrfToken} hasExistingNotes={noteCount > 0} />
       </section>
 
       <p className="text-xs text-[#5A4F42]">
         Rate limit: up to 5 uploads per hour per admin. Cap: 500 MB per ZIP, 50 MB per file
-        inside. Files under <code>.obsidian/</code>, <code>.trash/</code>, and <code>.DS_Store</code>{' '}
+        inside. Tool metadata folders (<code>.obsidian/</code>, <code>.trash/</code>) and system files (<code>.DS_Store</code>, <code>Thumbs.db</code>){' '}
         are skipped automatically.
       </p>
     </div>

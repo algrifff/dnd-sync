@@ -142,13 +142,13 @@ function jsonTypeForField(field: TemplateField): Record<string, unknown> {
 export function renderContextBlock(ctx: ImportSkillContext): string {
   const tagsHint =
     ctx.existingVaultTags.length > 0
-      ? `Existing tags in this vault (prefer reuse):\n${ctx.existingVaultTags
+      ? `Existing world tags (prefer reuse):\n${ctx.existingVaultTags
           .slice(0, 120)
           .join(', ')}`
-      : 'The vault currently has no tags — coin new ones sparingly.';
+      : 'No tags exist yet — coin new ones sparingly.';
 
   return [
-    'Folder conventions in this vault:',
+    'Folder conventions for this world:',
     renderConventions(ctx.conventions),
     '',
     tagsHint,

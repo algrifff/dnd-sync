@@ -94,7 +94,7 @@ export function UploadForm({
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <label className="block">
-        <span className="mb-1 block text-sm font-medium text-[#5A4F42]">Vault ZIP</span>
+        <span className="mb-1 block text-sm font-medium text-[#5A4F42]">Notes ZIP</span>
         <input
           type="file"
           accept=".zip,application/zip"
@@ -117,7 +117,7 @@ export function UploadForm({
             className="mt-1"
           />
           <span>
-            I understand this replaces every note in the vault and disconnects any live editors.
+            I understand this replaces all existing notes and disconnects any live editors.
           </span>
         </label>
       )}
@@ -131,7 +131,7 @@ export function UploadForm({
           ? `Uploading ${state.percent}%…`
           : state.kind === 'processing'
             ? 'Ingesting…'
-            : 'Upload vault'}
+            : 'Import notes'}
       </button>
 
       {state.kind === 'uploading' && (
@@ -151,7 +151,7 @@ export function UploadForm({
 
       {state.kind === 'ok' && (
         <div className="rounded-[10px] border border-[#7B8A5F]/40 bg-[#7B8A5F]/10 p-4 text-sm text-[#2A241E]">
-          <h3 className="mb-2 font-semibold">Vault ingested</h3>
+          <h3 className="mb-2 font-semibold">Import complete</h3>
           <dl className="grid grid-cols-2 gap-1">
             <dt className="text-[#5A4F42]">Notes</dt>
             <dd>{state.summary.notes}</dd>

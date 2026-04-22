@@ -23,7 +23,7 @@ const WORLD_TABS: Tab[] = [
   { href: '/settings/world', label: 'World' },
   { href: '/settings/members', label: 'Members' },
   { href: '/settings/templates', label: 'Templates' },
-  { href: '/settings/vault', label: 'Import Vault' },
+  { href: '/settings/vault', label: 'Import Notes' },
 ];
 
 export function SettingsTabs(): React.JSX.Element | null {

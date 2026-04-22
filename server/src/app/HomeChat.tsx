@@ -672,7 +672,7 @@ function AssistantPart({
               href={noteEditorHref(output.path)}
               className="text-sm font-medium text-[#8B4A52] underline decoration-[rgba(139,74,82,0.45)] underline-offset-2 hover:text-[#6B2F38]"
             >
-              Open in vault →
+              Open note →
             </Link>
           </div>
         );
@@ -701,7 +701,7 @@ function AssistantPart({
               href={noteEditorHref(output.path)}
               className="text-sm font-medium text-[#8B4A52] underline decoration-[rgba(139,74,82,0.45)] underline-offset-2 hover:text-[#6B2F38]"
             >
-              Open in vault →
+              Open note →
             </Link>
           </div>
         );
