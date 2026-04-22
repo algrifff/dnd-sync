@@ -17,7 +17,10 @@ export function CollapsibleRightPanel({
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved === 'false') setOpen(false);
-    setMounted(true);
+    // Enable transitions only after the initial closed state is committed —
+    // otherwise the panel animates closed on every page navigation.
+    const id = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(id);
   }, []);
 
   function toggle() {
@@ -47,6 +50,7 @@ export function CollapsibleRightPanel({
           width: WIDTH,
           transform: effectiveOpen ? 'translateX(0)' : `translateX(${WIDTH}px)`,
           transition: mounted ? 'transform 200ms ease-in-out' : 'none',
+          visibility: effectiveOpen ? 'visible' : 'hidden',
         }}
       >
         {children}

@@ -17,7 +17,10 @@ export function CollapsibleSidebar({
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved === 'false') setOpen(false);
-    setMounted(true);
+    // Enable transitions only after the initial closed state is committed —
+    // otherwise the sidebar animates closed on every page navigation.
+    const id = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(id);
   }, []);
 
   function toggle() {
