@@ -15,7 +15,7 @@
 // New categories: add a row here, ordered by the priority you want.
 
 export const NODE_BASE_RADIUS = 5;
-export const NODE_DEGREE_COEFF = 2.5;
+export const NODE_DEGREE_COEFF = 3.5;
 
 export type TagStyle = {
   tag: string;
@@ -42,8 +42,9 @@ export function colorForTags(tags: readonly string[]): string {
   return DEFAULT_COLOR;
 }
 
-/** Render radius: grows gently with degree so hub nodes stand out
- *  without overwhelming the layout. */
+/** Render radius: grows with degree so hub nodes stand out.
+ *  degree^0.6 tapers less aggressively than sqrt, keeping each new
+ *  link visibly meaningful even at high connection counts. */
 export function radiusForDegree(degree: number): number {
-  return NODE_BASE_RADIUS + NODE_DEGREE_COEFF * Math.sqrt(Math.max(0, degree));
+  return NODE_BASE_RADIUS + NODE_DEGREE_COEFF * Math.pow(Math.max(0, degree), 0.6);
 }
