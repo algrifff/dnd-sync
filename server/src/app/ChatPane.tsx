@@ -94,11 +94,13 @@ export function ChatPane({
   groupId,
   userId,
   campaignSlug,
+  activePath,
   role,
 }: {
   groupId: string;
   userId: string;
   campaignSlug?: string | undefined;
+  activePath?: string | undefined;
   role: 'dm' | 'player';
 }): ReactElement {
   const [open, setOpen] = useState(false);
@@ -122,10 +124,11 @@ export function ChatPane({
         api: '/api/chat',
         body: {
           groupId,
-          ...(campaignSlug !== undefined ? { campaignSlug } : {}),
+          ...(campaignSlug !== undefined ? { campaignSlug }              : {}),
+          ...(activePath   !== undefined ? { activeNotePath: activePath } : {}),
         },
       }),
-    [groupId, campaignSlug],
+    [groupId, campaignSlug, activePath],
   );
 
   const { messages, status, sendMessage, setMessages } = useChat({ transport });

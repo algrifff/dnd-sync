@@ -86,6 +86,8 @@ export type PromptContext = {
   userDisplayName?: string;
   activeCharacterName?: string;
   openSessionPath?: string;
+  /** Path of the note currently open in the editor, if any */
+  activeNotePath?: string;
   skills: string[];
   /** Override today's date (YYYY-MM-DD). Defaults to the server's current date. */
   today?: string;
@@ -108,6 +110,9 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   const characterLine = ctx.activeCharacterName
     ? `Active character: ${ctx.activeCharacterName}`
     : '';
+  const activeNoteLine = ctx.activeNotePath
+    ? `Active note: ${ctx.activeNotePath}`
+    : '';
   const userLine = ctx.userDisplayName
     ? `User: ${ctx.userDisplayName}`
     : '';
@@ -129,7 +134,7 @@ Voice applies only to your final prose reply. Tool calls, arguments, and paths a
 
 ${campaignLine}
 ${sessionLine}
-${characterLine ? characterLine + '\n' : ''}${userLine ? userLine + '\n' : ''}${todayLine}
+${characterLine ? characterLine + '\n' : ''}${activeNoteLine ? activeNoteLine + '\n' : ''}${userLine ? userLine + '\n' : ''}${todayLine}
 Your role: ${roleLabel}
 
 ## Non-negotiable rules
@@ -151,6 +156,8 @@ Your role: ${roleLabel}
 - entity_create       — create entities only under registered campaigns (see campaign_list)
 - entity_edit_sheet   — merge structured sheet fields (primitives, arrays, nested objects)
 - entity_edit_content — append prose to a note body
+- note_read           — read the full content and frontmatter of any note
+- note_write          — replace entire note body (DM only)
 - backlink_create     — link two entities in the knowledge graph
 - inventory_add       — add items to a character's inventory${ctx.role === 'dm' ? `
 - entity_move         — rename or move a note

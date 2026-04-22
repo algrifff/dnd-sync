@@ -8,14 +8,11 @@ export function EndSessionButton({
   sessionPath,
   csrfToken,
   isAlreadyClosed,
-  sessionContent,
   campaignSlug,
 }: {
   sessionPath: string;
   csrfToken: string;
   isAlreadyClosed: boolean;
-  /** Raw markdown content of the session note, passed from the server. */
-  sessionContent: string;
   campaignSlug: string | undefined;
 }): React.JSX.Element {
   const [phase, setPhase] = useState<Phase>('idle');
@@ -40,32 +37,10 @@ export function EndSessionButton({
       return;
     }
 
-    // Build the message that will be auto-sent to the existing chat AI
-    const sessionName = sessionPath.split('/').pop()?.replace(/\.md$/i, '') ?? sessionPath;
-    const notes = sessionContent.trim()
-      ? sessionContent.trim()
-      : '(No notes were written for this session.)';
-    const campaignLine = campaignSlug ? `Campaign slug: ${campaignSlug}` : '';
-
-    const message = [
-      `End of session — please analyse the session note at path "${sessionPath}" and update the campaign knowledge base.`,
-      campaignLine,
-      '',
-      `Session notes from "${sessionName}":`,
-      '---',
-      notes,
-      '---',
-      '',
-      'Instructions:',
-      '1. Extract every named NPC, creature, location, and notable item from the notes above.',
-      '2. Do NOT create player characters (kind=character, pc, or ally).',
-      '3. For each entity: call entity_search first. If found, call entity_edit_content to append a brief session note. If not found, call entity_create.',
-      '4. For each entity: call backlink_create with fromPath equal to the session path and toPath equal to the entity path, so the session appears in the entity\'s backlinks.',
-      '5. Also call backlink_create in reverse (fromPath=entity path, toPath=session path) so wikilinks appear inside the session note itself.',
-      '6. When done, list every entity you processed with its full note path so I can navigate to it.',
-    ]
-      .filter((l) => l !== undefined)
-      .join('\n');
+    // Short trigger message — the session.md skill contains the full
+    // extraction instructions; the AI will call note_read to fetch content.
+    const campaignLine = campaignSlug ? ` (campaign: ${campaignSlug})` : '';
+    const message = `End of session: "${sessionPath}"${campaignLine}. Please read the session note and update the compendium.`;
 
     // Hand off to the chat pane — it will auto-send the message and show streaming progress
     window.dispatchEvent(

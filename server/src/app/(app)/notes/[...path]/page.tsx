@@ -203,7 +203,6 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                       sessionPath={path}
                       csrfToken={session.csrfToken}
                       isAlreadyClosed={sessionStatus === 'closed'}
-                      sessionContent={note.content_md}
                       campaignSlug={sessionCampaignSlug}
                     />
                   )}
@@ -249,6 +248,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
           groupId={session.currentGroupId}
           userId={session.userId}
           role={session.role === 'viewer' ? 'player' : 'dm'}
+          activePath={path}
           {...(campaignSlugFromPath(path) !== undefined
             ? { campaignSlug: campaignSlugFromPath(path) }
             : {})}

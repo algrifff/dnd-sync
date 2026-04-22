@@ -21,6 +21,7 @@ export const dynamic = 'force-dynamic';
 type ParsedBody = {
   groupId: string;
   campaignSlug?: string;
+  activeNotePath?: string;
   messages: unknown[];
 };
 
@@ -95,8 +96,9 @@ export async function POST(req: NextRequest): Promise<Response> {
       skills,
       voice: personality.prompt,
       userDisplayName: session.displayName,
-      ...(body.campaignSlug !== undefined ? { campaignSlug: body.campaignSlug } : {}),
-      ...(campaignName !== undefined     ? { campaignName }                     : {}),
+      ...(body.campaignSlug   !== undefined ? { campaignSlug:   body.campaignSlug }   : {}),
+      ...(campaignName        !== undefined ? { campaignName }                         : {}),
+      ...(body.activeNotePath !== undefined ? { activeNotePath: body.activeNotePath } : {}),
     }),
     messages: modelMessages,
     tools:    getToolsForRole(toolCtx),
@@ -179,6 +181,11 @@ async function parseBody(req: NextRequest): Promise<ParsedBody | Response> {
       (nestedBody && typeof nestedBody.campaignSlug === 'string' ? nestedBody.campaignSlug : undefined) ??
       (nestedData && typeof nestedData.campaignSlug === 'string' ? nestedData.campaignSlug : undefined);
 
+    const activeNotePath =
+      (typeof raw.activeNotePath === 'string' ? raw.activeNotePath : undefined) ??
+      (nestedBody && typeof nestedBody.activeNotePath === 'string' ? nestedBody.activeNotePath : undefined) ??
+      (nestedData && typeof nestedData.activeNotePath === 'string' ? nestedData.activeNotePath : undefined);
+
     const messages =
       (Array.isArray(raw.messages) ? raw.messages : null) ??
       (nestedBody && Array.isArray(nestedBody.messages) ? nestedBody.messages : null) ??
@@ -195,7 +202,8 @@ async function parseBody(req: NextRequest): Promise<ParsedBody | Response> {
 
     return {
       groupId,
-      ...(campaignSlug !== undefined ? { campaignSlug } : {}),
+      ...(campaignSlug    !== undefined ? { campaignSlug }    : {}),
+      ...(activeNotePath  !== undefined ? { activeNotePath }  : {}),
       messages,
     };
   } catch (err) {

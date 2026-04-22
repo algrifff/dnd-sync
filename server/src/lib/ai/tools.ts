@@ -39,6 +39,8 @@ export function createTools(ctx: ToolContext) {
     entity_create:       entityCreate(ctx),
     entity_edit_sheet:   entityEditSheet(ctx),
     entity_edit_content: entityEditContent(ctx),
+    note_read:           noteRead(ctx),
+    note_write:          noteWrite(ctx),
     entity_move:         entityMove(ctx),
     backlink_create:     backlinkCreate(ctx),
     inventory_add:       inventoryAdd(ctx),
@@ -50,7 +52,7 @@ export function createTools(ctx: ToolContext) {
 export function getToolsForRole(ctx: ToolContext) {
   const all = createTools(ctx);
   if (ctx.role === 'dm') return all;
-  const { session_close: _sc, session_apply: _sa, entity_move: _em, ...playerTools } = all;
+  const { session_close: _sc, session_apply: _sa, entity_move: _em, note_write: _nw, ...playerTools } = all;
   return playerTools;
 }
 
@@ -112,6 +114,15 @@ const InventorySchema = z.object({
   itemPath:      z.string().optional().describe('Path to an existing Item entity note'),
   freeformName:  z.string().optional().describe('Plain text name for mundane/consumable items'),
   quantity:      z.number().int().positive().optional().default(1),
+});
+
+const NoteReadSchema = z.object({
+  path: z.string().min(1).max(512).describe('Full note path to read'),
+});
+
+const NoteWriteSchema = z.object({
+  path: z.string().min(1).max(512).describe('Full note path'),
+  content: z.string().describe('Full markdown content to write — replaces the existing body entirely'),
 });
 
 const SessionCloseSchema = z.object({
@@ -523,6 +534,80 @@ function inventoryAdd(ctx: ToolContext) {
       } catch (err) {
         console.error('[ai/tools] derive failed after inventory_add:', err);
       }
+
+      return { ok: true as const };
+    },
+  });
+}
+
+// ── note_read ─────────────────────────────────────────────────────────
+
+function noteRead(ctx: ToolContext) {
+  return tool({
+    description:
+      'Read the full content and frontmatter of a note. Use this to inspect a note before editing it, or to read session notes before extracting entities.',
+    inputSchema: NoteReadSchema,
+    execute: async ({ path }: z.infer<typeof NoteReadSchema>) => {
+      const note = loadNote(ctx.groupId, path);
+      if (!note) return { ok: false as const, error: `Not found: ${path}` };
+
+      if (note.dm_only === 1 && ctx.role !== 'dm') {
+        return { ok: false as const, error: 'Access denied: DM-only note' };
+      }
+
+      let frontmatter: Record<string, unknown> = {};
+      try { frontmatter = JSON.parse(note.frontmatter_json) as Record<string, unknown>; }
+      catch { /* ignore */ }
+
+      return {
+        ok: true as const,
+        path,
+        title: note.title,
+        content: note.content_md,
+        frontmatter,
+      };
+    },
+  });
+}
+
+// ── note_write ────────────────────────────────────────────────────────
+
+function noteWrite(ctx: ToolContext) {
+  return tool({
+    description:
+      'Replace the entire body of a note with new markdown content. DM only. Use entity_edit_content to append instead.',
+    inputSchema: NoteWriteSchema,
+    execute: async ({ path, content }: z.infer<typeof NoteWriteSchema>) => {
+      if (ctx.role !== 'dm') return { ok: false as const, error: 'DM only' };
+
+      const note = loadNote(ctx.groupId, path);
+      if (!note) return { ok: false as const, error: `Not found: ${path}` };
+
+      const newNodes: PmNode[] = [];
+      for (const para of content.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)) {
+        if (para.startsWith('# ')) {
+          newNodes.push({ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: para.slice(2) }] });
+        } else if (para.startsWith('## ')) {
+          newNodes.push({ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: para.slice(3) }] });
+        } else if (para.startsWith('### ')) {
+          newNodes.push({ type: 'heading', attrs: { level: 3 }, content: [{ type: 'text', text: para.slice(4) }] });
+        } else {
+          newNodes.push({ type: 'paragraph', content: [{ type: 'text', text: para }] });
+        }
+      }
+
+      const nextDoc: PmDoc = { type: 'doc', content: newNodes.length ? newNodes : [{ type: 'paragraph' }] };
+
+      getDb()
+        .query(
+          `UPDATE notes SET content_json=?, content_text=?, content_md=?,
+                            yjs_state=NULL, updated_at=?, updated_by=?
+           WHERE group_id=? AND path=?`,
+        )
+        .run(
+          JSON.stringify(nextDoc), extractText(nextDoc), content.trim(),
+          Date.now(), ctx.userId, ctx.groupId, path,
+        );
 
       return { ok: true as const };
     },
