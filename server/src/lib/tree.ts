@@ -12,7 +12,6 @@ import { getDb } from './db';
 const DEFAULT_FOLDERS: readonly string[] = [
   'Campaigns',
   'World Lore',
-  'World Lore/Quests',
   'World Lore/World Info',
   'Assets',
 ] as const;
@@ -26,8 +25,8 @@ const DEFAULT_FOLDERS: readonly string[] = [
 export function isSystemFolder(path: string): boolean {
   if (path === 'Campaigns' || path === 'World Lore' || path === 'Assets') return true;
   if (/^Campaigns\/[^/]+$/.test(path)) return true;
-  if (/^Campaigns\/[^/]+\/(Characters|People|Enemies|Loot|Adventure Log|Places|Creatures)$/.test(path)) return true;
-  return /^World Lore\/(Quests|World Info)$/.test(path);
+  if (/^Campaigns\/[^/]+\/(Characters|People|Enemies|Loot|Adventure Log|Places|Creatures|Quests)$/.test(path)) return true;
+  return /^World Lore\/World Info$/.test(path);
 }
 
 /** Seed the default folder skeleton if the group has no notes and no

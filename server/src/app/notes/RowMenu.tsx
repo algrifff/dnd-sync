@@ -27,7 +27,16 @@ export function RowMenu({
 }: Props): React.JSX.Element {
   const router = useRouter();
   const [open, setOpen] = useState<boolean>(false);
+  const [dropUp, setDropUp] = useState<boolean>(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  const openMenu = (): void => {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      setDropUp(rect.bottom + 160 > window.innerHeight - 8);
+    }
+    setOpen(true);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -127,7 +136,7 @@ export function RowMenu({
         onClick={(e) => {
           e.stopPropagation();
           e.preventDefault();
-          setOpen((v) => !v);
+          if (open) { setOpen(false); } else { openMenu(); }
         }}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -139,7 +148,7 @@ export function RowMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-30 mt-1 w-40 overflow-hidden rounded-[8px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_8px_24px_rgba(42,36,30,0.18)]"
+          className={`absolute right-0 z-30 w-40 overflow-hidden rounded-[8px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_8px_24px_rgba(42,36,30,0.18)] ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
         >
           <MenuItem
             onClick={() => {

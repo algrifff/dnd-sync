@@ -63,7 +63,8 @@ type CreateKind =
   | 'item'
   | 'location'
   | 'session'
-  | 'monster';
+  | 'monster'
+  | 'quest';
 
 const NEW_ENTRY_OPTIONS: Array<{
   kind: CreateKind;
@@ -78,6 +79,7 @@ const NEW_ENTRY_OPTIONS: Array<{
   { kind: 'location', label: 'Place', icon: MapIcon, placeholder: 'New place' },
   { kind: 'monster', label: 'Creature', icon: Ghost, placeholder: 'New creature' },
   // kept for canonical subfolder + rename flows; not surfaced in general menus
+  { kind: 'quest', label: 'Quest', icon: ScrollText, placeholder: 'Untitled quest' },
   { kind: 'page', label: 'Page', icon: FileText, placeholder: 'Untitled' },
   { kind: 'folder', label: 'Folder', icon: FolderPlus, placeholder: 'New folder' },
   { kind: 'campaign', label: 'New campaign', icon: Shield, placeholder: 'Campaign name' },
@@ -113,7 +115,7 @@ function getContextualOptions(folderPath: string | undefined, isWorldOwner: bool
 
   // Campaign root (Campaigns/<slug>) — entity kinds only, no folder creation
   if (/^Campaigns\/[^/]+$/.test(folderPath)) {
-    return { kinds: ['session', 'npc', 'villain', 'item', 'location', 'monster'], isUpload: false, labelOverrides: {} };
+    return { kinds: ['session', 'npc', 'villain', 'item', 'location', 'monster', 'quest'], isUpload: false, labelOverrides: {} };
   }
 
   // Per-campaign canonical sub-folders (and any depth within them)
@@ -124,13 +126,11 @@ function getContextualOptions(folderPath: string | undefined, isWorldOwner: bool
   if (/^Campaigns\/[^/]+\/Adventure Log(\/|$)/.test(folderPath)) return { kinds: ['session', 'folder'], isUpload: false, labelOverrides: {} };
   if (/^Campaigns\/[^/]+\/Places(\/|$)/.test(folderPath))        return { kinds: ['location', 'folder'],isUpload: false, labelOverrides: {} };
   if (/^Campaigns\/[^/]+\/Creatures(\/|$)/.test(folderPath))     return { kinds: ['monster', 'folder'], isUpload: false, labelOverrides: {} };
+  if (/^Campaigns\/[^/]+\/Quests(\/|$)/.test(folderPath))        return { kinds: ['quest', 'folder'],   isUpload: false, labelOverrides: {} };
 
   // World Lore section
   if (folderPath === 'World Lore') {
     return { kinds: ['page', 'folder'], isUpload: false, labelOverrides: {} };
-  }
-  if (folderPath === 'World Lore/Quests') {
-    return { kinds: ['page', 'folder'], isUpload: false, labelOverrides: { page: 'New quest' } };
   }
   if (folderPath === 'World Lore/World Info') {
     return { kinds: ['page', 'folder'], isUpload: false, labelOverrides: {} };
@@ -147,7 +147,6 @@ function getFolderIcon(path: string): FolderIconDef | null {
   if (path === 'Assets') return { Icon: MapIcon, color: '#8B7355' };
   if (path === 'Campaigns') return { Icon: Shield, color: '#5A7A6A' };
   if (path === 'World Lore') return { Icon: BookOpen, color: '#7B5A8B' };
-  if (path === 'World Lore/Quests') return { Icon: ScrollText, color: '#8B7A45' };
   if (path === 'World Lore/World Info') return { Icon: Globe, color: '#4A7A8B' };
   if (/^Campaigns\/[^/]+$/.test(path)) return { Icon: MapIcon, color: '#4A7A6A' };
   if (/^Campaigns\/[^/]+\/Characters$/.test(path))    return { Icon: Sword, color: '#7B8A5F' };
@@ -157,6 +156,7 @@ function getFolderIcon(path: string): FolderIconDef | null {
   if (/^Campaigns\/[^/]+\/Adventure Log$/.test(path)) return { Icon: CalendarDays, color: '#6A5D8B' };
   if (/^Campaigns\/[^/]+\/Places$/.test(path))        return { Icon: MapPin, color: '#5A7A6A' };
   if (/^Campaigns\/[^/]+\/Creatures$/.test(path))     return { Icon: Ghost, color: '#6B5A8E' };
+  if (/^Campaigns\/[^/]+\/Quests$/.test(path))        return { Icon: ScrollText, color: '#8B7A45' };
   return null;
 }
 
@@ -269,6 +269,7 @@ export function FileTree({
       const KIND_SUBFOLDER: Partial<Record<CreateKind, string>> = {
         pc: 'Characters', npc: 'People', ally: 'People', villain: 'Enemies',
         item: 'Loot', session: 'Adventure Log', location: 'Places', monster: 'Creatures',
+        quest: 'Quests',
       };
       let resolvedParent = parent;
       if (/^Campaigns\/[^/]+$/.test(parent) && kind in KIND_SUBFOLDER) {
@@ -306,9 +307,9 @@ export function FileTree({
           folder,
           name: name.trim(),
         };
-        // API treats missing kind as "page"; omitting keeps the log
-        // clean for the common case.
-        if (kind !== 'page') payload.kind = kind;
+        // 'quest' is a UI routing hint only — notes land as plain pages.
+        // API treats missing kind as "page"; omitting keeps the log clean.
+        if (kind !== 'page' && kind !== 'quest') payload.kind = kind;
         const res = await fetch('/api/notes/create', {
           method: 'POST',
           headers: {
@@ -544,34 +545,6 @@ export function FileTree({
           }}
         />
       )}
-      {canCreate && (
-        <div className="mb-1 px-2">
-          <NewEntryDropdown
-            onPick={(kind) => startCreate('', kind)}
-            onUpload={(files) => void uploadAsset(files, '')}
-            variant="wide"
-            folderPath=""
-            isWorldOwner={isWorldOwner}
-          />
-        </div>
-      )}
-
-      {creatingIn?.parent === '' && (
-        <div className="mb-1 px-2">
-          <NewEntryRow
-            kind={creatingIn.kind}
-            depth={0}
-            disabled={creating}
-            error={error}
-            onCancel={cancelCreate}
-            onSubmit={(name) => {
-              if (creatingIn.kind === 'folder') createFolder('', name);
-              else createNote('', name, creatingIn.kind);
-            }}
-          />
-        </div>
-      )}
-
       <ul
         role="tree"
         className={
@@ -976,6 +949,7 @@ function NewEntryDropdown({
   isWorldOwner: boolean;
 }): React.JSX.Element | null {
   const [open, setOpen] = useState<boolean>(false);
+  const [dropUp, setDropUp] = useState<boolean>(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -996,6 +970,15 @@ function NewEntryDropdown({
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
+
+  const openMenu = (): void => {
+    if (wrapRef.current) {
+      const rect = wrapRef.current.getBoundingClientRect();
+      // Use a conservative max height; real menu won't exceed this
+      setDropUp(rect.bottom + 320 > window.innerHeight - 8);
+    }
+    setOpen(true);
+  };
 
   // Assets section: single upload button, no dropdown
   if (isUpload) {
@@ -1050,7 +1033,7 @@ function NewEntryDropdown({
             onPick(visibleOptions[0].kind);
             return;
           }
-          setOpen((o) => !o);
+          if (open) { setOpen(false); } else { openMenu(); }
         }}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -1071,8 +1054,10 @@ function NewEntryDropdown({
         // stays inside wrapRef while moving from button to menu.
         <div
           className={
-            'absolute z-30 pt-1 ' +
-            (variant === 'wide' ? 'left-0 top-full' : 'right-0 top-full')
+            'absolute z-30 ' +
+            (dropUp
+              ? (variant === 'wide' ? 'left-0 bottom-full pb-1' : 'right-0 bottom-full pb-1')
+              : (variant === 'wide' ? 'left-0 top-full pt-1' : 'right-0 top-full pt-1'))
           }
         >
           <ul
@@ -1167,7 +1152,7 @@ function NewEntryRow({
 }
 
 const CAMPAIGN_SUBFOLDERS = [
-  'Characters', 'People', 'Enemies', 'Loot', 'Adventure Log', 'Places', 'Creatures',
+  'Characters', 'People', 'Enemies', 'Loot', 'Adventure Log', 'Places', 'Creatures', 'Quests',
 ] as const;
 type CampaignSubfolder = typeof CAMPAIGN_SUBFOLDERS[number];
 
