@@ -63,7 +63,7 @@ export default async function TagDetailPage({ params }: Ctx): Promise<ReactEleme
           <SidebarFooter username={session.username} />
         </aside>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <NoteTabBar canCreate={session.role !== 'viewer'} csrfToken={session.csrfToken} />
+          <NoteTabBar />
           <div className="flex-1 overflow-y-auto">
             <main className="mx-auto max-w-[960px] px-8 py-10">
               <p className="mb-2 text-xs text-[#5A4F42]">

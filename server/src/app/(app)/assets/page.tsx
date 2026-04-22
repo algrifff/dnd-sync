@@ -57,7 +57,7 @@ export default async function AssetsPage(): Promise<ReactElement> {
           <SidebarFooter username={session.username} />
         </aside>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <NoteTabBar canCreate={session.role !== 'viewer'} csrfToken={session.csrfToken} />
+          <NoteTabBar />
           <div className="flex-1 overflow-y-auto px-6 py-8">
             <div className="mx-auto max-w-6xl">
               <h1 className="mb-1 text-3xl font-bold" style={{ fontFamily: '"Fraunces", Georgia, serif' }}>
