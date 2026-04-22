@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useLayoutEffect } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 const STORAGE_KEY = 'compendium_rightpanel_open';
@@ -12,15 +12,12 @@ export function CollapsibleRightPanel({
   children: React.ReactNode;
 }): React.JSX.Element {
   const [open, setOpen] = useState(true);
-  const [mounted, setMounted] = useState(false);
+  const [ready, setReady] = useState(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved === 'false') setOpen(false);
-    // Enable transitions only after the initial closed state is committed —
-    // otherwise the panel animates closed on every page navigation.
-    const id = requestAnimationFrame(() => setMounted(true));
-    return () => cancelAnimationFrame(id);
+    setReady(true);
   }, []);
 
   function toggle() {
@@ -31,32 +28,31 @@ export function CollapsibleRightPanel({
     });
   }
 
-  const effectiveOpen = !mounted || open;
+  const effectiveOpen = !ready || open;
 
   return (
     <div
       className="relative hidden shrink-0 md:block"
       style={{
         width: effectiveOpen ? WIDTH : 0,
-        transition: mounted ? 'width 200ms ease-in-out' : 'none',
-        // Ensure the toggle tab can overflow the boundary
-        overflow: 'visible',
+        transition: ready ? 'width 200ms ease-in-out' : 'none',
       }}
     >
-      {/* Sliding panel */}
-      <div
-        className="absolute inset-y-0 right-0 h-full overflow-hidden"
-        style={{
-          width: WIDTH,
-          transform: effectiveOpen ? 'translateX(0)' : `translateX(${WIDTH}px)`,
-          transition: mounted ? 'transform 200ms ease-in-out' : 'none',
-          visibility: effectiveOpen ? 'visible' : 'hidden',
-        }}
-      >
-        {children}
+      {/* Overflow-hidden clipping container — sibling of toggle tab */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div
+          className="absolute inset-y-0 right-0 flex h-full flex-col"
+          style={{
+            width: WIDTH,
+            transform: effectiveOpen ? 'translateX(0)' : `translateX(${WIDTH}px)`,
+            transition: ready ? 'transform 200ms ease-in-out' : 'none',
+          }}
+        >
+          {children}
+        </div>
       </div>
 
-      {/* Toggle tab — always visible at the left boundary */}
+      {/* Toggle tab — sibling of the overflow:hidden container */}
       <button
         onClick={toggle}
         title={effectiveOpen ? 'Collapse panel' : 'Expand panel'}
