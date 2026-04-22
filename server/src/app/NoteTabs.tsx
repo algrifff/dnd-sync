@@ -160,14 +160,8 @@ export function NoteTabs(): React.JSX.Element {
             className={
               'group relative flex max-w-[220px] min-w-0 shrink-0 items-center gap-1.5 rounded-t-[8px] px-3 py-1.5 text-xs transition ' +
               (isActive
-                ? // Active tab matches content bg; a pseudo-element
-                  // extends that bg 2 px below the tab to conclusively
-                  // cover the header's border-b line regardless of
-                  // subpixel rendering, so the tab appears to flow
-                  // straight into the content pane.
-                  'z-10 border border-b-0 border-[#D4C7AE] bg-[#F4EDE0] text-[#2A241E] ' +
-                  'after:content-[""] after:absolute after:inset-x-0 after:top-full after:h-[2px] after:bg-[#F4EDE0]'
-                : 'border border-transparent text-[#5A4F42] hover:bg-[#FBF5E8]/70 hover:text-[#2A241E]')
+                ? 'z-10 bg-[#F4EDE0] text-[#2A241E]'
+                : 'text-[#5A4F42] hover:bg-[#FBF5E8]/70 hover:text-[#2A241E]')
             }
           >
             <FileText size={12} aria-hidden className="shrink-0" />
