@@ -5,6 +5,24 @@ import type { NextConfig } from 'next';
 const config: NextConfig = {
   reactStrictMode: true,
 
+  async rewrites() {
+    return [
+      {
+        source: '/ingest/static/:path*',
+        destination: 'https://eu-assets.i.posthog.com/static/:path*',
+      },
+      {
+        source: '/ingest/array/:path*',
+        destination: 'https://eu-assets.i.posthog.com/array/:path*',
+      },
+      {
+        source: '/ingest/:path*',
+        destination: 'https://eu.i.posthog.com/:path*',
+      },
+    ];
+  },
+  skipTrailingSlashRedirect: true,
+
   // Externalise packages whose modules have top-level side effects
   // (registrations against a shared registry, singleton construction)
   // so the whole server process — custom server.ts + every route

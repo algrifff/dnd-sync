@@ -101,6 +101,15 @@ export async function POST(req: NextRequest): Promise<Response> {
     messages: modelMessages,
     tools:    getToolsForRole(toolCtx),
     stopWhen: stepCountIs(8),
+    experimental_telemetry: {
+      isEnabled: true,
+      functionId: 'compendium-chat',
+      metadata: {
+        posthog_distinct_id: session.userId,
+        role,
+        groupId: session.currentGroupId,
+      },
+    },
   });
 
   return result.toUIMessageStreamResponse();

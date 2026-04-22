@@ -36,6 +36,7 @@ import { ChatMarkdown } from './ChatMarkdown';
 import { SessionReviewPanel, type SessionProposal } from './SessionReviewPanel';
 import { noteEditorHref, useRefreshTreeOnAiNoteMutations } from './chat-tree-refresh';
 import { chatStorageKey, cleanupLegacyChatStorage } from './chat-storage';
+import posthog from '@/lib/posthog-web';
 
 // ── File attachment helpers (shared shape with ChatPane) ───────────────
 
@@ -268,6 +269,13 @@ export function HomeChat({
     setInput('');
     setAttachedFiles([]);
 
+    posthog.capture('ai_message_sent', {
+      has_attachments: attachedFiles.length > 0,
+      attachment_count: attachedFiles.length,
+      has_images: imageFiles.length > 0,
+      role: 'dm',
+    });
+
     if (imageParts.length > 0) {
       void sendMessage({ text: fullText || 'Please look at the attached image(s).', files: imageParts });
     } else {
@@ -276,6 +284,7 @@ export function HomeChat({
   }
 
   function clearChat() {
+    posthog.capture('ai_chat_cleared');
     setMessages([]);
     try {
       window.localStorage.removeItem(storageKey);
@@ -298,6 +307,8 @@ export function HomeChat({
 
   function quickSend(prompt: string) {
     if (isStreaming) return;
+    const action = QUICK_ACTIONS.find((a) => a.prompt === prompt);
+    posthog.capture('ai_quick_action_triggered', { action_key: action?.key ?? 'unknown' });
     void sendMessage({ text: prompt });
   }
 

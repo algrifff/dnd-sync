@@ -10,6 +10,7 @@
 // refreshing doesn't lose state.
 
 import { useCallback, useMemo, useRef, useState } from 'react';
+import posthog from '@/lib/posthog-web';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
@@ -263,6 +264,16 @@ export function ImportJobPanel({
           body.failed ? ` · ${body.failed} failed` : ''
         }`,
       });
+      posthog.capture('import_job_applied', {
+        job_id: job.id,
+        moved: body.moved ?? 0,
+        merged: body.merged ?? 0,
+        kept_in_place: body.keptInPlace ?? 0,
+        assets_committed: body.assetsCommitted ?? 0,
+        failed: body.failed ?? 0,
+        accepted_count: counts.accepted,
+        total_count: counts.total,
+      });
       router.refresh();
     } catch (err) {
       setFlash({
@@ -292,6 +303,7 @@ export function ImportJobPanel({
         });
         return;
       }
+      posthog.capture('import_job_cancelled', { job_id: job.id, job_status: job.status });
       router.refresh();
     } catch (err) {
       setFlash({

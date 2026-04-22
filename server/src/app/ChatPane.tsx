@@ -25,6 +25,7 @@ import { ChatMarkdown } from './ChatMarkdown';
 import { SessionReviewPanel, type SessionProposal } from './SessionReviewPanel';
 import { noteEditorHref, useRefreshTreeOnAiNoteMutations } from './chat-tree-refresh';
 import { chatStorageKey, cleanupLegacyChatStorage } from './chat-storage';
+import posthog from '@/lib/posthog-web';
 
 // ── File attachment types ───────────────────────────────────────────────
 
@@ -259,6 +260,13 @@ export function ChatPane({
     setInput('');
     setAttachedFiles([]);
 
+    posthog.capture('ai_message_sent', {
+      has_attachments: attachedFiles.length > 0,
+      attachment_count: attachedFiles.length,
+      has_images: imageFiles.length > 0,
+      role,
+    });
+
     if (imageParts.length > 0) {
       void sendMessage({ text: fullText || 'Please look at the attached image(s).', files: imageParts });
     } else {
@@ -281,6 +289,14 @@ export function ChatPane({
     sessionPath: string,
     approvedChanges: Array<{ id: string; approved: boolean }>,
   ) {
+    const approved = approvedChanges.filter((c) => c.approved).length;
+    const rejected = approvedChanges.length - approved;
+    posthog.capture('session_review_submitted', {
+      session_path: sessionPath,
+      approved_count: approved,
+      rejected_count: rejected,
+      role,
+    });
     const json = JSON.stringify(approvedChanges);
     void sendMessage({
       text: `Apply the approved session changes. Call session_apply with sessionPath="${sessionPath}" and approvedChanges=${json}`,

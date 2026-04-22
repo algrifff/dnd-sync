@@ -8,10 +8,17 @@
 // Worlds list is fetched from /api/worlds on mount. Switching posts
 // to /api/worlds/active then router.refresh()es so every server
 // component re-reads session.currentGroupId.
+//
+// IMPORTANT: the active pill is driven by the `worldId` prop (from
+// the server session), NOT by the `isActive` flag on the fetched
+// list. The fetched list is a mount-time snapshot — if we read
+// isActive from it, every switch after the first keeps the highlight
+// pinned to whatever world was active when the sidebar mounted.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Check, Link2, Pencil, Plus, X } from 'lucide-react';
+import { useWorldSwitch } from './(app)/WorldSwitch';
 
 type World = {
   id: string;
@@ -40,6 +47,7 @@ export function WorldsSidebar({
   role: 'admin' | 'editor' | 'viewer';
   worldId: string;
 }): React.JSX.Element {
+  const { isPending, switchTo } = useWorldSwitch();
   const [worlds, setWorlds] = useState<World[] | null>(null);
   const [creating, setCreating] = useState<boolean>(false);
   const [busy, setBusy] = useState<boolean>(false);
@@ -60,6 +68,22 @@ export function WorldsSidebar({
     return () => window.removeEventListener('world-updated', onWorldUpdated);
   }, []);
 
+  // When the active world changes, re-pull the list so role flags,
+  // iconVersion bumps, and any newly-joined worlds stay current. We
+  // already render the active pill straight from the `worldId` prop,
+  // so the list's own isActive column isn't load-bearing anymore —
+  // but the rest of the row data still needs to match the new
+  // session. Skip the very first render because the mount-time fetch
+  // already kicked off above.
+  const mountedOnce = useRef<boolean>(false);
+  useEffect(() => {
+    if (!mountedOnce.current) {
+      mountedOnce.current = true;
+      return;
+    }
+    void fetchWorlds();
+  }, [worldId]);
+
   const fetchWorlds = async (): Promise<void> => {
     try {
       const res = await fetch('/api/worlds', { cache: 'no-store' });
@@ -71,41 +95,38 @@ export function WorldsSidebar({
     }
   };
 
-  const activateWorld = async (id: string): Promise<boolean> => {
-    const res = await fetch('/api/worlds/active', {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrfToken,
-      },
-      body: JSON.stringify({ id }),
-    });
-    return res.ok;
-  };
+  // Live active-state view of the worlds list. We keep the fetched
+  // list as-is and override `isActive` per-row from the server
+  // session's worldId, so that after a switch the highlight flips
+  // even before the (possibly debounced) re-fetch finishes.
+  const worldsWithLiveActive = useMemo<World[] | null>(
+    () =>
+      worlds == null
+        ? null
+        : worlds.map((w) => ({ ...w, isActive: w.id === worldId })),
+    [worlds, worldId],
+  );
 
   const switchWorld = async (id: string): Promise<void> => {
-    if (busy) return;
+    if (busy || isPending) return;
     setBusy(true);
     try {
-      const ok = await activateWorld(id);
-      if (!ok) return;
-      // Full reload to drop any active-character pin / in-memory state
-      // from the previous world.
-      window.location.href = '/';
+      await switchTo(id);
     } finally {
       setBusy(false);
     }
   };
 
+  // Clicking the pencil on any world both flips the active world
+  // (server-side) and lands the user on its settings page. Setting
+  // the active world to the one it already is is a harmless no-op on
+  // the server, so we can route every case through switchTo and keep
+  // the world rail mounted.
   const editWorld = async (w: World): Promise<void> => {
-    if (busy) return;
+    if (busy || isPending) return;
     setBusy(true);
     try {
-      if (!w.isActive) {
-        const ok = await activateWorld(w.id);
-        if (!ok) return;
-      }
-      window.location.href = '/settings/world';
+      await switchTo(w.id, '/settings/world');
     } finally {
       setBusy(false);
     }
@@ -117,10 +138,10 @@ export function WorldsSidebar({
         aria-label="Worlds"
         className="hidden h-full w-[56px] shrink-0 flex-col items-center gap-1.5 bg-[#2A241E] py-2 md:flex"
       >
-        {worlds == null ? (
+        {worldsWithLiveActive == null ? (
           <div className="h-10 w-10 animate-pulse rounded-full bg-[#5A4F42]/40" />
         ) : (
-          worlds.map((w) => (
+          worldsWithLiveActive.map((w) => (
             <WorldIcon
               key={w.id}
               world={w}
@@ -157,9 +178,9 @@ export function WorldsSidebar({
         <NewWorldDialog
           csrfToken={csrfToken}
           onClose={() => setCreating(false)}
-          onCreated={() => {
+          onCreated={(id) => {
             setCreating(false);
-            window.location.href = '/';
+            void switchWorld(id);
           }}
         />
       )}
@@ -240,7 +261,7 @@ function NewWorldDialog({
 }: {
   csrfToken: string;
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (id: string) => void;
 }): React.JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState<string>('');
@@ -268,6 +289,7 @@ function NewWorldDialog({
       });
       const body = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
+        id?: string;
         error?: string;
         detail?: string;
       };
@@ -275,7 +297,11 @@ function NewWorldDialog({
         setError(body.detail ?? body.error ?? `HTTP ${res.status}`);
         return;
       }
-      onCreated();
+      if (!body.id) {
+        setError('Server did not return a world id.');
+        return;
+      }
+      onCreated(body.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'network error');
     } finally {
