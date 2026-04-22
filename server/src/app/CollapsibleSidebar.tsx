@@ -3,26 +3,20 @@
 import { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
-const STORAGE_KEY = 'compendium_sidebar_open';
+const COOKIE_KEY = 'compendium_sidebar_open';
 const WIDTH = 260;
-
-function readOpen(): boolean {
-  // typeof window guard: returns false during SSR, correct value on client.
-  if (typeof window === 'undefined') return false;
-  return localStorage.getItem(STORAGE_KEY) !== 'false';
-}
 
 export function CollapsibleSidebar({
   children,
+  initialOpen,
 }: {
   children: React.ReactNode;
+  initialOpen: boolean;
 }): React.JSX.Element {
-  // Lazy initializer reads localStorage on the first client render so the
-  // component starts with the correct state — no correction pass needed.
-  const [open, setOpen] = useState(readOpen);
+  // Server passes the correct initial value from the cookie — no hydration mismatch.
+  const [open, setOpen] = useState(initialOpen);
   const [ready, setReady] = useState(false);
 
-  // Enable transitions only after the initial state is painted.
   useEffect(() => {
     setReady(true);
   }, []);
@@ -30,14 +24,14 @@ export function CollapsibleSidebar({
   function toggle() {
     setOpen((v) => {
       const next = !v;
-      localStorage.setItem(STORAGE_KEY, String(next));
+      // Write cookie so server can read the correct value on next SSR load.
+      document.cookie = `${COOKIE_KEY}=${next}; path=/; max-age=31536000; SameSite=Lax`;
       return next;
     });
   }
 
   return (
     <div
-      suppressHydrationWarning
       className="relative hidden h-full shrink-0 md:block"
       style={{
         width: open ? WIDTH : 0,
@@ -49,7 +43,6 @@ export function CollapsibleSidebar({
           toggle tab so the tab is never clipped. */}
       <div className="absolute inset-0 overflow-hidden">
         <div
-          suppressHydrationWarning
           className="absolute inset-y-0 left-0 flex h-full flex-col bg-[#EAE1CF]/60"
           style={{
             width: WIDTH,

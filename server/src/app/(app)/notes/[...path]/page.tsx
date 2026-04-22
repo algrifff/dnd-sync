@@ -49,6 +49,9 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   const note = loadNote(session.currentGroupId, path);
   if (!note) notFound();
 
+  const sidebarOpen = jar.get('compendium_sidebar_open')?.value !== 'false';
+  const rightPanelOpen = jar.get('compendium_rightpanel_open')?.value !== 'false';
+
   const worldHeader = getWorldHeader(session.currentGroupId);
   const accentColor = worldHeader.headerColor;
 
@@ -121,7 +124,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
         groupId={session.currentGroupId}
       />
       <div className="flex min-h-0 flex-1">
-        <CollapsibleSidebar>
+        <CollapsibleSidebar initialOpen={sidebarOpen}>
           <SidebarHeader role={session.role} />
           <FileTree
             tree={tree}
@@ -231,7 +234,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
               </div>
             </main>
 
-            <CollapsibleRightPanel>
+            <CollapsibleRightPanel initialOpen={rightPanelOpen}>
               <NoteSidebar
                 path={path}
                 backlinks={backlinks}

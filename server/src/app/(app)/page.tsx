@@ -59,7 +59,7 @@ export default async function HomePage(): Promise<ReactElement> {
         groupId={session.currentGroupId}
       />
       <div className="flex min-h-0 flex-1">
-        <CollapsibleSidebar>
+        <CollapsibleSidebar initialOpen={jar.get('compendium_sidebar_open')?.value !== 'false'}>
           <SidebarHeader role={session.role} />
           <FileTree
             tree={tree}

@@ -3,20 +3,17 @@
 import { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
-const STORAGE_KEY = 'compendium_rightpanel_open';
+const COOKIE_KEY = 'compendium_rightpanel_open';
 const WIDTH = 280;
-
-function readOpen(): boolean {
-  if (typeof window === 'undefined') return false;
-  return localStorage.getItem(STORAGE_KEY) !== 'false';
-}
 
 export function CollapsibleRightPanel({
   children,
+  initialOpen,
 }: {
   children: React.ReactNode;
+  initialOpen: boolean;
 }): React.JSX.Element {
-  const [open, setOpen] = useState(readOpen);
+  const [open, setOpen] = useState(initialOpen);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -26,14 +23,13 @@ export function CollapsibleRightPanel({
   function toggle() {
     setOpen((v) => {
       const next = !v;
-      localStorage.setItem(STORAGE_KEY, String(next));
+      document.cookie = `${COOKIE_KEY}=${next}; path=/; max-age=31536000; SameSite=Lax`;
       return next;
     });
   }
 
   return (
     <div
-      suppressHydrationWarning
       className="relative hidden shrink-0 md:block"
       style={{
         width: open ? WIDTH : 0,
@@ -43,7 +39,6 @@ export function CollapsibleRightPanel({
       {/* Overflow-hidden clipping container — sibling of toggle tab */}
       <div className="absolute inset-0 overflow-hidden">
         <div
-          suppressHydrationWarning
           className="absolute inset-y-0 right-0 flex h-full flex-col"
           style={{
             width: WIDTH,
