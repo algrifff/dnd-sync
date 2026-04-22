@@ -179,35 +179,50 @@ export function ImportLauncher({ csrfToken }: { csrfToken: string }): React.JSX.
   const sendAnswer = async (): Promise<void> => {
     const content = answerText.trim();
     if (!content || sendingAnswer || phase.kind !== 'running') return;
+    const jobId = phase.jobId;
     setSendingAnswer(true);
-    // Optimistic append.
-    setPhase((prev) => {
-      if (prev.kind !== 'running') return prev;
-      const orch = prev.liveJob.plan?.orchestration;
-      if (!orch) return prev;
-      return {
-        ...prev,
-        liveJob: {
-          ...prev.liveJob,
-          plan: {
-            ...prev.liveJob.plan,
-            orchestration: {
-              ...orch,
-              conversationHistory: [...orch.conversationHistory, { role: 'user' as const, content, timestamp: Date.now() }],
-            },
-          },
-        },
-      };
-    });
     setAnswerText('');
     try {
-      await fetch(`/api/import/${encodeURIComponent(phase.jobId)}/answer`, {
+      const res = await fetch(`/api/import/${encodeURIComponent(jobId)}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
         body: JSON.stringify({ content }),
       });
-    } catch { /* polling will reflect the new state */ }
-    finally { setSendingAnswer(false); }
+      if (!res.ok) {
+        // Restore so the user can retry.
+        setAnswerText(content);
+        return;
+      }
+      const body = (await res.json().catch(() => ({}))) as { reconnecting?: boolean };
+      if (body.reconnecting) {
+        // Worker was dead — it's restarting and will re-ask the question.
+        // Don't optimistic-append; the re-asked message will appear in the next poll.
+        return;
+      }
+      // Optimistic append to reduce perceived latency.
+      setPhase((prev) => {
+        if (prev.kind !== 'running') return prev;
+        const orch = prev.liveJob.plan?.orchestration;
+        if (!orch) return prev;
+        return {
+          ...prev,
+          liveJob: {
+            ...prev.liveJob,
+            plan: {
+              ...prev.liveJob.plan,
+              orchestration: {
+                ...orch,
+                conversationHistory: [...orch.conversationHistory, { role: 'user' as const, content, timestamp: Date.now() }],
+              },
+            },
+          },
+        };
+      });
+    } catch {
+      setAnswerText(content);
+    } finally {
+      setSendingAnswer(false);
+    }
   };
 
   // ── Helpers ────────────────────────────────────────────────────────

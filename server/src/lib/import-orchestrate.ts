@@ -39,7 +39,7 @@ import {
   defaultConventions,
   type ImportSkillContext,
 } from './ai/skills/common';
-import { canonicalPath, canonicalFolder, nameToSlug, type EntityKind } from './ai/paths';
+import { canonicalPath, canonicalFolder, nameToSlug, isCanonicalNotePath, type EntityKind } from './ai/paths';
 import { listCampaigns } from './characters';
 import { deriveAllIndexes } from './derive-indexes';
 
@@ -134,7 +134,15 @@ export function resolveDmQuestion(jobId: string, reply: string): boolean {
 async function doOrchestrate(jobId: string, signal: AbortSignal): Promise<void> {
   const job = getImportJob(jobId);
   if (!job) return;
-  if (job.status !== 'uploaded' && job.status !== 'ready') return;
+  const resumable =
+    job.status === 'uploaded' ||
+    job.status === 'ready' ||
+    job.status === 'waiting_for_answer' ||
+    job.status === 'orchestrating_assets' ||
+    job.status === 'orchestrating_campaign' ||
+    job.status === 'orchestrating_entities' ||
+    job.status === 'orchestrating_quality';
+  if (!resumable) return;
 
   const rawPlan = job.plan as ImportPlan | null;
   if (!rawPlan) {
@@ -567,15 +575,13 @@ async function runEntitiesPhase(
   for (const cn of confident) {
     if (signal.aborted) return;
 
-    // Compute the target path.
-    let targetPath: string;
-    if (cn.kind === 'plain' || cn.confidence === 0) {
-      targetPath = cn.sourcePath;
-    } else if (cn.confidence >= 0.4 && cn.canonicalPath.trim()) {
-      targetPath = cn.canonicalPath.trim().replace(/^\/+|\/+$/g, '');
-    } else {
-      targetPath = fallbackPath(cn.displayName, cn.kind, cn.role, orch);
-    }
+    // Always compute the target path from kind + displayName via our canonical
+    // folder map — never trust the AI's canonicalPath output, which can mirror
+    // the source ZIP structure instead of ours.
+    // Plain/unclassifiable notes land in World Lore rather than staying at
+    // their original ZIP path.
+    const effectiveKind = cn.kind === 'plain' ? 'lore' : cn.kind;
+    const targetPath = fallbackPath(cn.displayName, effectiveKind, cn.role, orch);
 
     // Build frontmatter.
     const fm = buildEntityFrontmatter(cn, orch);
@@ -587,6 +593,11 @@ async function runEntitiesPhase(
         'SELECT id FROM notes WHERE group_id = ? AND path = ?',
       )
       .get(job.groupId, targetPath);
+
+    if (!isCanonicalNotePath(targetPath)) {
+      console.warn('[orchestrate.entities] non-canonical path blocked:', targetPath, '— skipping');
+      continue;
+    }
 
     try {
       setActivity(`Writing ${targetPath}`);

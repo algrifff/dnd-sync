@@ -8,8 +8,8 @@ import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getImportJob } from '@/lib/imports';
-import { resolveDmQuestion } from '@/lib/import-orchestrate';
+import { getImportJob, updateImportJob } from '@/lib/imports';
+import { resolveDmQuestion, startOrchestration, isOrchestrationRunning } from '@/lib/import-orchestrate';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,8 +43,14 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
 
   const resolved = resolveDmQuestion(id, body.content);
   if (!resolved) {
-    // Worker lost its in-process promise (e.g. server restarted).
-    return json({ error: 'no_pending_question', reason: 'worker not running — please cancel and start a new import' }, 409);
+    // Worker lost its in-process resolver (e.g. hot reload / server restart).
+    // Reset status to 'ready' so doOrchestrate can re-enter, then restart
+    // the worker — it will replay the current phase and re-ask the question.
+    if (!isOrchestrationRunning(id)) {
+      updateImportJob(id, { status: 'ready' });
+      startOrchestration(id);
+    }
+    return json({ ok: true, reconnecting: true });
   }
 
   return json({ ok: true });

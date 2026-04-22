@@ -170,8 +170,8 @@ function buildSystem(ctx: ImportSkillContext): string {
     '  - Only reference an image basename that is in the known images list.',
     '  - Prefer existing world tags; coin new ones only when no existing tag fits, and cap new tags at 1-2 per note.',
     '  - Total tags: 2-5 per note. Lowercase, hyphen-separated.',
-    '  - canonical_path must follow the folder conventions above. Filename: "<Display Name>.md" (character / location / item / lore) or "<YYYY-MM-DD>-<slug>.md" (session).',
-    '  - If confidence < 0.4, return kind="plain" with canonical_path equal to the original note path so nothing moves.',
+    '  - canonical_path: the orchestrator recomputes this from kind + display_name, so set it to an empty string — it is ignored.',
+    '  - If confidence < 0.4, return kind="plain". The orchestrator will place it in World Lore automatically.',
     '  - Do NOT include sheet fields in the response — a separate skill extracts them.',
   ].join('\n');
 }
