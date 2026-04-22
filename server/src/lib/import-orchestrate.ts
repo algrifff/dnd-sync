@@ -60,6 +60,8 @@ export type OrchestrationState = {
   }>;
   summary: string | null;
   phaseLog: Array<{ phase: string; completedAt: number; count?: number }>;
+  /** Latest action — overwritten (not appended) so the UI can cycle it. */
+  currentActivity: string | null;
 };
 
 type PlanWithOrch = ImportPlan & { orchestration?: OrchestrationState };
@@ -161,6 +163,12 @@ async function doOrchestrate(jobId: string, signal: AbortSignal): Promise<void> 
     conversationHistory: [],
     summary: null,
     phaseLog: [],
+    currentActivity: null,
+  };
+
+  const setActivity = (msg: string): void => {
+    orch.currentActivity = msg;
+    updateImportJob(jobId, { plan: { ...rawPlan, orchestration: orch } });
   };
 
   const saveState = (status: ImportStatus): void => {
@@ -173,7 +181,7 @@ async function doOrchestrate(jobId: string, signal: AbortSignal): Promise<void> 
   // Phase 0 — Assets
   if (orch.phase === 'assets') {
     saveState('orchestrating_assets');
-    runAssetsPhase(job, orch, rawPlan, entryByPath);
+    runAssetsPhase(job, orch, rawPlan, entryByPath, setActivity);
     orch.phaseLog.push({ phase: 'assets', completedAt: Date.now(), count: Object.keys(orch.assetMap).length });
     orch.phase = 'campaign';
     saveState('orchestrating_campaign');
@@ -183,7 +191,7 @@ async function doOrchestrate(jobId: string, signal: AbortSignal): Promise<void> 
 
   // Phase 1 — Campaign
   if (orch.phase === 'campaign') {
-    await runCampaignPhase(jobId, job, orch, rawPlan, signal);
+    await runCampaignPhase(jobId, job, orch, rawPlan, signal, setActivity);
     if (signal.aborted) return;
     orch.phaseLog.push({ phase: 'campaign', completedAt: Date.now() });
     orch.phase = 'entities';
@@ -192,7 +200,7 @@ async function doOrchestrate(jobId: string, signal: AbortSignal): Promise<void> 
 
   // Phase 2 — Entities
   if (orch.phase === 'entities') {
-    await runEntitiesPhase(jobId, job, orch, rawPlan, entryByPath, signal);
+    await runEntitiesPhase(jobId, job, orch, rawPlan, entryByPath, signal, setActivity);
     if (signal.aborted) return;
     orch.phaseLog.push({ phase: 'entities', completedAt: Date.now(), count: Object.keys(orch.entityMap).length });
     orch.phase = 'quality';
@@ -201,7 +209,7 @@ async function doOrchestrate(jobId: string, signal: AbortSignal): Promise<void> 
 
   // Phase 3 — Quality
   if (orch.phase === 'quality') {
-    runQualityPhase(job, orch);
+    runQualityPhase(job, orch, setActivity);
     orch.phaseLog.push({ phase: 'quality', completedAt: Date.now() });
     orch.phase = 'done';
   }
@@ -222,12 +230,14 @@ function runAssetsPhase(
   orch: OrchestrationState,
   rawPlan: ImportPlan,
   entryByPath: Map<string, AdmZip.IZipEntry>,
+  setActivity: (msg: string) => void,
 ): void {
   for (const asset of rawPlan.assets) {
     const entry = entryByPath.get(asset.sourcePath);
     if (!entry) continue;
     const folder = asset.mime?.startsWith('image/') ? 'Assets/Portraits' : 'Assets';
     const vaultPath = `${folder}/${asset.basename}`;
+    setActivity(`Saving ${asset.basename}`);
     try {
       commitAsset(job, entry.getData(), vaultPath);
       orch.assetMap[asset.basename.toLowerCase()] = vaultPath;
@@ -245,8 +255,10 @@ async function runCampaignPhase(
   orch: OrchestrationState,
   rawPlan: ImportPlan,
   signal: AbortSignal,
+  setActivity: (msg: string) => void,
 ): Promise<void> {
   if (orch.campaignSlug !== null || orch.campaignRoot !== null) return; // resumed
+  setActivity('Detecting campaign structure…');
 
   const campaigns = listCampaigns(job.groupId);
   const sourcePaths = rawPlan.notes.map((n) => n.sourcePath);
@@ -383,6 +395,7 @@ async function runEntitiesPhase(
   rawPlan: ImportPlan,
   entryByPath: Map<string, AdmZip.IZipEntry>,
   signal: AbortSignal,
+  setActivity: (msg: string) => void,
 ): Promise<void> {
   const ctx = buildClassifyContext(job, rawPlan, orch);
   const concurrency = 4;
@@ -419,6 +432,7 @@ async function runEntitiesPhase(
       const body = splitBody(rawContent);
 
       try {
+        setActivity(`Classifying ${note.basename}…`);
         const classifyInput: ClassifyInput = {
           filename: note.basename,
           folderPath: note.sourcePath.split('/').slice(0, -1).join('/'),
@@ -432,6 +446,7 @@ async function runEntitiesPhase(
 
         let sheet: Record<string, unknown> = {};
         const extractor = pickExtractor(result);
+        if (extractor) setActivity(`Extracting sheet for ${result.displayName}…`);
         if (extractor) {
           const extractInput: ExtractInput = { ...classifyInput, displayName: result.displayName };
           const extracted = await extractor(extractInput, { signal });
@@ -574,6 +589,7 @@ async function runEntitiesPhase(
       .get(job.groupId, targetPath);
 
     try {
+      setActivity(`Writing ${targetPath}`);
       writeNote({
         groupId: job.groupId,
         userId: job.createdBy,
@@ -592,7 +608,8 @@ async function runEntitiesPhase(
 
 // ── Phase 3: Quality ───────────────────────────────────────────────────
 
-function runQualityPhase(job: ImportJob, orch: OrchestrationState): void {
+function runQualityPhase(job: ImportJob, orch: OrchestrationState, setActivity: (msg: string) => void): void {
+  setActivity('Rebuilding indexes…');
   const db = getDb();
   let indexErrors = 0;
 
