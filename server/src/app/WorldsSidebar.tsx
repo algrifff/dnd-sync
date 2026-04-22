@@ -18,6 +18,9 @@ type World = {
   name: string;
   role: 'admin' | 'editor' | 'viewer';
   isActive: boolean;
+  /** 0 = no uploaded icon, fall back to initials chip. Non-zero acts
+   *  as a cache-buster for /api/worlds/{id}/icon?v=N. */
+  iconVersion: number;
 };
 
 export function WorldsSidebar({
@@ -176,6 +179,7 @@ function WorldIcon({
   const initials = initialsOf(world.name);
   const bg = colorFor(world.id);
   const canEdit = world.role === 'admin';
+  const hasIcon = world.iconVersion > 0;
   return (
     <div className="group relative">
       <span
@@ -197,9 +201,18 @@ function WorldIcon({
             ? 'rounded-[14px] ring-2 ring-[#F4EDE0]/20'
             : 'rounded-full hover:rounded-[14px]')
         }
-        style={{ backgroundColor: bg }}
+        style={{ backgroundColor: hasIcon ? '#2A241E' : bg }}
       >
-        {initials}
+        {hasIcon ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`/api/worlds/${encodeURIComponent(world.id)}/icon?v=${world.iconVersion}`}
+            alt=""
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          initials
+        )}
       </button>
       {canEdit && (
         <button

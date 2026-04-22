@@ -232,6 +232,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
       <ChatPane
         groupId={session.currentGroupId}
+        userId={session.userId}
         role={session.role === 'viewer' ? 'player' : 'dm'}
         {...(campaignSlugFromPath(path) !== undefined
           ? { campaignSlug: campaignSlugFromPath(path) }

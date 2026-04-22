@@ -24,8 +24,7 @@ import { Loader2, Send, Sparkles, X, Paperclip, FolderOpen, Trash2 } from 'lucid
 import { ChatMarkdown } from './ChatMarkdown';
 import { SessionReviewPanel, type SessionProposal } from './SessionReviewPanel';
 import { noteEditorHref, useRefreshTreeOnAiNoteMutations } from './chat-tree-refresh';
-
-const HOME_CHAT_KEY = 'compendium-home-chat-v1';
+import { chatStorageKey, cleanupLegacyChatStorage } from './chat-storage';
 
 // ── File attachment types ───────────────────────────────────────────────
 
@@ -92,10 +91,12 @@ async function uploadForExtraction(file: File): Promise<string> {
 
 export function ChatPane({
   groupId,
+  userId,
   campaignSlug,
   role,
 }: {
   groupId: string;
+  userId: string;
   campaignSlug?: string | undefined;
   role: 'dm' | 'player';
 }): ReactElement {
@@ -108,6 +109,11 @@ export function ChatPane({
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   const router = useRouter();
+
+  const storageKey = useMemo(
+    () => chatStorageKey(userId, groupId),
+    [userId, groupId],
+  );
 
   const transport = useMemo(
     () =>
@@ -130,29 +136,38 @@ export function ChatPane({
   const isStreaming = status === 'submitted' || status === 'streaming';
 
   useEffect(() => {
+    // Re-runs when storageKey changes (i.e. the active world or user
+    // changes). Reset in-memory messages first so the old world's chat
+    // does not flash in while we read the new one.
+    cleanupLegacyChatStorage();
+    setLoaded(false);
     try {
-      const raw = window.localStorage.getItem(HOME_CHAT_KEY);
+      const raw = window.localStorage.getItem(storageKey);
       if (raw) {
         const parsed = JSON.parse(raw) as UIMessage[];
         if (Array.isArray(parsed) && parsed.length > 0) {
           setMessages(parsed);
+        } else {
+          setMessages([]);
         }
+      } else {
+        setMessages([]);
       }
     } catch {
-      // Ignore local storage failures.
+      setMessages([]);
     } finally {
       setLoaded(true);
     }
-  }, [setMessages]);
+  }, [setMessages, storageKey]);
 
   useEffect(() => {
     if (!loaded) return;
     try {
-      window.localStorage.setItem(HOME_CHAT_KEY, JSON.stringify(messages));
+      window.localStorage.setItem(storageKey, JSON.stringify(messages));
     } catch {
       // Ignore local storage failures.
     }
-  }, [loaded, messages]);
+  }, [loaded, messages, storageKey]);
 
   useEffect(() => {
     if (!open) return;
@@ -254,7 +269,7 @@ export function ChatPane({
   function clearChat() {
     setMessages([]);
     try {
-      window.localStorage.removeItem(HOME_CHAT_KEY);
+      window.localStorage.removeItem(storageKey);
     } catch {
       // ignore
     }

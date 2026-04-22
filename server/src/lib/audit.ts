@@ -27,7 +27,12 @@ export type AuditAction =
   | 'group.create'
   | 'group.delete'
   | 'group.join'
-  | 'group.switch';
+  | 'group.switch'
+  | 'personality.create'
+  | 'personality.update'
+  | 'personality.delete'
+  | 'world.icon.upload'
+  | 'world.icon.clear';
 
 export type AuditEntry = {
   action: AuditAction;

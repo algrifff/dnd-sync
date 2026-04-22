@@ -16,26 +16,41 @@ export type WorldRow = {
   name: string;
   role: 'admin' | 'editor' | 'viewer';
   isActive: boolean;
+  /** Cache-buster for /api/worlds/[id]/icon?v=N. 0 means no icon. */
+  iconVersion: number;
 };
 
 export type WorldHeader = {
   name: string;
   headerColor: string | null;
+  iconVersion: number;
 };
 
 export function getWorldHeader(groupId: string): WorldHeader {
   const row = getDb()
-    .query<{ name: string; header_color: string | null }, [string]>(
-      'SELECT name, header_color FROM groups WHERE id = ?',
+    .query<
+      {
+        name: string;
+        header_color: string | null;
+        icon_updated_at: number;
+      },
+      [string]
+    >(
+      `SELECT name, header_color, icon_updated_at FROM groups WHERE id = ?`,
     )
     .get(groupId);
-  return { name: row?.name ?? '', headerColor: row?.header_color ?? null };
+  return {
+    name: row?.name ?? '',
+    headerColor: row?.header_color ?? null,
+    iconVersion: row?.icon_updated_at ?? 0,
+  };
 }
 
 type ListDbRow = {
   id: string;
   name: string;
   role: 'admin' | 'editor' | 'viewer';
+  icon_updated_at: number;
   current_group_id: string;
 };
 
@@ -45,7 +60,7 @@ export function listWorldsForSession(
 ): WorldRow[] {
   const rows = getDb()
     .query<ListDbRow, [string, string]>(
-      `SELECT g.id, g.name, gm.role,
+      `SELECT g.id, g.name, gm.role, g.icon_updated_at,
               (SELECT s.current_group_id FROM sessions s WHERE s.id = ?) AS current_group_id
          FROM groups g
          JOIN group_members gm ON gm.group_id = g.id
@@ -58,7 +73,75 @@ export function listWorldsForSession(
     name: r.name,
     role: r.role,
     isActive: r.id === r.current_group_id,
+    iconVersion: r.icon_updated_at,
   }));
+}
+
+// ── Icon blob helpers ──────────────────────────────────────────────────
+//
+// Mirror of users.avatar_* — store the (client-side resized) bytes on
+// the groups row and use icon_updated_at as the ?v= cache-buster. The
+// serve route (/api/worlds/[id]/icon) gates on group membership.
+
+/** Overwrite the world's icon. Returns the new icon_updated_at. */
+export function setWorldIcon(
+  groupId: string,
+  blob: Uint8Array,
+  mime: string,
+): number {
+  const now = Date.now();
+  getDb()
+    .query(
+      `UPDATE groups SET icon_blob = ?, icon_mime = ?, icon_updated_at = ?
+         WHERE id = ?`,
+    )
+    .run(blob, mime, now, groupId);
+  return now;
+}
+
+/** Drop the icon; sidebar falls back to the initials-on-colour chip. */
+export function clearWorldIcon(groupId: string): void {
+  getDb()
+    .query(
+      `UPDATE groups SET icon_blob = NULL, icon_mime = NULL,
+                          icon_updated_at = 0
+         WHERE id = ?`,
+    )
+    .run(groupId);
+}
+
+export function loadWorldIcon(
+  groupId: string,
+): { blob: Uint8Array; mime: string; updatedAt: number } | null {
+  const row = getDb()
+    .query<
+      {
+        icon_blob: Uint8Array | null;
+        icon_mime: string | null;
+        icon_updated_at: number;
+      },
+      [string]
+    >(
+      `SELECT icon_blob, icon_mime, icon_updated_at
+         FROM groups WHERE id = ?`,
+    )
+    .get(groupId);
+  if (!row || !row.icon_blob || !row.icon_mime) return null;
+  return {
+    blob: new Uint8Array(row.icon_blob),
+    mime: row.icon_mime,
+    updatedAt: row.icon_updated_at,
+  };
+}
+
+/** True if the user is a member of the given world. */
+export function isGroupMember(userId: string, groupId: string): boolean {
+  const row = getDb()
+    .query<{ n: number }, [string, string]>(
+      'SELECT COUNT(*) AS n FROM group_members WHERE user_id = ? AND group_id = ?',
+    )
+    .get(userId, groupId);
+  return (row?.n ?? 0) > 0;
 }
 
 /** Set the caller's active world for the rest of the session. Also

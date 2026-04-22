@@ -117,6 +117,7 @@ export default async function HomePage(): Promise<ReactElement> {
         <section className="mb-10">
           <HomeChat
             groupId={session.currentGroupId}
+            userId={session.userId}
           />
         </section>
 
