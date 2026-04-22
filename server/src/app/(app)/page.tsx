@@ -77,27 +77,17 @@ export default async function HomePage(): Promise<ReactElement> {
           <div className="flex-1 overflow-y-auto">
             <main className="surface-paper mx-auto w-full max-w-4xl px-6 py-10">
               <section className="mb-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h1
-                      className="text-4xl font-bold tracking-tight text-[#2A241E]"
-                      style={{ fontFamily: '"Fraunces", Georgia, serif' }}
-                    >
-                      Welcome, {session.displayName}.
-                    </h1>
-                    <p className="mt-2 text-sm text-[#5A4F42]">
-                      {counts.notes} note{counts.notes === 1 ? '' : 's'} · {counts.assets} asset
-                      {counts.assets === 1 ? '' : 's'} · signed in as <code>{session.username}</code>
-                    </p>
-                  </div>
-                  {session.role !== 'viewer' && (
-                    <Link
-                      href="/settings/vault"
-                      className="mt-1 shrink-0 rounded-[8px] border border-[#D4A85A]/60 bg-[#D4A85A]/10 px-3 py-1.5 text-sm font-medium text-[#2A241E] transition hover:bg-[#D4A85A]/20"
-                    >
-                      Import notes
-                    </Link>
-                  )}
+                <div>
+                  <h1
+                    className="text-4xl font-bold tracking-tight text-[#2A241E]"
+                    style={{ fontFamily: '"Fraunces", Georgia, serif' }}
+                  >
+                    Welcome, {session.displayName}.
+                  </h1>
+                  <p className="mt-2 text-sm text-[#5A4F42]">
+                    {counts.notes} note{counts.notes === 1 ? '' : 's'} · {counts.assets} asset
+                    {counts.assets === 1 ? '' : 's'} · signed in as <code>{session.username}</code>
+                  </p>
                 </div>
               </section>
 

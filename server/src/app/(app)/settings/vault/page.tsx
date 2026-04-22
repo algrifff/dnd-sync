@@ -33,11 +33,34 @@ export default async function SettingsVaultPage(): Promise<ReactElement> {
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-[#5A4F42]">
-        Upload a ZIP of your Obsidian vault. The server parses every <code>.md</code> into our
-        shared schema, writes it into the notes table, and seeds a Yjs doc for each note so live
-        editing picks up where you left off.
-      </p>
+      <div>
+        <p className="text-sm text-[#5A4F42]">
+          Drop in a ZIP of your Obsidian vault and the AI will turn it into a fully structured
+          Compendium world — no manual sorting needed.
+        </p>
+        <ul className="mt-3 space-y-1.5 text-sm text-[#5A4F42]">
+          <li className="flex gap-2">
+            <span className="mt-0.5 shrink-0 text-[#D4A85A]">①</span>
+            <span><span className="font-medium text-[#2A241E]">Parse &amp; classify</span> — every <code>.md</code> and image is read; characters, locations, items, sessions and lore are detected automatically.</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="mt-0.5 shrink-0 text-[#D4A85A]">②</span>
+            <span><span className="font-medium text-[#2A241E]">Campaign setup</span> — existing campaigns are matched or a new one is proposed based on your folder structure.</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="mt-0.5 shrink-0 text-[#D4A85A]">③</span>
+          <span><span className="font-medium text-[#2A241E]">Sheets &amp; portraits</span> — stats (HP, AC, ability scores, level) are extracted and written to each entity; portrait images are matched automatically.</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="mt-0.5 shrink-0 text-[#D4A85A]">④</span>
+            <span><span className="font-medium text-[#2A241E]">Links &amp; backlinks</span> — <code>[[wikilinks]]</code> are resolved into the knowledge graph and body content is converted to rich text.</span>
+          </li>
+        </ul>
+        <p className="mt-3 text-sm text-[#5A4F42]">
+          The AI pauses to ask targeted questions only when something is genuinely ambiguous.
+          You get a summary of everything created at the end — not a wall of rows to click through.
+        </p>
+      </div>
 
       <div className="rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] px-5 py-4">
         <dl className="grid grid-cols-2 gap-2 text-sm">
@@ -53,7 +76,7 @@ export default async function SettingsVaultPage(): Promise<ReactElement> {
       </div>
 
       <section className="rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-5">
-        <h2 className="mb-3 text-lg font-semibold text-[#2A241E]">Upload</h2>
+        <h2 className="mb-3 text-lg font-semibold text-[#2A241E]">Upload vault ZIP</h2>
         <UploadForm csrfToken={session.csrfToken} hasExistingNotes={noteCount > 0} />
       </section>
 
