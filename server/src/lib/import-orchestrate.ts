@@ -267,6 +267,10 @@ function runAssetsPhase(
 }
 
 // ── Phase 1: Campaign ──────────────────────────────────────────────────
+//
+// Asks ONE simple question: what campaign should these notes go under?
+// We don't try to auto-detect from source paths — the ZIP can have any
+// structure. The DM knows what campaign the notes belong to.
 
 async function runCampaignPhase(
   jobId: string,
@@ -276,117 +280,77 @@ async function runCampaignPhase(
   signal: AbortSignal,
   setActivity: (msg: string) => void,
 ): Promise<void> {
-  if (orch.campaignSlug !== null || orch.campaignRoot !== null) return; // resumed
-  setActivity('Detecting campaign structure…');
+  // Idempotent — skip if already resolved from a previous (resumed) run.
+  // We use a sentinel value 'none' for "no campaign" so we can distinguish
+  // "not yet answered" (null) from "user chose no campaign" ('none').
+  if (orch.campaignSlug !== null) return;
 
-  const campaigns = listCampaigns(job.groupId);
-  const sourcePaths = rawPlan.notes.map((n) => n.sourcePath);
+  setActivity('Setting up campaign structure…');
 
-  // Check if source paths already suggest an existing campaign.
-  const detectedSlug = pickCampaignSlugFromPaths(sourcePaths);
-  if (detectedSlug) {
-    const match = campaigns.find((c) => c.slug === detectedSlug);
-    if (match) {
-      orch.campaignSlug = match.slug;
-      orch.campaignRoot = match.folderPath;
-      return;
-    }
-  }
-
+  const existing = listCampaigns(job.groupId);
   const n = rawPlan.notes.length;
 
-  if (campaigns.length === 0) {
-    const suggestedName = detectedSlug
-      ? detectedSlug.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
-      : 'My Campaign';
+  // Derive a suggested name from the top-level folder of the uploaded ZIP.
+  const topFolders = [...new Set(
+    rawPlan.notes
+      .map((note) => note.sourcePath.split('/')[0] ?? '')
+      .filter((f) => f.length > 0 && !f.endsWith('.md')),
+  )];
+  const suggested = topFolders.length === 1
+    ? topFolders[0]!.replace(/[-_]/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+    : existing.length === 1
+    ? existing[0]!.name
+    : 'My Campaign';
 
-    const reply = await askDmChat(
-      jobId,
-      rawPlan,
-      orch,
-      `I'm about to import **${n} note${n !== 1 ? 's' : ''}**. There are no campaigns in this world yet.\n\n` +
-      `Should I create a new campaign?\n\n` +
-      `• Suggested name: **"${suggestedName}"**\n` +
-      `• Reply with a campaign name to create one\n` +
-      `• Reply **"no"** to import as world-level notes (no campaign)`,
-      signal,
-    );
-    if (signal.aborted) return;
-
-    if (/^no\b/i.test(reply.trim())) {
-      orch.campaignSlug = null;
-      orch.campaignRoot = null;
-    } else {
-      const name = reply.trim().replace(/^["']|["']$/g, '') || suggestedName;
-      const slug = slugify(name);
-      orch.campaignSlug = slug;
-      orch.campaignRoot = `Campaigns/${slug}`;
-      createCampaignSkeleton(job, name, slug);
-    }
-    return;
+  let questionText: string;
+  if (existing.length === 0) {
+    questionText =
+      `I'm importing **${n} note${n !== 1 ? 's' : ''}** into your world.\n\n` +
+      `**What campaign should I create for these notes?**\n\n` +
+      `• I'll create all subfolders (Characters, People, Enemies, Loot, Places, Adventure Log, Creatures, Quests) automatically\n` +
+      `• Suggested name: **"${suggested}"** — reply with this or type a different name\n` +
+      `• Reply **"none"** to import as world-level notes instead`;
+  } else {
+    const list = existing.map((c) => `• **"${c.name}"**`).join('\n');
+    questionText =
+      `I'm importing **${n} note${n !== 1 ? 's' : ''}** into your world.\n\n` +
+      `**Which campaign should these notes go under?**\n\n` +
+      `Existing campaigns:\n${list}\n\n` +
+      `• Reply with the name of an existing campaign to add notes there\n` +
+      `• Reply with a **new name** to create a fresh campaign\n` +
+      `• Reply **"none"** to import as world-level notes`;
   }
 
-  if (campaigns.length === 1) {
-    const camp = campaigns[0]!;
-    const reply = await askDmChat(
-      jobId,
-      rawPlan,
-      orch,
-      `I'm about to import **${n} note${n !== 1 ? 's' : ''}**. I found one existing campaign: **"${camp.name}"**.\n\n` +
-      `What should I do?\n` +
-      `1. Add to **"${camp.name}"**\n` +
-      `2. Create a new campaign (reply with its name)\n` +
-      `3. Import as world-level notes`,
-      signal,
-    );
-    if (signal.aborted) return;
-
-    const t = reply.trim();
-    if (t === '1' || t.toLowerCase().includes(camp.name.toLowerCase())) {
-      orch.campaignSlug = camp.slug;
-      orch.campaignRoot = camp.folderPath;
-    } else if (t === '3' || /world|no campaign/i.test(t)) {
-      orch.campaignSlug = null;
-      orch.campaignRoot = null;
-    } else {
-      const name = t.replace(/^2[.\s]+/, '').replace(/^["']|["']$/g, '') || 'New Campaign';
-      const slug = slugify(name);
-      orch.campaignSlug = slug;
-      orch.campaignRoot = `Campaigns/${slug}`;
-      createCampaignSkeleton(job, name, slug);
-    }
-    return;
-  }
-
-  // Multiple campaigns — let DM pick.
-  const list = campaigns.map((c, i) => `${i + 1}. **"${c.name}"**`).join('\n');
-  const newIdx = campaigns.length + 1;
-  const worldIdx = campaigns.length + 2;
-
-  const reply = await askDmChat(
-    jobId,
-    rawPlan,
-    orch,
-    `I'm about to import **${n} note${n !== 1 ? 's' : ''}**. Which campaign should I use?\n\n` +
-    `${list}\n${newIdx}. Create a new campaign (reply with its name)\n${worldIdx}. World-level notes (no campaign)`,
-    signal,
-  );
+  const reply = await askDmChat(jobId, rawPlan, orch, questionText, signal);
   if (signal.aborted) return;
 
-  const t = reply.trim();
-  const idx = parseInt(t, 10) - 1;
-  if (!isNaN(idx) && idx >= 0 && idx < campaigns.length) {
-    const camp = campaigns[idx]!;
-    orch.campaignSlug = camp.slug;
-    orch.campaignRoot = camp.folderPath;
-  } else if (t === String(worldIdx) || /world|no campaign/i.test(t)) {
-    orch.campaignSlug = null;
+  const cleaned = reply.trim().replace(/^["']|["']$/g, '');
+
+  if (/^none\b/i.test(cleaned) || /^no\b.*campaign/i.test(cleaned)) {
+    // User explicitly chose no campaign — use sentinel 'none' so we don't
+    // ask again on resume.
+    orch.campaignSlug = 'none';
     orch.campaignRoot = null;
+    return;
+  }
+
+  // Check if the reply matches an existing campaign name or slug.
+  const matched = existing.find(
+    (c) =>
+      c.name.toLowerCase() === cleaned.toLowerCase() ||
+      c.slug === slugify(cleaned),
+  );
+
+  if (matched) {
+    orch.campaignSlug = matched.slug;
+    orch.campaignRoot = matched.folderPath;
   } else {
-    const name = t.replace(/^\d+[.\s]+/, '').replace(/^["']|["']$/g, '') || 'New Campaign';
+    // Create a new campaign.
+    const name = cleaned || suggested;
     const slug = slugify(name);
     orch.campaignSlug = slug;
     orch.campaignRoot = `Campaigns/${slug}`;
+    setActivity(`Creating campaign "${name}"…`);
     createCampaignSkeleton(job, name, slug);
   }
 }
@@ -544,77 +508,39 @@ async function runEntitiesPhase(
   await Promise.all(Array.from({ length: concurrency }, () => classifyWorker()));
   if (signal.aborted) return;
 
-  // Batch all ambiguous notes into a single DM question.
-  if (ambiguous.length > 0) {
-    const cap = 12; // keep the question readable
-    const listed = ambiguous.slice(0, cap);
-    const listText = listed
-      .map((n, i) => {
-        const excerpt = n.body.slice(0, 80).replace(/\n/g, ' ').trim();
-        return `${i + 1}. **${n.displayName}** (${n.sourcePath})\n   My best guess: ${n.kind} (${Math.round(n.confidence * 100)}% confident)\n   "${excerpt}…"`;
-      })
-      .join('\n\n');
-
-    const extra = ambiguous.length > cap ? `\n\n_(${ambiguous.length - cap} more notes will default to **lore**.)_` : '';
-
-    const reply = await askDmChat(
-      jobId,
-      rawPlan,
-      orch,
-      `I'm not sure how to classify ${ambiguous.length} note${ambiguous.length !== 1 ? 's' : ''}. Can you help?\n\n` +
-      `${listText}${extra}\n\n` +
-      `For each number, reply with its kind: **character**, **person**, **creature**, **location**, **item**, **session**, **lore**, or **skip**.\n` +
-      `Example: \`1. location  2. character  3. skip\``,
-      signal,
-    );
-    if (signal.aborted) return;
-
-    // Parse the DM's response — simple keyword scan per note.
-    for (let i = 0; i < listed.length; i++) {
-      const n = listed[i]!;
-      const line = extractLineForNote(reply, i + 1, n.displayName);
-      const lower = line.toLowerCase();
-
-      if (/\bskip\b|\bignore\b/.test(lower)) continue;
-
-      let kind = 'lore';
-      let role: string | null = null;
-      if (/\bcharacter\b|\bpc\b/.test(lower)) { kind = 'character'; role = 'pc'; }
-      else if (/\bperson\b|\bnpc\b|\bally\b/.test(lower)) { kind = 'character'; role = /\bally\b/.test(lower) ? 'ally' : 'npc'; }
-      else if (/\bvillain\b/.test(lower)) { kind = 'character'; role = 'villain'; }
-      else if (/\bcreature\b|\bmonster\b/.test(lower)) { kind = 'creature'; }
-      else if (/\blocation\b|\bplace\b/.test(lower)) { kind = 'location'; }
-      else if (/\bitem\b|\bloot\b|\bweapon\b|\barmou?r\b/.test(lower)) { kind = 'item'; }
-      else if (/\bsession\b|\blog\b/.test(lower)) { kind = 'session'; }
-      else if (/\blore\b|\bworld\b/.test(lower)) { kind = 'lore'; }
-
-      n.kind = kind;
-      n.role = role;
-      confident.push(n);
-    }
-
-    // Any past the cap default to lore.
-    for (let i = cap; i < ambiguous.length; i++) {
-      const n = ambiguous[i]!;
-      n.kind = 'lore';
-      confident.push(n);
-    }
+  // Ambiguous notes auto-classify as lore — no Q&A. The DM can manually
+  // move them after the import. Asking per-batch questions here is a
+  // second blocking point that causes the import to feel stuck.
+  for (const n of ambiguous) {
+    n.kind = 'lore';
+    confident.push(n);
   }
 
   // Write all entities to the DB.
   const db = getDb();
+  // Track paths used in THIS import so we can deduplicate within the batch.
+  const usedPaths = new Set<string>(
+    Object.values(orch.entityMap), // paths from a resumed partial run
+  );
+
   for (const cn of confident) {
     if (signal.aborted) return;
 
-    // Always compute the target path from kind + displayName via our canonical
-    // folder map — never trust the AI's canonicalPath output, which can mirror
-    // the source ZIP structure instead of ours.
-    // Plain/unclassifiable notes land in World Lore rather than staying at
-    // their original ZIP path.
+    // Always derive the path from kind + displayName — never trust the AI's
+    // canonicalPath output or the original source path.
     const effectiveKind = cn.kind === 'plain' ? 'lore' : cn.kind;
-    const targetPath = fallbackPath(cn.displayName, effectiveKind, cn.role, orch);
+    let targetPath = fallbackPath(cn.displayName, effectiveKind, cn.role, orch);
 
-    // Build frontmatter.
+    // Deduplicate within this import batch (two notes can have the same
+    // display name; append -2, -3, … to the slug to avoid overwriting).
+    if (usedPaths.has(targetPath)) {
+      const base = targetPath.replace(/\.md$/, '');
+      let counter = 2;
+      while (usedPaths.has(`${base}-${counter}.md`)) counter++;
+      targetPath = `${base}-${counter}.md`;
+    }
+    usedPaths.add(targetPath);
+
     const fm = buildEntityFrontmatter(cn, orch);
     const rewrittenBody = rewriteWikilinks(cn.body, cn.wikilinks);
     const markdown = composeMarkdown(fm, rewrittenBody);
@@ -625,13 +551,8 @@ async function runEntitiesPhase(
       )
       .get(job.groupId, targetPath);
 
-    if (!isCanonicalNotePath(targetPath)) {
-      console.warn('[orchestrate.entities] non-canonical path blocked:', targetPath, '— skipping');
-      continue;
-    }
-
     try {
-      setActivity(`Writing ${targetPath}`);
+      setActivity(`Writing ${cn.displayName}…`);
       writeNote({
         groupId: job.groupId,
         userId: job.createdBy,
@@ -643,7 +564,7 @@ async function runEntitiesPhase(
       });
       orch.entityMap[cn.sourcePath] = targetPath;
     } catch (err) {
-      console.warn('[orchestrate.entities] failed to write', targetPath, err);
+      console.error('[orchestrate.entities] write failed', targetPath, err);
     }
   }
 }
@@ -816,12 +737,10 @@ function fallbackPath(
   } else {
     fk = kind as EntityKind;
   }
-  return canonicalPath({
-    kind: fk,
-    campaignSlug: orch.campaignSlug ?? undefined,
-    campaignRoot: orch.campaignRoot ?? undefined,
-    name,
-  });
+  // 'none' is the sentinel meaning "user chose no campaign" — treat as null.
+  const slug = orch.campaignSlug === 'none' ? undefined : (orch.campaignSlug ?? undefined);
+  const root = orch.campaignRoot ?? undefined;
+  return canonicalPath({ kind: fk, campaignSlug: slug, campaignRoot: root, name });
 }
 
 function pickExtractor(
