@@ -15,7 +15,7 @@
 // New categories: add a row here, ordered by the priority you want.
 
 export const NODE_BASE_RADIUS = 4;
-export const NODE_DEGREE_COEFF = 4;
+export const NODE_DEGREE_COEFF = 2.2;
 
 export type TagStyle = {
   tag: string;
