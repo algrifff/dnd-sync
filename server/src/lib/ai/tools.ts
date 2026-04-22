@@ -606,14 +606,18 @@ function noteWriteSection(ctx: ToolContext) {
       }
 
       // Section-targeted write — splice the section in/out of existing markdown
-      const nextMd = spliceSection(existingMd, section, content);
-      return writeFullContent(ctx, path, nextMd);
+      const spliced = spliceSection(existingMd, section, content);
+      if (!spliced.ok) return { ok: false as const, error: spliced.error };
+      return writeFullContent(ctx, path, spliced.md);
     },
   });
 }
 
-function spliceSection(existing: string, heading: string, newContent: string): string {
-  // Detect heading level by scanning for "# heading" / "## heading" / "### heading"
+function spliceSection(
+  existing: string,
+  heading: string,
+  newContent: string,
+): { ok: true; md: string } | { ok: false; error: string } {
   const headingRe = new RegExp(
     `^(#{1,6})\\s+${escapeRegex(heading)}\\s*$`,
     'im',
@@ -621,26 +625,26 @@ function spliceSection(existing: string, heading: string, newContent: string): s
   const match = headingRe.exec(existing);
 
   if (!match) {
-    // Section doesn't exist yet — append it
-    const prefix = existing ? existing.trimEnd() + '\n\n' : '';
-    return `${prefix}## ${heading}\n\n${newContent.trim()}`;
+    return {
+      ok: false,
+      error:
+        `Section "${heading}" not found in this note. ` +
+        `Call note_read to see the actual headings, then target one of those. ` +
+        `Use entity_edit_content to append new content without creating a section.`,
+    };
   }
 
   const level = match[1]!.length;
   const start = match.index!;
-  // Find the next heading of equal or higher level (fewer #s) after this one
   const afterHeading = existing.slice(start + match[0].length);
   const nextRe = new RegExp(`^#{1,${level}}\\s`, 'm');
   const nextMatch = nextRe.exec(afterHeading);
 
   const before = existing.slice(0, start);
-  const after  = nextMatch
-    ? afterHeading.slice(nextMatch.index)
-    : '';
-
+  const after  = nextMatch ? afterHeading.slice(nextMatch.index) : '';
   const hashes = '#'.repeat(level);
   const spliced = `${before.trimEnd()}\n\n${hashes} ${heading}\n\n${newContent.trim()}`;
-  return after ? `${spliced}\n\n${after.trimStart()}` : spliced;
+  return { ok: true, md: after ? `${spliced}\n\n${after.trimStart()}` : spliced };
 }
 
 function escapeRegex(s: string): string {
