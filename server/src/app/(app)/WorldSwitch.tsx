@@ -4,7 +4,9 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
   type ReactNode,
@@ -28,6 +30,8 @@ export function WorldSwitchProvider({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isSwitching, setIsSwitching] = useState<boolean>(false);
+  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingDestRef = useRef<string>('/');
 
   // Client-side switch. The active world lives in the session row on
   // the server; PATCH /api/worlds/active flips it, then we router-nav
@@ -62,10 +66,17 @@ export function WorldSwitchProvider({
           body: JSON.stringify({ id }),
         });
         if (!res.ok) return false;
+        pendingDestRef.current = destination;
         startTransition(() => {
           router.replace(destination);
           router.refresh();
         });
+        // Safety net: if router.refresh() hangs (slow server, Railway cold
+        // start), isPending stays true forever. Fall back to a hard reload
+        // after 8 s so the overlay never traps the user.
+        fallbackTimerRef.current = setTimeout(() => {
+          window.location.replace(destination);
+        }, 8000);
         return true;
       } catch {
         return false;
@@ -75,6 +86,14 @@ export function WorldSwitchProvider({
     },
     [csrfToken, isPending, isSwitching, router],
   );
+
+  // Clear the fallback timer once the transition resolves normally.
+  useEffect(() => {
+    if (!isPending && fallbackTimerRef.current) {
+      clearTimeout(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
+    }
+  }, [isPending]);
 
   const value = useMemo<WorldSwitchContextValue>(
     () => ({ isPending: isPending || isSwitching, switchTo }),

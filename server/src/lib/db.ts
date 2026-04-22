@@ -145,6 +145,9 @@ export function getDb(): Database {
   handle.exec('PRAGMA journal_mode = WAL');
   handle.exec('PRAGMA foreign_keys = ON');
   handle.exec('PRAGMA synchronous = NORMAL');
+  // Retry writes for up to 5 s instead of failing immediately when
+  // the Hocuspocus writer holds the WAL lock.
+  handle.exec('PRAGMA busy_timeout = 5000');
 
   runMigrations(handle);
 

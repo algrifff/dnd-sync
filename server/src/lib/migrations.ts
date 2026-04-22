@@ -613,6 +613,18 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE groups ADD COLUMN icon_updated_at INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 31,
+    description: 'note_links: add from_path index for neighbourhood graph queries',
+    sql: `
+      -- Neighbourhood queries look up outgoing edges with
+      -- WHERE group_id = ? AND from_path = ? on every frontier node.
+      -- The existing note_links_to index covers to_path; this covers
+      -- the other direction.
+      CREATE INDEX IF NOT EXISTS note_links_from
+        ON note_links(group_id, from_path);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

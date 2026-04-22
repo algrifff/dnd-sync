@@ -159,6 +159,12 @@ export function GraphCanvas({
     to: { x: number; y: number };
   } | null>(null);
 
+  // colorForRef lets the main load effect use the latest colorFor without
+  // subscribing to it — groups/tagColors syncing during initial load was
+  // causing the effect to cancel and restart in a loop, keeping the graph
+  // stuck in "loading" indefinitely on active campaigns.
+  const colorForRef = useRef<((nodeId: string, tags: readonly string[]) => string) | null>(null);
+
   // ── shared graph state (synced across connected peers) ─────────────
   // Two providers: one ephemeral (pins/colours/anchors/awareness),
   // one persistent (groups). See the comment above LABEL_STORAGE_PREFIX.
@@ -297,6 +303,7 @@ export function GraphCanvas({
     },
     [groups, tagColors],
   );
+  useEffect(() => { colorForRef.current = colorFor; });
 
   // Label mode: personal preference, local to this viewer.
   useEffect(() => {
@@ -450,7 +457,7 @@ export function GraphCanvas({
           g.addNode(n.id, {
             label: n.title,
             size: radiusForDegree(n.degree) * nodeScaleRef.current,
-            color: colorFor(n.id, n.tags),
+            color: (colorForRef.current ?? colorFor)(n.id, n.tags),
             x: pin?.x ?? seed.x,
             y: pin?.y ?? seed.y,
             tags: n.tags,
@@ -889,7 +896,6 @@ export function GraphCanvas({
     scopeParam,
     groupId,
     router,
-    colorFor,
     labelMode,
     provider,
     pinsMap,
