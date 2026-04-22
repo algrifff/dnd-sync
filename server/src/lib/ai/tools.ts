@@ -40,7 +40,7 @@ export function createTools(ctx: ToolContext) {
     entity_edit_sheet:   entityEditSheet(ctx),
     entity_edit_content: entityEditContent(ctx),
     note_read:           noteRead(ctx),
-    note_write:          noteWrite(ctx),
+    note_write_section:  noteWriteSection(ctx),
     entity_move:         entityMove(ctx),
     backlink_create:     backlinkCreate(ctx),
     inventory_add:       inventoryAdd(ctx),
@@ -52,7 +52,7 @@ export function createTools(ctx: ToolContext) {
 export function getToolsForRole(ctx: ToolContext) {
   const all = createTools(ctx);
   if (ctx.role === 'dm') return all;
-  const { session_close: _sc, session_apply: _sa, entity_move: _em, note_write: _nw, ...playerTools } = all;
+  const { session_close: _sc, session_apply: _sa, entity_move: _em, note_write_section: _nws, ...playerTools } = all;
   return playerTools;
 }
 
@@ -120,9 +120,13 @@ const NoteReadSchema = z.object({
   path: z.string().min(1).max(512).describe('Full note path to read'),
 });
 
-const NoteWriteSchema = z.object({
+const NoteWriteSectionSchema = z.object({
   path: z.string().min(1).max(512).describe('Full note path'),
-  content: z.string().describe('Full markdown content to write — replaces the existing body entirely'),
+  section: z.string().optional().describe(
+    'Heading text of the section to replace (e.g. "Combat Notes"). ' +
+    'If omitted the note must be empty — otherwise the tool refuses to avoid losing existing content.',
+  ),
+  content: z.string().describe('Markdown content for this section (without the heading line)'),
 });
 
 const SessionCloseSchema = z.object({
@@ -570,48 +574,107 @@ function noteRead(ctx: ToolContext) {
   });
 }
 
-// ── note_write ────────────────────────────────────────────────────────
+// ── note_write_section ───────────────────────────────────────────────
 
-function noteWrite(ctx: ToolContext) {
+function noteWriteSection(ctx: ToolContext) {
   return tool({
     description:
-      'Replace the entire body of a note with new markdown content. DM only. Use entity_edit_content to append instead.',
-    inputSchema: NoteWriteSchema,
-    execute: async ({ path, content }: z.infer<typeof NoteWriteSchema>) => {
+      'Write or replace a named section in a note. DM only. ' +
+      'Always call note_read first to see what already exists. ' +
+      'If `section` is provided, only that heading block is replaced — all other content is preserved. ' +
+      'If `section` is omitted the note must be empty; otherwise the tool refuses to protect existing content.',
+    inputSchema: NoteWriteSectionSchema,
+    execute: async ({ path, section, content }: z.infer<typeof NoteWriteSectionSchema>) => {
       if (ctx.role !== 'dm') return { ok: false as const, error: 'DM only' };
 
       const note = loadNote(ctx.groupId, path);
       if (!note) return { ok: false as const, error: `Not found: ${path}` };
 
-      const newNodes: PmNode[] = [];
-      for (const para of content.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)) {
-        if (para.startsWith('# ')) {
-          newNodes.push({ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: para.slice(2) }] });
-        } else if (para.startsWith('## ')) {
-          newNodes.push({ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: para.slice(3) }] });
-        } else if (para.startsWith('### ')) {
-          newNodes.push({ type: 'heading', attrs: { level: 3 }, content: [{ type: 'text', text: para.slice(4) }] });
-        } else {
-          newNodes.push({ type: 'paragraph', content: [{ type: 'text', text: para }] });
+      const existingMd = (note.content_md ?? '').trim();
+
+      // No section target — only allow on empty notes
+      if (!section) {
+        if (existingMd) {
+          return {
+            ok: false as const,
+            error:
+              'Note already has content. Call note_read first, then specify a `section` heading ' +
+              'to replace only that part. Use entity_edit_content to append.',
+          };
         }
+        return writeFullContent(ctx, path, content);
       }
 
-      const nextDoc: PmDoc = { type: 'doc', content: newNodes.length ? newNodes : [{ type: 'paragraph' }] };
-
-      getDb()
-        .query(
-          `UPDATE notes SET content_json=?, content_text=?, content_md=?,
-                            yjs_state=NULL, updated_at=?, updated_by=?
-           WHERE group_id=? AND path=?`,
-        )
-        .run(
-          JSON.stringify(nextDoc), extractText(nextDoc), content.trim(),
-          Date.now(), ctx.userId, ctx.groupId, path,
-        );
-
-      return { ok: true as const };
+      // Section-targeted write — splice the section in/out of existing markdown
+      const nextMd = spliceSection(existingMd, section, content);
+      return writeFullContent(ctx, path, nextMd);
     },
   });
+}
+
+function spliceSection(existing: string, heading: string, newContent: string): string {
+  // Detect heading level by scanning for "# heading" / "## heading" / "### heading"
+  const headingRe = new RegExp(
+    `^(#{1,6})\\s+${escapeRegex(heading)}\\s*$`,
+    'im',
+  );
+  const match = headingRe.exec(existing);
+
+  if (!match) {
+    // Section doesn't exist yet — append it
+    const prefix = existing ? existing.trimEnd() + '\n\n' : '';
+    return `${prefix}## ${heading}\n\n${newContent.trim()}`;
+  }
+
+  const level = match[1]!.length;
+  const start = match.index!;
+  // Find the next heading of equal or higher level (fewer #s) after this one
+  const afterHeading = existing.slice(start + match[0].length);
+  const nextRe = new RegExp(`^#{1,${level}}\\s`, 'm');
+  const nextMatch = nextRe.exec(afterHeading);
+
+  const before = existing.slice(0, start);
+  const after  = nextMatch
+    ? afterHeading.slice(nextMatch.index)
+    : '';
+
+  const hashes = '#'.repeat(level);
+  const spliced = `${before.trimEnd()}\n\n${hashes} ${heading}\n\n${newContent.trim()}`;
+  return after ? `${spliced}\n\n${after.trimStart()}` : spliced;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function writeFullContent(
+  ctx: ToolContext,
+  path: string,
+  md: string,
+): { ok: true } {
+  const newNodes: PmNode[] = [];
+  for (const para of md.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)) {
+    if (/^#{1,6}\s/.test(para)) {
+      const m = /^(#{1,6})\s+(.*)$/.exec(para);
+      if (m) {
+        newNodes.push({ type: 'heading', attrs: { level: m[1]!.length }, content: [{ type: 'text', text: m[2] ?? '' }] });
+        continue;
+      }
+    }
+    newNodes.push({ type: 'paragraph', content: [{ type: 'text', text: para }] });
+  }
+
+  const nextDoc: PmDoc = { type: 'doc', content: newNodes.length ? newNodes : [{ type: 'paragraph' }] };
+
+  getDb()
+    .query(
+      `UPDATE notes SET content_json=?, content_text=?, content_md=?,
+                        yjs_state=NULL, updated_at=?, updated_by=?
+       WHERE group_id=? AND path=?`,
+    )
+    .run(JSON.stringify(nextDoc), extractText(nextDoc), md.trim(), Date.now(), ctx.userId, ctx.groupId, path);
+
+  return { ok: true as const };
 }
 
 // ── session_close ─────────────────────────────────────────────────────

@@ -157,7 +157,7 @@ Your role: ${roleLabel}
 - entity_edit_sheet   — merge structured sheet fields (primitives, arrays, nested objects)
 - entity_edit_content — append prose to a note body
 - note_read           — read the full content and frontmatter of any note
-- note_write          — replace entire note body (DM only)
+- note_write_section  — write or replace a named section; call note_read first (DM only)
 - backlink_create     — link two entities in the knowledge graph
 - inventory_add       — add items to a character's inventory${ctx.role === 'dm' ? `
 - entity_move         — rename or move a note
