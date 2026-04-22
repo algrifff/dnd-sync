@@ -14,8 +14,8 @@
 // Anything not in the table falls through to the ink-soft default.
 // New categories: add a row here, ordered by the priority you want.
 
-export const NODE_BASE_RADIUS = 5;
-export const NODE_DEGREE_COEFF = 3.5;
+export const NODE_BASE_RADIUS = 4;
+export const NODE_DEGREE_COEFF = 4;
 
 export type TagStyle = {
   tag: string;
@@ -43,8 +43,9 @@ export function colorForTags(tags: readonly string[]): string {
 }
 
 /** Render radius: grows with degree so hub nodes stand out.
- *  degree^0.6 tapers less aggressively than sqrt, keeping each new
- *  link visibly meaningful even at high connection counts. */
+ *  degree^0.7 distributes growth more evenly than sqrt — each new
+ *  link stays visibly meaningful even at high connection counts,
+ *  reaching ~100px around degree 100 with no upper cap. */
 export function radiusForDegree(degree: number): number {
-  return NODE_BASE_RADIUS + NODE_DEGREE_COEFF * Math.pow(Math.max(0, degree), 0.6);
+  return NODE_BASE_RADIUS + NODE_DEGREE_COEFF * Math.pow(Math.max(0, degree), 0.7);
 }
