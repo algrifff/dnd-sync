@@ -56,7 +56,7 @@ export default async function TagsIndexPage(): Promise<ReactElement> {
           />
           <SidebarFooter username={session.username} />
         </aside>
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <NoteTabBar canCreate={session.role !== 'viewer'} csrfToken={session.csrfToken} />
           <div className="flex-1 overflow-y-auto">
             <main className="mx-auto max-w-[960px] px-8 py-10">

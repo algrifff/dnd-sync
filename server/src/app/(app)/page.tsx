@@ -72,7 +72,7 @@ export default async function HomePage(): Promise<ReactElement> {
           />
           <SidebarFooter username={session.username} />
         </CollapsibleSidebar>
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <NoteTabBar canCreate={session.role !== 'viewer'} csrfToken={session.csrfToken} />
           <div className="flex-1 overflow-y-auto">
             <main className="surface-paper mx-auto w-full max-w-4xl px-6 py-10">
