@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useLayoutEffect } from 'react';
+import { useState, useEffect, useLayoutEffect } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 const STORAGE_KEY = 'compendium_sidebar_open';
@@ -14,11 +14,18 @@ export function CollapsibleSidebar({
   const [open, setOpen] = useState(true);
   const [ready, setReady] = useState(false);
 
-  // useLayoutEffect fires synchronously before the browser paints, so the
-  // correct closed state is applied before the first frame — no pop-in flash.
+  // Phase 1: apply the correct open/closed state before the browser paints.
+  // useLayoutEffect is synchronous — no flash, no pop.
   useLayoutEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved === 'false') setOpen(false);
+    // Do NOT set ready here — transitions must stay disabled until after
+    // the first paint so the initial state snaps in with no animation.
+  }, []);
+
+  // Phase 2: enable transitions only after the first paint. useEffect fires
+  // after the browser has painted, so the user never sees an animated close.
+  useEffect(() => {
     setReady(true);
   }, []);
 

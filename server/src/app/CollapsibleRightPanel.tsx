@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useLayoutEffect } from 'react';
+import { useState, useEffect, useLayoutEffect } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 const STORAGE_KEY = 'compendium_rightpanel_open';
@@ -17,6 +17,9 @@ export function CollapsibleRightPanel({
   useLayoutEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved === 'false') setOpen(false);
+  }, []);
+
+  useEffect(() => {
     setReady(true);
   }, []);
 
