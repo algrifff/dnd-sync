@@ -231,6 +231,7 @@ export function GraphCanvas({
       if (!res.ok) return;
       const payload = (await res.json()) as GraphPayload;
       let changed = false;
+      const affectedNodes = new Set<string>();
       for (const e of payload.edges) {
         if (!g.hasNode(e.source) || !g.hasNode(e.target)) continue;
         const key = `${e.source}→${e.target}`;
@@ -239,10 +240,19 @@ export function GraphCanvas({
             size: 1,
             color: 'rgba(42, 36, 30, 0.4)',
           });
+          affectedNodes.add(e.source);
+          affectedNodes.add(e.target);
           changed = true;
         }
       }
-      if (changed) setCounts({ nodes: g.order, edges: g.size });
+      if (changed) {
+        for (const id of affectedNodes) {
+          const d = g.degree(id);
+          g.setNodeAttribute(id, 'degree', d);
+          g.setNodeAttribute(id, 'size', radiusForDegree(d) * nodeScaleRef.current);
+        }
+        setCounts({ nodes: g.order, edges: g.size });
+      }
     } catch {
       /* ignore — stale graph is better than a crash */
     }
@@ -791,6 +801,11 @@ export function GraphCanvas({
                   size: 1,
                   color: 'rgba(42, 36, 30, 0.4)',
                 });
+                for (const id of [source, target]) {
+                  const d = g.degree(id);
+                  g.setNodeAttribute(id, 'degree', d);
+                  g.setNodeAttribute(id, 'size', radiusForDegree(d) * nodeScaleRef.current);
+                }
                 setCounts({ nodes: g.order, edges: g.size });
               }
               // Persist to DB then signal remote peers to pull the new edge.
@@ -924,8 +939,7 @@ export function GraphCanvas({
     const g = graphRef.current;
     if (!g) return;
     g.forEachNode((node) => {
-      const degree = (g.getNodeAttribute(node, 'degree') as number) ?? 0;
-      g.setNodeAttribute(node, 'size', radiusForDegree(degree) * nodeScale);
+      g.setNodeAttribute(node, 'size', radiusForDegree(g.degree(node)) * nodeScale);
     });
   }, [nodeScale]);
 
