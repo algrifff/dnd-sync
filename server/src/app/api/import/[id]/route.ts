@@ -12,6 +12,7 @@ import {
   updateImportJob,
 } from '@/lib/imports';
 import { abortAnalyse, type PlannedNote } from '@/lib/import-analyse';
+import { abortOrchestration } from '@/lib/import-orchestrate';
 import type { ImportPlan } from '@/lib/import-parse';
 import type { ImportClassifyResult } from '@/lib/ai/skills/types';
 
@@ -144,11 +145,10 @@ export async function DELETE(req: NextRequest, ctx: Ctx): Promise<Response> {
     return json({ error: 'already_applied' }, 409);
   }
 
-  // Kill any in-flight AI worker first so its abortable fetch calls
-  // bail out cleanly. The worker observes the signal and updates the
-  // job to cancelled; cancelImportJob below handles the terminal
-  // flip + temp-file cleanup for jobs that never started analysing.
+  // Kill any in-flight workers (analyse or orchestrate) before the
+  // terminal flip so abortable fetch calls bail out cleanly.
   abortAnalyse(id);
+  abortOrchestration(id);
   cancelImportJob(id);
   return json({ ok: true });
 }

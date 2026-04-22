@@ -458,7 +458,7 @@ function rewriteWikilinks(
 
 // ── Persistence ────────────────────────────────────────────────────────
 
-type WriteOpts = {
+export type WriteOpts = {
   groupId: string;
   userId: string;
   path: string;
@@ -468,7 +468,7 @@ type WriteOpts = {
   noteId?: string | undefined;
 };
 
-function writeNote(opts: WriteOpts): void {
+export function writeNote(opts: WriteOpts): void {
   const db = getDb();
 
   // Run md-to-pm so we generate the same contentJson + wikilinks /
@@ -663,7 +663,7 @@ function pickAssetFolder(c: ImportClassifyResult): string {
 /** Idempotent content-addressed asset write + row insert. `Canonical
  *  path` lands in the assets.original_path column so the by-path
  *  resolver can find it; the on-disk blob is deduped via sha256. */
-function commitAsset(
+export function commitAsset(
   job: ImportJob,
   data: Buffer,
   canonicalPath: string,
@@ -726,7 +726,7 @@ function stripFrontmatter(raw: string): string {
   return splitFrontmatter(raw).body;
 }
 
-function composeMarkdown(
+export function composeMarkdown(
   frontmatter: Record<string, unknown>,
   body: string,
 ): string {

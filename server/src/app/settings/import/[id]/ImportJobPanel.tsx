@@ -1,29 +1,44 @@
 'use client';
 
-// Full per-row review table for an import job.
+// Full per-row review table for an import job, plus the Smart Import
+// orchestration overlay.
 //
-// One row per note in the plan, with inline controls for accept /
-// reject + path + kind / role. Bulk actions on top (Accept all,
-// reject-all-plain, invert). Apply button commits the edited plan;
-// Cancel deletes the temp zip and flips the row. Edits are flushed
-// to the server on blur / toggle via PATCH /api/import/:id so
-// refreshing doesn't lose state.
+// Two distinct flows share this component:
+//
+//  1. Manual review — Analyse → per-row accept/reject → Apply
+//  2. Smart Import  — multi-pass AI orchestrator, possibly pausing to
+//     ask the DM questions via a blocking full-screen chat overlay.
+//
+// The `liveJob` state is initialised from the server-rendered prop and
+// kept up-to-date by a 2-second polling loop whenever the job is in an
+// orchestrating state. The chat overlay resolves answers by POSTing to
+// /api/import/:id/answer.
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import posthog from '@/lib/posthog-web';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
-import type { ImportJob } from '@/lib/imports';
+import { Loader2, Sparkles, Send } from 'lucide-react';
+import type { ImportJob, ImportStatus } from '@/lib/imports';
 import type { ImportPlan } from '@/lib/import-parse';
-import type {
-  AnalyseStats,
-  PlannedNote,
-} from '@/lib/import-analyse';
+import type { AnalyseStats, PlannedNote } from '@/lib/import-analyse';
 import type { ImportClassifyResult } from '@/lib/ai/skills/types';
 
 type Kind = ImportClassifyResult['kind'];
 type Role = NonNullable<ImportClassifyResult['role']>;
+
+// Defined locally to avoid importing a server module in a client component.
+type OrchestrationPhase = 'assets' | 'campaign' | 'entities' | 'quality' | 'done';
+type OrchestrationMsg = { role: 'assistant' | 'user'; content: string; timestamp: number };
+type OrchestrationState = {
+  phase: OrchestrationPhase;
+  assetMap: Record<string, string>;
+  entityMap: Record<string, string>;
+  campaignSlug: string | null;
+  conversationHistory: OrchestrationMsg[];
+  summary: string | null;
+  phaseLog: Array<{ phase: string; completedAt: number; count?: number }>;
+};
 
 const KINDS: Array<{ value: Kind; label: string }> = [
   { value: 'character', label: 'Character' },
@@ -40,6 +55,23 @@ const ROLES: Array<{ value: Role; label: string }> = [
   { value: 'ally', label: 'Ally' },
   { value: 'villain', label: 'Villain' },
 ];
+
+const PHASE_STEPS: Array<{ label: string; phase: OrchestrationPhase }> = [
+  { label: 'Assets',   phase: 'assets' },
+  { label: 'Campaign', phase: 'campaign' },
+  { label: 'Entities', phase: 'entities' },
+  { label: 'Quality',  phase: 'quality' },
+];
+
+function isOrchestratingStatus(s: ImportStatus): boolean {
+  return (
+    s === 'orchestrating_assets' ||
+    s === 'orchestrating_campaign' ||
+    s === 'orchestrating_entities' ||
+    s === 'orchestrating_quality' ||
+    s === 'waiting_for_answer'
+  );
+}
 
 // ── Component ──────────────────────────────────────────────────────────
 
@@ -67,9 +99,57 @@ export function ImportJobPanel({
     message: string;
   } | null>(null);
 
+  // ── Live job state (kept fresh via polling when orchestrating) ────────
+
+  const [liveJob, setLiveJob] = useState<ImportJob>(job);
+  const orch = (liveJob.plan as { orchestration?: OrchestrationState } | null)
+    ?.orchestration;
+  const orchestrating = isOrchestratingStatus(liveJob.status);
+  const orchestrationDone = liveJob.status === 'applied' && !!orch;
+
+  useEffect(() => {
+    if (!orchestrating) return;
+    const id = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/import/${encodeURIComponent(job.id)}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { job?: ImportJob };
+        if (data.job) {
+          setLiveJob(data.job);
+          // Stop polling once terminal.
+          if (
+            data.job.status === 'applied' ||
+            data.job.status === 'cancelled' ||
+            data.job.status === 'failed'
+          ) {
+            clearInterval(id);
+          }
+        }
+      } catch { /* ignore network blips */ }
+    }, 2000);
+    return () => clearInterval(id);
+  }, [orchestrating, job.id]);
+
+  // Warn on page refresh / navigation while orchestrating.
+  useEffect(() => {
+    if (!orchestrating) return;
+    const handler = (e: BeforeUnloadEvent): void => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [orchestrating]);
+
+  // ── Derived state (uses liveJob so polling updates feed through) ──────
+
   const disabledState =
-    job.status === 'applied' || job.status === 'cancelled' || job.status === 'failed';
-  const applyable = job.status === 'ready' || job.status === 'uploaded';
+    orchestrating ||
+    liveJob.status === 'applied' ||
+    liveJob.status === 'cancelled' ||
+    liveJob.status === 'failed';
+
+  const applyable = liveJob.status === 'ready' || liveJob.status === 'uploaded';
 
   // ── PATCH flush (debounced) ──────────────────────────────────────────
 
@@ -219,14 +299,12 @@ export function ImportJobPanel({
     void flush();
   };
 
-  // ── Actions: Apply / Cancel ──────────────────────────────────────────
+  // ── Actions: Apply / Cancel / Smart Import ────────────────────────────
 
   const apply = async (): Promise<void> => {
     if (busy) return;
     setBusy(true);
     setFlash(null);
-    // Flush any in-flight edits first so the server sees the final
-    // state before running.
     if (flushTimer.current) {
       clearTimeout(flushTimer.current);
       flushTimer.current = null;
@@ -303,7 +381,7 @@ export function ImportJobPanel({
         });
         return;
       }
-      posthog.capture('import_job_cancelled', { job_id: job.id, job_status: job.status });
+      posthog.capture('import_job_cancelled', { job_id: job.id, job_status: liveJob.status });
       router.refresh();
     } catch (err) {
       setFlash({
@@ -315,7 +393,84 @@ export function ImportJobPanel({
     }
   };
 
-  // ── Derived ──────────────────────────────────────────────────────────
+  const [smartBusy, setSmartBusy] = useState(false);
+  const smartImport = async (): Promise<void> => {
+    if (smartBusy) return;
+    setSmartBusy(true);
+    setFlash(null);
+    try {
+      const res = await fetch(
+        `/api/import/${encodeURIComponent(job.id)}/orchestrate`,
+        { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } },
+      );
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; reason?: string };
+      if (!res.ok) {
+        setFlash({ kind: 'error', message: body.reason ?? body.error ?? `failed (${res.status})` });
+        return;
+      }
+      posthog.capture('import_smart_import_started', { job_id: job.id });
+      // Fetch updated status to trigger polling.
+      const statusRes = await fetch(`/api/import/${encodeURIComponent(job.id)}`);
+      if (statusRes.ok) {
+        const data = (await statusRes.json()) as { job?: ImportJob };
+        if (data.job) setLiveJob(data.job);
+      }
+    } catch (err) {
+      setFlash({ kind: 'error', message: err instanceof Error ? err.message : 'network error' });
+    } finally {
+      setSmartBusy(false);
+    }
+  };
+
+  // ── Chat answer ───────────────────────────────────────────────────────
+
+  const [answerText, setAnswerText] = useState('');
+  const [sendingAnswer, setSendingAnswer] = useState(false);
+
+  const sendAnswer = async (): Promise<void> => {
+    const content = answerText.trim();
+    if (!content || sendingAnswer) return;
+    setSendingAnswer(true);
+    // Optimistic local append so the UI feels responsive.
+    setLiveJob((prev) => {
+      const prevPlan = prev.plan as { orchestration?: OrchestrationState } | null;
+      if (!prevPlan?.orchestration) return prev;
+      return {
+        ...prev,
+        plan: {
+          ...prevPlan,
+          orchestration: {
+            ...prevPlan.orchestration,
+            conversationHistory: [
+              ...prevPlan.orchestration.conversationHistory,
+              { role: 'user' as const, content, timestamp: Date.now() },
+            ],
+          },
+        },
+      };
+    });
+    setAnswerText('');
+    try {
+      const res = await fetch(
+        `/api/import/${encodeURIComponent(job.id)}/answer`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+          body: JSON.stringify({ content }),
+        },
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; reason?: string };
+        setFlash({ kind: 'error', message: body.reason ?? body.error ?? `send failed (${res.status})` });
+      }
+    } catch (err) {
+      setFlash({ kind: 'error', message: err instanceof Error ? err.message : 'network error' });
+    } finally {
+      setSendingAnswer(false);
+    }
+  };
+
+  // ── Derived counts ────────────────────────────────────────────────────
 
   const counts = useMemo(() => {
     let accepted = 0;
@@ -325,9 +480,11 @@ export function ImportJobPanel({
     return { accepted, total: rows.length };
   }, [rows]);
 
+  // ── Render ────────────────────────────────────────────────────────────
+
   return (
     <div className="space-y-5">
-      <StatsBar job={job} stats={stats} plan={plan} acceptedCount={counts.accepted} />
+      <StatsBar job={liveJob} stats={stats} plan={plan} acceptedCount={counts.accepted} />
 
       {flash && (
         <div
@@ -342,7 +499,19 @@ export function ImportJobPanel({
         </div>
       )}
 
-      {!disabledState && (
+      {/* Orchestration summary card — shown after Smart Import completes */}
+      {orchestrationDone && orch?.summary && (
+        <div className="rounded-[10px] border border-[#7B8A5F]/40 bg-[#7B8A5F]/10 px-4 py-3 text-sm text-[#2A241E]">
+          <div className="mb-1 flex items-center gap-2 font-medium">
+            <Sparkles size={13} className="text-[#7B8A5F]" />
+            Smart Import complete
+          </div>
+          <p className="text-xs text-[#5A4F42]">{orch.summary}</p>
+        </div>
+      )}
+
+      {/* Manual review controls — hidden when orchestrating */}
+      {!disabledState && !orchestrating && (
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -372,10 +541,21 @@ export function ImportJobPanel({
             <button
               type="button"
               onClick={cancel}
-              disabled={busy || job.status === 'applied'}
+              disabled={busy || liveJob.status === 'applied'}
               className="rounded-[6px] px-3 py-1.5 text-xs font-medium text-[#8B4A52] transition hover:bg-[#8B4A52]/10 disabled:opacity-50"
             >
               Cancel
+            </button>
+            <button
+              type="button"
+              onClick={smartImport}
+              disabled={smartBusy || !applyable}
+              className="flex items-center gap-1.5 rounded-[8px] border border-[#D4A85A]/60 bg-[#D4A85A]/10 px-3 py-1.5 text-xs font-medium text-[#2A241E] transition hover:bg-[#D4A85A]/20 disabled:opacity-50"
+            >
+              {smartBusy
+                ? <Loader2 size={11} className="animate-spin" />
+                : <Sparkles size={11} />}
+              Smart Import
             </button>
             <button
               type="button"
@@ -389,34 +569,255 @@ export function ImportJobPanel({
         </div>
       )}
 
-      {rows.length === 0 ? (
-        <p className="text-sm text-[#5A4F42]">
-          No planned notes on this job. {plan ? 'Wait for analyse to finish.' : 'Parse failed — cancel and re-upload.'}
-        </p>
-      ) : (
-        <ul className="divide-y divide-[#D4C7AE]/50 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#F4EDE0] text-sm">
-          {rows.map((r) => (
-            <Row
-              key={r.id}
-              row={r}
-              disabled={disabledState}
-              onToggle={(v) => setAccepted(r.id, v)}
-              onPath={(v) => setPath(r.id, v)}
-              onKind={(v) => setKind(r.id, v)}
-              onRole={(v) => setRole(r.id, v)}
-            />
-          ))}
-        </ul>
+      {/* Manual review table — hidden when orchestrating */}
+      {!orchestrating && !orchestrationDone && (
+        rows.length === 0 ? (
+          <p className="text-sm text-[#5A4F42]">
+            No planned notes on this job. {plan ? 'Wait for analyse to finish.' : 'Parse failed — cancel and re-upload.'}
+          </p>
+        ) : (
+          <ul className="divide-y divide-[#D4C7AE]/50 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#F4EDE0] text-sm">
+            {rows.map((r) => (
+              <Row
+                key={r.id}
+                row={r}
+                disabled={disabledState}
+                onToggle={(v) => setAccepted(r.id, v)}
+                onPath={(v) => setPath(r.id, v)}
+                onKind={(v) => setKind(r.id, v)}
+                onRole={(v) => setRole(r.id, v)}
+              />
+            ))}
+          </ul>
+        )
       )}
 
       <footer className="flex items-center justify-between text-xs text-[#5A4F42]">
         <span>
-          status: <span className="font-medium text-[#2A241E]">{job.status}</span>
+          status: <span className="font-medium text-[#2A241E]">{liveJob.status}</span>
         </span>
         <Link href="/" className="text-[#5A4F42] hover:text-[#2A241E] hover:underline">
           Back to home
         </Link>
       </footer>
+
+      {/* Full-screen orchestration overlay — rendered above everything */}
+      {(orchestrating || (orchestrationDone && orch?.conversationHistory && orch.conversationHistory.length > 0)) && orch && (
+        <OrchestrationOverlay
+          status={liveJob.status}
+          orch={orch}
+          answerText={answerText}
+          onAnswerChange={setAnswerText}
+          onSendAnswer={sendAnswer}
+          sendingAnswer={sendingAnswer}
+          onCancel={cancel}
+          cancelDisabled={busy}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Orchestration overlay ──────────────────────────────────────────────
+
+const PHASE_ORDER: OrchestrationPhase[] = ['assets', 'campaign', 'entities', 'quality', 'done'];
+
+function OrchestrationOverlay({
+  status,
+  orch,
+  answerText,
+  onAnswerChange,
+  onSendAnswer,
+  sendingAnswer,
+  onCancel,
+  cancelDisabled,
+}: {
+  status: ImportStatus;
+  orch: OrchestrationState;
+  answerText: string;
+  onAnswerChange: (v: string) => void;
+  onSendAnswer: () => void;
+  sendingAnswer: boolean;
+  onCancel: () => void;
+  cancelDisabled: boolean;
+}): React.JSX.Element {
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const isWaiting = status === 'waiting_for_answer';
+  const isDone = status === 'applied';
+
+  // Scroll to latest message.
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [orch.conversationHistory.length]);
+
+  // Focus input when question appears.
+  useEffect(() => {
+    if (isWaiting) inputRef.current?.focus();
+  }, [isWaiting]);
+
+  const activePhaseIdx = PHASE_ORDER.indexOf(orch.phase);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      onSendAnswer();
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#2A241E]/60 backdrop-blur-sm">
+      <div className="flex h-[90vh] w-full max-w-xl flex-col rounded-[14px] border border-[#D4C7AE] bg-[#F4EDE0] shadow-2xl mx-4">
+
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-[#D4C7AE] px-5 py-3.5">
+          <div className="flex items-center gap-2">
+            <Sparkles size={14} className="text-[#D4A85A]" />
+            <span className="text-sm font-semibold text-[#2A241E]">
+              {isDone ? 'Smart Import complete' : isWaiting ? 'Your input needed' : 'Smart Import running…'}
+            </span>
+          </div>
+          {!isDone && (
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={cancelDisabled}
+              className="rounded-[6px] px-2.5 py-1 text-[11px] font-medium text-[#8B4A52] transition hover:bg-[#8B4A52]/10 disabled:opacity-40"
+            >
+              Cancel import
+            </button>
+          )}
+        </div>
+
+        {/* Phase step bar */}
+        <div className="flex items-center gap-0 border-b border-[#D4C7AE]/60 px-5 py-2.5">
+          {PHASE_STEPS.map((step, i) => {
+            const stepIdx = PHASE_ORDER.indexOf(step.phase);
+            const done = activePhaseIdx > stepIdx;
+            const active = activePhaseIdx === stepIdx && !isDone;
+            return (
+              <div key={step.phase} className="flex items-center">
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className={
+                      'h-2 w-2 rounded-full transition-colors ' +
+                      (done
+                        ? 'bg-[#7B8A5F]'
+                        : active
+                          ? 'bg-[#D4A85A]'
+                          : isDone
+                            ? 'bg-[#7B8A5F]'
+                            : 'bg-[#D4C7AE]')
+                    }
+                  />
+                  <span
+                    className={
+                      'text-[10px] font-medium ' +
+                      (active ? 'text-[#2A241E]' : 'text-[#8A7E6B]')
+                    }
+                  >
+                    {step.label}
+                  </span>
+                  {active && !isDone && (
+                    <Loader2 size={10} className="animate-spin text-[#D4A85A]" />
+                  )}
+                </div>
+                {i < PHASE_STEPS.length - 1 && (
+                  <div className="mx-2 h-px w-4 bg-[#D4C7AE]" />
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Conversation */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          {orch.conversationHistory.length === 0 && (
+            <p className="text-center text-xs text-[#8A7E6B]">
+              Analysing your notes…
+            </p>
+          )}
+          {orch.conversationHistory.map((msg, i) => (
+            <ChatBubble key={i} msg={msg} />
+          ))}
+          {!isWaiting && !isDone && (
+            <div className="flex items-center gap-2 text-xs text-[#8A7E6B]">
+              <Loader2 size={11} className="animate-spin" />
+              <span>Working…</span>
+            </div>
+          )}
+          {isDone && orch.summary && (
+            <div className="rounded-[8px] border border-[#7B8A5F]/40 bg-[#7B8A5F]/10 px-3 py-2 text-xs text-[#2A241E]">
+              {orch.summary}
+            </div>
+          )}
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* Input */}
+        {!isDone && (
+          <div className="border-t border-[#D4C7AE] px-4 py-3">
+            {isWaiting ? (
+              <div className="flex items-end gap-2">
+                <textarea
+                  ref={inputRef}
+                  value={answerText}
+                  onChange={(e) => onAnswerChange(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Type your answer… (Enter to send, Shift+Enter for new line)"
+                  rows={2}
+                  disabled={sendingAnswer}
+                  className="flex-1 resize-none rounded-[8px] border border-[#D4C7AE] bg-[#FBF5E8] px-3 py-2 text-xs text-[#2A241E] outline-none placeholder:text-[#8A7E6B] focus:border-[#D4A85A] disabled:opacity-60"
+                />
+                <button
+                  type="button"
+                  onClick={onSendAnswer}
+                  disabled={sendingAnswer || !answerText.trim()}
+                  className="shrink-0 rounded-[8px] bg-[#2A241E] p-2 text-[#F4EDE0] transition hover:bg-[#3A342E] disabled:opacity-40"
+                >
+                  {sendingAnswer
+                    ? <Loader2 size={14} className="animate-spin" />
+                    : <Send size={14} />}
+                </button>
+              </div>
+            ) : (
+              <p className="text-center text-[11px] text-[#8A7E6B]">
+                Input will appear when a question needs your answer.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Chat bubble ────────────────────────────────────────────────────────
+
+function ChatBubble({ msg }: { msg: OrchestrationMsg }): React.JSX.Element {
+  const isAssistant = msg.role === 'assistant';
+  // Render newlines; strip markdown bold markers for cleaner display.
+  const lines = msg.content
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .split('\n');
+
+  return (
+    <div className={`flex ${isAssistant ? 'justify-start' : 'justify-end'}`}>
+      <div
+        className={
+          'max-w-[85%] rounded-[10px] px-3 py-2 text-xs leading-relaxed ' +
+          (isAssistant
+            ? 'bg-[#EAE1CF] text-[#2A241E]'
+            : 'bg-[#2A241E] text-[#F4EDE0]')
+        }
+      >
+        {lines.map((line, i) => (
+          <span key={i}>
+            {line}
+            {i < lines.length - 1 && <br />}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -491,8 +892,6 @@ function Row({
   const c = row.classification;
   const [pathDraft, setPathDraft] = useState<string>(c?.canonicalPath ?? row.sourcePath);
 
-  // Re-sync when the server echoes a new path in — e.g. a bulk action
-  // mutates it elsewhere.
   const lastUpstream = useRef<string>(c?.canonicalPath ?? row.sourcePath);
   const upstream = c?.canonicalPath ?? row.sourcePath;
   if (lastUpstream.current !== upstream) {

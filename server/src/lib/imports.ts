@@ -23,6 +23,12 @@ export const IMPORT_STATUSES = [
   'applied',
   'cancelled',
   'failed',
+  // Smart Import orchestration phases
+  'orchestrating_assets',
+  'orchestrating_campaign',
+  'orchestrating_entities',
+  'orchestrating_quality',
+  'waiting_for_answer',
 ] as const;
 export type ImportStatus = (typeof IMPORT_STATUSES)[number];
 
@@ -153,7 +159,10 @@ export function listOpenJobsForUser(
               plan_json, stats_json, created_at, updated_at
          FROM import_jobs
         WHERE group_id = ? AND created_by = ?
-          AND status IN ('uploaded', 'parsing', 'analysing', 'ready')
+          AND status IN ('uploaded', 'parsing', 'analysing', 'ready',
+                        'orchestrating_assets', 'orchestrating_campaign',
+                        'orchestrating_entities', 'orchestrating_quality',
+                        'waiting_for_answer')
         ORDER BY updated_at DESC`,
     )
     .all(groupId, userId)
