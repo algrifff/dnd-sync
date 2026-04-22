@@ -11,12 +11,14 @@ export function CollapsibleRightPanel({
 }: {
   children: React.ReactNode;
 }): React.JSX.Element {
-  const [open, setOpen] = useState(true);
+  // Start CLOSED so a user with a closed panel never sees a flash.
+  // useLayoutEffect opens it before paint if localStorage says open.
+  const [open, setOpen] = useState(false);
   const [ready, setReady] = useState(false);
 
   useLayoutEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === 'false') setOpen(false);
+    // Open unless explicitly saved as closed.
+    setOpen(localStorage.getItem(STORAGE_KEY) !== 'false');
   }, []);
 
   useEffect(() => {

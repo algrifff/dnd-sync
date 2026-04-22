@@ -11,20 +11,17 @@ export function CollapsibleSidebar({
 }: {
   children: React.ReactNode;
 }): React.JSX.Element {
-  const [open, setOpen] = useState(true);
+  // Start CLOSED so a user with a closed sidebar never sees a flash.
+  // useLayoutEffect opens it before paint if localStorage says open.
+  const [open, setOpen] = useState(false);
   const [ready, setReady] = useState(false);
 
-  // Phase 1: apply the correct open/closed state before the browser paints.
-  // useLayoutEffect is synchronous — no flash, no pop.
   useLayoutEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === 'false') setOpen(false);
-    // Do NOT set ready here — transitions must stay disabled until after
-    // the first paint so the initial state snaps in with no animation.
+    // Open unless explicitly saved as closed.
+    setOpen(localStorage.getItem(STORAGE_KEY) !== 'false');
   }, []);
 
-  // Phase 2: enable transitions only after the first paint. useEffect fires
-  // after the browser has painted, so the user never sees an animated close.
+  // Enable transitions only after the initial state is painted.
   useEffect(() => {
     setReady(true);
   }, []);
