@@ -28,7 +28,7 @@ export default async function GraphPage(): Promise<ReactElement> {
   const allTags = listAllTags(session.currentGroupId).map((t) => t.tag);
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <AppHeader
         role={session.role}
         me={{

@@ -28,7 +28,7 @@ export default async function AssetsPage(): Promise<ReactElement> {
   const assets = listGroupAssetsWithTags(session.currentGroupId);
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <AppHeader
         role={session.role}
         me={{

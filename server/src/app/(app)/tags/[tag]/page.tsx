@@ -34,7 +34,7 @@ export default async function TagDetailPage({ params }: Ctx): Promise<ReactEleme
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <AppHeader
         role={session.role}
         me={{

@@ -109,7 +109,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   const outline = extractOutline(contentJson);
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <AppHeader
         role={session.role}
         me={{

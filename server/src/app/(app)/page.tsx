@@ -44,7 +44,7 @@ export default async function HomePage(): Promise<ReactElement> {
   const topFolders = tree.root.children.filter((c) => c.kind === 'dir').slice(0, 6);
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <AppHeader
         role={session.role}
         me={{
