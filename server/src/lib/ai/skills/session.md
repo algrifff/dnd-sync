@@ -4,6 +4,18 @@ Path (assigned by server): `Campaigns/{slug}/Adventure Log/session-{N}-{title-sl
 
 Required sheet fields (when creating): `date` (`YYYY-MM-DD`), `session_number` (number), `attendees` (array of **usernames**).
 
+### Starting a new session
+
+When the user asks to "start a new session" / "open a session" / "log tonight's session" and does **not** supply a title, default to:
+
+```
+{userDisplayName} — {YYYY-MM-DD}
+```
+
+Using the current user's display name (from the `User:` line in the system context) and today's date (from the `Today:` line). Pass that same string as `entity_create.name` **and** `sheet.title`, and set `sheet.date` to the same `YYYY-MM-DD`. Do not ask for a title — they can rename later.
+
+If the user **does** give a title ("session three: the vault"), use theirs verbatim and ignore the default.
+
 ### During play
 
 - Append with `entity_edit_content` — never replace whole session bodies.

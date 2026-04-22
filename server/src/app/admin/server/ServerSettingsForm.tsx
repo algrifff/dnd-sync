@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Copy, Check, RefreshCw } from 'lucide-react';
 
 export function ServerSettingsForm({
@@ -35,6 +36,7 @@ function RenameSection({
   worldName: string;
   csrfToken: string;
 }): React.JSX.Element {
+  const router = useRouter();
   const [name, setName] = useState(worldName);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +59,13 @@ function RenameSection({
         setError(body.detail ?? `HTTP ${res.status}`);
         return;
       }
+      // Re-render server components (AppHeader, etc.) so the new title
+      // shows up immediately. router.refresh() patches the RSC tree in
+      // place, preserving this form's input state — no flicker, no remount.
+      router.refresh();
+      // Nudge the worlds sidebar (client-fetched) to re-pull so its
+      // tooltip / aria-label reflect the new name too.
+      window.dispatchEvent(new Event('world-updated'));
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
@@ -115,6 +124,7 @@ function HeaderColorSection({
   initialColor: string | null;
   csrfToken: string;
 }): React.JSX.Element {
+  const router = useRouter();
   const [color, setColor] = useState(initialColor ?? '#2A241E');
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -136,6 +146,9 @@ function HeaderColorSection({
         setError(body.detail ?? `HTTP ${res.status}`);
         return;
       }
+      // Push the new colour to the AppHeader (server component) without
+      // a full navigation or flicker.
+      router.refresh();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {

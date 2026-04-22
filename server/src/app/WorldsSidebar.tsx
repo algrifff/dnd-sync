@@ -45,6 +45,18 @@ export function WorldsSidebar({
     void fetchWorlds();
   }, []);
 
+  // Re-fetch the worlds list whenever the current world is edited
+  // elsewhere (for example the settings page dispatches this after a
+  // successful rename), so the sidebar's icon tooltip / aria-label stay
+  // in sync without a full reload.
+  useEffect(() => {
+    const onWorldUpdated = (): void => {
+      void fetchWorlds();
+    };
+    window.addEventListener('world-updated', onWorldUpdated);
+    return () => window.removeEventListener('world-updated', onWorldUpdated);
+  }, []);
+
   const fetchWorlds = async (): Promise<void> => {
     try {
       const res = await fetch('/api/worlds', { cache: 'no-store' });

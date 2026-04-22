@@ -88,6 +88,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       groupId: session.currentGroupId,
       role,
       skills,
+      userDisplayName: session.displayName,
       ...(body.campaignSlug !== undefined ? { campaignSlug: body.campaignSlug } : {}),
       ...(campaignName !== undefined     ? { campaignName }                     : {}),
     }),

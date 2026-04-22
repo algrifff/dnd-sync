@@ -76,9 +76,12 @@ export type PromptContext = {
   campaignSlug?: string;
   campaignName?: string;
   role: 'dm' | 'player';
+  userDisplayName?: string;
   activeCharacterName?: string;
   openSessionPath?: string;
   skills: string[];
+  /** Override today's date (YYYY-MM-DD). Defaults to the server's current date. */
+  today?: string;
 };
 
 export function buildSystemPrompt(ctx: PromptContext): string {
@@ -92,6 +95,10 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   const characterLine = ctx.activeCharacterName
     ? `Active character: ${ctx.activeCharacterName}`
     : '';
+  const userLine = ctx.userDisplayName
+    ? `User: ${ctx.userDisplayName}`
+    : '';
+  const todayLine = `Today: ${ctx.today ?? new Date().toISOString().slice(0, 10)}`;
 
   const base = `You are the Compendium AI — a TTRPG campaign assistant embedded in a D&D note-taking app.
 You help ${roleLabel === 'Dungeon Master' ? 'the DM' : 'players'} manage campaign entities, session notes, and lore.
@@ -109,7 +116,7 @@ Voice applies only to your final prose reply. Tool calls, arguments, and paths a
 
 ${campaignLine}
 ${sessionLine}
-${characterLine ? characterLine + '\n' : ''}
+${characterLine ? characterLine + '\n' : ''}${userLine ? userLine + '\n' : ''}${todayLine}
 Your role: ${roleLabel}
 
 ## Non-negotiable rules
