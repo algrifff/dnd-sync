@@ -177,6 +177,20 @@ export function ChatPane({
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [open, messages, isStreaming]);
 
+  // Allow external components (e.g. EndSessionButton) to open the panel
+  // and optionally pre-fill the input via a custom DOM event.
+  useEffect(() => {
+    function onOpenChat(e: Event) {
+      const detail = (e as CustomEvent<{ prefill?: string }>).detail;
+      setOpen(true);
+      if (typeof detail?.prefill === 'string' && detail.prefill.trim()) {
+        setInput(detail.prefill.trim());
+      }
+    }
+    window.addEventListener('compendium:open-chat', onOpenChat);
+    return () => window.removeEventListener('compendium:open-chat', onOpenChat);
+  }, []);
+
   // ── File handling ──────────────────────────────────────────────────
 
   const processFiles = useCallback(async (fileList: File[]) => {

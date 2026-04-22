@@ -25,6 +25,7 @@ import { getPmSchema } from '@/lib/pm-schema';
 import { logAudit } from '@/lib/audit';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { getTemplate } from '@/lib/templates';
+import { generateSessionTitle } from '@/lib/session-title';
 
 export const dynamic = 'force-dynamic';
 
@@ -97,7 +98,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     sheet,
   };
 
-  const titleText = body.title ?? body.date;
+  const titleText = body.title ?? generateSessionTitle(session.displayName || session.username, body.date);
   const emptyDoc = { type: 'doc', content: [{ type: 'paragraph' }] };
   const schema = getPmSchema();
   const ydoc = prosemirrorJSONToYDoc(schema, emptyDoc, 'default');

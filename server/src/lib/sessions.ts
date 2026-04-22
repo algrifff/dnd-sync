@@ -56,6 +56,17 @@ function rowToSession(r: DbRow): SessionListRow {
   };
 }
 
+export type SessionStatus = 'open' | 'review' | 'closed';
+
+export function getSessionStatus(groupId: string, notePath: string): SessionStatus {
+  const row = getDb()
+    .query<{ status: string }, [string, string]>(
+      `SELECT status FROM session_notes WHERE group_id=? AND note_path=?`,
+    )
+    .get(groupId, notePath);
+  return (row?.status as SessionStatus) ?? 'open';
+}
+
 export function deriveSessionFromFrontmatter(opts: {
   groupId: string;
   notePath: string;

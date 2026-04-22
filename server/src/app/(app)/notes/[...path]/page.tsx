@@ -24,6 +24,8 @@ import { NoteWorkspace } from '../../../notes/NoteWorkspace';
 import { TagEditor } from '../../../notes/TagEditor';
 import { NoteSidebar, extractOutline } from '../../../notes/NoteSidebar';
 import { ChatPane } from '../../../ChatPane';
+import { EndSessionButton } from '../../../notes/EndSessionButton';
+import { getSessionStatus } from '@/lib/sessions';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,6 +65,24 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
     sessionUserId: session.userId,
     createdBy: note.created_by,
   });
+
+  // Session-kind metadata — drives the End of Session button
+  let noteKind: string | null = null;
+  let sessionStatus: 'open' | 'review' | 'closed' = 'open';
+  try {
+    const fm = JSON.parse(note.frontmatter_json) as Record<string, unknown>;
+    noteKind = typeof fm.kind === 'string' ? fm.kind : null;
+  } catch { /* ignore */ }
+  const isSessionNote = noteKind === 'session';
+  const canEdit = canEditNote({
+    role: session.role,
+    userId: session.userId,
+    createdBy: note.created_by,
+    character,
+  });
+  if (isSessionNote && canEdit) {
+    sessionStatus = getSessionStatus(session.currentGroupId, path);
+  }
 
   let contentJson: unknown = null;
   try {
@@ -164,6 +184,14 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                       })}
                     />
                   </div>
+
+                  {isSessionNote && canEdit && (
+                    <EndSessionButton
+                      sessionPath={path}
+                      csrfToken={session.csrfToken}
+                      isAlreadyClosed={sessionStatus === 'closed'}
+                    />
+                  )}
 
                   <NoteWorkspace
                     path={path}
