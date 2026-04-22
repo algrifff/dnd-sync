@@ -16,7 +16,7 @@ import {
 } from './common';
 
 export type ClassifyResult = {
-  kind: 'character' | 'location' | 'item' | 'session' | 'lore' | 'plain';
+  kind: 'character' | 'creature' | 'location' | 'item' | 'session' | 'lore' | 'plain';
   role: 'pc' | 'npc' | 'ally' | 'villain' | null;
   confidence: number;
   displayName: string;
@@ -42,7 +42,7 @@ const SCHEMA: Record<string, unknown> = {
   properties: {
     kind: {
       type: 'string',
-      enum: ['character', 'location', 'item', 'session', 'lore', 'plain'],
+      enum: ['character', 'creature', 'location', 'item', 'session', 'lore', 'plain'],
     },
     role: {
       type: ['string', 'null'],
@@ -83,7 +83,7 @@ const SCHEMA: Record<string, unknown> = {
 };
 
 type RawOutput = {
-  kind: ClassifyResult['kind'];
+  kind: 'character' | 'creature' | 'location' | 'item' | 'session' | 'lore' | 'plain';
   role: ClassifyResult['role'];
   confidence: number;
   display_name: string;
@@ -153,6 +153,7 @@ function buildSystem(ctx: ImportSkillContext): string {
     '',
     'Kinds:',
     '  character - a PC, NPC, ally, or villain. Set role accordingly.',
+    '  creature  - monster, beast, construct, undead, demon, dragon, or any non-humanoid combatant.',
     '  location  - city, town, dungeon, landmark, plane, region.',
     '  item      - magic item, weapon, treasure, relic.',
     '  session   - a dated session log (look for date patterns, "session N", "recap", "log").',
@@ -160,8 +161,9 @@ function buildSystem(ctx: ImportSkillContext): string {
     '  plain     - anything you cannot classify confidently.',
     '',
     'Folder name is a strong signal — a note inside a folder literally named "Characters", "NPCs",',
-    '"Enemies", "Places", "Items", "Lore", "Sessions", "Quests", or close synonyms should be',
-    'classified accordingly even with low body-text confidence. Folder wins over ambiguous body.',
+    '"Enemies", "Creatures", "Monsters", "Bestiary", "Places", "Items", "Lore", "Sessions", "Quests",',
+    'or close synonyms should be classified accordingly even with low body-text confidence.',
+    'Folder wins over ambiguous body.',
     '',
     renderContextBlock(ctx),
     '',

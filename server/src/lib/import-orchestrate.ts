@@ -40,8 +40,13 @@ import {
   type ImportSkillContext,
 } from './ai/skills/common';
 import { canonicalPath, canonicalFolder, nameToSlug, isCanonicalNotePath, type EntityKind } from './ai/paths';
-import { listCampaigns } from './characters';
+import { listCampaigns, ensureCampaignForPath } from './characters';
 import { deriveAllIndexes } from './derive-indexes';
+
+// Canonical subfolders created for every new campaign — mirrors CampaignCreateDialog.
+const CAMPAIGN_SUBFOLDERS = [
+  'Characters', 'People', 'Enemies', 'Loot', 'Adventure Log', 'Places', 'Creatures', 'Quests',
+] as const;
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -205,6 +210,12 @@ async function doOrchestrate(jobId: string, signal: AbortSignal): Promise<void> 
     orch.phase = 'entities';
     saveState('orchestrating_entities');
   }
+
+  // Ensure World Lore folder marker exists before entities are written so
+  // lore notes have a visible home in the sidebar tree immediately.
+  getDb()
+    .query(`INSERT OR IGNORE INTO folder_markers (group_id, path, created_at) VALUES (?, ?, ?)`)
+    .run(job.groupId, 'World Lore', Date.now());
 
   // Phase 2 — Entities
   if (orch.phase === 'entities') {
@@ -381,13 +392,33 @@ async function runCampaignPhase(
 }
 
 function createCampaignSkeleton(job: ImportJob, name: string, slug: string): void {
-  // Writing a note at Campaigns/{slug}/index.md triggers campaign
-  // auto-registration in deriveAllIndexes.
+  const db = getDb();
+  const campaignPath = `Campaigns/${slug}`;
+  const now = Date.now();
+
+  // Folder markers — mirrors what CampaignCreateDialog does in the UI so
+  // the sidebar tree shows all subfolders immediately, even before any
+  // entities land in them.
+  db.query(
+    `INSERT OR IGNORE INTO folder_markers (group_id, path, created_at) VALUES (?, ?, ?)`,
+  ).run(job.groupId, campaignPath, now);
+
+  for (const sf of CAMPAIGN_SUBFOLDERS) {
+    db.query(
+      `INSERT OR IGNORE INTO folder_markers (group_id, path, created_at) VALUES (?, ?, ?)`,
+    ).run(job.groupId, `${campaignPath}/${sf}`, now);
+  }
+
+  // Register the campaign row so dashboards can list it immediately.
+  ensureCampaignForPath(job.groupId, `${campaignPath}/index.md`);
+
+  // Campaign root note — the campaign auto-registers via deriveAllIndexes
+  // when this note is written.
   const fm = { kind: 'note', title: name };
   writeNote({
     groupId: job.groupId,
     userId: job.createdBy,
-    path: `Campaigns/${slug}/index.md`,
+    path: `${campaignPath}/index.md`,
     markdown: composeMarkdown(fm, `# ${name}\n`),
     frontmatter: fm,
     isUpdate: false,
