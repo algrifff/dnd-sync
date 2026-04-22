@@ -87,21 +87,6 @@ export default async function HomePage(): Promise<ReactElement> {
                   {counts.notes} note{counts.notes === 1 ? '' : 's'} · {counts.assets} asset
                   {counts.assets === 1 ? '' : 's'} · signed in as <code>{session.username}</code>
                 </p>
-                {counts.notes === 0 && (
-                  <p className="mt-4 rounded-[10px] border border-[#D4A85A]/40 bg-[#D4A85A]/10 px-4 py-3 text-sm text-[#5A4F42]">
-                    {session.role === 'admin' ? (
-                      <>
-                        The vault is empty. Head to{' '}
-                        <Link href="/settings/vault" className="underline">
-                          /settings/vault
-                        </Link>{' '}
-                        and upload a ZIP to get started.
-                      </>
-                    ) : (
-                      'The vault is empty. Ask your DM to upload.'
-                    )}
-                  </p>
-                )}
               </section>
 
               <section className="mb-10">
