@@ -136,6 +136,7 @@ export function PresenceClient({
 
     const onLocalChange = (): void => {
       aw.setLocalStateField('treeVersion', Date.now());
+      router.refresh();
     };
     document.addEventListener(TREE_CHANGE_EVENT, onLocalChange);
 

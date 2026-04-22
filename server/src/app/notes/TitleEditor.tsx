@@ -4,8 +4,13 @@
 // keystroke broadcasts through the same HocuspocusProvider the body
 // uses, so renames are fully collaborative.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type * as Y from 'yjs';
+import { broadcastTreeChange } from '@/lib/tree-sync';
+
+// Hocuspocus debounces its store at ~2 s; we wait 2.5 s so the DB
+// write has landed before the sidebar refresh fires.
+const TREE_REFRESH_DELAY_MS = 2500;
 
 export function TitleEditor({
   ydoc,
@@ -16,6 +21,7 @@ export function TitleEditor({
 }): React.JSX.Element {
   const yTitle = ydoc.getText('title');
   const [value, setValue] = useState<string>(() => yTitle.toString());
+  const treeRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const observer = (): void => {
@@ -26,6 +32,12 @@ export function TitleEditor({
     return () => yTitle.unobserve(observer);
   }, [yTitle]);
 
+  useEffect(() => {
+    return () => {
+      if (treeRefreshTimer.current !== null) clearTimeout(treeRefreshTimer.current);
+    };
+  }, []);
+
   const onChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const next = e.target.value;
     setValue(next);
@@ -33,6 +45,10 @@ export function TitleEditor({
       yTitle.delete(0, yTitle.length);
       yTitle.insert(0, next);
     });
+    if (treeRefreshTimer.current !== null) clearTimeout(treeRefreshTimer.current);
+    treeRefreshTimer.current = setTimeout(() => {
+      broadcastTreeChange();
+    }, TREE_REFRESH_DELAY_MS);
   };
 
   return (

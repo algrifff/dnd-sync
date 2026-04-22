@@ -102,7 +102,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
           <SidebarFooter username={session.username} />
         </aside>
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <NoteTabBar canCreate={session.role !== 'viewer'} csrfToken={session.csrfToken} />
           <div
             id="note-tools-anchor"
