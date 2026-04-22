@@ -26,6 +26,8 @@ import { NoteSidebar, extractOutline } from '../../../notes/NoteSidebar';
 import { ChatPane } from '../../../ChatPane';
 import { EndSessionButton } from '../../../notes/EndSessionButton';
 import { getSessionStatus } from '@/lib/sessions';
+import { CollapsibleSidebar } from '../../../CollapsibleSidebar';
+import { CollapsibleRightPanel } from '../../../CollapsibleRightPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,7 +82,18 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
     createdBy: note.created_by,
     character,
   });
-  if (isSessionNote && canEdit) {
+
+  // Campaign slug for session end — from frontmatter.campaigns[0] or path
+  let sessionCampaignSlug: string | undefined;
+  if (isSessionNote) {
+    try {
+      const fm2 = JSON.parse(note.frontmatter_json) as Record<string, unknown>;
+      const camps = Array.isArray(fm2.campaigns) ? fm2.campaigns : [];
+      sessionCampaignSlug =
+        typeof camps[0] === 'string'
+          ? camps[0]
+          : /^Campaigns\/([^/]+)\//.exec(path)?.[1];
+    } catch { /* ignore */ }
     sessionStatus = getSessionStatus(session.currentGroupId, path);
   }
 
@@ -107,8 +120,8 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
         canCreate={session.role !== 'viewer'}
         groupId={session.currentGroupId}
       />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <aside className="hidden h-full w-[260px] shrink-0 flex-col bg-[#EAE1CF]/60 md:flex">
+      <div className="flex min-h-0 flex-1">
+        <CollapsibleSidebar>
           <SidebarHeader role={session.role} />
           <FileTree
             tree={tree}
@@ -120,16 +133,16 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
             kindMap={kindMap}
           />
           <SidebarFooter username={session.username} />
-        </aside>
+        </CollapsibleSidebar>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <NoteTabBar canCreate={session.role !== 'viewer'} csrfToken={session.csrfToken} />
           <div
             id="note-tools-anchor"
-            className="relative grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,1fr)_280px]"
+            className="relative flex min-h-0 flex-1"
           >
             <main
-              className="relative flex justify-center overflow-y-auto overflow-x-hidden px-8 py-10"
+              className="relative flex min-w-0 flex-1 justify-center overflow-y-auto overflow-x-hidden px-8 pt-10 pb-32"
               id="note-main"
             >
               <div id="note-scroll-body" className="relative w-[1600px] shrink-0 self-start">
@@ -190,6 +203,8 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                       sessionPath={path}
                       csrfToken={session.csrfToken}
                       isAlreadyClosed={sessionStatus === 'closed'}
+                      sessionContent={note.content_md}
+                      campaignSlug={sessionCampaignSlug}
                     />
                   )}
 
@@ -217,7 +232,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
               </div>
             </main>
 
-            <aside className="hidden md:block">
+            <CollapsibleRightPanel>
               <NoteSidebar
                 path={path}
                 backlinks={backlinks}
@@ -226,7 +241,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                 outline={outline}
                 csrfToken={session.csrfToken}
               />
-            </aside>
+            </CollapsibleRightPanel>
           </div>
         </div>
 

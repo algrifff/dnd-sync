@@ -17,6 +17,7 @@ import { SidebarHeader } from '../SidebarHeader';
 import { HomeChat } from '../HomeChat';
 import { SidebarFooter } from '../SidebarFooter';
 import { FileTree } from '../notes/FileTree';
+import { CollapsibleSidebar } from '../CollapsibleSidebar';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,8 +58,8 @@ export default async function HomePage(): Promise<ReactElement> {
         canCreate={session.role !== 'viewer'}
         groupId={session.currentGroupId}
       />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <aside className="hidden h-full w-[260px] shrink-0 flex-col bg-[#EAE1CF]/60 md:flex">
+      <div className="flex min-h-0 flex-1">
+        <CollapsibleSidebar>
           <SidebarHeader role={session.role} />
           <FileTree
             tree={tree}
@@ -70,7 +71,7 @@ export default async function HomePage(): Promise<ReactElement> {
             kindMap={kindMap}
           />
           <SidebarFooter username={session.username} />
-        </aside>
+        </CollapsibleSidebar>
         <div className="flex min-w-0 flex-1 flex-col">
           <NoteTabBar canCreate={session.role !== 'viewer'} csrfToken={session.csrfToken} />
           <div className="flex-1 overflow-y-auto">

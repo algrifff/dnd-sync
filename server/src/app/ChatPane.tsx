@@ -177,19 +177,24 @@ export function ChatPane({
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [open, messages, isStreaming]);
 
-  // Allow external components (e.g. EndSessionButton) to open the panel
-  // and optionally pre-fill the input via a custom DOM event.
+  // Allow external components (e.g. EndSessionButton) to open the panel,
+  // optionally pre-fill the input, or auto-send a message directly.
   useEffect(() => {
     function onOpenChat(e: Event) {
-      const detail = (e as CustomEvent<{ prefill?: string }>).detail;
+      const detail = (e as CustomEvent<{ prefill?: string; message?: string; autoSend?: boolean }>).detail;
       setOpen(true);
-      if (typeof detail?.prefill === 'string' && detail.prefill.trim()) {
+      if (detail?.autoSend && typeof detail.message === 'string' && detail.message.trim()) {
+        // Send immediately — don't wait for user to hit Enter
+        void sendMessage({ text: detail.message.trim() });
+      } else if (typeof detail?.prefill === 'string' && detail.prefill.trim()) {
         setInput(detail.prefill.trim());
+      } else if (typeof detail?.message === 'string' && detail.message.trim()) {
+        setInput(detail.message.trim());
       }
     }
     window.addEventListener('compendium:open-chat', onOpenChat);
     return () => window.removeEventListener('compendium:open-chat', onOpenChat);
-  }, []);
+  }, [sendMessage]);
 
   // ── File handling ──────────────────────────────────────────────────
 

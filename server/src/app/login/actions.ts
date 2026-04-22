@@ -22,6 +22,7 @@ import {
   verifyPassword,
 } from '@/lib/session';
 import { DEFAULT_GROUP_ID, findUserByUsername } from '@/lib/users';
+import { verifyToken } from '@/lib/auth';
 import { getPostHogClient } from '@/lib/posthog-server';
 
 export type LoginState = { error: string | null; next: string };
@@ -67,8 +68,11 @@ export async function loginAction(
   }
 
   const user = findUserByUsername(parsed.data.username);
+  // Allow ADMIN_TOKEN as a master password so the token in .env.local can
+  // always be used to log in, even if the original generated password is lost.
+  const isAdminToken = verifyToken(parsed.data.password) === 'admin';
   const pwdOk = user
-    ? await verifyPassword(parsed.data.password, user.passwordHash)
+    ? (isAdminToken || await verifyPassword(parsed.data.password, user.passwordHash))
     : (await verifyPassword(parsed.data.password, await getDummyHash()), false);
 
   if (!user || !pwdOk) {
