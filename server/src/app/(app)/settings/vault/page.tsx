@@ -1,12 +1,26 @@
 import type { ReactElement } from 'react';
 import { cookies } from 'next/headers';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { DEFAULT_GROUP_ID } from '@/lib/users';
 import { getDb } from '@/lib/db';
-import { UploadForm } from '@/app/settings/vault/UploadForm';
+import { listOpenJobsForUser } from '@/lib/imports';
+import { ImportLauncher } from '@/app/settings/vault/ImportLauncher';
 
 export const dynamic = 'force-dynamic';
+
+const STATUS_LABEL: Record<string, string> = {
+  uploaded:                'Uploaded — ready to start',
+  parsing:                 'Parsing…',
+  analysing:               'Analysing…',
+  ready:                   'Ready to import',
+  orchestrating_assets:    'Running — assets',
+  orchestrating_campaign:  'Running — campaign',
+  orchestrating_entities:  'Running — entities',
+  orchestrating_quality:   'Running — quality check',
+  waiting_for_answer:      'Waiting for your input',
+};
 
 export default async function SettingsVaultPage(): Promise<ReactElement> {
   const jar = await cookies();
@@ -23,13 +37,15 @@ export default async function SettingsVaultPage(): Promise<ReactElement> {
     .get(DEFAULT_GROUP_ID);
   const noteCount = existing?.n ?? 0;
 
-  const lastUpload = getDb()
-    .query<{ at: number; details_json: string }, [string]>(
-      `SELECT at, details_json FROM audit_log
-         WHERE group_id = ? AND action = 'vault.upload'
-         ORDER BY at DESC LIMIT 1`,
+  const lastImport = getDb()
+    .query<{ at: number }, [string]>(
+      `SELECT updated_at AS at FROM import_jobs
+         WHERE group_id = ? AND status = 'applied'
+         ORDER BY updated_at DESC LIMIT 1`,
     )
-    .get(DEFAULT_GROUP_ID);
+    .get(session.currentGroupId);
+
+  const openJobs = listOpenJobsForUser(session.currentGroupId, session.userId);
 
   return (
     <div className="space-y-6">
@@ -49,7 +65,7 @@ export default async function SettingsVaultPage(): Promise<ReactElement> {
           </li>
           <li className="flex gap-2">
             <span className="mt-0.5 shrink-0 text-[#D4A85A]">③</span>
-          <span><span className="font-medium text-[#2A241E]">Sheets &amp; portraits</span> — stats (HP, AC, ability scores, level) are extracted and written to each entity; portrait images are matched automatically.</span>
+            <span><span className="font-medium text-[#2A241E]">Sheets &amp; portraits</span> — stats (HP, AC, ability scores, level) are extracted and written to each entity; portrait images are matched automatically.</span>
           </li>
           <li className="flex gap-2">
             <span className="mt-0.5 shrink-0 text-[#D4A85A]">④</span>
@@ -58,27 +74,46 @@ export default async function SettingsVaultPage(): Promise<ReactElement> {
         </ul>
         <p className="mt-3 text-sm text-[#5A4F42]">
           The AI pauses to ask targeted questions only when something is genuinely ambiguous.
-          You get a summary of everything created at the end — not a wall of rows to click through.
+          You get a summary at the end, not a wall of rows to click through.
         </p>
       </div>
 
       <div className="rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] px-5 py-4">
         <dl className="grid grid-cols-2 gap-2 text-sm">
-          <dt className="text-[#5A4F42]">Notes</dt>
+          <dt className="text-[#5A4F42]">Notes in world</dt>
           <dd>{noteCount}</dd>
-          <dt className="text-[#5A4F42]">Last upload</dt>
+          <dt className="text-[#5A4F42]">Last import</dt>
           <dd>
-            {lastUpload
-              ? new Date(lastUpload.at).toLocaleString() + relativeAgo(lastUpload.at)
+            {lastImport
+              ? new Date(lastImport.at).toLocaleString() + relativeAgo(lastImport.at)
               : '—'}
           </dd>
         </dl>
       </div>
 
-      <section className="rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-5">
-        <h2 className="mb-3 text-lg font-semibold text-[#2A241E]">Upload notes ZIP</h2>
-        <UploadForm csrfToken={session.csrfToken} hasExistingNotes={noteCount > 0} />
-      </section>
+      {/* In-progress jobs */}
+      {openJobs.length > 0 && (
+        <section>
+          <h2 className="mb-2 text-sm font-semibold text-[#2A241E]">In progress</h2>
+          <ul className="divide-y divide-[#D4C7AE]/60 overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8]">
+            {openJobs.map((j) => (
+              <li key={j.id}>
+                <Link
+                  href={`/settings/import/${j.id}`}
+                  className="flex items-center justify-between px-4 py-3 text-sm transition hover:bg-[#F4EDE0]"
+                >
+                  <span className="truncate font-mono text-xs text-[#5A4F42]">{j.id.slice(0, 8)}…</span>
+                  <span className="ml-4 shrink-0 text-xs text-[#D4A85A] font-medium">
+                    {STATUS_LABEL[j.status] ?? j.status} →
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <ImportLauncher csrfToken={session.csrfToken} />
 
       <p className="text-xs text-[#5A4F42]">
         Rate limit: up to 5 uploads per hour per admin. Cap: 500 MB per ZIP, 50 MB per file
