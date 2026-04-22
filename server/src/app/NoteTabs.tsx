@@ -24,6 +24,7 @@ export function NoteTabs(): React.JSX.Element {
 
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [mounted, setMounted] = useState<boolean>(false);
+  const tabsRef = useRef<Tab[]>([]);
 
   useEffect(() => {
     setMounted(true);
@@ -61,6 +62,9 @@ export function NoteTabs(): React.JSX.Element {
     });
   }, [activePath]);
 
+  // Keep ref in sync for synchronous reads inside async callbacks.
+  tabsRef.current = tabs;
+
   // Persist.
   useEffect(() => {
     if (!mounted) return;
@@ -88,19 +92,21 @@ export function NoteTabs(): React.JSX.Element {
         const body = (await res.json()) as { root?: unknown };
         const existing = new Set<string>();
         walkTree(body.root, existing);
+        // Compute navigation target outside the setter to avoid
+        // calling router.push() during a React state update.
+        const current = activePathRef.current;
+        const needsNav = !!(current && !existing.has(current));
+        const neighbour = needsNav
+          ? (tabsRef.current.find((t) => existing.has(t.path)) ?? null)
+          : null;
         setTabs((prev) => {
           const next = prev.filter((t) => existing.has(t.path));
-          if (next.length === prev.length) return prev;
-          const current = activePathRef.current;
-          if (current && !existing.has(current)) {
-            // The active tab's note no longer exists — route to a
-            // surviving neighbour, falling back to home.
-            const neighbour = next[0] ?? null;
-            if (neighbour) router.push(noteHref(neighbour.path));
-            else router.push('/');
-          }
-          return next;
+          return next.length === prev.length ? prev : next;
         });
+        if (needsNav) {
+          if (neighbour) router.push(noteHref(neighbour.path));
+          else router.push('/');
+        }
       } catch {
         /* ignore — stale tabs will self-heal on next event */
       }
@@ -120,19 +126,17 @@ export function NoteTabs(): React.JSX.Element {
     (path: string, e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      setTabs((prev) => {
-        const next = prev.filter((t) => t.path !== path);
-        if (path === activePath) {
-          // If we're closing the active tab, route to the next open tab.
-          const idx = prev.findIndex((t) => t.path === path);
-          const neighbour = next[idx] ?? next[idx - 1] ?? null;
-          if (neighbour) router.push(noteHref(neighbour.path));
-          else router.push('/');
-        }
-        return next;
-      });
+      // Compute navigation target before the state update.
+      if (path === activePath) {
+        const next = tabs.filter((t) => t.path !== path);
+        const idx = tabs.findIndex((t) => t.path === path);
+        const neighbour = next[idx] ?? next[idx - 1] ?? null;
+        if (neighbour) router.push(noteHref(neighbour.path));
+        else router.push('/');
+      }
+      setTabs((prev) => prev.filter((t) => t.path !== path));
     },
-    [activePath, router],
+    [activePath, router, tabs],
   );
 
   if (!mounted || tabs.length === 0) {
