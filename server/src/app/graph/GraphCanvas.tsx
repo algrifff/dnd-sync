@@ -37,7 +37,7 @@ import { HocuspocusProvider } from '@hocuspocus/provider';
 import Graph from 'graphology';
 import Sigma from 'sigma';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
-import { colorForTags, radiusForDegree } from './graphStyle';
+import { clusterSeedPositions, colorForTags, radiusForDegree } from './graphStyle';
 import { NotePicker } from '../notes/NotePicker';
 
 type RemoteGraphCursor = {
@@ -134,17 +134,35 @@ export function GraphCanvas({
   const [labelMode, setLabelMode] = useState<LabelMode>('some');
   const [tagColors, setTagColors] = useState<Record<string, string>>({});
   const [groups, setGroups] = useState<Group[]>([]);
-  const [palette, setPalette] = useState<boolean>(false);
   const [nodesPayload, setNodesPayload] = useState<GraphPayload['nodes']>([]);
   const [remoteCursors, setRemoteCursors] = useState<RemoteGraphCursor[]>([]);
   // Bumped on every sigma render so the overlay rerenders the peer
   // cursors at their latest screen positions (camera pan/zoom,
   // dragged nodes, physics — all update the graph→viewport mapping).
   const [renderTick, setRenderTick] = useState<number>(0);
-  // nodeScale is persisted in metaMap ('nodeScale' key) so all peers
-  // share the same value; the observer below keeps local state in sync.
+  // nodeScale, gravity, repulsion, and clusterSpacing are persisted in metaMap
+  // so all peers share the same values; the observer below keeps local state in sync.
   const [nodeScale, setNodeScale] = useState<number>(1);
   const nodeScaleRef = useRef<number>(1);
+  const [gravity, setGravity] = useState<number>(1);
+  const gravityRef = useRef<number>(1);
+  const [repulsion, setRepulsion] = useState<number>(10);
+  const repulsionRef = useRef<number>(10);
+  // clusterSpacing triggers a graph rebuild (in effect deps); pendingSpacing
+  // tracks the slider display without triggering a rebuild on every drag tick.
+  const [clusterSpacing, setClusterSpacing] = useState<number>(7);
+  const [pendingSpacing, setPendingSpacing] = useState<number>(7);
+  const [labelOpacity, setLabelOpacity] = useState<number>(1);
+  const labelOpacityRef = useRef<number>(1);
+  const [edgeOpacity, setEdgeOpacity] = useState<number>(0.4);
+  const edgeOpacityRef = useRef<number>(0.4);
+
+  // Collapsible menu sections — all open by default except physics/colours/groups.
+  const [sectLabels, setSectLabels] = useState(true);
+  const [sectNodes, setSectNodes] = useState(true);
+  const [sectPhysics, setSectPhysics] = useState(false);
+  const [sectColours, setSectColours] = useState(false);
+  const [sectGroups, setSectGroups] = useState(false);
 
   // Link-draw mode: toggle button switches between pan/drag and
   // rubber-band link creation. Refs keep the interaction handlers
@@ -245,7 +263,7 @@ export function GraphCanvas({
         if (!g.hasEdge(key)) {
           g.addEdgeWithKey(key, e.source, e.target, {
             size: 1,
-            color: 'rgba(42, 36, 30, 0.4)',
+            color: `rgba(42, 36, 30, ${edgeOpacityRef.current})`,
           });
           affectedNodes.add(e.source);
           affectedNodes.add(e.target);
@@ -266,16 +284,37 @@ export function GraphCanvas({
   }, [scopeParam]);
 
   useEffect(() => {
-    // Seed local nodeScale from whatever a peer already set (e.g. joining
-    // after someone else changed the slider).
+    // Seed local values from whatever a peer already set.
     const stored = metaMap.get('nodeScale');
     if (typeof stored === 'number' && stored > 0) setNodeScale(stored);
+    const storedGravity = metaMap.get('gravity');
+    if (typeof storedGravity === 'number' && storedGravity > 0) setGravity(storedGravity);
+    const storedRepulsion = metaMap.get('repulsion');
+    if (typeof storedRepulsion === 'number' && storedRepulsion > 0) setRepulsion(storedRepulsion);
+    const storedSpacing = metaMap.get('clusterSpacing');
+    if (typeof storedSpacing === 'number' && storedSpacing > 0) {
+      setClusterSpacing(storedSpacing);
+      setPendingSpacing(storedSpacing);
+    }
+    const storedLabelOpacity = metaMap.get('labelOpacity');
+    if (typeof storedLabelOpacity === 'number') setLabelOpacity(storedLabelOpacity);
+    const storedEdgeOpacity = metaMap.get('edgeOpacity');
+    if (typeof storedEdgeOpacity === 'number') setEdgeOpacity(storedEdgeOpacity);
 
     const onMeta = (): void => {
       if (metaMap.has('graphDirty')) void addNewEdges();
-      // Sync nodeScale from any peer that changed it.
       const v = metaMap.get('nodeScale');
       if (typeof v === 'number' && v > 0) setNodeScale(v);
+      const g = metaMap.get('gravity');
+      if (typeof g === 'number' && g > 0) setGravity(g);
+      const r = metaMap.get('repulsion');
+      if (typeof r === 'number' && r > 0) setRepulsion(r);
+      const s = metaMap.get('clusterSpacing');
+      if (typeof s === 'number' && s > 0) { setClusterSpacing(s); setPendingSpacing(s); }
+      const lo = metaMap.get('labelOpacity');
+      if (typeof lo === 'number') setLabelOpacity(lo);
+      const eo = metaMap.get('edgeOpacity');
+      if (typeof eo === 'number') setEdgeOpacity(eo);
     };
     metaMap.observe(onMeta);
     return () => metaMap.unobserve(onMeta);
@@ -448,17 +487,20 @@ export function GraphCanvas({
         setNodesPayload(payload.nodes);
 
         const g = new Graph({ multi: false, type: 'directed', allowSelfLoops: false });
+        // Cluster-aware seed: nodes in the same campaign folder start near
+        // each other so FA2 refines existing groups rather than discovering
+        // them from a random scatter. Fully deterministic — same positions
+        // on every peer for the same node list.
+        const seedPositions = clusterSeedPositions(payload.nodes, clusterSpacing);
         const pins = pinsRef.current;
         for (const n of payload.nodes) {
           const pin = pins[n.id];
-          // Deterministic seed so every peer starts from the same
-          // layout. Random seeding produced wildly different
-          // burned-in graphs across connected users.
-          const seed = seedPosition(n.id);
+          const seed = seedPositions.get(n.id) ?? { x: 0, y: 0 };
           g.addNode(n.id, {
             label: n.title,
             size: radiusForDegree(n.degree) * nodeScaleRef.current,
             color: (colorForRef.current ?? colorFor)(n.id, n.tags),
+            labelColor: `rgba(42, 36, 30, ${labelOpacityRef.current})`,
             x: pin?.x ?? seed.x,
             y: pin?.y ?? seed.y,
             tags: n.tags,
@@ -473,7 +515,7 @@ export function GraphCanvas({
           if (g.hasEdge(key)) continue;
           g.addEdgeWithKey(key, e.source, e.target, {
             size: 1,
-            color: 'rgba(42, 36, 30, 0.4)',
+            color: `rgba(42, 36, 30, ${edgeOpacityRef.current})`,
           });
         }
 
@@ -496,8 +538,8 @@ export function GraphCanvas({
         const labelSettings = labelModeToSigmaSettings(labelMode);
         const renderer = new Sigma(g, container, {
           defaultNodeColor: '#5A4F42',
-          defaultEdgeColor: 'rgba(42, 36, 30, 0.4)',
-          labelColor: { color: '#2A241E' },
+          defaultEdgeColor: `rgba(42, 36, 30, ${edgeOpacityRef.current})`,
+          labelColor: { attribute: 'labelColor' },
           labelWeight: '500',
           labelFont: 'Inter, system-ui, sans-serif',
           labelSize: 12,
@@ -603,13 +645,15 @@ export function GraphCanvas({
         cleanupListenersRef.current = cleanupListeners;
 
         // ── Continuous physics loop ──────────────────────────────────
+        // gravity and scalingRatio are read from refs each frame so the
+        // Physics sliders take effect immediately without a graph rebuild.
         const liveSettings = forceAtlas2.inferSettings(g);
         const tickOpts = {
           iterations: 1,
           settings: {
             ...liveSettings,
-            gravity: 1,
-            scalingRatio: 10,
+            gravity: gravityRef.current,
+            scalingRatio: repulsionRef.current,
             slowDown: 20, // high slowdown = less jitter once settled
             barnesHutOptimize: g.order > 500,
           },
@@ -617,6 +661,8 @@ export function GraphCanvas({
         const tick = (): void => {
           if (!sigmaRef.current || cancelled) return;
           if (g.order > 1) {
+            tickOpts.settings.gravity = gravityRef.current;
+            tickOpts.settings.scalingRatio = repulsionRef.current;
             forceAtlas2.assign(g, tickOpts);
             // Soft anchors — after FA2 moves each anchored node this
             // tick, pull it a little back toward its drop position.
@@ -808,7 +854,7 @@ export function GraphCanvas({
               if (g.hasNode(source) && g.hasNode(target) && !g.hasEdge(key)) {
                 g.addEdgeWithKey(key, source, target, {
                   size: 1,
-                  color: 'rgba(42, 36, 30, 0.4)',
+                  color: `rgba(42, 36, 30, ${edgeOpacityRef.current})`,
                 });
                 for (const id of [source, target]) {
                   const d = g.degree(id);
@@ -907,6 +953,7 @@ export function GraphCanvas({
     me.accentColor,
     me.cursorMode,
     me.avatarVersion,
+    clusterSpacing,
   ]);
 
   // Live re-colour when tag overrides change without rebuilding the
@@ -950,6 +997,28 @@ export function GraphCanvas({
       g.setNodeAttribute(node, 'size', radiusForDegree(g.degree(node)) * nodeScale);
     });
   }, [nodeScale]);
+
+  // Keep physics refs in sync so the RAF tick reads current slider values.
+  useEffect(() => { gravityRef.current = gravity; }, [gravity]);
+  useEffect(() => { repulsionRef.current = repulsion; }, [repulsion]);
+
+  // Apply label opacity to all nodes without rebuilding the graph.
+  useEffect(() => {
+    labelOpacityRef.current = labelOpacity;
+    const g = graphRef.current;
+    if (!g) return;
+    const color = `rgba(42, 36, 30, ${labelOpacity})`;
+    g.forEachNode((node) => g.setNodeAttribute(node, 'labelColor', color));
+  }, [labelOpacity]);
+
+  // Apply edge opacity to all edges without rebuilding the graph.
+  useEffect(() => {
+    edgeOpacityRef.current = edgeOpacity;
+    const g = graphRef.current;
+    if (!g) return;
+    const color = `rgba(42, 36, 30, ${edgeOpacity})`;
+    g.forEachEdge((edge) => g.setEdgeAttribute(edge, 'color', color));
+  }, [edgeOpacity]);
 
   const zoomBy = useCallback((factor: number) => {
     const renderer = sigmaRef.current;
@@ -1128,131 +1197,210 @@ export function GraphCanvas({
               </select>
             </div>
 
-            <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
-                  Labels
-                </span>
-                <span className="text-xs text-[#5A4F42]">{labelModeLabel(labelMode)}</span>
+            <MenuSection label="Labels" open={sectLabels} onToggle={() => setSectLabels((o) => !o)}>
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-xs text-[#8A7E6B]">Visibility</span>
+                  <span className="text-xs text-[#5A4F42]">{labelModeLabel(labelMode)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={1}
+                  value={labelMode === 'none' ? 0 : labelMode === 'some' ? 1 : 2}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setLabelMode(v === 0 ? 'none' : v === 1 ? 'some' : 'all');
+                  }}
+                  className="w-full accent-[#8B4A52]"
+                />
               </div>
-              <input
-                type="range"
-                min={0}
-                max={2}
-                step={1}
-                value={labelMode === 'none' ? 0 : labelMode === 'some' ? 1 : 2}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setLabelMode(v === 0 ? 'none' : v === 1 ? 'some' : 'all');
-                }}
-                className="w-full accent-[#8B4A52]"
-              />
-            </div>
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-xs text-[#8A7E6B]">Opacity</span>
+                  <span className="text-xs text-[#5A4F42]">{Math.round(labelOpacity * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={labelOpacity}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setLabelOpacity(v);
+                    metaMap.set('labelOpacity', v);
+                  }}
+                  className="w-full accent-[#8B4A52]"
+                />
+              </div>
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-xs text-[#8A7E6B]">Edge opacity</span>
+                  <span className="text-xs text-[#5A4F42]">{Math.round(edgeOpacity * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={edgeOpacity}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setEdgeOpacity(v);
+                    metaMap.set('edgeOpacity', v);
+                  }}
+                  className="w-full accent-[#8B4A52]"
+                />
+              </div>
+            </MenuSection>
 
-            <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
-                  Node size
-                </span>
-                <span className="text-xs text-[#5A4F42]">{nodeScale.toFixed(1)}×</span>
+            <MenuSection label="Nodes" open={sectNodes} onToggle={() => setSectNodes((o) => !o)}>
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-xs text-[#8A7E6B]">Size</span>
+                  <span className="text-xs text-[#5A4F42]">{nodeScale.toFixed(1)}×</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.5}
+                  max={3}
+                  step={0.1}
+                  value={nodeScale}
+                  onChange={(e) => metaMap.set('nodeScale', Number(e.target.value))}
+                  className="w-full accent-[#8B4A52]"
+                />
               </div>
-              <input
-                type="range"
-                min={0.5}
-                max={3}
-                step={0.1}
-                value={nodeScale}
-                onChange={(e) => metaMap.set('nodeScale', Number(e.target.value))}
-                className="w-full accent-[#8B4A52]"
-              />
-            </div>
+            </MenuSection>
+
+            <MenuSection label="Physics" open={sectPhysics} onToggle={() => setSectPhysics((o) => !o)}>
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-xs text-[#8A7E6B]">Gravity</span>
+                  <span className="text-xs text-[#5A4F42]">{gravity.toFixed(2)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.1}
+                  max={2}
+                  step={0.05}
+                  value={gravity}
+                  onChange={(e) => metaMap.set('gravity', Number(e.target.value))}
+                  className="w-full accent-[#8B4A52]"
+                />
+              </div>
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-xs text-[#8A7E6B]">Repulsion</span>
+                  <span className="text-xs text-[#5A4F42]">{repulsion}</span>
+                </div>
+                <input
+                  type="range"
+                  min={2}
+                  max={30}
+                  step={1}
+                  value={repulsion}
+                  onChange={(e) => metaMap.set('repulsion', Number(e.target.value))}
+                  className="w-full accent-[#8B4A52]"
+                />
+              </div>
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-xs text-[#8A7E6B]">Cluster spacing</span>
+                  <span className="text-xs text-[#5A4F42]">{pendingSpacing.toFixed(1)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={3}
+                  max={20}
+                  step={0.5}
+                  value={pendingSpacing}
+                  onChange={(e) => setPendingSpacing(Number(e.target.value))}
+                  onPointerUp={(e) => {
+                    const v = Number((e.target as HTMLInputElement).value);
+                    setClusterSpacing(v);
+                    metaMap.set('clusterSpacing', v);
+                  }}
+                  className="w-full accent-[#8B4A52]"
+                />
+              </div>
+            </MenuSection>
+
+            {/* Colours */}
+            <MenuSection label="Colours" open={sectColours} onToggle={() => setSectColours((o) => !o)}>
+              <div className="text-xs text-[#5A4F42]">
+                Override the colour for any tag. Reset to default by clicking ⟲.
+              </div>
+              {paletteTags.length === 0 ? (
+                <div className="text-xs text-[#8A7E6B]">No tags yet.</div>
+              ) : (
+                <ul className="max-h-48 space-y-1 overflow-y-auto">
+                  {paletteTags.map((t) => {
+                    const current = tagColors[t] ?? colorForTags([t]);
+                    const isOverride = t in tagColors;
+                    return (
+                      <li key={t} className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={current}
+                          onChange={(e) => coloursMap.set(t, e.target.value)}
+                          className="h-6 w-6 cursor-pointer rounded-[4px] border border-[#D4C7AE] bg-transparent p-0"
+                        />
+                        <span className="flex-1 truncate text-xs text-[#2A241E]">#{t}</span>
+                        {isOverride && (
+                          <button
+                            type="button"
+                            onClick={() => coloursMap.delete(t)}
+                            title="Reset"
+                            aria-label={`Reset colour for #${t}`}
+                            className="rounded-[4px] px-1 text-xs text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]"
+                          >
+                            ⟲
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </MenuSection>
+
+            {/* Groups */}
+            <MenuSection label="Groups" open={sectGroups} onToggle={() => setSectGroups((o) => !o)}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-[#5A4F42]">Paint tags or notes a shared colour.</span>
+                <button
+                  type="button"
+                  onClick={createGroup}
+                  className="shrink-0 rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-0.5 text-xs text-[#5A4F42] transition hover:bg-[#EAE1CF] hover:text-[#2A241E]"
+                >
+                  + New
+                </button>
+              </div>
+              {groups.length === 0 ? (
+                <div className="text-xs text-[#8A7E6B]">No groups yet.</div>
+              ) : (
+                <ul className="max-h-60 space-y-2 overflow-y-auto">
+                  {groups.map((g) => (
+                    <GroupEditor
+                      key={g.id}
+                      group={g}
+                      paletteTags={paletteTags}
+                      onUpdate={(next) => groupsMap.set(g.id, next)}
+                      onDelete={() => groupsMap.delete(g.id)}
+                    />
+                  ))}
+                </ul>
+              )}
+            </MenuSection>
 
             <div className="pointer-events-auto flex items-center gap-1 rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-1 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
               <ToolButton onClick={() => zoomBy(1 / 1.4)} label="−" title="Zoom in" />
               <ToolButton onClick={() => zoomBy(1.4)} label="＋" title="Zoom out" />
               <ToolButton onClick={fit} label="Fit" title="Recentre" />
               <ToolButton onClick={clearPins} label="Unpin" title="Clear all pins" />
-              <ToolButton
-                onClick={() => setPalette((p) => !p)}
-                label={palette ? 'Hide' : 'Colours'}
-                title="Tag colour overrides"
-              />
             </div>
-
-            {palette && (
-              <div className="pointer-events-auto max-h-64 overflow-y-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
-                <div className="mb-2 text-xs text-[#5A4F42]">
-                  Override the colour for any tag. Reset to default by clicking ⟲.
-                </div>
-                {paletteTags.length === 0 ? (
-                  <div className="text-xs text-[#5A4F42]">No tags yet.</div>
-                ) : (
-                  <ul className="space-y-1">
-                    {paletteTags.map((t) => {
-                      const current = tagColors[t] ?? colorForTags([t]);
-                      const isOverride = t in tagColors;
-                      return (
-                        <li key={t} className="flex items-center gap-2">
-                          <input
-                            type="color"
-                            value={current}
-                            onChange={(e) => coloursMap.set(t, e.target.value)}
-                            className="h-6 w-6 cursor-pointer rounded-[4px] border border-[#D4C7AE] bg-transparent p-0"
-                          />
-                          <span className="flex-1 truncate text-xs text-[#2A241E]">#{t}</span>
-                          {isOverride && (
-                            <button
-                              type="button"
-                              onClick={() => coloursMap.delete(t)}
-                              title="Reset"
-                              aria-label={`Reset colour for #${t}`}
-                              className="rounded-[4px] px-1 text-xs text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]"
-                            >
-                              ⟲
-                            </button>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            )}
-
-            {palette && (
-              <div className="pointer-events-auto max-h-72 overflow-y-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
-                    Groups
-                  </span>
-                  <button
-                    type="button"
-                    onClick={createGroup}
-                    className="rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-0.5 text-xs text-[#5A4F42] transition hover:bg-[#EAE1CF] hover:text-[#2A241E]"
-                  >
-                    + New
-                  </button>
-                </div>
-                {groups.length === 0 ? (
-                  <div className="text-xs text-[#5A4F42]">
-                    Create a group to paint multiple tags or specific notes the
-                    same colour.
-                  </div>
-                ) : (
-                  <ul className="space-y-2">
-                    {groups.map((g) => (
-                      <GroupEditor
-                        key={g.id}
-                        group={g}
-                        paletteTags={paletteTags}
-                        onUpdate={(next) => groupsMap.set(g.id, next)}
-                        onDelete={() => groupsMap.delete(g.id)}
-                      />
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
 
             <div className="pointer-events-none text-xs text-[#5A4F42]">
               {status === 'loading' && 'Loading graph…'}
@@ -1274,6 +1422,36 @@ export function GraphCanvas({
         )}
       </div>
     </>
+  );
+}
+
+function MenuSection({
+  label,
+  open,
+  onToggle,
+  children,
+}: {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between px-3 py-2.5 text-left"
+      >
+        <span className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+          {label}
+        </span>
+        <span className="text-[#8A7E6B]" aria-hidden>
+          {open ? '▾' : '▸'}
+        </span>
+      </button>
+      {open && <div className="space-y-3 px-3 pb-3">{children}</div>}
+    </div>
   );
 }
 
@@ -1554,24 +1732,6 @@ function GraphCursors({
   );
 }
 
-// Deterministic per-node seed. Maps a node id to a point in roughly
-// [-1, 1] × [-1, 1] via a simple string hash. Two peers hashing the
-// same id land on identical coordinates, so the burned-in layout
-// matches on both sides. The quality isn't cryptographic — just
-// enough to spread the initial cloud so forceatlas2 has useful
-// gradients to work with.
-function seedPosition(id: string): { x: number; y: number } {
-  let h1 = 0x811c9dc5;
-  let h2 = 0xdeadbeef;
-  for (let i = 0; i < id.length; i++) {
-    const c = id.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
-    h2 = Math.imul(h2 ^ c, 0x85ebca6b) >>> 0;
-  }
-  const fx = (h1 & 0xffff) / 0xffff; // [0, 1]
-  const fy = (h2 & 0xffff) / 0xffff;
-  return { x: fx * 2 - 1, y: fy * 2 - 1 };
-}
 
 function buildCollabUrl(): string {
   if (typeof window === 'undefined') return 'ws://localhost/collab';
