@@ -5,6 +5,7 @@ import { readSession } from '@/lib/session';
 import { getDb } from '@/lib/db';
 import { getInviteToken } from '@/lib/groups';
 import { DEFAULT_PERSONALITY, listPersonalities } from '@/lib/ai/personalities';
+import { listUsersInGroup } from '@/lib/users';
 import { ServerSettingsForm } from '@/app/admin/server/ServerSettingsForm';
 
 export const dynamic = 'force-dynamic';
@@ -43,6 +44,10 @@ export default async function WorldSettingsPage(): Promise<ReactElement> {
     prompt: p.prompt,
   }));
 
+  const members = listUsersInGroup(session.currentGroupId)
+    .filter((m) => m.id !== session.userId)
+    .map((m) => ({ id: m.id, displayName: m.displayName, username: m.username }));
+
   return (
     <ServerSettingsForm
       worldId={session.currentGroupId}
@@ -58,6 +63,7 @@ export default async function WorldSettingsPage(): Promise<ReactElement> {
         name: DEFAULT_PERSONALITY.name,
         prompt: DEFAULT_PERSONALITY.prompt,
       }}
+      members={members}
     />
   );
 }

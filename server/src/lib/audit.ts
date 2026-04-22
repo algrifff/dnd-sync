@@ -28,6 +28,7 @@ export type AuditAction =
   | 'group.delete'
   | 'group.join'
   | 'group.switch'
+  | 'group.transfer_ownership'
   | 'personality.create'
   | 'personality.update'
   | 'personality.delete'

@@ -25,6 +25,12 @@ export type PersonalityItem = {
   prompt: string;
 };
 
+export type MemberItem = {
+  id: string;
+  displayName: string;
+  username: string;
+};
+
 export function ServerSettingsForm({
   worldId,
   worldName,
@@ -35,6 +41,7 @@ export function ServerSettingsForm({
   personalities,
   activePersonalityId,
   builtinPersonality,
+  members,
 }: {
   worldId: string;
   worldName: string;
@@ -45,6 +52,7 @@ export function ServerSettingsForm({
   personalities: PersonalityItem[];
   activePersonalityId: string;
   builtinPersonality: PersonalityItem;
+  members: MemberItem[];
 }): React.JSX.Element {
   return (
     <div className="space-y-8">
@@ -64,7 +72,7 @@ export function ServerSettingsForm({
         builtin={builtinPersonality}
       />
       <InviteSection worldId={worldId} csrfToken={csrfToken} initialToken={initialToken} />
-      <DangerZone worldId={worldId} worldName={worldName} csrfToken={csrfToken} />
+      <DangerZone worldId={worldId} worldName={worldName} csrfToken={csrfToken} members={members} />
     </div>
   );
 }
@@ -948,14 +956,135 @@ function InviteSection({
   );
 }
 
+function TransferOwnershipSection({
+  worldId,
+  csrfToken,
+  members,
+}: {
+  worldId: string;
+  csrfToken: string;
+  members: MemberItem[];
+}): React.JSX.Element {
+  const [selectedId, setSelectedId] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const selectedMember = members.find((m) => m.id === selectedId) ?? null;
+
+  const openConfirm = (): void => {
+    if (!selectedId) return;
+    setConfirming(true);
+    setError(null);
+  };
+
+  const doTransfer = async (): Promise<void> => {
+    if (!selectedId || pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/worlds/${encodeURIComponent(worldId)}/transfer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ newOwnerId: selectedId }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; reason?: string };
+      if (!res.ok || !body.ok) {
+        setError(body.reason ?? `HTTP ${res.status}`);
+        setPending(false);
+        return;
+      }
+      window.location.href = '/';
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'network error');
+      setPending(false);
+    }
+  };
+
+  if (members.length === 0) {
+    return (
+      <div className="rounded-[8px] border border-[#D4A85A]/40 bg-[#FBF5E8] p-4">
+        <p className="text-xs font-medium text-[#5A4F42]">Transfer ownership</p>
+        <p className="mt-1 text-xs text-[#8A7E6B]">
+          No other members in this world to transfer to.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-[8px] border border-[#D4A85A]/50 bg-[#FBF5E8] p-4">
+      <p className="mb-2 text-xs font-medium text-[#5A4F42]">Transfer ownership</p>
+
+      {!confirming ? (
+        <div className="flex items-center gap-2">
+          <select
+            value={selectedId}
+            onChange={(e) => setSelectedId(e.target.value)}
+            className="flex-1 rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-3 py-1.5 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
+          >
+            <option value="">Select a member…</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.displayName} ({m.username})
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={openConfirm}
+            disabled={!selectedId}
+            className="shrink-0 rounded-[6px] border border-[#D4A85A]/60 bg-[#D4A85A]/10 px-3 py-1.5 text-xs font-medium text-[#8A6A2A] transition hover:bg-[#D4A85A]/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Transfer…
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="rounded-[6px] border border-[#D4A85A]/50 bg-[#D4A85A]/10 p-3 text-xs text-[#5A4F42]">
+            <strong className="text-[#2A241E]">
+              Transfer to {selectedMember?.displayName} (@{selectedMember?.username})?
+            </strong>
+            <p className="mt-1">
+              You will be downgraded to editor and immediately lose access to world settings.
+              The new owner will have full admin control. This cannot be undone.
+            </p>
+          </div>
+          {error && <p className="text-xs text-[#8B4A52]">{error}</p>}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              disabled={pending}
+              className="rounded-[6px] px-3 py-1.5 text-xs text-[#5A4F42] transition hover:text-[#2A241E] disabled:opacity-40"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={doTransfer}
+              disabled={pending}
+              className="rounded-[6px] bg-[#D4A85A] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#C49840] disabled:opacity-40"
+            >
+              {pending ? 'Transferring…' : 'Yes, transfer ownership'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DangerZone({
   worldId,
   worldName,
   csrfToken,
+  members,
 }: {
   worldId: string;
   worldName: string;
   csrfToken: string;
+  members: MemberItem[];
 }): React.JSX.Element {
   const [confirming, setConfirming] = useState(false);
   const [confirmName, setConfirmName] = useState('');
@@ -1003,49 +1132,53 @@ function DangerZone({
         sessions, and assets. This cannot be undone.
       </p>
 
-      {!confirming ? (
-        <button
-          type="button"
-          onClick={openConfirm}
-          className="rounded-[6px] border border-[#8B4A52]/50 bg-[#8B4A52]/10 px-3 py-1.5 text-sm font-medium text-[#8B4A52] transition hover:bg-[#8B4A52]/20"
-        >
-          Delete this world…
-        </button>
-      ) : (
-        <div className="space-y-3">
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-[#5A4F42]">
-              Type <strong>{worldName}</strong> to confirm
-            </span>
-            <input
-              ref={inputRef}
-              type="text"
-              value={confirmName}
-              onChange={(e) => setConfirmName(e.target.value)}
-              className="w-full rounded-[6px] border border-[#8B4A52]/50 bg-[#F4EDE0] px-3 py-1.5 text-sm text-[#2A241E] outline-none focus:border-[#8B4A52]"
-              placeholder={worldName}
-            />
-          </label>
-          {error && <p className="text-xs text-[#8B4A52]">{error}</p>}
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setConfirming(false)}
-              className="rounded-[6px] px-3 py-1.5 text-xs text-[#5A4F42] transition hover:text-[#2A241E]"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={deleteWorld}
-              disabled={confirmName !== worldName || pending}
-              className="rounded-[6px] bg-[#8B4A52] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#7A3A42] disabled:opacity-40"
-            >
-              {pending ? 'Deleting…' : 'Delete world'}
-            </button>
+      <TransferOwnershipSection worldId={worldId} csrfToken={csrfToken} members={members} />
+
+      <div className="mt-4">
+        {!confirming ? (
+          <button
+            type="button"
+            onClick={openConfirm}
+            className="rounded-[6px] border border-[#8B4A52]/50 bg-[#8B4A52]/10 px-3 py-1.5 text-sm font-medium text-[#8B4A52] transition hover:bg-[#8B4A52]/20"
+          >
+            Delete this world…
+          </button>
+        ) : (
+          <div className="space-y-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-[#5A4F42]">
+                Type <strong>{worldName}</strong> to confirm
+              </span>
+              <input
+                ref={inputRef}
+                type="text"
+                value={confirmName}
+                onChange={(e) => setConfirmName(e.target.value)}
+                className="w-full rounded-[6px] border border-[#8B4A52]/50 bg-[#F4EDE0] px-3 py-1.5 text-sm text-[#2A241E] outline-none focus:border-[#8B4A52]"
+                placeholder={worldName}
+              />
+            </label>
+            {error && <p className="text-xs text-[#8B4A52]">{error}</p>}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className="rounded-[6px] px-3 py-1.5 text-xs text-[#5A4F42] transition hover:text-[#2A241E]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={deleteWorld}
+                disabled={confirmName !== worldName || pending}
+                className="rounded-[6px] bg-[#8B4A52] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#7A3A42] disabled:opacity-40"
+              >
+                {pending ? 'Deleting…' : 'Delete world'}
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </section>
   );
 }

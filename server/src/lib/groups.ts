@@ -221,6 +221,36 @@ export function createWorld(opts: {
  * Returns the id of another world to switch into, or null if the
  * session was already in a different world.
  */
+
+/**
+ * Transfer admin ownership of a world to another existing member.
+ * The caller is downgraded to 'editor'; the target is promoted to 'admin'.
+ * Throws 'not_member' if toUserId is not in the world.
+ */
+export function transferOwnership(
+  groupId: string,
+  fromUserId: string,
+  toUserId: string,
+): void {
+  const db = getDb();
+
+  const target = db
+    .query<{ role: string }, [string, string]>(
+      'SELECT role FROM group_members WHERE group_id = ? AND user_id = ?',
+    )
+    .get(groupId, toUserId);
+  if (!target) throw new Error('not_member');
+
+  db.transaction(() => {
+    db.query(
+      'UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?',
+    ).run('editor', groupId, fromUserId);
+    db.query(
+      'UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?',
+    ).run('admin', groupId, toUserId);
+  })();
+}
+
 export function deleteWorld(opts: {
   groupId: string;
   actorId: string;
