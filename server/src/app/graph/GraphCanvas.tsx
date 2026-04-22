@@ -239,6 +239,7 @@ export function GraphCanvas({
       let changed = false;
       const affectedNodes = new Set<string>();
       for (const e of payload.edges) {
+        if (e.source === e.target) continue; // graph forbids self-loops
         if (!g.hasNode(e.source) || !g.hasNode(e.target)) continue;
         const key = `${e.source}→${e.target}`;
         if (!g.hasEdge(key)) {
@@ -466,6 +467,7 @@ export function GraphCanvas({
           });
         }
         for (const e of payload.edges) {
+          if (e.source === e.target) continue; // graph forbids self-loops
           if (!g.hasNode(e.source) || !g.hasNode(e.target)) continue;
           const key = `${e.source}→${e.target}`;
           if (g.hasEdge(key)) continue;

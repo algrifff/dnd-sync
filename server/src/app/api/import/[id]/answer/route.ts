@@ -44,8 +44,25 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
   const resolved = resolveDmQuestion(id, body.content);
   if (!resolved) {
     // Worker lost its in-process resolver (e.g. hot reload / server restart).
-    // Reset status to 'ready' so doOrchestrate can re-enter, then restart
-    // the worker — it will replay the current phase and re-ask the question.
+    // Persist the reply to conversationHistory FIRST — otherwise the
+    // restarted worker re-enters askDmChat with no record of the answer
+    // and re-asks the same question. askDmChat detects a user reply at
+    // the tail of history and returns it directly on resume.
+    const fresh = getImportJob(id);
+    const plan = (fresh?.plan ?? null) as
+      | { orchestration?: { conversationHistory: Array<{ role: 'assistant' | 'user'; content: string; timestamp: number }> } }
+      | null;
+    if (plan?.orchestration) {
+      const last = plan.orchestration.conversationHistory.at(-1);
+      if (!(last && last.role === 'user' && last.content === body.content)) {
+        plan.orchestration.conversationHistory.push({
+          role: 'user',
+          content: body.content,
+          timestamp: Date.now(),
+        });
+      }
+      updateImportJob(id, { plan });
+    }
     if (!isOrchestrationRunning(id)) {
       updateImportJob(id, { status: 'ready' });
       startOrchestration(id);

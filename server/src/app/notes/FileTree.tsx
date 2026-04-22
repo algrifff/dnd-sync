@@ -669,7 +669,7 @@ const KIND_META: Record<
 };
 
 type FlatRow =
-  | { kind: 'dir'; key: string; name: string; path: string; depth: number; open: boolean; hasChildren: boolean; system: boolean }
+  | { kind: 'dir'; key: string; name: string; path: string; depth: number; open: boolean; hasChildren: boolean; system: boolean; indexPath: string | null }
   | { kind: 'file'; key: string; name: string; path: string; title: string; depth: number };
 
 function flatten(dir: TreeDir, openSet: Set<string>, depth: number): FlatRow[] {
@@ -678,6 +678,15 @@ function flatten(dir: TreeDir, openSet: Set<string>, depth: number): FlatRow[] {
     if (child.kind === 'dir' && (child.path === 'Assets' || child.path.startsWith('Assets/'))) continue;
     if (child.kind === 'dir') {
       const isOpen = openSet.has(child.path);
+      // Find a child index.md — it's the folder's "page" in Notion-style
+      // folder-as-page UX. Hidden from the child list when present.
+      const indexChild = child.children.find(
+        (c) => c.kind === 'file' && /^index\.(md|canvas)$/i.test(c.name),
+      );
+      const indexPath = indexChild?.kind === 'file' ? indexChild.path : null;
+      const visibleChildCount = child.children.filter(
+        (c) => !(c.kind === 'file' && /^index\.(md|canvas)$/i.test(c.name)),
+      ).length;
       out.push({
         kind: 'dir',
         key: 'dir:' + child.path,
@@ -685,11 +694,15 @@ function flatten(dir: TreeDir, openSet: Set<string>, depth: number): FlatRow[] {
         path: child.path,
         depth,
         open: isOpen,
-        hasChildren: child.children.length > 0,
+        hasChildren: visibleChildCount > 0,
         system: child.system,
+        indexPath,
       });
       if (isOpen) out.push(...flatten(child, openSet, depth + 1));
     } else {
+      // Hide the folder's own index.md from the child list — it's reached
+      // by clicking the parent folder row instead.
+      if (/^index\.(md|canvas)$/i.test(child.name)) continue;
       out.push({
         kind: 'file',
         key: 'file:' + child.path,
@@ -814,6 +827,25 @@ function TreeRow({
         </li>
       );
     }
+    const indexHref = item.indexPath
+      ? '/notes/' + item.indexPath.split('/').map(encodeURIComponent).join('/')
+      : null;
+    const isIndexActive = item.indexPath === activePath;
+    const folderIcon = (() => {
+      const fi = getFolderIcon(item.path);
+      return fi ? (
+        <fi.Icon size={13} aria-hidden className="shrink-0" style={{ color: fi.color }} />
+      ) : null;
+    })();
+    const nameLabel = (
+      <span
+        className={`truncate font-medium ${
+          isSystem ? 'tracking-wide text-xs uppercase text-[#5A4F42]/70' : ''
+        } ${isIndexActive ? 'text-[#2A241E]' : ''}`}
+      >
+        {item.name}
+      </span>
+    );
     return (
       <li role="treeitem" aria-expanded={item.open} className="list-none">
         <div
@@ -823,13 +855,16 @@ function TreeRow({
             'group flex items-center rounded-[6px] transition ' +
             (isDropTarget
               ? 'bg-[#8B4A52]/15 ring-1 ring-[#8B4A52]/40'
-              : 'hover:bg-[#D4A85A]/15')
+              : isIndexActive
+                ? 'bg-[#D4A85A]/25'
+                : 'hover:bg-[#D4A85A]/15')
           }
         >
           <button
             type="button"
-            onClick={() => onToggle(item.path)}
-            className="flex flex-1 items-center gap-1 px-2 py-1 text-left text-[#5A4F42]"
+            onClick={(e) => { e.stopPropagation(); onToggle(item.path); }}
+            aria-label={item.open ? 'Collapse' : 'Expand'}
+            className="flex items-center px-1 py-1 text-[#5A4F42]"
             style={{ paddingLeft: padding }}
           >
             <ChevronRight
@@ -838,16 +873,26 @@ function TreeRow({
               style={{ transform: item.open ? 'rotate(90deg)' : 'none' }}
               aria-hidden
             />
-            {(() => {
-              const fi = getFolderIcon(item.path);
-              return fi ? (
-                <fi.Icon size={13} aria-hidden className="shrink-0" style={{ color: fi.color }} />
-              ) : null;
-            })()}
-            <span className={`truncate font-medium ${isSystem ? 'tracking-wide text-xs uppercase text-[#5A4F42]/70' : ''}`}>
-              {item.name}
-            </span>
           </button>
+          {indexHref ? (
+            <Link
+              href={indexHref}
+              onClick={() => { if (!item.open) onToggle(item.path); }}
+              className="flex flex-1 items-center gap-1 py-1 pr-2 text-left text-[#5A4F42]"
+            >
+              {folderIcon}
+              {nameLabel}
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onToggle(item.path)}
+              className="flex flex-1 items-center gap-1 py-1 pr-2 text-left text-[#5A4F42]"
+            >
+              {folderIcon}
+              {nameLabel}
+            </button>
+          )}
           {canCreate && (
             <div className="mr-1 hidden items-center gap-0.5 group-hover:flex">
               <NewEntryDropdown

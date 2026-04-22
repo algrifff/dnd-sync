@@ -571,7 +571,10 @@ export function writeNote(opts: WriteOpts): void {
   const insertLink = db.query(
     'INSERT OR IGNORE INTO note_links (group_id, from_path, to_path) VALUES (?, ?, ?)',
   );
-  for (const link of ingest.wikilinks) insertLink.run(opts.groupId, opts.path, link);
+  for (const link of ingest.wikilinks) {
+    if (link === opts.path) continue; // no self-loops
+    insertLink.run(opts.groupId, opts.path, link);
+  }
   const insertTag = db.query(
     'INSERT OR IGNORE INTO tags (group_id, path, tag) VALUES (?, ?, ?)',
   );

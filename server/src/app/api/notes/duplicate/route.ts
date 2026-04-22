@@ -89,6 +89,7 @@ export async function POST(req: NextRequest): Promise<Response> {
         'SELECT to_path FROM note_links WHERE group_id = ? AND from_path = ?',
       )
       .all(session.currentGroupId, src.path)) {
+      if (to_path === newPath) continue; // no self-loops
       db.query('INSERT OR IGNORE INTO note_links (group_id, from_path, to_path) VALUES (?, ?, ?)')
         .run(session.currentGroupId, newPath, to_path);
     }

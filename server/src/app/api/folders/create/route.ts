@@ -11,6 +11,7 @@ import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { ensureCampaignForPath } from '@/lib/characters';
+import { ensureIndexNote } from '@/lib/index-notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -88,6 +89,23 @@ export async function POST(req: NextRequest): Promise<Response> {
     ensureCampaignForPath(session.currentGroupId, path + '/.marker');
   } catch (err) {
     console.error('[folders/create] ensureCampaignForPath failed:', err);
+  }
+
+  // Campaign roots + World Lore get a hidden index.md so the sidebar
+  // can treat the folder row as a Notion-style page, and the graph
+  // view shows the hub as a real node.
+  if (parent === 'Campaigns') {
+    try {
+      ensureIndexNote(session.currentGroupId, session.userId, path, cleanName);
+    } catch (err) {
+      console.error('[folders/create] ensureIndexNote failed:', err);
+    }
+  } else if (path === 'World Lore') {
+    try {
+      ensureIndexNote(session.currentGroupId, session.userId, 'World Lore', 'World Lore');
+    } catch (err) {
+      console.error('[folders/create] ensureIndexNote failed:', err);
+    }
   }
 
   logAudit({

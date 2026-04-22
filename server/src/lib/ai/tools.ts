@@ -457,6 +457,9 @@ function backlinkCreate(ctx: ToolContext) {
     description: 'Ensure a [[wikilink]] exists from one note to another.',
     inputSchema: BacklinkSchema,
     execute: async ({ fromPath, toPath, label }: z.infer<typeof BacklinkSchema>) => {
+      if (fromPath === toPath) {
+        return { ok: false as const, error: 'Self-links are not allowed' };
+      }
       const note = loadNote(ctx.groupId, fromPath);
       if (!note) return { ok: false as const, error: `Not found: ${fromPath}` };
 
@@ -761,6 +764,7 @@ function sessionApply(ctx: ToolContext) {
           }
           for (const bl of proposal.newBacklinks) {
             if (!approved.has(bl.id)) continue;
+            if (bl.from === bl.to) continue; // no self-loops
             db.query(`INSERT OR IGNORE INTO note_links (group_id, from_path, to_path) VALUES (?,?,?)`)
               .run(ctx.groupId, bl.from, bl.to);
             applied++;

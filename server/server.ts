@@ -13,6 +13,7 @@ import { cleanupExpiredSessions } from '@/lib/session';
 import { ensureDefaultAdmin, printAdminBanner, DEFAULT_GROUP_ID } from '@/lib/users';
 import { ensureDefaultTemplates } from '@/lib/templates';
 import { ensureDefaultFolders } from '@/lib/tree';
+import { backfillIndexNotes } from '@/lib/index-notes';
 import { handleCollabConnection } from '@/collab/server';
 
 // Validate environment before touching anything else — fail fast on
@@ -34,6 +35,7 @@ ensureConfig();
   printAdminBanner(seed);
   ensureDefaultTemplates();
   ensureDefaultFolders(DEFAULT_GROUP_ID);
+  backfillIndexNotes();
   const removed = cleanupExpiredSessions();
   if (removed > 0) console.log(`[compendium-server] pruned ${removed} expired session(s)`);
 }

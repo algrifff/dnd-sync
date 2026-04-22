@@ -331,6 +331,7 @@ export async function ingestZip(opts: IngestOptions): Promise<IngestSummary> {
         opts.actorId,
       );
       for (const link of p.ingest.wikilinks) {
+        if (link === p.ingest.path) continue; // no self-loops
         insertLink.run(opts.groupId, p.ingest.path, link);
       }
       for (const tag of p.ingest.tags) {
