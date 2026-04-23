@@ -29,6 +29,7 @@ export type User = {
   accentColor: string;
   createdAt: number;
   lastLoginAt: number | null;
+  emailVerifiedAt: number | null;
 };
 
 export type UserWithRole = User & {
@@ -54,6 +55,7 @@ type UserRow = {
   accent_color: string;
   created_at: number;
   last_login_at: number | null;
+  email_verified_at: number | null;
 };
 
 type UserJoinRow = UserRow & { role: UserRole | null };
@@ -67,6 +69,7 @@ function rowToUser(r: UserRow): User {
     accentColor: r.accent_color,
     createdAt: r.created_at,
     lastLoginAt: r.last_login_at,
+    emailVerifiedAt: r.email_verified_at,
   };
 }
 
@@ -80,7 +83,7 @@ export function findUserByUsername(username: string): (User & { passwordHash: st
   const row = getDb()
     .query<UserRow, [string]>(
       `SELECT id, username, email, password_hash, display_name, accent_color,
-              created_at, last_login_at
+              created_at, last_login_at, email_verified_at
          FROM users WHERE username = ? COLLATE NOCASE`,
     )
     .get(username);
@@ -92,7 +95,8 @@ export function listUsersInGroup(groupId: string): UserWithRole[] {
   return getDb()
     .query<UserJoinRow, [string]>(
       `SELECT u.id, u.username, u.email, u.password_hash, u.display_name,
-              u.accent_color, u.created_at, u.last_login_at, gm.role AS role
+              u.accent_color, u.created_at, u.last_login_at,
+              u.email_verified_at, gm.role AS role
          FROM users u
          JOIN group_members gm ON gm.user_id = u.id
         WHERE gm.group_id = ?
@@ -233,8 +237,9 @@ export async function createUser(input: CreateUserInput): Promise<User> {
   db.transaction(() => {
     db.query(
       `INSERT INTO users (id, username, email, password_hash, display_name,
-                          accent_color, created_at, last_login_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+                          accent_color, created_at, last_login_at,
+                          email_verified_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
     ).run(
       id,
       username,
@@ -242,6 +247,9 @@ export async function createUser(input: CreateUserInput): Promise<User> {
       passwordHash,
       input.displayName.trim(),
       accentColor,
+      now,
+      // Admin-created users are trusted; they skip email verification so
+      // existing invite/creation flows aren't blocked by the new gate.
       now,
     );
 
@@ -267,6 +275,7 @@ export async function createUser(input: CreateUserInput): Promise<User> {
     accentColor,
     createdAt: now,
     lastLoginAt: null,
+    emailVerifiedAt: now,
   };
 }
 
@@ -389,6 +398,123 @@ export function revokeUser(userId: string, actorId: string, groupId: string): bo
     });
   }
   return revoked;
+}
+
+// ── Public signup + reset + verify ─────────────────────────────────────
+
+/** Find a user by email address. Returns null if unknown. Case-insensitive
+ *  match (email column has COLLATE NOCASE). Used by the forgot-password
+ *  flow; callers must NOT leak existence to the client. */
+export function findUserByEmail(email: string): User | null {
+  const row = getDb()
+    .query<UserRow, [string]>(
+      `SELECT id, username, email, password_hash, display_name, accent_color,
+              created_at, last_login_at, email_verified_at
+         FROM users WHERE email = ? COLLATE NOCASE`,
+    )
+    .get(email.trim());
+  return row ? rowToUser(row) : null;
+}
+
+export type SignupUserInput = {
+  username: string;
+  email: string;
+  password: string;
+  groupId?: string;
+};
+
+/** Self-service signup. Unlike `createUser` this requires email and leaves
+ *  `email_verified_at = NULL` so `loginAction` blocks the account until the
+ *  user clicks the verification link. */
+export async function signupUser(input: SignupUserInput): Promise<User> {
+  const username = input.username.trim();
+  const email = input.email.trim().toLowerCase();
+
+  if (!/^[a-z0-9_-]{3,32}$/i.test(username)) {
+    throw new Error('username_invalid');
+  }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    throw new Error('email_invalid');
+  }
+  if (input.password.length < 8) {
+    throw new Error('password_too_short');
+  }
+  if (findUserByUsername(username)) throw new Error('username_taken');
+  if (findUserByEmail(email)) throw new Error('email_taken');
+
+  const id = randomUUID();
+  const passwordHash = await hashPassword(input.password);
+  const now = Date.now();
+  const groupId = input.groupId ?? DEFAULT_GROUP_ID;
+  const accentColor = pickAccentColor();
+
+  const db = getDb();
+  db.transaction(() => {
+    db.query(
+      `INSERT INTO users (id, username, email, password_hash, display_name,
+                          accent_color, created_at, last_login_at,
+                          email_verified_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+    ).run(id, username, email, passwordHash, username, accentColor, now);
+
+    db.query(
+      `INSERT INTO group_members (group_id, user_id, role, joined_at)
+       VALUES (?, ?, ?, ?)`,
+    ).run(groupId, id, 'viewer', now);
+  })();
+
+  logAudit({
+    action: 'user.signup',
+    actorId: null,
+    groupId,
+    target: username,
+    details: { email },
+  });
+
+  return {
+    id,
+    username,
+    email,
+    displayName: username,
+    accentColor,
+    createdAt: now,
+    lastLoginAt: null,
+    emailVerifiedAt: null,
+  };
+}
+
+/** Mark a user's email as verified. Idempotent — safe to call twice. */
+export function markEmailVerified(userId: string): void {
+  getDb()
+    .query('UPDATE users SET email_verified_at = ? WHERE id = ? AND email_verified_at IS NULL')
+    .run(Date.now(), userId);
+}
+
+/** Reset a user's password via the forgot-password flow. Rotates the
+ *  password hash, invalidates every active session for the user, and
+ *  clears any outstanding reset tokens. Audits the action with no actor
+ *  id (the "actor" is whoever clicked the emailed link). */
+export async function changePasswordByReset(userId: string, newPassword: string): Promise<void> {
+  if (newPassword.length < 8) throw new Error('password_too_short');
+  const hash = await hashPassword(newPassword);
+
+  const db = getDb();
+  db.transaction(() => {
+    db.query('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, userId);
+    db.query('DELETE FROM sessions WHERE user_id = ?').run(userId);
+    // Invalidate any other outstanding reset tokens for this user so the
+    // same token can't be replayed and a lingering link can't be used.
+    db.query(
+      'UPDATE password_reset_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL',
+    ).run(Date.now(), userId);
+  })();
+
+  logAudit({
+    action: 'user.passwordReset',
+    actorId: null,
+    groupId: DEFAULT_GROUP_ID,
+    target: userId,
+  });
 }
 
 // ── Accent colour assignment ───────────────────────────────────────────

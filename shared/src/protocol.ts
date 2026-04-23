@@ -73,6 +73,29 @@ export const ChangePasswordRequestSchema = z.object({
 });
 export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequestSchema>;
 
+export const SignupRequestSchema = z.object({
+  username: UsernameSchema,
+  email: z.string().email().max(256),
+  password: PasswordSchema,
+});
+export type SignupRequest = z.infer<typeof SignupRequestSchema>;
+
+export const PasswordResetRequestSchema = z.object({
+  email: z.string().email().max(256),
+});
+export type PasswordResetRequest = z.infer<typeof PasswordResetRequestSchema>;
+
+export const PasswordResetConsumeSchema = z.object({
+  token: z.string().length(64).regex(/^[a-f0-9]+$/),
+  newPassword: PasswordSchema,
+});
+export type PasswordResetConsume = z.infer<typeof PasswordResetConsumeSchema>;
+
+export const EmailVerifyConsumeSchema = z.object({
+  token: z.string().length(64).regex(/^[a-f0-9]+$/),
+});
+export type EmailVerifyConsume = z.infer<typeof EmailVerifyConsumeSchema>;
+
 // ── Chat ─────────────────────────────────────────────────────────────────────
 
 export const ChatMessageSchema = z.object({

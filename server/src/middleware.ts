@@ -11,12 +11,20 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { securityHeaders } from '@/lib/security-headers';
-import { sessionCookieName } from '@/lib/session-public';
+import { sessionCookieName, csrfCookieName } from '@/lib/session-public';
+
+// Keep in sync with SESSION_LIFETIME_MS in session.ts. Browser-side sliding
+// window: every authenticated request re-issues the SID + CSRF cookies with
+// a fresh 30-day Max-Age, so the cookies persist as long as the user shows
+// up at least once every 30 days. Server-side expiry slides inside
+// readSession (see session.ts).
+const SESSION_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
 /** Paths that must NOT redirect to /login when unauthenticated. Covers
  *  the login surface itself, API routes (self-authing), and static assets. */
 const PUBLIC_PATTERNS: readonly RegExp[] = [
   /^\/login(\/|$)/,
+  /^\/signup(\/|$)/,
   /^\/admin\/login(\/|$)/,
   /^\/api\//,
   /^\/_next\//,
@@ -53,9 +61,10 @@ export function middleware(req: NextRequest): NextResponse {
     return res;
   }
 
+  const sidCookie = req.cookies.get(sessionCookieName())?.value;
+
   if (!isPublic(pathname)) {
-    const sid = req.cookies.get(sessionCookieName())?.value;
-    if (!sid) {
+    if (!sidCookie) {
       const url = req.nextUrl.clone();
       url.pathname = '/login';
       url.search = '';
@@ -68,6 +77,38 @@ export function middleware(req: NextRequest): NextResponse {
 
   const res = NextResponse.next();
   for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
+
+  // Browser-side sliding session: if a SID cookie is present on a normal
+  // page request, re-issue both auth cookies with a fresh 30-day Max-Age so
+  // the cookies live on as long as the user keeps visiting. The actual
+  // server-side expiry is refreshed inside readSession. Skip for API
+  // routes (they set their own cookies on login/logout/rotate) to avoid
+  // clobbering the Set-Cookie header a route handler just emitted.
+  if (sidCookie && !/^\/api\//.test(pathname)) {
+    const csrfCookie = req.cookies.get(csrfCookieName())?.value;
+    const secure = process.env.NODE_ENV === 'production';
+    res.cookies.set({
+      name: sessionCookieName(),
+      value: sidCookie,
+      path: '/',
+      maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
+      sameSite: 'lax',
+      httpOnly: true,
+      secure,
+    });
+    if (csrfCookie) {
+      res.cookies.set({
+        name: csrfCookieName(),
+        value: csrfCookie,
+        path: '/',
+        maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
+        sameSite: 'lax',
+        httpOnly: false,
+        secure,
+      });
+    }
+  }
+
   return res;
 }
 

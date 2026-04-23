@@ -460,3 +460,29 @@ html, body {
 .sheet-header *:focus-visible {
   outline: none;
 }
+
+/* Auth surface (login / signup / forgot / reset / verify). Same rationale
+   as .sheet-header — inputs draw a 2px bottom stroke in candlelight and
+   we don't want the universal ring drawing an orange box on top. */
+.auth-shell *:focus,
+.auth-shell *:focus-visible {
+  outline: none;
+}
+
+/* Auth animations — a gentle fade + lift on mode swap, plus a subtle
+   letter-spacing settle on titles so the hero line feels intentional.
+   Users with prefers-reduced-motion: reduce see no animation. */
+@keyframes authFadeSwap {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes authTitleGlow {
+  from { opacity: 0; letter-spacing: 0.05em; }
+  to   { opacity: 1; letter-spacing: normal; }
+}
+.auth-fade { animation: authFadeSwap 380ms ease-out both; }
+.auth-title { animation: authTitleGlow 700ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .auth-fade,
+  .auth-title { animation: none; }
+}

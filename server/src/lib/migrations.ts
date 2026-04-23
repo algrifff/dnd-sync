@@ -678,6 +678,55 @@ const MIGRATIONS: readonly Migration[] = [
         SELECT path, group_id, title, content_text FROM notes;
     `,
   },
+  {
+    version: 34,
+    description: 'users: email verification column + partial unique email index',
+    sql: `
+      -- Track when a user confirmed their email. NULL means unverified
+      -- (blocked from logging in). Pre-existing rows are back-filled with
+      -- their created_at so admin-created accounts keep working after deploy.
+      ALTER TABLE users ADD COLUMN email_verified_at INTEGER;
+      UPDATE users SET email_verified_at = created_at WHERE email_verified_at IS NULL;
+
+      -- Email must be unique when present. Legacy rows with NULL email are
+      -- untouched by the partial index.
+      CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx
+        ON users(email COLLATE NOCASE) WHERE email IS NOT NULL;
+    `,
+  },
+  {
+    version: 35,
+    description: 'password_reset_tokens: time-bound single-use reset links',
+    sql: `
+      CREATE TABLE password_reset_tokens (
+        id           TEXT    PRIMARY KEY,
+        user_id      TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash   TEXT    NOT NULL,
+        expires_at   INTEGER NOT NULL,
+        used_at      INTEGER,
+        created_at   INTEGER NOT NULL,
+        ip           TEXT
+      );
+      CREATE INDEX password_reset_tokens_user_idx ON password_reset_tokens(user_id);
+      CREATE INDEX password_reset_tokens_hash_idx ON password_reset_tokens(token_hash);
+    `,
+  },
+  {
+    version: 36,
+    description: 'email_verification_tokens: single-use verify links',
+    sql: `
+      CREATE TABLE email_verification_tokens (
+        id           TEXT    PRIMARY KEY,
+        user_id      TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash   TEXT    NOT NULL,
+        expires_at   INTEGER NOT NULL,
+        verified_at  INTEGER,
+        created_at   INTEGER NOT NULL
+      );
+      CREATE INDEX email_verification_tokens_hash_idx ON email_verification_tokens(token_hash);
+      CREATE INDEX email_verification_tokens_user_idx ON email_verification_tokens(user_id);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

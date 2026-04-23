@@ -28,6 +28,11 @@ export { sessionCookieName, csrfCookieName } from './session-public';
 
 const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const LAST_SEEN_DEBOUNCE_MS = 60 * 1000; // only touch last_seen_at once a minute
+// Slide expires_at forward when the remaining lifetime has dropped below
+// this threshold — i.e. the session has been in use for at least a day since
+// its last refresh. Bundled with the last_seen_at update so there is only
+// ever one UPDATE per read.
+const EXPIRY_REFRESH_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 1 day
 
 export type UserRole = 'admin' | 'editor' | 'viewer';
 
@@ -234,8 +239,22 @@ export function readSession(
       (getDb()
         .query<{ last_seen_at: number }, [string]>('SELECT last_seen_at FROM sessions WHERE id = ?')
         .get(row.id)?.last_seen_at) ?? 0;
-    if (Date.now() - lastSeen >= LAST_SEEN_DEBOUNCE_MS) {
-      getDb().query('UPDATE sessions SET last_seen_at = ? WHERE id = ?').run(Date.now(), row.id);
+    const now = Date.now();
+    if (now - lastSeen >= LAST_SEEN_DEBOUNCE_MS) {
+      // Slide expires_at along with last_seen_at: if the session has less
+      // than (SESSION_LIFETIME_MS - EXPIRY_REFRESH_THRESHOLD_MS) remaining,
+      // push the expiry back to a full 30 days from now. One UPDATE covers
+      // both columns.
+      const remaining = row.expires_at - now;
+      if (remaining < SESSION_LIFETIME_MS - EXPIRY_REFRESH_THRESHOLD_MS) {
+        const nextExpiresAt = now + SESSION_LIFETIME_MS;
+        getDb()
+          .query('UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?')
+          .run(now, nextExpiresAt, row.id);
+        row.expires_at = nextExpiresAt;
+      } else {
+        getDb().query('UPDATE sessions SET last_seen_at = ? WHERE id = ?').run(now, row.id);
+      }
     }
   }
 

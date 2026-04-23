@@ -81,6 +81,17 @@ export const adminUploadLimiter = createLimiter(5, 60 * 60_000);
 // drag-drop of session images without tripping.
 export const assetUploadLimiter = createLimiter(30, 60_000);
 
+// Self-service signup. 5 per hour per IP — a real user creates one
+// account per device, anything faster is a script.
+export const signupLimiter = createLimiter(5, 60 * 60_000);
+
+// Forgot-password requests. 5 per hour per IP — limits both enumeration
+// attempts and accidental mail-storms from a stuck tab.
+export const resetRequestLimiter = createLimiter(5, 60 * 60_000);
+
+// Resend-verification-email clicks. 3 per hour per IP.
+export const verifyResendLimiter = createLimiter(3, 60 * 60_000);
+
 // ── Backwards-compatible shims for the WS upgrade handler ──────────────
 
 export function checkAuthAttempt(ip: string, isLocalhost: boolean): RateLimitDecision {
