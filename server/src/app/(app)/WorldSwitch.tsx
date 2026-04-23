@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
-import { EVENTS, setWorld, track } from '@/lib/analytics/client';
+import { EVENTS, identify, setWorld, track } from '@/lib/analytics/client';
 
 type WorldSwitchContextValue = {
   isPending: boolean;
@@ -24,10 +24,14 @@ const WorldSwitchContext = createContext<WorldSwitchContextValue | null>(null);
 export function WorldSwitchProvider({
   csrfToken,
   activeWorldId,
+  userId,
+  username,
   children,
 }: {
   csrfToken: string;
   activeWorldId?: string;
+  userId?: string;
+  username?: string;
   children: ReactNode;
 }): React.JSX.Element {
   const router = useRouter();
@@ -36,6 +40,20 @@ export function WorldSwitchProvider({
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingDestRef = useRef<string>('/');
   const lastReportedWorldRef = useRef<string | null>(null);
+  const lastIdentifiedUserRef = useRef<string | null>(null);
+
+  // Stitch the anonymous posthog-js distinct_id to the authenticated
+  // user on first mount of an authenticated route. posthog-js aliases
+  // the pre-login events onto the same Person as everything captured
+  // server-side against user.id, so the funnel (page view → signup →
+  // verify → first load) lives on one timeline. Without this the
+  // anonymous session and the user.id Person stay split.
+  useEffect(() => {
+    if (!userId) return;
+    if (lastIdentifiedUserRef.current === userId) return;
+    lastIdentifiedUserRef.current = userId;
+    identify(userId, username ? { username } : undefined);
+  }, [userId, username]);
 
   // Keep PostHog group-analytics in sync with the active world. Fires
   // once on mount and again whenever the layout re-renders with a new

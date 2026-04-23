@@ -354,7 +354,7 @@ export function ChatPane({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label={open ? 'Close Compendium AI' : 'Open Compendium AI'}
+        aria-label={open ? 'Close Huel' : 'Open Huel'}
         aria-hidden={open}
         tabIndex={open ? -1 : 0}
         className={`fixed bottom-6 right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-[#D4A85A] text-white shadow-[0_4px_16px_rgba(42,36,30,0.25)] transition-all duration-200 ease-out hover:bg-[#C49848] active:scale-95 ${
@@ -380,7 +380,7 @@ export function ChatPane({
             </button>
             <span className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold text-[#2A241E]">
               <Sparkles size={13} className="shrink-0 text-[#D4A85A]" aria-hidden />
-              <span className="truncate">Compendium AI</span>
+              <span className="truncate">Huel</span>
             </span>
             {messages.length > 0 && (
               <button

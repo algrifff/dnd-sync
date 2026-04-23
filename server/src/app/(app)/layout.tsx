@@ -22,7 +22,12 @@ export default async function AppLayout({
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#F4EDE0] text-[#2A241E]">
-      <WorldSwitchProvider csrfToken={session.csrfToken} activeWorldId={session.currentGroupId}>
+      <WorldSwitchProvider
+        csrfToken={session.csrfToken}
+        activeWorldId={session.currentGroupId}
+        userId={session.userId}
+        username={session.username}
+      >
         <WorldsSidebar
           csrfToken={session.csrfToken}
           userId={session.userId}

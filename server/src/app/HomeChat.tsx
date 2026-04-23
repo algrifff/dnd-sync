@@ -339,7 +339,7 @@ export function HomeChat({
       {/* Header */}
       <header className="flex items-center gap-2 border-b border-[#D4C7AE] px-4 py-2">
         <Sparkles size={14} className="text-[#D4A85A]" aria-hidden />
-        <h2 className="flex-1 text-sm font-semibold text-[#2A241E]">Compendium assistant</h2>
+        <h2 className="flex-1 text-sm font-semibold text-[#2A241E]">Huel</h2>
         {messages.length > 0 && (
           <button
             type="button"

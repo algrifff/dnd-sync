@@ -86,7 +86,7 @@ export default function Dashboard() {
   return (
     <main className="min-h-screen bg-neutral-950 text-neutral-100 p-6">
       <header className="flex items-baseline justify-between mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Compendium</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Pit Pals</h1>
         <div className="text-xs text-neutral-500">
           {stats ? `updated ${fmtAgo(Date.now())}` : 'connecting…'}
         </div>
@@ -169,7 +169,7 @@ function LoginForm({ onSubmit }: { onSubmit: (token: string) => void }) {
         }}
       >
         <div>
-          <h1 className="text-xl font-semibold">Compendium</h1>
+          <h1 className="text-xl font-semibold">Pit Pals</h1>
           <p className="text-sm text-neutral-400 mt-1">Admin dashboard</p>
         </div>
         <label className="block text-sm">

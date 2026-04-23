@@ -19,7 +19,7 @@ const fraunces = Fraunces({
 });
 
 export const metadata = {
-  title: 'Compendium',
+  title: 'Pit Pals',
   description: 'Live-edited shared TTRPG vault',
 };
 
