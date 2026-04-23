@@ -1,4 +1,4 @@
-// Dev-only inspector for the new D&D 5e data-model backbone. Lets you:
+// Dev-only inspector for the TTRPG data-model backbone. Lets you:
 //   * See current rows in the new index tables (items, locations,
 //     creatures) alongside the extended characters index.
 //   * Feed arbitrary JSON into validateSheet() for each kind and see

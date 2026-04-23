@@ -7,7 +7,7 @@ import type { TemplateField, TemplateKind } from '../../templates';
 import { getTemplate } from '../../templates';
 
 export type ImportSkillContext = {
-  /** Campaign slug the DM wants the drop to land under (if any). */
+  /** Campaign slug the GM wants the drop to land under (if any). */
   targetCampaignSlug: string | null;
   /** Every note path already in the vault + every note in this drop
    *  so the model only ever proposes real wikilink targets. */

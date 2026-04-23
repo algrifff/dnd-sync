@@ -649,7 +649,7 @@ function noteRead(ctx: ToolContext) {
       if (!note) return { ok: false as const, error: `Not found: ${path}` };
 
       if (note.dm_only === 1 && ctx.role !== 'dm') {
-        return { ok: false as const, error: 'Access denied: DM-only note' };
+        return { ok: false as const, error: 'Access denied: GM-only note' };
       }
 
       let frontmatter: Record<string, unknown> = {};
@@ -672,13 +672,13 @@ function noteRead(ctx: ToolContext) {
 function noteWriteSection(ctx: ToolContext) {
   return tool({
     description:
-      'Write or replace a named section in a note. DM only. ' +
+      'Write or replace a named section in a note. GM only. ' +
       'Always call note_read first to see what already exists. ' +
       'If `section` is provided, only that heading block is replaced — all other content is preserved. ' +
       'If `section` is omitted the note must be empty; otherwise the tool refuses to protect existing content.',
     inputSchema: NoteWriteSectionSchema,
     execute: async ({ path, section, content }: z.infer<typeof NoteWriteSectionSchema>) => {
-      if (ctx.role !== 'dm') return { ok: false as const, error: 'DM only' };
+      if (ctx.role !== 'dm') return { ok: false as const, error: 'GM only' };
 
       const note = loadNote(ctx.groupId, path);
       if (!note) return { ok: false as const, error: `Not found: ${path}` };
@@ -779,10 +779,10 @@ function writeFullContent(
 function sessionClose(ctx: ToolContext) {
   return tool({
     description:
-      'Analyse a session and produce proposed changes for DM review. Does NOT commit — always requires session_apply.',
+      'Analyse a session and produce proposed changes for GM review. Does NOT commit — always requires session_apply.',
     inputSchema: SessionCloseSchema,
     execute: async ({ sessionPath }: z.infer<typeof SessionCloseSchema>) => {
-      if (ctx.role !== 'dm') return { ok: false as const, error: 'DM only' };
+      if (ctx.role !== 'dm') return { ok: false as const, error: 'GM only' };
 
       const note = loadNote(ctx.groupId, sessionPath);
       if (!note) return { ok: false as const, error: `Not found: ${sessionPath}` };
@@ -816,10 +816,10 @@ function sessionClose(ctx: ToolContext) {
 
 function sessionApply(ctx: ToolContext) {
   return tool({
-    description: 'Commit DM-approved session changes after review.',
+    description: 'Commit GM-approved session changes after review.',
     inputSchema: SessionApplySchema,
     execute: async ({ sessionPath, approvedChanges }: z.infer<typeof SessionApplySchema>) => {
-      if (ctx.role !== 'dm') return { ok: false as const, error: 'DM only' };
+      if (ctx.role !== 'dm') return { ok: false as const, error: 'GM only' };
 
       const db = getDb();
       const row = db

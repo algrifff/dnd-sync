@@ -1,6 +1,6 @@
 # Compendium
 
-Self-hosted real-time vault for D&D. Obsidian is the UI. A Next.js 15 + SQLite server handles sync, search, AI-assisted import, and a web dashboard. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the design decisions and roadmap.
+Self-hosted real-time vault for tabletop RPG campaigns. Obsidian is the UI. A Next.js 15 + SQLite server handles sync, search, AI-assisted import, and a web dashboard. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the design decisions and roadmap.
 
 ---
 
@@ -340,7 +340,7 @@ All routes live under `/api/`. The full set is ~50 endpoints; key groups:
 | Notes | `GET /api/notes/[...path]`, `POST /api/notes/create`, `DELETE /api/notes/[...path]` |
 | Search | `GET /api/search?q=...` (FTS5) |
 | Characters | `GET /api/characters`, `POST /api/characters/create` |
-| Sessions (D&D) | `POST /api/sessions/create` |
+| Sessions | `POST /api/sessions/create` |
 | Worlds/Groups | `GET /api/worlds`, `POST /api/worlds`, `POST /api/worlds/[id]/invite` |
 | Assets | `POST /api/assets/upload`, `GET /api/assets/[id]` |
 | Import (AI) | `POST /api/import`, `POST /api/import/[id]/analyse`, `POST /api/import/[id]/apply` |

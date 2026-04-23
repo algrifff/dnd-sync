@@ -4,7 +4,7 @@
 // a given kind (PC, NPC, Ally, Villain, Session). The schema is edited
 // by admins in /settings/templates and lives in the server-global
 // `note_templates` table — every world shares one copy because most
-// campaigns want the same 5e PC sheet / the same session-log shape.
+// campaigns want the same PC sheet / the same session-log shape.
 // Players never see or edit templates; they fill in values via the
 // character sheet UI (Phase 1d).
 //
@@ -12,7 +12,7 @@
 //   * The TypeScript types for the schema (TemplateField, Section, …)
 //   * DB CRUD helpers for admins + render layers
 //   * ensureDefaultTemplates() — seeds the table on first boot with
-//     the minimal 5e PC / NPC / Ally / Villain / Session defaults so
+//     the minimal PC / NPC / Ally / Villain / Session defaults so
 //     there's always something to render against.
 
 import { getDb } from './db';
@@ -470,7 +470,7 @@ const DEFAULT_TEMPLATES: Array<{
   name: string;
   schema: TemplateSchema;
 }> = [
-  { kind: 'character', name: 'D&D 5e — Character', schema: DEFAULT_CHARACTER_SCHEMA },
+  { kind: 'character', name: 'Character', schema: DEFAULT_CHARACTER_SCHEMA },
   { kind: 'person', name: 'Person (NPC)', schema: DEFAULT_PERSON_SCHEMA },
   { kind: 'creature', name: 'Creature', schema: DEFAULT_CREATURE_SCHEMA },
   { kind: 'session', name: 'Session log', schema: DEFAULT_SESSION_SCHEMA },
@@ -478,7 +478,7 @@ const DEFAULT_TEMPLATES: Array<{
   { kind: 'location', name: 'Location', schema: DEFAULT_LOCATION_SCHEMA },
   // legacy — keep so existing notes keep rendering, but won't be offered
   // in the "new entry" menu once UIs reference the canonical kinds.
-  { kind: 'pc', name: 'D&D 5e — Player character', schema: DEFAULT_PC_SCHEMA },
+  { kind: 'pc', name: 'Player character', schema: DEFAULT_PC_SCHEMA },
   { kind: 'npc', name: 'NPC', schema: DEFAULT_NPC_SCHEMA },
   { kind: 'ally', name: 'Ally', schema: DEFAULT_ALLY_SCHEMA },
   { kind: 'villain', name: 'Villain', schema: DEFAULT_VILLAIN_SCHEMA },

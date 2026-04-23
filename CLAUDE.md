@@ -2,7 +2,7 @@
 
 ## What we're building
 
-**Compendium** — a self-hosted D&D note-taking web app for players and DMs. Think Obsidian, but purpose-built for tabletop campaigns: real-time collaborative notes, character sheets, session logs, knowledge graph, and an AI assistant that understands the game context.
+**Compendium** — a self-hosted TTRPG note-taking web app for players and GMs. Think Obsidian, but purpose-built for tabletop campaigns: real-time collaborative notes, character sheets, session logs, knowledge graph, and an AI assistant that understands the game context.
 
 Players connect via a web dashboard. Notes sync live across all clients via Yjs CRDTs over WebSocket. Multiple groups (worlds/campaigns) are supported; users can belong to several.
 
@@ -44,7 +44,7 @@ Key tables:
 | `group_members` | User ↔ group with role: `admin`, `editor`, `viewer` |
 | `sessions` | HTTP-only session cookies + CSRF tokens |
 | `characters` | Derived index from note frontmatter — re-derived on every save |
-| `session_notes` | D&D session logs with DM review workflow (open → closed) |
+| `session_notes` | Campaign session logs with GM review workflow (open → closed) |
 | `import_jobs` | AI import pipeline state (uploaded → parsing → analysing → ready → applied) |
 | `assets` | Binary files (images etc.) deduplicated by content hash |
 | `note_links` | Graph edges between notes (backlinks) |
@@ -64,7 +64,7 @@ All queries include `group_id` — no table-level tenant isolation, just strict 
 **Session-based** (web dashboard)
 - HTTP-only cookie + CSRF token validated on every mutation
 - Roles within a group: `admin`, `editor`, `viewer`
-- Admin/editor = DM privileges in AI; viewer = player
+- Admin/editor = GM privileges in AI; viewer = player
 
 **Middleware** (`server/src/middleware.ts`): redirects unauthenticated to `/login`; public paths: `/login`, `/api/*`, `/_next/*`
 
@@ -91,8 +91,8 @@ All queries include `group_id` — no table-level tenant isolation, just strict 
 - `entity_edit_sheet` — update structured frontmatter fields (stats, HP, level)
 - `entity_edit_content` — append prose to note body
 - `backlink_create` — add knowledge graph edges
-- `inventory_add` — add items to character sheet (DM only)
-- `entity_move`, `session_close`, `session_apply` (DM only)
+- `inventory_add` — add items to character sheet (GM only)
+- `entity_move`, `session_close`, `session_apply` (GM only)
 
 **Import pipeline** — AI-assisted batch import of Markdown vaults
 1. Upload ZIP → `import-parse.ts` (structural parse)

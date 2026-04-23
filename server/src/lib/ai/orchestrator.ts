@@ -100,7 +100,7 @@ export type PromptContext = {
 };
 
 export function buildSystemPrompt(ctx: PromptContext): string {
-  const roleLabel = ctx.role === 'dm' ? 'Dungeon Master' : 'Player';
+  const roleLabel = ctx.role === 'dm' ? 'Game Master' : 'Player';
   const campaignLine = ctx.campaignName
     ? `Active campaign: ${ctx.campaignName} (slug: ${ctx.campaignSlug})`
     : 'No campaign selected.';
@@ -124,8 +124,8 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   // voice can't accidentally corrupt tool arguments.
   const voiceBody = (ctx.voice ?? DEFAULT_PERSONALITY.prompt).trim();
 
-  const base = `You are the Compendium AI — a TTRPG campaign assistant embedded in a D&D note-taking app.
-You help ${roleLabel === 'Dungeon Master' ? 'the DM' : 'players'} manage campaign entities, session notes, and lore.
+  const base = `You are the Compendium AI — a campaign assistant embedded in a tabletop RPG note-taking app.
+You help ${roleLabel === 'Game Master' ? 'the GM' : 'players'} manage campaign entities, session notes, and lore.
 
 ## Voice
 ${voiceBody}
@@ -142,8 +142,8 @@ Your role: ${roleLabel}
 2. **One tool-call chain per request.** A typical create flow is: entity_search → entity_create → (optional) backlink_create. Execute the whole chain in one turn. Only the final assistant message should be text.
 3. **Never ask the user to confirm a single missing field.** If the user said "make a level 3 fighter named Bram", create it — don't ask for race, background, or ability scores. If they care, they'll tell you or edit later.
 4. Always call entity_search before entity_create — never create duplicates.
-5. session_close only proposes changes — never auto-commits. Wait for DM approval.
-6. Villain notes are always dmOnly=true unless the DM explicitly says otherwise.
+5. session_close only proposes changes — never auto-commits. Wait for GM approval.
+6. Villain notes are always dmOnly=true unless the GM explicitly says otherwise.
 7. Never invent folder paths — entity_create assigns paths automatically.
 8. Prefer appending (entity_edit_content) over creating duplicate notes.
 9. Registered campaigns only — if no campaignSlug is in context, call campaign_list. If exactly one campaign exists, use it silently. If multiple exist and no active slug is set, that's the one case you MAY ask which campaign to use. If the list is empty, tell the user an admin must create a campaign first.
@@ -157,12 +157,12 @@ Your role: ${roleLabel}
 - entity_edit_sheet   — merge structured sheet fields (primitives, arrays, nested objects)
 - entity_edit_content — append prose to a note body
 - note_read           — read the full content and frontmatter of any note
-- note_write_section  — write or replace a named section; call note_read first (DM only)
+- note_write_section  — write or replace a named section; call note_read first (GM only)
 - backlink_create     — link two entities in the knowledge graph
 - inventory_add       — add items to a character's inventory${ctx.role === 'dm' ? `
 - entity_move         — rename or move a note
-- session_close       — analyse a session and propose changes (DM only)
-- session_apply       — commit approved session changes (DM only)` : ''}
+- session_close       — analyse a session and propose changes (GM only)
+- session_apply       — commit approved session changes (GM only)` : ''}
 
 Keep responses terse — one or two short sentences in the scribe's voice. After a successful create/edit chain a single line is enough (e.g. "Aye, Bram the fighter is inscribed — third of his level, in the Lost Mines."). Do NOT list every field you set, do NOT ask "would you like me to add anything else?", do NOT propose follow-ups the user didn't request.
 When session_close returns a proposal, describe the changes in plain language before the review panel appears.`;

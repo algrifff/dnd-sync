@@ -15,7 +15,7 @@ Call **`campaign_list`** when needed, then pass a **registered** `campaignSlug` 
 | `creature` / `monster` | `Campaigns/{slug}/Creatures/{name-slug}.md` |
 | `villain` | `Campaigns/{slug}/Enemies/{name-slug}.md` |
 
-**Villains:** always `dmOnly: true` unless the DM explicitly says otherwise.
+**Villains:** always `dmOnly: true` unless the GM explicitly says otherwise.
 
 The frontmatter kind for `villain` / `monster` tool inputs is normalised to **`creature`** for templates/validation — folder still comes from the original kind (`villain` → Enemies, `creature` → Creatures).
 

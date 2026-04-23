@@ -7,7 +7,7 @@
 //   - 'monster' (now superseded by 'creature')
 //
 // New canonical values:
-//   - 'character' = player character, full 5e sheet
+//   - 'character' = player character, full sheet
 //   - 'person'    = lightweight NPC (name / location / portrait / notes)
 //   - 'creature'  = stat-blocked monster or NPC, with player notes
 //   - 'item'      = gear / weapons / wondrous items

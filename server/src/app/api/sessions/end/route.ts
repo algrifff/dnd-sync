@@ -113,7 +113,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       : `Campaign slug: ${campaignSlug}`;
   }
 
-  const systemPrompt = `You are an autonomous D&D session-end processor for the Compendium app.
+  const systemPrompt = `You are an autonomous TTRPG session-end processor for the Compendium app.
 
 Your task: analyse the session notes below and update the campaign knowledge base.
 

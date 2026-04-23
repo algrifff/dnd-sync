@@ -1,8 +1,7 @@
-// Full 5e player-character sheet. Lives under `note.frontmatter.sheet`
+// Full player-character sheet. Lives under `note.frontmatter.sheet`
 // when `note.frontmatter.kind === 'character'`.
 //
-// Mirrors /Users/magig/Desktop/dnd5e_json_schema-master/schemas/Character.schema.json
-// adapted for our storage (nested compendium refs + player-POV extras).
+// Adapted for our storage (nested compendium refs + player-POV extras).
 
 import { z } from 'zod';
 import {

@@ -41,7 +41,7 @@ describe('normalizeKind', () => {
 });
 
 describe('abilityModifier', () => {
-  test('matches D&D 5e floor((score - 10) / 2)', () => {
+  test('matches floor((score - 10) / 2)', () => {
     expect(abilityModifier(10)).toBe(0);
     expect(abilityModifier(11)).toBe(0);
     expect(abilityModifier(12)).toBe(1);

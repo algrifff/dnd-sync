@@ -3,7 +3,7 @@
 
 import { getDb } from './db';
 
-/** Default D&D-shaped folder skeleton seeded on first boot. Each
+/** Default campaign-shaped folder skeleton seeded on first boot. Each
  *  entry is a folder path relative to the vault root; subfolders
  *  must list their full path so the empty-folder marker table
  *  carries them all. Users can delete any folder they don't want;

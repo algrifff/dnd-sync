@@ -144,7 +144,7 @@ export async function runClassify(
 
 function buildSystem(ctx: ImportSkillContext): string {
   return [
-    'You are a careful D&D campaign-note classifier.',
+    'You are a careful TTRPG campaign-note classifier.',
     'Notes may come from any tool — Obsidian, Google Drive, OneNote, plain text files, or hand-written markdown.',
     'Infer the source format from signals: YAML frontmatter and [[wikilinks]] suggest Obsidian; numbered or dated',
     'folder names suggest Google Drive or OneDrive exports; first-line titles with no frontmatter suggest OneNote',

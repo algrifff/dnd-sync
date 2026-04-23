@@ -100,7 +100,7 @@ export async function runRelink(
 
 function buildSystem(): string {
   return [
-    'You are the link-resolution skill for a D&D campaign-note importer.',
+    'You are the link-resolution skill for a TTRPG campaign-note importer.',
     '',
     'You will receive ONE markdown note and a full index of every other note',
     'imported in the same batch. The note body uses Obsidian-style wikilinks',

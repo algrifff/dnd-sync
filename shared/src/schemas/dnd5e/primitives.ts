@@ -1,6 +1,5 @@
-// D&D 5e shared primitives used across character / creature / item / compendium schemas.
-// Sourced from /Users/magig/Desktop/dnd5e_json_schema-master canonical shapes
-// and adapted for our JSON-in-frontmatter storage.
+// Shared primitives used across character / creature / item / compendium schemas.
+// Adapted for our JSON-in-frontmatter storage.
 
 import { z } from 'zod';
 
@@ -20,7 +19,7 @@ export const AbilityScores = z.object({
 });
 export type AbilityScores = z.infer<typeof AbilityScores>;
 
-// ── Skills (5e canonical 18) ─────────────────────────────────────────────
+// ── Skills (canonical 18) ─────────────────────────────────────────────
 
 export const SKILL_KEYS = [
   'acrobatics',
@@ -45,7 +44,7 @@ export const SKILL_KEYS = [
 export const SkillKey = z.enum(SKILL_KEYS);
 export type SkillKey = z.infer<typeof SkillKey>;
 
-/** Which ability each skill is keyed off of (5e canon). */
+/** Which ability each skill is keyed off of. */
 export const SKILL_ABILITY: Readonly<Record<SkillKey, AbilityKey>> = {
   acrobatics: 'dex',
   animal_handling: 'wis',
@@ -248,7 +247,7 @@ export const Ref = z.object({
 });
 export type Ref = z.infer<typeof Ref>;
 
-// ── Source citation (mirrors dnd5e Source.schema.json) ───────────────────
+// ── Source citation ──────────────────────────────────────────────────────
 
 export const Source = z
   .object({

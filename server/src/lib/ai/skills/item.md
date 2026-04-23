@@ -27,7 +27,7 @@ Pass **every** inferable field in `entity_create.sheet`.
 
 ### Rules
 
-- DM-secret loot / villain-only gear: `dmOnly: true`
+- GM-secret loot / villain-only gear: `dmOnly: true`
 - Mundane consumables the player does not need as a full note: `inventory_add` with `freeformName` only
 - Legendary / artifact items: set `requires_attunement` + `charges` when relevant
 

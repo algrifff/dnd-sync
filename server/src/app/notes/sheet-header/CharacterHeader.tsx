@@ -220,7 +220,7 @@ export function CharacterHeader({
                   // Editing the total, not the bonus — so the user types
                   // the initiative they want and we back out the bonus
                   // from DEX mod. Keeps the bonus stable when DEX later
-                  // changes (total follows DEX the way 5e rules expect).
+                  // changes (total follows DEX the way the rules expect).
                   onCommit={(n) =>
                     n == null
                       ? undefined

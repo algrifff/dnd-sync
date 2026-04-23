@@ -20,7 +20,7 @@ const fraunces = Fraunces({
 
 export const metadata = {
   title: 'Compendium',
-  description: 'Live-edited shared D&D vault',
+  description: 'Live-edited shared TTRPG vault',
 };
 
 export default function RootLayout({

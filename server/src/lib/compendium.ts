@@ -1,6 +1,6 @@
 // Compendium access layer.
 //
-// The compendium is a cross-world library of canonical D&D 5e content
+// The compendium is a cross-world library of canonical TTRPG content
 // (classes, feats, spells, items, monsters, …) plus any per-world
 // homebrew scoped by group_id. Every entry is JSON validated against
 // its Zod schema on write; read APIs do NOT re-validate — that trust

@@ -436,7 +436,7 @@ async function aiAnalyseStructure(
   };
 
   const systemPrompt = [
-    'You are analysing a D&D vault import to plan how notes should be organised into campaigns.',
+    'You are analysing a TTRPG vault import to plan how notes should be organised into campaigns.',
     '',
     'GOAL: output one entry in `groups` per distinct campaign or world-lore bucket you detect.',
     '',

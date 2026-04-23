@@ -18,7 +18,7 @@ ALWAYS call `entity_search` before `entity_create`. If a match exists, prefer `e
 |------|--------|
 | `character` (PC) | `Campaigns/{slug}/Characters/{name-slug}.md` |
 | `person` (NPC / ally) | `Campaigns/{slug}/People/{name-slug}.md` |
-| `villain` (named antagonist) | `Campaigns/{slug}/Enemies/{name-slug}.md` — always `dmOnly: true` unless the DM explicitly says otherwise |
+| `villain` (named antagonist) | `Campaigns/{slug}/Enemies/{name-slug}.md` — always `dmOnly: true` unless the GM explicitly says otherwise |
 
 Legacy tool kinds `pc` → character, `npc` / `ally` → person. Prefer canonical kinds in new calls.
 

@@ -100,12 +100,12 @@ After completing all tool calls, reply with a single scribe-voice paragraph list
 - Skip entities because you're unsure — create stubs with minimal fields
 - Create player characters (kind=character/pc/ally)
 
-### Closing a session (legacy DM review workflow)
+### Closing a session (legacy GM review workflow)
 
 - `session_close` only proposes changes — it does **not** commit.
 - After `session_close`, summarise the proposal in plain language before any review UI.
-- Do **not** call `session_apply` until the DM explicitly approves ("apply", "commit", "looks good").
-- If the session row is already `closed`, refuse to reopen without DM confirmation.
+- Do **not** call `session_apply` until the GM explicitly approves ("apply", "commit", "looks good").
+- If the session row is already `closed`, refuse to reopen without GM confirmation.
 
 ### After session_apply
 

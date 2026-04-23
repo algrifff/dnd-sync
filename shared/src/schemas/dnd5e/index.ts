@@ -1,4 +1,4 @@
-// Barrel export for all 5e Zod schemas.
+// Barrel export for all TTRPG Zod schemas.
 
 export * from './primitives';
 export * from './character';

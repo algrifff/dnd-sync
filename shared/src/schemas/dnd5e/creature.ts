@@ -2,7 +2,7 @@
 // short observed-info memo; the full-length body lives in the TipTap
 // note itself.
 //
-// Mirrors Monster.schema.json from dnd5e_json_schema.
+// Mirrors a standard monster/creature stat block.
 
 import { z } from 'zod';
 import {

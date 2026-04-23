@@ -1,6 +1,6 @@
 @import 'tailwindcss';
 
-/* D&D palette — "round table, neatly typeset" */
+/* TTRPG palette — "round table, neatly typeset" */
 :root {
   --parchment: #F4EDE0;
   --parchment-sunk: #EAE1CF;
@@ -188,7 +188,7 @@ html, body {
   font-weight: 600;
 }
 
-/* External / plain markdown links — D&D wine so they read as
+/* External / plain markdown links — wine so they read as
    clickable at first glance without looking like web-era blue. */
 .note-surface .ProseMirror a {
   color: var(--wine);

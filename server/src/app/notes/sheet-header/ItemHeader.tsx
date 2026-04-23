@@ -1,8 +1,8 @@
 'use client';
 
 // Item / loot header. Big icon box on the left to showcase the art;
-// compendium search bar on the right so the DM can attach a canonical
-// 5e item (Longsword, Potion of Healing, …) and autofill category,
+// compendium search bar on the right so the GM can attach a canonical
+// item (Longsword, Potion of Healing, …) and autofill category,
 // rarity, weapon damage, armor AC and modifiers in one click. Weapon
 // and armor sub-sheets surface as their own tiles when present.
 
@@ -119,8 +119,8 @@ export function ItemHeader({
     : undefined;
 
   // When a compendium item is picked we autofill the core fields in one
-  // PATCH so the sheet reflects the canonical 5e shape (weapon damage,
-  // armor AC, modifiers etc.) without the DM having to retype anything.
+  // PATCH so the sheet reflects the canonical shape (weapon damage,
+  // armor AC, modifiers etc.) without the GM having to retype anything.
   const applyCompendium = (data: Record<string, unknown>): void => {
     const patch: Record<string, unknown> = {};
     if (typeof data.category === 'string') patch.category = data.category;
@@ -171,7 +171,7 @@ export function ItemHeader({
               <div className="mt-1.5">
                 <CompendiumSearch
                   kind="item"
-                  placeholder="Link a 5e item (autofills stats)…"
+                  placeholder="Link a compendium item (autofills stats)…"
                   ariaLabel="Link item from compendium"
                   onPick={(hit) =>
                     applyCompendium(hit.data as Record<string, unknown>)

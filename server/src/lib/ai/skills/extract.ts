@@ -173,7 +173,7 @@ function buildSystem(kindSpecific: string, ctx: ImportSkillContext): string {
 // ── Per-kind instruction blocks ────────────────────────────────────────
 
 const SYSTEM_PC = [
-  'You extract a D&D 5e player-character sheet from the given note.',
+  'You extract a TTRPG player-character sheet from the given note.',
   'The player (owner) is whoever wrote this note. Leave the `player` field untouched — the app sets it from the creator.',
   'Common signals to look for:',
   '  * class / subclass / level (usually in a header or a stat block)',
@@ -187,7 +187,7 @@ const SYSTEM_PC = [
 
 const SYSTEM_NPC = [
   'You extract an NPC sheet from the given note.',
-  'Focus on what a DM needs at a glance: a quick tagline ("grizzled innkeeper"), the role they play in the world, where they live, and — if they matter in combat — a stat block.',
+  'Focus on what a GM needs at a glance: a quick tagline ("grizzled innkeeper"), the role they play in the world, where they live, and — if they matter in combat — a stat block.',
   'Leave combat stats null for pure-roleplay NPCs.',
 ].join('\n');
 
@@ -206,7 +206,7 @@ const SYSTEM_VILLAIN = [
 const SYSTEM_LOCATION = [
   'You extract a location sheet from the given note.',
   'Capture: the place name, type (city / town / village / dungeon / wilderness / landmark / plane / other), which region it sits in, an approximate population or character ("~12k, mostly dwarves" is a valid string), a one-paragraph summary, and a short list of notable features.',
-  'Dungeon-style pages usually do not have populations — leave null.',
+  'Underground/ruin-style pages usually do not have populations — leave null.',
 ].join('\n');
 
 const SYSTEM_ITEM = [

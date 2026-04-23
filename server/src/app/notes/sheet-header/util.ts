@@ -28,7 +28,7 @@ export function normalizeKind(raw: unknown): CanonicalKind | null {
   }
 }
 
-/** D&D 5e ability modifier: floor((score - 10) / 2). */
+/** Ability modifier: floor((score - 10) / 2). */
 export function abilityModifier(score: number): number {
   if (!Number.isFinite(score)) return 0;
   return Math.floor((score - 10) / 2);

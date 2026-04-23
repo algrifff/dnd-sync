@@ -9,7 +9,7 @@
 //
 // The form shape for Inventory / Features / Extras still comes from
 // the admin-editable template (one copy per role). Skills are
-// rendered directly from the canonical 5e list keyed off
+// rendered directly from the canonical skill list keyed off
 // `sheet.skills` + `sheet.proficiency_bonus` — no template entry
 // required, so every character gets the same single-column skill
 // list regardless of the template they were created against.
@@ -66,7 +66,7 @@ function sectionTab(sectionId: string): TabId {
   return 'extras';
 }
 
-// ── 5e skill catalogue (must match shared/schemas/dnd5e/primitives) ────
+// ── Skill catalogue (must match shared/schemas/dnd5e/primitives) ────
 
 const SKILL_CATALOG: Array<{
   key: string;
@@ -354,7 +354,7 @@ export function CharacterSheet({
   };
 
   // Hide tabs that would render empty (except Skills — it's always
-  // populated from the canonical 5e list).
+  // populated from the canonical skill list).
   const availableTabs = TABS.filter(
     (t) => t.id === 'skills' || sectionsByTab[t.id].length > 0,
   );

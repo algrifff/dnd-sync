@@ -1,5 +1,5 @@
-// Location sheet. No direct analogue in dnd5e_json_schema; shaped for
-// player-facing use (where is this, who's here, how does it nest).
+// Location sheet. Shaped for player-facing use (where is this, who's
+// here, how does it nest).
 
 import { z } from 'zod';
 

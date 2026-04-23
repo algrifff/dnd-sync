@@ -38,11 +38,11 @@ export type MergeResult = {
   mergedBody: string;
   /** Fields the model thinks should be added / updated on the
    *  frontmatter. Our caller enforces the "existing wins per-key"
-   *  rule on top of these, so nothing the DM set gets clobbered. */
+   *  rule on top of these, so nothing the GM set gets clobbered. */
   frontmatterSuggestions: Record<string, unknown>;
   /** Tags the merged note should carry (union + any new implied). */
   tags: string[];
-  /** One-liner for the DM on what changed. */
+  /** One-liner for the GM on what changed. */
   summary: string;
 };
 
@@ -116,7 +116,7 @@ export async function runMerge(
 
 function buildSystem(): string {
   return [
-    'You merge two versions of the same D&D note into one.',
+    'You merge two versions of the same campaign note into one.',
     'You will receive an existing note (frontmatter + body) and an incoming note (frontmatter + body) that the user wants to fold into it.',
     '',
     'Rules:',
@@ -126,7 +126,7 @@ function buildSystem(): string {
     '  4. Frontmatter suggestions: emit a JSON object string of fields you think should be set on the merged note. Only include additions + clearly-missing fields. The caller will NOT overwrite existing values; it merges your suggestions under the existing frontmatter.',
     '  5. Merge `sheet` entries field-by-field: existing values win, your additions fill blanks only.',
     '  6. Union tags. Drop duplicates. Keep to 2-5 distinct tags total.',
-    '  7. summary: one short sentence for the DM, e.g. "added stat block and two new paragraphs of backstory; no conflicts".',
+    '  7. summary: one short sentence for the GM, e.g. "added stat block and two new paragraphs of backstory; no conflicts".',
   ].join('\n');
 }
 

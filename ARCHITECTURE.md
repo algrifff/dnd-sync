@@ -4,7 +4,7 @@ Living north-star document. Update this as decisions evolve. Phase 1 is file-lev
 
 ## North star
 
-**Compendium** — a self-hosted real-time vault for D&D. Obsidian remains the UI. A tiny Next.js + SQLite server handles sync, search, and AI. Character-level editing and AI assistance are flip-a-switch upgrades on the same codebase.
+**Compendium** — a self-hosted real-time vault for tabletop RPG campaigns. Obsidian remains the UI. A tiny Next.js + SQLite server handles sync, search, and AI. Character-level editing and AI assistance are flip-a-switch upgrades on the same codebase.
 
 ## Architecture
 

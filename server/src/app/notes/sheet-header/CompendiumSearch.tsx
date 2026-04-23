@@ -1,6 +1,6 @@
 'use client';
 
-// Typeahead over the compendium for attaching a canonical 5e entry
+// Typeahead over the compendium for attaching a canonical entry
 // (Longsword, Potion of Healing, etc.) to a world note. On pick, we
 // hand the full entry back to the caller so they can autofill the
 // sheet in a single PATCH. 200ms debounce, keyboard nav matches

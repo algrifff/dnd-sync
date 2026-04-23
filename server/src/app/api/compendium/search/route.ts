@@ -1,8 +1,8 @@
 // GET /api/compendium/search?kind=item&q=<query>
 //
 // Typeahead over the cross-world compendium (items / monsters / spells /
-// classes / …). Used by the ItemHeader's CompendiumSearch to let a DM
-// attach a canonical 5e item (Longsword, Potion of Healing, etc.) to a
+// classes / …). Used by the ItemHeader's CompendiumSearch to let a GM
+// attach a canonical item (Longsword, Potion of Healing, etc.) to a
 // loot note so category, rarity, weapon damage, and modifiers get
 // populated automatically.
 //

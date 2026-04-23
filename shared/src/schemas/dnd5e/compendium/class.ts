@@ -1,4 +1,4 @@
-// Class definition used in the compendium (canonical 5e class).
+// Class definition used in the compendium (canonical class).
 
 import { z } from 'zod';
 import { AbilityKey } from '../primitives';
