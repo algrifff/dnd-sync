@@ -11,23 +11,15 @@ import {
   loadUser,
 } from '@/lib/notes';
 import { getTemplate, type NoteTemplate, type TemplateKind } from '@/lib/templates';
-import { listNoteKinds } from '@/lib/characters';
-import { buildTree } from '@/lib/tree';
 import { getWorldHeader } from '@/lib/groups';
-import { AppHeader } from '../../../AppHeader';
-import { NoteTabBar } from '../../../NoteTabBar';
-import { SidebarHeader } from '../../../SidebarHeader';
-import { SidebarFooter } from '../../../SidebarFooter';
-import { FileTree } from '../../../notes/FileTree';
-import { NoteMenu } from '../../../notes/NoteMenu';
-import { NoteWorkspace } from '../../../notes/NoteWorkspace';
-import { TagEditor } from '../../../notes/TagEditor';
-import { NoteSidebar, extractOutline } from '../../../notes/NoteSidebar';
-import { ChatPane } from '../../../ChatPane';
-import { EndSessionButton } from '../../../notes/EndSessionButton';
+import { NoteMenu } from '../../../../notes/NoteMenu';
+import { NoteWorkspace } from '../../../../notes/NoteWorkspace';
+import { TagEditor } from '../../../../notes/TagEditor';
+import { NoteSidebar, extractOutline } from '../../../../notes/NoteSidebar';
+import { ChatPane } from '../../../../ChatPane';
+import { EndSessionButton } from '../../../../notes/EndSessionButton';
 import { getSessionStatus } from '@/lib/sessions';
-import { CollapsibleSidebar } from '../../../CollapsibleSidebar';
-import { CollapsibleRightPanel } from '../../../CollapsibleRightPanel';
+import { CollapsibleRightPanel } from '../../../../CollapsibleRightPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,21 +41,38 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   const note = loadNote(session.currentGroupId, path);
   if (!note) notFound();
 
-  const sidebarOpen = jar.get('compendium_sidebar_open')?.value !== 'false';
   const rightPanelOpen = jar.get('compendium_rightpanel_open')?.value !== 'false';
 
-  const worldHeader = getWorldHeader(session.currentGroupId);
+  // Fan out the independent reads. bun:sqlite / better-sqlite3 are
+  // synchronous, but Promise.all still lets the engine interleave
+  // work (await microtask yields) and keeps us from blocking on a
+  // slow query before a fast one can start. Tree + kindMap are owned
+  // by the parent (content)/layout so this page only fetches the
+  // note-specific payloads.
+  const [worldHeader, backlinks, outgoingLinks, tags, creator] =
+    await Promise.all([
+      Promise.resolve(getWorldHeader(session.currentGroupId)),
+      Promise.resolve(loadBacklinks(session.currentGroupId, path)),
+      Promise.resolve(loadOutgoingLinks(session.currentGroupId, path)),
+      Promise.resolve(loadTags(session.currentGroupId, path)),
+      note.created_by
+        ? Promise.resolve(loadUser(note.created_by))
+        : Promise.resolve(null),
+    ]);
+
   const accentColor = worldHeader.headerColor;
 
-  const tree = buildTree(session.currentGroupId);
-  const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
-  const backlinks = loadBacklinks(session.currentGroupId, path);
-  const outgoingLinks = loadOutgoingLinks(session.currentGroupId, path);
-  const tags = loadTags(session.currentGroupId, path);
-  const creator = note.created_by ? loadUser(note.created_by) : null;
+  // Parse frontmatter ONCE — character resolution, session detection,
+  // and campaign-slug extraction all used to re-parse the same JSON.
+  let frontmatter: Record<string, unknown> = {};
+  try {
+    frontmatter = JSON.parse(note.frontmatter_json) as Record<string, unknown>;
+  } catch {
+    /* corrupt frontmatter → treat as empty object */
+  }
 
   const character = resolveCharacterView({
-    frontmatterJson: note.frontmatter_json,
+    frontmatter,
     path,
     sessionRole: session.role,
     sessionUsername: session.username,
@@ -72,12 +81,8 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   });
 
   // Session-kind metadata — drives the End of Session button
-  let noteKind: string | null = null;
-  let sessionStatus: 'open' | 'review' | 'closed' = 'open';
-  try {
-    const fm = JSON.parse(note.frontmatter_json) as Record<string, unknown>;
-    noteKind = typeof fm.kind === 'string' ? fm.kind : null;
-  } catch { /* ignore */ }
+  const noteKind: string | null =
+    typeof frontmatter.kind === 'string' ? frontmatter.kind : null;
   const isSessionNote = noteKind === 'session';
   const canEdit = canEditNote({
     role: session.role,
@@ -88,15 +93,15 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
   // Campaign slug for session end — from frontmatter.campaigns[0] or path
   let sessionCampaignSlug: string | undefined;
+  let sessionStatus: 'open' | 'review' | 'closed' = 'open';
   if (isSessionNote) {
-    try {
-      const fm2 = JSON.parse(note.frontmatter_json) as Record<string, unknown>;
-      const camps = Array.isArray(fm2.campaigns) ? fm2.campaigns : [];
-      sessionCampaignSlug =
-        typeof camps[0] === 'string'
-          ? camps[0]
-          : /^Campaigns\/([^/]+)\//.exec(path)?.[1];
-    } catch { /* ignore */ }
+    const camps = Array.isArray(frontmatter.campaigns)
+      ? frontmatter.campaigns
+      : [];
+    sessionCampaignSlug =
+      typeof camps[0] === 'string'
+        ? camps[0]
+        : /^Campaigns\/([^/]+)\//.exec(path)?.[1];
     sessionStatus = getSessionStatus(session.currentGroupId, path);
   }
 
@@ -109,45 +114,15 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   const outline = extractOutline(contentJson);
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <AppHeader
-        role={session.role}
-        me={{
-          userId: session.userId,
-          displayName: session.displayName,
-          username: session.username,
-          accentColor: session.accentColor,
-          avatarVersion: session.avatarVersion,
-        }}
-        csrfToken={session.csrfToken}
-        canCreate={session.role !== 'viewer'}
-        groupId={session.currentGroupId}
-      />
-      <div className="flex min-h-0 flex-1">
-        <CollapsibleSidebar initialOpen={sidebarOpen}>
-          <SidebarHeader role={session.role} />
-          <FileTree
-            tree={tree}
-            activePath={path}
-            groupId={session.currentGroupId}
-            csrfToken={session.csrfToken}
-            canCreate={session.role !== 'viewer'}
-            isWorldOwner={session.role === 'admin'}
-            kindMap={kindMap}
-          />
-          <SidebarFooter username={session.username} />
-        </CollapsibleSidebar>
-
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <NoteTabBar />
-          <div
-            id="note-tools-anchor"
-            className="relative flex min-h-0 flex-1"
-          >
-            <main
-              className="relative flex min-w-0 flex-1 justify-center overflow-y-auto overflow-x-hidden px-8 pt-10 pb-32"
-              id="note-main"
-            >
+    <>
+      <div
+        id="note-tools-anchor"
+        className="relative flex min-h-0 flex-1"
+      >
+        <main
+          className="relative flex min-w-0 flex-1 justify-center overflow-y-auto overflow-x-hidden px-8 pt-10 pb-32"
+          id="note-main"
+        >
               <div id="note-scroll-body" className="relative w-[1600px] shrink-0 self-start">
                 <div className="relative mx-auto max-w-[720px]">
                   <header className="mb-2 flex items-center justify-between gap-3">
@@ -234,30 +209,32 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
               </div>
             </main>
 
-            <CollapsibleRightPanel initialOpen={rightPanelOpen}>
-              <NoteSidebar
-                path={path}
-                backlinks={backlinks}
-                outgoingLinks={outgoingLinks}
-                tags={tags}
-                outline={outline}
-                csrfToken={session.csrfToken}
-              />
-            </CollapsibleRightPanel>
-          </div>
-        </div>
-
-        <ChatPane
-          groupId={session.currentGroupId}
-          userId={session.userId}
-          role={session.role === 'viewer' ? 'player' : 'dm'}
-          activePath={path}
-          {...(campaignSlugFromPath(path) !== undefined
-            ? { campaignSlug: campaignSlugFromPath(path) }
-            : {})}
-        />
+        <CollapsibleRightPanel initialOpen={rightPanelOpen}>
+          <NoteSidebar
+            path={path}
+            backlinks={backlinks}
+            outgoingLinks={outgoingLinks}
+            tags={tags}
+            outline={outline}
+            csrfToken={session.csrfToken}
+          />
+        </CollapsibleRightPanel>
       </div>
-    </div>
+
+      {/* Fixed-position overlay — DOM location doesn't matter. Kept
+           inside the page so props tied to the current note (activePath,
+           campaignSlug, role) flow through cleanly without a client-side
+           pathname derivation. */}
+      <ChatPane
+        groupId={session.currentGroupId}
+        userId={session.userId}
+        role={session.role === 'viewer' ? 'player' : 'dm'}
+        activePath={path}
+        {...(campaignSlugFromPath(path) !== undefined
+          ? { campaignSlug: campaignSlugFromPath(path) }
+          : {})}
+      />
+    </>
   );
 }
 
@@ -281,19 +258,14 @@ const CHARACTER_KINDS_BY_PATH: Array<[RegExp, TemplateKind]> = [
 ];
 
 function resolveCharacterView(args: {
-  frontmatterJson: string;
+  frontmatter: Record<string, unknown>;
   path: string;
   sessionRole: 'admin' | 'editor' | 'viewer';
   sessionUsername: string;
   sessionUserId: string;
   createdBy: string | null;
 }): CharacterView | null {
-  let fm: Record<string, unknown>;
-  try {
-    fm = JSON.parse(args.frontmatterJson) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+  const fm = args.frontmatter;
 
   let templateKind: TemplateKind;
   if (fm.kind === 'character') {

@@ -127,10 +127,41 @@ export function PointerOverlay({
 
     let rafHandle = 0;
     let last: VirtualPointer | FractionPointer | null = null;
+    // Last pointer actually broadcast to peers. We gate updates on a
+    // small pixel-distance threshold so micro-jitter and RAF ticks
+    // on a still mouse don't spray awareness messages across the WS.
+    // The threshold is measured in the SAME unit space as `last` —
+    // virtual-px for notes (≈3 screen-px at default zoom), fractional
+    // for the graph (0.002 ≈ 2 px at 1000-px canvas).
+    let sent: VirtualPointer | FractionPointer | null = null;
+    const MIN_VIRTUAL_DELTA = 3;
+    const MIN_FRACTIONAL_DELTA = 0.002;
+
+    const distanceChanged = (
+      a: VirtualPointer | FractionPointer | null,
+      b: VirtualPointer | FractionPointer,
+    ): boolean => {
+      if (!a) return true;
+      if ('x' in b && 'x' in a) {
+        return (
+          Math.abs(a.x - b.x) >= MIN_VIRTUAL_DELTA ||
+          Math.abs(a.y - b.y) >= MIN_VIRTUAL_DELTA
+        );
+      }
+      if ('xRel' in b && 'xRel' in a) {
+        return (
+          Math.abs(a.xRel - b.xRel) >= MIN_FRACTIONAL_DELTA ||
+          Math.abs(a.yRel - b.yRel) >= MIN_FRACTIONAL_DELTA
+        );
+      }
+      return true;
+    };
 
     const flush = (): void => {
       rafHandle = 0;
       if (!last) return;
+      if (!distanceChanged(sent, last)) return;
+      sent = last;
       aw.setLocalStateField('pointer', last);
     };
     const onMove = (e: MouseEvent): void => {
@@ -172,6 +203,24 @@ export function PointerOverlay({
   useEffect(() => {
     const aw = provider.awareness;
     if (!aw) return;
+    const selfClientId = aw.clientID;
+    // Awareness change payload from y-protocols: `{ added, updated,
+    // removed }` arrays of client IDs. Skip the recompute entirely if
+    // the only client that changed is us — our own pointer broadcasts
+    // would otherwise trigger a remotes-list rebuild + re-render on
+    // every mousemove.
+    const onChange = (
+      changes?: { added: number[]; updated: number[]; removed: number[] },
+    ): void => {
+      if (changes) {
+        const peerTouched =
+          changes.added.some((id) => id !== selfClientId) ||
+          changes.updated.some((id) => id !== selfClientId) ||
+          changes.removed.some((id) => id !== selfClientId);
+        if (!peerTouched) return;
+      }
+      recompute();
+    };
     const recompute = (): void => {
       if (!coordScope) return;
       const w = coordScope.scrollWidth;
@@ -214,9 +263,9 @@ export function PointerOverlay({
       }
       setRemotes(list);
     };
-    aw.on('change', recompute);
+    aw.on('change', onChange);
     recompute();
-    return () => aw.off('change', recompute);
+    return () => aw.off('change', onChange);
   }, [provider, coordScope, virtualWidth]);
 
   // Cache viewport + coord rects for edge-chip positioning. Bump on

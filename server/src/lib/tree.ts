@@ -84,11 +84,57 @@ export type Tree = {
   updatedAt: number;
 };
 
+// Module-level cache so repeated buildTree() calls within the same
+// request flow (page render → /api/tree → tab validate, etc.) reuse
+// a single materialised tree. Validity is gated by a cheap snapshot
+// query against the source tables, so any mutation (note save,
+// folder add/delete) invalidates automatically without explicit
+// invalidation logic anywhere else.
+type CacheEntry = { tree: Tree; snapshotKey: string };
+const treeCache = new Map<string, CacheEntry>();
+const TREE_CACHE_MAX = 20;
+
+function snapshotKey(groupId: string, hideDmOnly: boolean): string {
+  // Single round-trip: max(updated_at) + count over notes + count
+  // over folder_markers. Captures every input that buildTree's two
+  // SELECTs read. ~1ms even on large worlds.
+  const row = getDb()
+    .query<
+      { u: number | null; n: number; m: number },
+      [string, string]
+    >(
+      `SELECT
+         (SELECT COALESCE(MAX(updated_at), 0) FROM notes WHERE group_id = ?) AS u,
+         (SELECT COUNT(*) FROM notes WHERE group_id = ?1) AS n,
+         (SELECT COUNT(*) FROM folder_markers WHERE group_id = ?2) AS m`,
+    )
+    .get(groupId, groupId);
+  const u = row?.u ?? 0;
+  const n = row?.n ?? 0;
+  const m = row?.m ?? 0;
+  return `${u}:${n}:${m}:${hideDmOnly ? 1 : 0}`;
+}
+
+function cacheKey(groupId: string, hideDmOnly: boolean): string {
+  return `${groupId}:${hideDmOnly ? 1 : 0}`;
+}
+
 export function buildTree(
   groupId: string,
   opts?: { hideDmOnly?: boolean },
 ): Tree {
-  const where = opts?.hideDmOnly
+  const hideDmOnly = !!opts?.hideDmOnly;
+  const key = cacheKey(groupId, hideDmOnly);
+  const snap = snapshotKey(groupId, hideDmOnly);
+  const cached = treeCache.get(key);
+  if (cached && cached.snapshotKey === snap) {
+    // Re-insert to keep the LRU-ish ordering — Map.set on an
+    // existing key bumps it to "most recent" in iteration order.
+    treeCache.delete(key);
+    treeCache.set(key, cached);
+    return cached.tree;
+  }
+  const where = hideDmOnly
     ? 'WHERE group_id = ? AND dm_only = 0'
     : 'WHERE group_id = ?';
   const rows = getDb()
@@ -121,7 +167,15 @@ export function buildTree(
   }
 
   sortTree(root);
-  return { root, updatedAt: maxUpdated };
+  const tree: Tree = { root, updatedAt: maxUpdated };
+  // Bound the cache so an admin in many worlds doesn't grow it
+  // forever. FIFO eviction by Map insertion order.
+  if (treeCache.size >= TREE_CACHE_MAX) {
+    const oldestKey = treeCache.keys().next().value;
+    if (oldestKey) treeCache.delete(oldestKey);
+  }
+  treeCache.set(key, { tree, snapshotKey: snap });
+  return tree;
 }
 
 function ensureFolder(root: TreeDir, path: string): void {

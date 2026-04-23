@@ -28,6 +28,12 @@ export function usePatchSheet(args: {
   const pendingRef = useRef<Record<string, unknown>>({});
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inflightRef = useRef<Promise<void> | null>(null);
+  // Awareness broadcasts are throttled separately from the server
+  // PATCH so rapid typing (HP spinner, name field) doesn't spray a
+  // new awareness state on every keystroke. 80 ms is short enough
+  // that peer mirroring still feels live.
+  const awarenessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const awarenessPendingRef = useRef<Record<string, unknown>>({});
 
   const flush = useCallback(async (): Promise<void> => {
     if (inflightRef.current) await inflightRef.current;
@@ -72,13 +78,23 @@ export function usePatchSheet(args: {
     (partial) => {
       setSheet((prev) => ({ ...prev, ...partial }));
       Object.assign(pendingRef.current, partial);
+      // Accumulate awareness fields in a separate buffer so the
+      // throttled broadcast below sends the MOST RECENT value of each
+      // field per window, not just whichever one landed last.
+      Object.assign(awarenessPendingRef.current, partial);
       const aw = provider?.awareness;
-      if (aw) {
-        aw.setLocalStateField('sheetEdit', {
-          path: notePath,
-          seq: Date.now(),
-          fields: { ...partial },
-        });
+      if (aw && !awarenessTimerRef.current) {
+        awarenessTimerRef.current = setTimeout(() => {
+          awarenessTimerRef.current = null;
+          const fields = awarenessPendingRef.current;
+          awarenessPendingRef.current = {};
+          if (Object.keys(fields).length === 0) return;
+          aw.setLocalStateField('sheetEdit', {
+            path: notePath,
+            seq: Date.now(),
+            fields,
+          });
+        }, 80);
       }
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
@@ -92,10 +108,23 @@ export function usePatchSheet(args: {
   useEffect(() => {
     const aw = provider?.awareness;
     if (!aw) return;
+    const selfClientId = aw.clientID;
     const seen = new Map<number, number>();
-    const onChange = (): void => {
+    const onChange = (
+      changes?: { added: number[]; updated: number[]; removed: number[] },
+    ): void => {
+      // Skip the whole scan if only our own awareness state changed.
+      // Without this, every local broadcast re-fires the observer and
+      // setSheet re-runs for every header on screen.
+      if (changes) {
+        const peerTouched =
+          changes.added.some((id) => id !== selfClientId) ||
+          changes.updated.some((id) => id !== selfClientId) ||
+          changes.removed.some((id) => id !== selfClientId);
+        if (!peerTouched) return;
+      }
       for (const [clientId, state] of aw.getStates().entries()) {
-        if (clientId === aw.clientID) continue;
+        if (clientId === selfClientId) continue;
         const s = state as
           | {
               sheetEdit?: {
@@ -124,6 +153,7 @@ export function usePatchSheet(args: {
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      if (awarenessTimerRef.current) clearTimeout(awarenessTimerRef.current);
       if (Object.keys(pendingRef.current).length > 0) void flush();
     };
   }, [flush]);

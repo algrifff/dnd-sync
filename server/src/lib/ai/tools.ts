@@ -183,16 +183,21 @@ function entitySearch(ctx: ToolContext) {
 
       type FtsRow = { path: string; title: string; snippet: string };
       const rows = getDb()
-        .query<FtsRow, [string, string, number]>(
+        .query<FtsRow, [string, string, string, number]>(
+          // group_id moved into notes_fts in migration #33 — scope
+          // MATCH per world directly so the FTS rank is correct and
+          // we don't leak hits across tenants.
           `SELECT n.path, n.title,
                   snippet(notes_fts, 2, '', '', '…', 20) AS snippet
              FROM notes_fts
-             JOIN notes n ON n.path = notes_fts.path AND n.group_id = ?
+             JOIN notes n
+               ON n.group_id = notes_fts.group_id AND n.path = notes_fts.path
              WHERE notes_fts MATCH ?
+               AND notes_fts.group_id = ?
              ORDER BY notes_fts.rank
              LIMIT ?`,
         )
-        .all(ctx.groupId, fts, limit ?? 10);
+        .all(fts, ctx.groupId, ctx.groupId, limit ?? 10);
 
       return { ok: true as const, results: rows };
     },

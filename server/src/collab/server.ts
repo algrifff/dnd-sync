@@ -87,6 +87,14 @@ function canEditDoc(documentName: string, session: Session): boolean {
 }
 
 export const collabServer = new Hocuspocus({
+  // Batch persistence: hold the `store()` call open for up to 200 ms
+  // after the last edit, but never longer than 1.5 s. Without this,
+  // every Y.Doc update from a fast typist triggers an immediate
+  // `UPDATE notes SET yjs_state` plus the deriveAndPersist work —
+  // dozens of writes per second per note. Peer broadcasts are
+  // unaffected; this only debounces the disk write.
+  debounce: 200,
+  maxDebounce: 1500,
   async onAuthenticate(data): Promise<AuthContext> {
     const session = readSessionFromIncoming({
       headers: { cookie: data.request.headers.cookie },

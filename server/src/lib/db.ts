@@ -148,8 +148,28 @@ export function getDb(): Database {
   // Retry writes for up to 5 s instead of failing immediately when
   // the Hocuspocus writer holds the WAL lock.
   handle.exec('PRAGMA busy_timeout = 5000');
+  // Keep sorting / temp tables in RAM — SQLite otherwise spills to
+  // disk files in the data dir even for modest intermediate sets.
+  // Home-page COUNT and FTS MATCH queries both benefit.
+  handle.exec('PRAGMA temp_store = MEMORY');
+  // Memory-map ~64 MB of the DB so hot reads (tree, graph, notes
+  // list) hit pages without round-tripping through the page cache.
+  // The OS reclaims automatically; safe on all our deploy targets.
+  handle.exec('PRAGMA mmap_size = 67108864');
+  // Cap the page cache at ~32 MB (-32000 = KiB). Default is 2 MB
+  // which is too small for the tree/graph builders.
+  handle.exec('PRAGMA cache_size = -32000');
 
   runMigrations(handle);
+
+  // One-shot optimiser: rebuilds index statistics based on current
+  // row counts so the query planner picks the right indexes after
+  // large imports. Cheap on startup, skipped silently if unsupported.
+  try {
+    handle.exec('PRAGMA optimize');
+  } catch {
+    /* older SQLite builds */
+  }
 
   db = handle;
   return db;

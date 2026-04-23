@@ -53,7 +53,10 @@ export async function POST(req: NextRequest): Promise<Response> {
       db.query('DELETE FROM tags WHERE group_id = ? AND path = ?').run(groupId, n.path);
       db.query('DELETE FROM aliases WHERE group_id = ? AND path = ?').run(groupId, n.path);
       db.query('DELETE FROM notes WHERE group_id = ? AND path = ?').run(groupId, n.path);
-      db.query('DELETE FROM notes_fts WHERE path = ?').run(n.path);
+      db.query('DELETE FROM notes_fts WHERE path = ? AND group_id = ?').run(
+        n.path,
+        groupId,
+      );
     }
     db.query(
       `DELETE FROM folder_markers

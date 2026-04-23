@@ -16,7 +16,7 @@ import {
   useState,
 } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   BookOpen,
   CalendarDays,
@@ -164,7 +164,7 @@ const STORAGE_KEY = 'compendium.tree.open';
 
 export function FileTree({
   tree,
-  activePath,
+  activePath: activePathProp,
   groupId,
   csrfToken,
   canCreate,
@@ -172,7 +172,11 @@ export function FileTree({
   kindMap,
 }: {
   tree: Tree;
-  activePath: string;
+  /** Optional override. When omitted, the active path is derived from
+   *  `usePathname()` so the tree can live in a persistent layout and
+   *  still keep its row highlight in sync with the URL without
+   *  re-mounting on every navigation. */
+  activePath?: string;
   groupId: string;
   csrfToken: string;
   canCreate: boolean;
@@ -184,6 +188,12 @@ export function FileTree({
   kindMap?: KindMap;
 }): React.JSX.Element {
   const router = useRouter();
+  const pathname = usePathname() ?? '';
+  // Derive the active path from the URL when the caller hasn't passed
+  // one explicitly. Keeps the tree's highlight + auto-expand in sync
+  // with the current route even though the tree lives in a layout
+  // that never unmounts across navigations.
+  const activePath = activePathProp ?? decodeActiveNotePath(pathname);
   const storageKey = `${STORAGE_KEY}.${groupId}`;
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const [creatingIn, setCreatingIn] = useState<
@@ -335,8 +345,16 @@ export function FileTree({
         router.push(
           '/notes/' + body.path.split('/').map(encodeURIComponent).join('/'),
         );
-        router.refresh();
-        broadcastTreeChange();
+        // Defer router.refresh() so the navigation we just kicked off
+        // settles before the RSC tree is invalidated. Without the
+        // delay, refresh races the in-flight push: the new row appears
+        // in the tree but its activePath highlight (driven by the
+        // previous render) hasn't caught up, leaving the row visually
+        // present but unresponsive to the first click.
+        setTimeout(() => {
+          router.refresh();
+          broadcastTreeChange();
+        }, 120);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'network error');
       } finally {
@@ -714,6 +732,25 @@ function flatten(dir: TreeDir, openSet: Set<string>, depth: number): FlatRow[] {
     }
   }
   return out;
+}
+
+// URL pathname → decoded note path. Returns '' for any non-note
+// route so that tree highlights clear automatically when the user
+// navigates to /graph, /tags, /settings, etc. Mirrors the decoder in
+// NoteTabs so the two stay in step if either is ever changed.
+function decodeActiveNotePath(pathname: string): string {
+  if (!pathname.startsWith('/notes/')) return '';
+  const rest = pathname.slice('/notes/'.length);
+  return rest
+    .split('/')
+    .map((seg) => {
+      try {
+        return decodeURIComponent(seg);
+      } catch {
+        return seg;
+      }
+    })
+    .join('/');
 }
 
 function prettyName(fileName: string): string {
@@ -1183,6 +1220,16 @@ function NewEntryRow({
               e.preventDefault();
               onCancel();
             }
+          }}
+          onBlur={() => {
+            // Click-away commits the current name (or the placeholder
+            // default if the user never typed). Empty string falls back
+            // to cancellation. Tracked via initialValue check so the
+            // submit-and-rerender cycle doesn't re-fire blur.
+            if (disabled) return;
+            const trimmed = value.trim();
+            if (trimmed) onSubmit(trimmed);
+            else onCancel();
           }}
           disabled={disabled}
           placeholder={placeholder}

@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { X, FileText } from 'lucide-react';
 import { TREE_CHANGE_EVENT, TREE_CHANGE_REMOTE_EVENT } from '@/lib/tree-sync';
+import { setPersistentPaths } from './notes/provider-cache';
 
 const STORAGE_KEY = 'compendium.tabs.v1';
 
@@ -75,6 +76,27 @@ export function NoteTabs(): React.JSX.Element {
     }
   }, [tabs, mounted]);
 
+  // Prefetch every non-active open tab. Next.js caches the RSC payload
+  // client-side for ~30s even on force-dynamic routes, so switching to
+  // an already-prefetched tab renders without a network round-trip.
+  // Re-runs whenever the open-tab set or the active path changes.
+  useEffect(() => {
+    if (!mounted) return;
+    for (const t of tabs) {
+      if (t.path === activePath) continue;
+      router.prefetch(noteHref(t.path));
+    }
+  }, [tabs, activePath, mounted, router]);
+
+  // Pin the open-tab paths in the Hocuspocus provider cache so their
+  // WS connections + Y.Docs survive the page-level unmount that
+  // happens on every tab switch. Closing a tab drops it from the set
+  // and the cache can sweep it after its idle grace window.
+  useEffect(() => {
+    if (!mounted) return;
+    setPersistentPaths(tabs.map((t) => t.path));
+  }, [tabs, mounted]);
+
   // Prune tabs whose notes no longer exist. Runs on mount (catches
   // stale tabs carried across sessions) and whenever a tree-change
   // event fires locally — covers the "someone else deleted this note
@@ -82,13 +104,31 @@ export function NoteTabs(): React.JSX.Element {
   // only self-heal when the user clicks the tab.
   const activePathRef = useRef<string>(activePath);
   activePathRef.current = activePath;
+  // Track the last ETag we saw from /api/tree so subsequent validate
+  // calls can short-circuit to a 304 when the tree hasn't moved.
+  // The route ETags by `tree-${maxUpdatedAt}`, so any note save
+  // bumps it and we re-pull only what's needed.
+  const lastTreeEtagRef = useRef<string | null>(null);
   useEffect(() => {
     if (!mounted) return;
     let cancelled = false;
     const validate = async (): Promise<void> => {
       try {
-        const res = await fetch('/api/tree', { cache: 'no-store' });
-        if (!res.ok || cancelled) return;
+        const headers: Record<string, string> = {};
+        if (lastTreeEtagRef.current) {
+          headers['If-None-Match'] = lastTreeEtagRef.current;
+        }
+        const res = await fetch('/api/tree', {
+          headers,
+          cache: 'no-store',
+        });
+        if (cancelled) return;
+        // 304 → tree unchanged, nothing to prune. Skip the JSON parse
+        // and the entire walk + setTabs cycle.
+        if (res.status === 304) return;
+        if (!res.ok) return;
+        const etag = res.headers.get('etag');
+        if (etag) lastTreeEtagRef.current = etag;
         const body = (await res.json()) as { root?: unknown };
         const existing = new Set<string>();
         walkTree(body.root, existing);
@@ -112,11 +152,24 @@ export function NoteTabs(): React.JSX.Element {
       }
     };
     void validate();
-    const onTreeChange = (): void => void validate();
+    // Debounce tree validation so a burst of tree changes (rename +
+    // refresh + remote broadcast landing within a few ms of each
+    // other) only fires one /api/tree fetch. 300 ms is long enough
+    // to coalesce the typical flurry without making stale-tab pruning
+    // feel laggy.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onTreeChange = (): void => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        void validate();
+      }, 300);
+    };
     document.addEventListener(TREE_CHANGE_EVENT, onTreeChange);
     document.addEventListener(TREE_CHANGE_REMOTE_EVENT, onTreeChange);
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
       document.removeEventListener(TREE_CHANGE_EVENT, onTreeChange);
       document.removeEventListener(TREE_CHANGE_REMOTE_EVENT, onTreeChange);
     };

@@ -117,12 +117,13 @@ export async function POST(req: NextRequest): Promise<Response> {
       db.query(
         'UPDATE session_notes SET note_path = ? WHERE group_id = ? AND note_path = ?',
       ).run(m.to, groupId, m.from);
-      db.query('DELETE FROM notes_fts WHERE path = ?').run(m.from);
-      db.query('INSERT INTO notes_fts(path, title, content) VALUES (?, ?, ?)').run(
-        m.to,
-        m.title,
-        m.content,
+      db.query('DELETE FROM notes_fts WHERE path = ? AND group_id = ?').run(
+        m.from,
+        groupId,
       );
+      db.query(
+        'INSERT INTO notes_fts(path, group_id, title, content) VALUES (?, ?, ?, ?)',
+      ).run(m.to, groupId, m.title, m.content);
     }
 
     // Folder markers: rewrite the folder itself plus any nested markers.

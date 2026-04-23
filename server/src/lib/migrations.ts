@@ -625,6 +625,59 @@ const MIGRATIONS: readonly Migration[] = [
         ON note_links(group_id, from_path);
     `,
   },
+  {
+    version: 32,
+    description: 'notes: clear dm_only on all rows (deprecated visibility flag)',
+    sql: `
+      -- The dm_only visibility flag has been retired from the create
+      -- and edit flows: every entity is public by default and the UI
+      -- no longer offers a toggle. Clear historical 1s so legacy notes
+      -- don't render with stale "DM only" badges or block viewer reads
+      -- through the API gate.
+      UPDATE notes SET dm_only = 0 WHERE dm_only = 1;
+    `,
+  },
+  {
+    version: 33,
+    description: 'notes_fts: add group_id column for per-world MATCH scoping',
+    sql: `
+      -- notes.path is unique within a group but NOT globally
+      -- (UNIQUE (group_id, path)). The original FTS schema only
+      -- carried path, so MATCH queries scanned across every world
+      -- and the join-by-path step could mis-snippet across tenants.
+      --
+      -- FTS5 has no ALTER ADD COLUMN; the only path is to drop +
+      -- recreate the virtual table and its triggers, then refill.
+      DROP TRIGGER IF EXISTS notes_ai;
+      DROP TRIGGER IF EXISTS notes_au;
+      DROP TRIGGER IF EXISTS notes_ad;
+      DROP TABLE IF EXISTS notes_fts;
+
+      CREATE VIRTUAL TABLE notes_fts USING fts5(
+        path UNINDEXED, group_id UNINDEXED, title, content,
+        tokenize = 'porter unicode61'
+      );
+
+      CREATE TRIGGER notes_ai AFTER INSERT ON notes BEGIN
+        INSERT INTO notes_fts(path, group_id, title, content)
+          VALUES (new.path, new.group_id, new.title, new.content_text);
+      END;
+      CREATE TRIGGER notes_au AFTER UPDATE OF title, content_text ON notes BEGIN
+        DELETE FROM notes_fts
+          WHERE path = old.path AND group_id = old.group_id;
+        INSERT INTO notes_fts(path, group_id, title, content)
+          VALUES (new.path, new.group_id, new.title, new.content_text);
+      END;
+      CREATE TRIGGER notes_ad AFTER DELETE ON notes BEGIN
+        DELETE FROM notes_fts
+          WHERE path = old.path AND group_id = old.group_id;
+      END;
+
+      -- Repopulate from the source of truth.
+      INSERT INTO notes_fts(path, group_id, title, content)
+        SELECT path, group_id, title, content_text FROM notes;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

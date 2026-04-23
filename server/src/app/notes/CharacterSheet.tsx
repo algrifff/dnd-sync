@@ -18,7 +18,7 @@
 // /api/notes/sheet on blur, with a peer-awareness broadcast so
 // multi-tab edits are near-instant before the round-trip.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HocuspocusProvider } from '@hocuspocus/provider';
 import type {
   NoteTemplate,
@@ -287,7 +287,7 @@ export function CharacterSheet({
             key={field.id}
             field={field}
             value={sheet[field.id]}
-            onCommit={(v) => commit(field.id, v)}
+            onCommit={commit}
             readOnly={!fieldEditable(field)}
             isPlayerField={playerEditable.has(field.id) && !canWriteAll}
           />
@@ -296,33 +296,49 @@ export function CharacterSheet({
     </section>
   );
 
+  // Stable skill-toggle callbacks. Reading the latest sheet via a
+  // ref keeps the callback identity stable across renders so
+  // SkillsPanel's memo isn't invalidated on every parent render.
+  const sheetRef = useRef(sheet);
+  sheetRef.current = sheet;
+  const toggleProficient = useCallback(
+    (key: string) => {
+      const s = sheetRef.current;
+      const current = readSkillEntry(s, key);
+      const next = {
+        ...(s.skills as Record<string, unknown> | undefined),
+        [key]: { ...current, proficient: !current.proficient },
+      };
+      commit('skills', next);
+    },
+    [commit],
+  );
+  const toggleExpertise = useCallback(
+    (key: string) => {
+      const s = sheetRef.current;
+      const current = readSkillEntry(s, key);
+      const next = {
+        ...(s.skills as Record<string, unknown> | undefined),
+        [key]: {
+          ...current,
+          // Expertise implies proficient.
+          proficient: current.expertise ? current.proficient : true,
+          expertise: !current.expertise,
+        },
+      };
+      commit('skills', next);
+    },
+    [commit],
+  );
+
   const renderTab = (tab: TabId): React.JSX.Element => {
     if (tab === 'skills') {
       return (
         <SkillsPanel
           sheet={sheet}
           canEdit={canWriteAll}
-          onToggleProficient={(key) => {
-            const current = readSkillEntry(sheet, key);
-            const next = {
-              ...(sheet.skills as Record<string, unknown> | undefined),
-              [key]: { ...current, proficient: !current.proficient },
-            };
-            commit('skills', next);
-          }}
-          onToggleExpertise={(key) => {
-            const current = readSkillEntry(sheet, key);
-            const next = {
-              ...(sheet.skills as Record<string, unknown> | undefined),
-              [key]: {
-                ...current,
-                // Expertise implies proficient.
-                proficient: current.expertise ? current.proficient : true,
-                expertise: !current.expertise,
-              },
-            };
-            commit('skills', next);
-          }}
+          onToggleProficient={toggleProficient}
+          onToggleExpertise={toggleExpertise}
         />
       );
     }
@@ -368,26 +384,15 @@ export function CharacterSheet({
         aria-label="Character sheet sections"
         className="mb-3 flex flex-wrap gap-1 border-b border-[#D4C7AE]"
       >
-        {availableTabs.map((t) => {
-          const on = t.id === effectiveTab;
-          return (
-            <button
-              key={t.id}
-              role="tab"
-              aria-selected={on}
-              type="button"
-              onClick={() => setActiveTab(t.id)}
-              className={
-                '-mb-px rounded-t border px-3 py-1 text-[11px] font-medium transition-colors ' +
-                (on
-                  ? 'border-[#D4C7AE] border-b-[#FBF5E8] bg-[#FBF5E8] text-[#2A241E]'
-                  : 'border-transparent text-[#5A4F42] hover:bg-[#F4EDE0]')
-              }
-            >
-              {t.label}
-            </button>
-          );
-        })}
+        {availableTabs.map((t) => (
+          <TabButton
+            key={t.id}
+            id={t.id}
+            label={t.label}
+            active={t.id === effectiveTab}
+            onSelect={setActiveTab}
+          />
+        ))}
       </div>
 
       {renderTab(effectiveTab)}
@@ -397,7 +402,7 @@ export function CharacterSheet({
 
 // ── Skills panel ───────────────────────────────────────────────────────
 
-function SkillsPanel({
+const SkillsPanel = memo(function SkillsPanel({
   sheet,
   canEdit,
   onToggleProficient,
@@ -426,35 +431,77 @@ function SkillsPanel({
             : 0;
         const total = abilityMod + bonus;
         return (
-          <li
+          <SkillRow
             key={s.key}
-            className="flex items-center gap-2 px-3 py-1.5 text-[12px]"
-          >
-            <ProfDot
-              state={
-                entry.expertise
-                  ? 'expertise'
-                  : entry.proficient
-                    ? 'proficient'
-                    : 'none'
-              }
-              canEdit={canEdit}
-              onClick={() => onToggleProficient(s.key)}
-              onDoubleClick={() => onToggleExpertise(s.key)}
-            />
-            <span className="flex-1 text-[#2A241E]">{s.label}</span>
-            <span className="w-10 text-right text-[10px] uppercase tracking-wide text-[#5A4F42]">
-              {s.ability}
-            </span>
-            <span className="w-10 text-right font-serif text-[14px] font-semibold tabular-nums text-[#2A241E]">
-              {formatModifier(total)}
-            </span>
-          </li>
+            skillKey={s.key}
+            label={s.label}
+            ability={s.ability}
+            modifier={total}
+            state={
+              entry.expertise
+                ? 'expertise'
+                : entry.proficient
+                  ? 'proficient'
+                  : 'none'
+            }
+            canEdit={canEdit}
+            onToggleProficient={onToggleProficient}
+            onToggleExpertise={onToggleExpertise}
+          />
         );
       })}
     </ul>
   );
-}
+});
+
+// Memoised single skill line. With the parent's stable toggle
+// callbacks, peer awareness churn that doesn't change a particular
+// skill's prof/expertise/modifier no longer re-renders that row.
+const SkillRow = memo(function SkillRow({
+  skillKey,
+  label,
+  ability,
+  modifier,
+  state,
+  canEdit,
+  onToggleProficient,
+  onToggleExpertise,
+}: {
+  skillKey: string;
+  label: string;
+  ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+  modifier: number;
+  state: 'none' | 'proficient' | 'expertise';
+  canEdit: boolean;
+  onToggleProficient: (key: string) => void;
+  onToggleExpertise: (key: string) => void;
+}): React.JSX.Element {
+  const onClick = useCallback(
+    () => onToggleProficient(skillKey),
+    [onToggleProficient, skillKey],
+  );
+  const onDoubleClick = useCallback(
+    () => onToggleExpertise(skillKey),
+    [onToggleExpertise, skillKey],
+  );
+  return (
+    <li className="flex items-center gap-2 px-3 py-1.5 text-[12px]">
+      <ProfDot
+        state={state}
+        canEdit={canEdit}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+      />
+      <span className="flex-1 text-[#2A241E]">{label}</span>
+      <span className="w-10 text-right text-[10px] uppercase tracking-wide text-[#5A4F42]">
+        {ability}
+      </span>
+      <span className="w-10 text-right font-serif text-[14px] font-semibold tabular-nums text-[#2A241E]">
+        {formatModifier(modifier)}
+      </span>
+    </li>
+  );
+});
 
 function ProfDot({
   state,
@@ -535,7 +582,44 @@ function collectPlayerEditable(schema: TemplateSchema): Set<string> {
   return out;
 }
 
-function FieldControl({
+// Memoised tab pill. `onSelect` is React's stable setActiveTab
+// reference, so as long as id/label/active don't change for a given
+// tab, this skips re-rendering on parent state churn.
+const TabButton = memo(function TabButton({
+  id,
+  label,
+  active,
+  onSelect,
+}: {
+  id: TabId;
+  label: string;
+  active: boolean;
+  onSelect: (id: TabId) => void;
+}): React.JSX.Element {
+  return (
+    <button
+      role="tab"
+      aria-selected={active}
+      type="button"
+      onClick={() => onSelect(id)}
+      className={
+        '-mb-px rounded-t border px-3 py-1 text-[11px] font-medium transition-colors ' +
+        (active
+          ? 'border-[#D4C7AE] border-b-[#FBF5E8] bg-[#FBF5E8] text-[#2A241E]'
+          : 'border-transparent text-[#5A4F42] hover:bg-[#F4EDE0]')
+      }
+    >
+      {label}
+    </button>
+  );
+});
+
+// Memoised so a peer awareness tick that updates one field's value
+// doesn't force every other FieldControl in the sheet to re-render.
+// `onCommit` is the stable parent-level commit fn (takes fieldId), so
+// the only props that actually change between renders are `value` for
+// the field that was just edited.
+const FieldControl = memo(function FieldControl({
   field,
   value,
   onCommit,
@@ -544,10 +628,17 @@ function FieldControl({
 }: {
   field: TemplateField;
   value: unknown;
-  onCommit: (v: unknown) => void;
+  onCommit: (fieldId: string, v: unknown) => void;
   readOnly: boolean;
   isPlayerField: boolean;
 }): React.JSX.Element {
+  // Local adapter so FieldInput keeps its single-arg contract.
+  // Recreated per FieldControl render, but FieldControl itself only
+  // renders when its memo'd props actually shift — so this is cheap.
+  const handle = useCallback(
+    (v: unknown) => onCommit(field.id, v),
+    [onCommit, field.id],
+  );
   return (
     <label
       className={
@@ -563,7 +654,7 @@ function FieldControl({
       <FieldInput
         field={field}
         value={value}
-        onCommit={onCommit}
+        onCommit={handle}
         readOnly={readOnly}
       />
       {field.hint && (
@@ -571,7 +662,7 @@ function FieldControl({
       )}
     </label>
   );
-}
+});
 
 function FieldInput({
   field,

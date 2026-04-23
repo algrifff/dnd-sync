@@ -159,14 +159,36 @@ export function DrawingOverlay({
     };
   }, [column, zoom]);
 
-  // Observe the shared Y.Map.
+  // Observe the shared Y.Map. We intentionally do a full rebuild on
+  // every change event — Y.Map.forEach is cheap (O(n) over a plain
+  // Map), and strokes are immutable-once-set so there's no partial-
+  // update path to optimise. Skipping when nothing observable
+  // changed (e.g. a delete of a key that was already absent) avoids
+  // the re-render cascade to downstream SVG children.
   useEffect(() => {
     const apply = (): void => {
       const next: Stroke[] = [];
       strokesYMap.forEach((value) => {
         if (value && typeof value === 'object') next.push(value);
       });
-      setStrokes(next);
+      setStrokes((prev) => {
+        // Shallow reference-equality check — since strokes are set
+        // once per key in Y.Map, the per-entry reference is stable
+        // between observer calls unless the key was replaced. If the
+        // length and every entry reference match, skip the setState
+        // (and therefore the downstream re-render).
+        if (prev.length === next.length) {
+          let same = true;
+          for (let i = 0; i < next.length; i++) {
+            if (prev[i] !== next[i]) {
+              same = false;
+              break;
+            }
+          }
+          if (same) return prev;
+        }
+        return next;
+      });
     };
     apply();
     strokesYMap.observe(apply);

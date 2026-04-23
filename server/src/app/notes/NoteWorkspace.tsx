@@ -4,10 +4,16 @@
 // Notion-style stack: title (Y.Text) → tags (REST) → body (Y.XmlFragment
 // 'default'). Hoisting the provider here means all three views share
 // one websocket connection and one CRDT identity.
+//
+// The provider is fetched from a module-level cache (`provider-cache`)
+// so switching between two already-open tabs reuses the existing WS
+// connection and synced Y.Doc, instead of tearing both down on every
+// route change. See that file for the lifecycle contract.
 
-import { useEffect, useMemo, useState } from 'react';
-import { HocuspocusProvider } from '@hocuspocus/provider';
-import * as Y from 'yjs';
+import { useEffect, useState } from 'react';
+import type { HocuspocusProvider } from '@hocuspocus/provider';
+import type * as Y from 'yjs';
+import { acquireProvider, releaseProvider } from './provider-cache';
 import { TitleEditor } from './TitleEditor';
 import { NoteSurface, type SurfaceUser } from './NoteSurface';
 import { PointerOverlay } from './PointerOverlay';
@@ -48,19 +54,32 @@ export function NoteWorkspace({
    *  parchment-friendly default in the sheet header. */
   accentColor: string | null;
 }): React.JSX.Element {
-  const ydoc = useMemo(() => new Y.Doc(), [path]);
-  const provider = useMemo(
-    () =>
-      new HocuspocusProvider({
-        url: buildCollabUrl(),
-        name: path,
-        document: ydoc,
-      }),
-    [path, ydoc],
+  // Provider + Y.Doc come from the shared module cache. They live as
+  // long as the tab is open (or the idle grace window after release),
+  // so tab switches between open notes don't replay the WS handshake.
+  // `path` is effectively static for a given NoteWorkspace instance —
+  // Next.js remounts the whole component on route change — so a single
+  // acquire on mount pairs with a single release on unmount.
+  const [handle] = useState<{ provider: HocuspocusProvider; ydoc: Y.Doc }>(() =>
+    acquireProvider(path),
   );
+  // Release on unmount. `path` is captured at mount time and never
+  // changes for the life of this component (route change → remount),
+  // so pairing with the mount-time acquire is safe.
+  useEffect(() => {
+    const capturedPath = path;
+    return () => {
+      releaseProvider(capturedPath);
+    };
+  }, [path]);
 
+  const { provider, ydoc } = handle;
+
+  // On cache-hit the provider is usually already synced, so seed from
+  // `synced` to avoid flashing the "connecting…" dot. Subsequent
+  // status events keep us honest if the connection drops.
   const [connected, setConnected] = useState<'connecting' | 'connected' | 'disconnected'>(
-    'connecting',
+    () => (provider.synced ? 'connected' : 'connecting'),
   );
   const [authFailed, setAuthFailed] = useState<boolean>(false);
 
@@ -71,20 +90,12 @@ export function NoteWorkspace({
     const onAuthFail = () => setAuthFailed(true);
     provider.on('status', onStatus);
     provider.on('authenticationFailed', onAuthFail);
+    if (provider.synced) setConnected('connected');
     return () => {
       provider.off('status', onStatus);
       provider.off('authenticationFailed', onAuthFail);
     };
   }, [provider]);
-
-  useEffect(() => {
-    const p = provider;
-    const d = ydoc;
-    return () => {
-      p.destroy();
-      d.destroy();
-    };
-  }, [provider, ydoc]);
 
   const showSheetHeader = !!character && !!normalizeKind(character.rawKind);
 
@@ -183,11 +194,5 @@ function StatusDot({
       style={{ backgroundColor: color }}
     />
   );
-}
-
-function buildCollabUrl(): string {
-  if (typeof window === 'undefined') return 'ws://localhost/collab';
-  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${scheme}//${location.host}/collab`;
 }
 

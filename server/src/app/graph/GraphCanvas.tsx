@@ -131,6 +131,13 @@ export function GraphCanvas({
     nodes: 0,
     edges: 0,
   });
+  // Tracks edge-loading progress for the progressive build:
+  //   - total = number of edges the server reported in the edges-phase fetch
+  //   - loaded = number actually inserted into the graph so far
+  // Both 0 means "no edge load in flight". loaded === total > 0 means done.
+  const [edgeProgress, setEdgeProgress] = useState<{ loaded: number; total: number }>(
+    { loaded: 0, total: 0 },
+  );
   const [labelMode, setLabelMode] = useState<LabelMode>('some');
   const [tagColors, setTagColors] = useState<Record<string, string>>({});
   const [groups, setGroups] = useState<Group[]>([]);
@@ -472,11 +479,15 @@ export function GraphCanvas({
         await waitForSync();
         if (cancelled) return;
 
-        const res = await fetch(`/api/graph?scope=${encodeURIComponent(scopeParam)}`, {
-          cache: 'no-store',
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const payload = (await res.json()) as GraphPayload;
+        // Phase 1 — fetch nodes only. The API skips the edge join so
+        // this lands in a single SELECT. We can render the node skeleton
+        // and unblock the user before any edge work begins.
+        const nodesRes = await fetch(
+          `/api/graph?scope=${encodeURIComponent(scopeParam)}&phase=nodes`,
+          { cache: 'no-store' },
+        );
+        if (!nodesRes.ok) throw new Error(`HTTP ${nodesRes.status}`);
+        const nodesBody = (await nodesRes.json()) as Pick<GraphPayload, 'nodes'>;
         if (cancelled) return;
 
         sigmaRef.current?.kill();
@@ -484,16 +495,18 @@ export function GraphCanvas({
         if (rafRef.current) cancelAnimationFrame(rafRef.current);
         rafRef.current = 0;
 
-        setNodesPayload(payload.nodes);
+        setNodesPayload(nodesBody.nodes);
+        // Reset progress so the bar shows 0% as edges start streaming in.
+        setEdgeProgress({ loaded: 0, total: 0 });
 
         const g = new Graph({ multi: false, type: 'directed', allowSelfLoops: false });
         // Cluster-aware seed: nodes in the same campaign folder start near
         // each other so FA2 refines existing groups rather than discovering
         // them from a random scatter. Fully deterministic — same positions
         // on every peer for the same node list.
-        const seedPositions = clusterSeedPositions(payload.nodes, clusterSpacing);
+        const seedPositions = clusterSeedPositions(nodesBody.nodes, clusterSpacing);
         const pins = pinsRef.current;
-        for (const n of payload.nodes) {
+        for (const n of nodesBody.nodes) {
           const pin = pins[n.id];
           const seed = seedPositions.get(n.id) ?? { x: 0, y: 0 };
           g.addNode(n.id, {
@@ -506,16 +519,6 @@ export function GraphCanvas({
             tags: n.tags,
             degree: n.degree,
             highlighted: !!pin,
-          });
-        }
-        for (const e of payload.edges) {
-          if (e.source === e.target) continue; // graph forbids self-loops
-          if (!g.hasNode(e.source) || !g.hasNode(e.target)) continue;
-          const key = `${e.source}→${e.target}`;
-          if (g.hasEdge(key)) continue;
-          g.addEdgeWithKey(key, e.source, e.target, {
-            size: 1,
-            color: `rgba(42, 36, 30, ${edgeOpacityRef.current})`,
           });
         }
 
@@ -549,6 +552,73 @@ export function GraphCanvas({
         sigmaRef.current = renderer;
         graphRef.current = g;
         setCounts({ nodes: g.order, edges: g.size });
+
+        // Phase 2 — fetch edges and stream them in. Done in a separate
+        // round-trip so the node skeleton is interactable immediately
+        // while the link mesh fills in. Inserted in 50-edge batches via
+        // requestAnimationFrame so the FA2 physics loop doesn't stall
+        // on a single huge insert. Updates `edgeProgress` so the status
+        // bar can render a fill percentage.
+        void (async () => {
+          try {
+            const edgesRes = await fetch(
+              `/api/graph?scope=${encodeURIComponent(scopeParam)}&phase=edges`,
+              { cache: 'no-store' },
+            );
+            if (!edgesRes.ok) throw new Error(`HTTP ${edgesRes.status}`);
+            const edgesBody = (await edgesRes.json()) as Pick<GraphPayload, 'edges'>;
+            if (cancelled) return;
+            const allEdges = edgesBody.edges;
+            // Pre-filter to valid in-graph edges so the progress bar
+            // measures real work, not skipped rows.
+            const valid = allEdges.filter(
+              (e) =>
+                e.source !== e.target &&
+                g.hasNode(e.source) &&
+                g.hasNode(e.target),
+            );
+            setEdgeProgress({ loaded: 0, total: valid.length });
+            if (valid.length === 0) return;
+
+            const BATCH = 50;
+            let i = 0;
+            const drainBatch = (): void => {
+              if (cancelled || !sigmaRef.current) return;
+              const end = Math.min(i + BATCH, valid.length);
+              const touched = new Set<string>();
+              for (; i < end; i++) {
+                const e = valid[i]!;
+                const key = `${e.source}→${e.target}`;
+                if (g.hasEdge(key)) continue;
+                g.addEdgeWithKey(key, e.source, e.target, {
+                  size: 1,
+                  color: `rgba(42, 36, 30, ${edgeOpacityRef.current})`,
+                });
+                touched.add(e.source);
+                touched.add(e.target);
+              }
+              // Recompute degree-derived size on the touched subset only —
+              // Graphology's degree() is O(1) so this stays cheap per batch.
+              for (const id of touched) {
+                const d = g.degree(id);
+                g.setNodeAttribute(id, 'degree', d);
+                g.setNodeAttribute(
+                  id,
+                  'size',
+                  radiusForDegree(d) * nodeScaleRef.current,
+                );
+              }
+              setEdgeProgress({ loaded: i, total: valid.length });
+              setCounts({ nodes: g.order, edges: g.size });
+              if (i < valid.length) {
+                requestAnimationFrame(drainBatch);
+              }
+            };
+            requestAnimationFrame(drainBatch);
+          } catch {
+            /* ignore — node skeleton stays interactive without edges */
+          }
+        })();
 
         // Seed our awareness user info — the cursor overlay renders
         // each peer's name label from here. No CollaborationCaret on
@@ -1404,13 +1474,39 @@ export function GraphCanvas({
 
             <div className="pointer-events-none text-xs text-[#5A4F42]">
               {status === 'loading' && 'Loading graph…'}
-              {status === 'ready' && !linkMode && (
-                <>
-                  {counts.nodes} node{counts.nodes === 1 ? '' : 's'} ·{' '}
-                  {counts.edges} edge{counts.edges === 1 ? '' : 's'} · drag to
-                  anchor · shift-drag to pin · double-click to release
-                </>
-              )}
+              {status === 'ready' &&
+                !linkMode &&
+                edgeProgress.total > 0 &&
+                edgeProgress.loaded < edgeProgress.total && (
+                  <span className="inline-flex items-center gap-2">
+                    <span>
+                      Building links… {edgeProgress.loaded}/{edgeProgress.total}
+                    </span>
+                    <span
+                      aria-hidden
+                      className="inline-block h-1.5 w-24 overflow-hidden rounded-full bg-[#D4C7AE]"
+                    >
+                      <span
+                        className="block h-full bg-[#D4A85A] transition-[width] duration-150 ease-linear"
+                        style={{
+                          width: `${Math.round(
+                            (edgeProgress.loaded / edgeProgress.total) * 100,
+                          )}%`,
+                        }}
+                      />
+                    </span>
+                  </span>
+                )}
+              {status === 'ready' &&
+                !linkMode &&
+                (edgeProgress.total === 0 ||
+                  edgeProgress.loaded >= edgeProgress.total) && (
+                  <>
+                    {counts.nodes} node{counts.nodes === 1 ? '' : 's'} ·{' '}
+                    {counts.edges} edge{counts.edges === 1 ? '' : 's'} · drag
+                    to anchor · shift-drag to pin · double-click to release
+                  </>
+                )}
               {status === 'ready' && linkMode && (
                 <span className="font-medium text-[#8B4A52]">
                   Weave mode — drag from one node to another to forge a link

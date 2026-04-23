@@ -100,14 +100,16 @@ export async function POST(req: NextRequest): Promise<Response> {
       'UPDATE session_notes SET note_path = ? WHERE group_id = ? AND note_path = ?',
     ).run(to, session.currentGroupId, from);
     // FTS mirror — triggers fire on title/content_text updates, not on
-    // path, so reseed manually.
-    db.query('DELETE FROM notes_fts WHERE path = ?').run(from);
+    // path, so reseed manually. group_id is part of the FTS row since
+    // migration #33 to keep MATCH queries scoped per world.
+    db.query('DELETE FROM notes_fts WHERE path = ? AND group_id = ?').run(
+      from,
+      session.currentGroupId,
+    );
     if (row) {
-      db.query('INSERT INTO notes_fts(path, title, content) VALUES (?, ?, ?)').run(
-        to,
-        row.title,
-        row.content_text,
-      );
+      db.query(
+        'INSERT INTO notes_fts(path, group_id, title, content) VALUES (?, ?, ?, ?)',
+      ).run(to, session.currentGroupId, row.title, row.content_text);
     }
   })();
 

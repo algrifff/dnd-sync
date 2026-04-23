@@ -29,17 +29,24 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   const noteRows = fts
     ? db
-        .query<{ path: string; title: string; snippet: string }, [string, string, number]>(
+        .query<{ path: string; title: string; snippet: string }, [string, string, string, number]>(
+          // group_id lives directly on notes_fts (migration #33), so
+          // MATCH is scoped per world inside the FTS index instead of
+          // post-filtering via the JOIN. Cuts work on multi-world
+          // servers and removes the cross-world snippet bug when two
+          // worlds share a path.
           `SELECT n.path, n.title,
                   snippet(notes_fts, 2, '<mark>', '</mark>', '…', 20) AS snippet
              FROM notes_fts
-             JOIN notes n ON n.path = notes_fts.path AND n.group_id = ?
+             JOIN notes n
+               ON n.group_id = notes_fts.group_id AND n.path = notes_fts.path
             WHERE notes_fts MATCH ?
+              AND notes_fts.group_id = ?
               AND (n.dm_only = 0 OR ? = 1)
             ORDER BY notes_fts.rank
             LIMIT ${LIMIT}`,
         )
-        .all(session.currentGroupId, fts, session.role !== 'viewer' ? 1 : 0)
+        .all(fts, session.currentGroupId, session.currentGroupId, session.role !== 'viewer' ? 1 : 0)
     : [];
 
   const assetRows = db
