@@ -32,6 +32,10 @@ const PUBLIC_PATTERNS: readonly RegExp[] = [
   /^\/textures\//,
   /^\/fonts\//,
   /^\/favicon\.ico$/,
+  /^\/icon\.png$/,
+  /^\/og-image\.png$/,
+  /^\/robots\.txt$/,
+  /^\/sitemap\.xml$/,
 ];
 
 function isPublic(pathname: string): boolean {
