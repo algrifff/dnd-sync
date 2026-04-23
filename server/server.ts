@@ -14,7 +14,9 @@ import { ensureDefaultAdmin, printAdminBanner, DEFAULT_GROUP_ID } from '@/lib/us
 import { ensureDefaultTemplates } from '@/lib/templates';
 import { ensureDefaultFolders } from '@/lib/tree';
 import { backfillIndexNotes } from '@/lib/index-notes';
-import { handleCollabConnection } from '@/collab/server';
+import { handleCollabConnection, collabServer } from '@/collab/server';
+import { captureServer } from '@/lib/analytics/capture';
+import { EVENTS } from '@/lib/analytics/events';
 
 // Validate environment before touching anything else — fail fast on
 // misconfiguration rather than at the first request.
@@ -75,8 +77,46 @@ server.on('upgrade', (req, socket, head) => {
   socket.destroy();
 });
 
+const bootStartedAt = Date.now();
+
 server.listen(port, hostname, () => {
   console.log(
     `[compendium-server] listening on http://${hostname}:${port} (${dev ? 'dev' : 'prod'})`,
   );
+
+  void captureServer({
+    event: EVENTS.SERVER_BOOT,
+    properties: {
+      node_version: process.version,
+      port,
+      dev,
+      git_sha: process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GIT_SHA ?? null,
+      boot_duration_ms: Date.now() - bootStartedAt,
+    },
+  });
 });
+
+// Periodic uptime pulse — gaps in this event stream surface as
+// downtime on the PostHog ops dashboard. Five minutes trades
+// resolution for PostHog quota and keeps cost predictable.
+const HEARTBEAT_INTERVAL_MS = 5 * 60_000;
+const heartbeat = setInterval(() => {
+  void captureServer({
+    event: EVENTS.SERVER_HEARTBEAT,
+    properties: {
+      uptime_seconds: Math.floor(process.uptime()),
+      ws_document_count: collabServer.documents.size,
+      memory_rss_mb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    },
+  });
+}, HEARTBEAT_INTERVAL_MS);
+
+// Timer hook on Node keeps the event loop alive indefinitely; unref()
+// so SIGTERM doesn't have to wait for the interval to fire.
+heartbeat.unref?.();
+
+for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(sig, () => {
+    clearInterval(heartbeat);
+  });
+}

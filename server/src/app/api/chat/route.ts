@@ -15,6 +15,9 @@ import { getDb } from '@/lib/db';
 import { detectSkills, buildSystemPrompt } from '@/lib/ai/orchestrator';
 import { getActivePersonality } from '@/lib/ai/personalities';
 import { getToolsForRole, type ToolContext } from '@/lib/ai/tools';
+import { captureServer } from '@/lib/analytics/capture';
+import { EVENTS } from '@/lib/analytics/events';
+import { apiErrorResponse } from '@/lib/analytics/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +29,7 @@ type ParsedBody = {
 };
 
 export async function POST(req: NextRequest): Promise<Response> {
+  try {
   const session = requireSession(req);
   if (session instanceof Response) return session;
 
@@ -88,6 +92,21 @@ export async function POST(req: NextRequest): Promise<Response> {
   // in Settings → World. Falls back to the built-in scribe otherwise.
   const personality = getActivePersonality(session.currentGroupId);
 
+  void captureServer({
+    userId: session.userId,
+    groupId: session.currentGroupId,
+    event: EVENTS.CHAT_MESSAGE_SENT,
+    properties: {
+      role,
+      model,
+      message_length: lastUserMessage.length,
+      skills_detected: skills,
+      has_active_note: Boolean(body.activeNotePath),
+      has_campaign: Boolean(body.campaignSlug),
+      personality: personality.id ?? null,
+    },
+  });
+
   const result = streamText({
     model: openai(model),
     system: buildSystemPrompt({
@@ -115,6 +134,9 @@ export async function POST(req: NextRequest): Promise<Response> {
   });
 
   return result.toUIMessageStreamResponse();
+  } catch (err) {
+    return apiErrorResponse('api/chat', err);
+  }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

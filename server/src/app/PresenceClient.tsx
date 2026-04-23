@@ -11,6 +11,7 @@
 // AppHeader) so closing a note doesn't bounce anyone off presence.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { EVENTS, track } from '@/lib/analytics/client';
 import { usePathname, useRouter } from 'next/navigation';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import * as Y from 'yjs';
@@ -107,6 +108,22 @@ export function PresenceClient({
       }
       setPeers(list);
       setPresencePeers(lite);
+      maybeReportPresence(list.length);
+    };
+
+    // Throttle presence reports to one every 30s per mount — an open
+    // session with peers would otherwise fire every keystroke.
+    let lastReportAt = 0;
+    let lastReportedCount = -1;
+    const maybeReportPresence = (peerCount: number): void => {
+      const now = Date.now();
+      if (peerCount === lastReportedCount && now - lastReportAt < 30_000) return;
+      lastReportAt = now;
+      lastReportedCount = peerCount;
+      track(EVENTS.PEER_PRESENCE_SEEN, {
+        peer_count: peerCount,
+        group_id: groupId ?? null,
+      });
     };
 
     aw.on('change', recompute);

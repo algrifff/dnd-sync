@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
+import { EVENTS, setWorld, track } from '@/lib/analytics/client';
 
 type WorldSwitchContextValue = {
   isPending: boolean;
@@ -22,9 +23,11 @@ const WorldSwitchContext = createContext<WorldSwitchContextValue | null>(null);
 
 export function WorldSwitchProvider({
   csrfToken,
+  activeWorldId,
   children,
 }: {
   csrfToken: string;
+  activeWorldId?: string;
   children: ReactNode;
 }): React.JSX.Element {
   const router = useRouter();
@@ -32,6 +35,18 @@ export function WorldSwitchProvider({
   const [isSwitching, setIsSwitching] = useState<boolean>(false);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingDestRef = useRef<string>('/');
+  const lastReportedWorldRef = useRef<string | null>(null);
+
+  // Keep PostHog group-analytics in sync with the active world. Fires
+  // once on mount and again whenever the layout re-renders with a new
+  // currentGroupId — no event if nothing changed.
+  useEffect(() => {
+    if (!activeWorldId) return;
+    if (lastReportedWorldRef.current === activeWorldId) return;
+    lastReportedWorldRef.current = activeWorldId;
+    setWorld(activeWorldId);
+    track(EVENTS.WORLD_SELECTED, { world_id: activeWorldId });
+  }, [activeWorldId]);
 
   // Client-side switch. The active world lives in the session row on
   // the server; PATCH /api/worlds/active flips it, then we router-nav

@@ -9,6 +9,8 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getImportJob, updateImportJob } from '@/lib/imports';
 import { applyImportJob } from '@/lib/import-apply';
+import { captureServer } from '@/lib/analytics/capture';
+import { EVENTS } from '@/lib/analytics/events';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -35,8 +37,24 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
     return json({ error: 'bad_state', status: job.status }, 409);
   }
 
+  const startedAt = Date.now();
   try {
     const summary = await applyImportJob(id);
+    void captureServer({
+      userId: session.userId,
+      groupId: session.currentGroupId,
+      event: EVENTS.IMPORT_APPLIED,
+      properties: {
+        job_id: id,
+        moved: summary.moved,
+        merged: summary.merged,
+        kept_in_place: summary.keptInPlace,
+        failed: summary.failed,
+        assets_committed: summary.assetsCommitted,
+        error_count: summary.errors.length,
+        duration_ms: Date.now() - startedAt,
+      },
+    });
     return json(
       {
         ok: true,
@@ -54,6 +72,17 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
       status: 'failed',
       stats: {
         applyError: err instanceof Error ? err.message : String(err),
+      },
+    });
+    void captureServer({
+      userId: session.userId,
+      groupId: session.currentGroupId,
+      event: EVENTS.IMPORT_FAILED,
+      properties: {
+        job_id: id,
+        stage: 'apply',
+        message: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+        duration_ms: Date.now() - startedAt,
       },
     });
     return json(

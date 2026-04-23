@@ -13,6 +13,8 @@ import {
   isAnalyseRunning,
   runAnalyseInBackground,
 } from '@/lib/import-analyse';
+import { captureServer } from '@/lib/analytics/capture';
+import { EVENTS } from '@/lib/analytics/events';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,6 +51,12 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
 
   if (!isAnalyseRunning(id)) {
     runAnalyseInBackground(id);
+    void captureServer({
+      userId: session.userId,
+      groupId: session.currentGroupId,
+      event: EVENTS.IMPORT_ANALYSED,
+      properties: { job_id: id, resumed: false, previous_status: job.status },
+    });
   }
 
   return json({ ok: true, running: true }, 202);

@@ -14,6 +14,9 @@ import { getPmSchema } from '@/lib/pm-schema';
 import { logAudit } from '@/lib/audit';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
+import { isAllowedPath } from '@/lib/notes';
+import { captureServer } from '@/lib/analytics/capture';
+import { EVENTS } from '@/lib/analytics/events';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,6 +69,17 @@ export async function POST(req: NextRequest): Promise<Response> {
   const cleanName = parsed.name.trim().replace(/\.(md|canvas)$/i, '');
   if (!cleanName) return json({ error: 'invalid_name' }, 400);
   const path = (folder ? folder + '/' : '') + cleanName + '.md';
+
+  // Enforce top-level allow-list + no-hidden-segment invariants.
+  // Checked against the folder + basename (without the .md suffix) so
+  // `.secret.md` and `Random/thing.md` both fail here rather than
+  // sneaking in via the note endpoint.
+  const allowed = isAllowedPath(folder ? folder + '/' + cleanName : cleanName);
+  if (!allowed.ok) {
+    const code = allowed.reason === 'names cannot start with a dot' ? 'invalid_name' : 'forbidden';
+    const status = code === 'invalid_name' ? 400 : 403;
+    return json({ error: code, reason: allowed.reason }, status);
+  }
 
   const db = getDb();
   const existing = db
@@ -136,6 +150,18 @@ export async function POST(req: NextRequest): Promise<Response> {
     groupId: session.currentGroupId,
     target: path,
     details: { kind: requestedKind },
+  });
+
+  void captureServer({
+    userId: session.userId,
+    groupId: session.currentGroupId,
+    event: EVENTS.NOTE_CREATED,
+    properties: {
+      kind: requestedKind,
+      path_depth: path.split('/').length,
+      top_level: path.split('/')[0],
+      via: 'ui',
+    },
   });
 
   return json({ ok: true, path }, 201);

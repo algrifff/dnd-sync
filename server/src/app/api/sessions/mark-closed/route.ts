@@ -9,6 +9,9 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
+import { captureServer } from '@/lib/analytics/capture';
+import { EVENTS } from '@/lib/analytics/events';
+import { apiErrorResponse } from '@/lib/analytics/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,32 +20,46 @@ const Body = z.object({
 });
 
 export async function POST(req: NextRequest): Promise<Response> {
-  const session = requireSession(req);
-  if (session instanceof Response) return session;
-  if (session.role === 'viewer') {
-    return json({ error: 'forbidden' }, 403);
-  }
-  const csrf = verifyCsrf(req, session);
-  if (csrf) return csrf;
-
-  let body: z.infer<typeof Body>;
   try {
-    body = Body.parse(await req.json());
-  } catch {
-    return json({ error: 'invalid_body' }, 400);
+    const session = requireSession(req);
+    if (session instanceof Response) return session;
+    if (session.role === 'viewer') {
+      return json({ error: 'forbidden' }, 403);
+    }
+    const csrf = verifyCsrf(req, session);
+    if (csrf) return csrf;
+
+    let body: z.infer<typeof Body>;
+    try {
+      body = Body.parse(await req.json());
+    } catch {
+      return json({ error: 'invalid_body' }, 400);
+    }
+
+    const now = Date.now();
+    getDb()
+      .query(
+        `INSERT INTO session_notes (group_id, note_path, updated_at, status, closed_at, closed_by)
+         VALUES (?, ?, ?, 'closed', ?, ?)
+         ON CONFLICT (group_id, note_path)
+         DO UPDATE SET status='closed', closed_at=excluded.closed_at, closed_by=excluded.closed_by`,
+      )
+      .run(session.currentGroupId, body.sessionPath, now, now, session.userId);
+
+    void captureServer({
+      userId: session.userId,
+      groupId: session.currentGroupId,
+      event: EVENTS.SESSION_CLOSED,
+      properties: {
+        session_path: body.sessionPath,
+        campaign_slug: body.sessionPath.split('/')[1] ?? null,
+      },
+    });
+
+    return json({ ok: true }, 200);
+  } catch (err) {
+    return apiErrorResponse('api/sessions/mark-closed', err);
   }
-
-  const now = Date.now();
-  getDb()
-    .query(
-      `INSERT INTO session_notes (group_id, note_path, updated_at, status, closed_at, closed_by)
-       VALUES (?, ?, ?, 'closed', ?, ?)
-       ON CONFLICT (group_id, note_path)
-       DO UPDATE SET status='closed', closed_at=excluded.closed_at, closed_by=excluded.closed_by`,
-    )
-    .run(session.currentGroupId, body.sessionPath, now, now, session.userId);
-
-  return json({ ok: true }, 200);
 }
 
 function json(body: unknown, status: number): Response {

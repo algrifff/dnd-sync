@@ -3,6 +3,47 @@
 
 import { getDb } from './db';
 
+/** Sanctioned top-level folder names. Every user-visible path must
+ *  start with one of these — no free-form top-level organisation.
+ *  Kept in sync with `DEFAULT_FOLDERS` / `isSystemFolder` in `./tree`. */
+export const TOP_LEVEL_ALLOWED: ReadonlySet<string> = new Set([
+  'Campaigns',
+  'World Lore',
+  'Assets',
+]);
+
+/** Validate a folder or note path against the two invariants the UI
+ *  relies on:
+ *    - first segment must be a sanctioned top-level folder
+ *    - no segment may start with "." (reserved for ephemeral docs)
+ *
+ *  Empty input is rejected — callers should never feed `""` in. */
+export function isAllowedPath(
+  path: string,
+): { ok: true } | { ok: false; reason: string } {
+  if (!path) return { ok: false, reason: 'empty_path' };
+  const normalised = path.replace(/^\/+|\/+$/g, '').replace(/\\/g, '/');
+  if (!normalised) return { ok: false, reason: 'empty_path' };
+
+  const segments = normalised.split('/');
+  if (segments.length === 0) return { ok: false, reason: 'empty_path' };
+  const first = segments[0]!;
+  if (!TOP_LEVEL_ALLOWED.has(first)) {
+    return {
+      ok: false,
+      reason: `top-level folder must be one of: ${[...TOP_LEVEL_ALLOWED].join(', ')}`,
+    };
+  }
+
+  for (const seg of segments) {
+    if (seg.startsWith('.')) {
+      return { ok: false, reason: 'names cannot start with a dot' };
+    }
+  }
+
+  return { ok: true };
+}
+
 export type NoteRow = {
   id: string;
   path: string;

@@ -13,6 +13,26 @@ import { getDb } from '@/lib/db';
 import { readSessionFromIncoming, type Session } from '@/lib/session';
 import { isPcOwnedBy } from '@/lib/characters';
 import { deriveAndPersist } from './derive';
+import { captureServer } from '@/lib/analytics/capture';
+import { EVENTS } from '@/lib/analytics/events';
+
+/** Per-socket bookkeeping so disconnect events can report a duration
+ *  without hitting the DB. Keyed by Hocuspocus socketId (a string);
+ *  entries are dropped in the onDisconnect hook. Stale entries would
+ *  only accumulate on server crash — fine for a long-running process. */
+type ConnectionInfo = {
+  userId: string;
+  groupId: string;
+  documentName: string;
+  connectedAt: number;
+  readOnly: boolean;
+};
+const connectionInfo = new Map<string, ConnectionInfo>();
+
+/** Throttle NOTE_EDITED events to once per note per 60s window so a
+ *  typist doesn't spam PostHog with one event per debounced save. */
+const lastEditCapture = new Map<string, number>();
+const NOTE_EDIT_THROTTLE_MS = 60_000;
 
 type AuthContext = {
   userId: string;
@@ -99,7 +119,13 @@ export const collabServer = new Hocuspocus({
     const session = readSessionFromIncoming({
       headers: { cookie: data.request.headers.cookie },
     });
-    if (!session) throw new Error('Unauthorized');
+    if (!session) {
+      void captureServer({
+        event: EVENTS.COLLAB_AUTH_REJECTED,
+        properties: { reason: 'no_session', documentName: data.documentName },
+      });
+      throw new Error('Unauthorized');
+    }
 
     // DM-only gate: block viewers from any note marked dm_only
     // entirely (they get no connection, so no live updates and no
@@ -110,6 +136,12 @@ export const collabServer = new Hocuspocus({
       !data.documentName.startsWith('graph-groups:') &&
       isNoteDmOnly(session.currentGroupId, data.documentName)
     ) {
+      void captureServer({
+        userId: session.userId,
+        groupId: session.currentGroupId,
+        event: EVENTS.COLLAB_AUTH_REJECTED,
+        properties: { reason: 'dm_only_blocked', documentName: data.documentName },
+      });
       throw new Error('Unauthorized');
     }
 
@@ -117,9 +149,27 @@ export const collabServer = new Hocuspocus({
     // connect, still receive live updates from peers, just can't
     // broadcast their own document updates. Awareness (cursors) is
     // unaffected.
-    if (!canEditDoc(data.documentName, session)) {
+    const readOnly = !canEditDoc(data.documentName, session);
+    if (readOnly) {
       data.connectionConfig.readOnly = true;
+      void captureServer({
+        userId: session.userId,
+        groupId: session.currentGroupId,
+        event: EVENTS.COLLAB_READONLY,
+        properties: { documentName: data.documentName, role: session.role },
+      });
     }
+
+    // Record per-socket connection info so the disconnect hook can
+    // compute duration. Keyed by socketId — the one stable identifier
+    // that appears in both onAuthenticate and onDisconnect payloads.
+    connectionInfo.set(data.socketId, {
+      userId: session.userId,
+      groupId: session.currentGroupId,
+      documentName: data.documentName,
+      connectedAt: Date.now(),
+      readOnly,
+    });
 
     return {
       userId: session.userId,
@@ -128,6 +178,40 @@ export const collabServer = new Hocuspocus({
       accentColor: session.accentColor,
       groupId: session.currentGroupId,
     };
+  },
+
+  async onConnect(data): Promise<void> {
+    const info = connectionInfo.get(data.socketId);
+    if (!info) return;
+    const doc = collabServer.documents.get(data.documentName);
+    const peerCount = doc ? doc.getConnectionsCount() : 1;
+    void captureServer({
+      userId: info.userId,
+      groupId: info.groupId,
+      event: EVENTS.COLLAB_CONNECTED,
+      properties: {
+        documentName: data.documentName,
+        peer_count: peerCount,
+        is_ephemeral: data.documentName.startsWith('.') || data.documentName.startsWith('graph-groups:'),
+      },
+    });
+  },
+
+  async onDisconnect(data): Promise<void> {
+    const info = connectionInfo.get(data.socketId);
+    connectionInfo.delete(data.socketId);
+    if (!info) return;
+    void captureServer({
+      userId: info.userId,
+      groupId: info.groupId,
+      event: EVENTS.COLLAB_DISCONNECTED,
+      properties: {
+        documentName: info.documentName,
+        duration_ms: Date.now() - info.connectedAt,
+        read_only: info.readOnly,
+        remaining_peers: data.clientsCount,
+      },
+    });
   },
 
   extensions: [
@@ -208,8 +292,29 @@ export const collabServer = new Hocuspocus({
             }
           } catch (err) {
             console.error(`[collab] derive failed for ${documentName}:`, err);
+            void captureServer({
+              userId: context.userId,
+              groupId: context.groupId,
+              event: EVENTS.API_ERROR,
+              properties: { route: 'collab.derive', documentName },
+            });
           }
         });
+
+        // Throttled note_edited capture — one event per note per
+        // minute so a fast typist doesn't flood PostHog.
+        const editKey = `${context.groupId}::${documentName}`;
+        const nowTs = Date.now();
+        const lastTs = lastEditCapture.get(editKey) ?? 0;
+        if (nowTs - lastTs >= NOTE_EDIT_THROTTLE_MS) {
+          lastEditCapture.set(editKey, nowTs);
+          void captureServer({
+            userId: context.userId,
+            groupId: context.groupId,
+            event: EVENTS.NOTE_EDITED,
+            properties: { documentName, byte_size: state.byteLength },
+          });
+        }
       },
     }),
   ],
@@ -233,5 +338,9 @@ export async function closeDocumentConnections(documentName: string): Promise<vo
     await collabServer.closeConnections(documentName);
   } catch (err) {
     console.warn('[collab] closeConnections failed:', err);
+    void captureServer({
+      event: EVENTS.API_ERROR,
+      properties: { route: 'collab.closeConnections', documentName },
+    });
   }
 }

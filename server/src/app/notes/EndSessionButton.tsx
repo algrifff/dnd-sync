@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { EVENTS, track } from '@/lib/analytics/client';
 
 type Phase = 'idle' | 'confirming' | 'working' | 'sent' | 'error';
 
@@ -19,6 +20,11 @@ export function EndSessionButton({
   const [errorMsg, setErrorMsg] = useState('');
 
   async function handleConfirm() {
+    track(EVENTS.END_SESSION_CONFIRMED, {
+      session_path: sessionPath,
+      campaign_slug: campaignSlug ?? null,
+      was_already_closed: isAlreadyClosed,
+    });
     setPhase('working');
     try {
       // Mark the session closed in the DB first
@@ -32,6 +38,10 @@ export function EndSessionButton({
         throw new Error(d.error ?? `HTTP ${res.status}`);
       }
     } catch (err) {
+      track(EVENTS.END_SESSION_FAILED, {
+        session_path: sessionPath,
+        reason: err instanceof Error ? err.message.slice(0, 120) : 'unknown',
+      });
       setErrorMsg(err instanceof Error ? err.message : 'Failed to close session.');
       setPhase('error');
       return;
@@ -140,7 +150,14 @@ export function EndSessionButton({
   // ── Idle ──────────────────────────────────────────────────────────────
   return (
     <button
-      onClick={() => setPhase('confirming')}
+      onClick={() => {
+        track(EVENTS.END_SESSION_CLICKED, {
+          session_path: sessionPath,
+          campaign_slug: campaignSlug ?? null,
+          was_already_closed: isAlreadyClosed,
+        });
+        setPhase('confirming');
+      }}
       className="mb-5 rounded-[4px] bg-[#8B4A52] px-4 py-2 text-sm font-medium text-[#F4EDE0] transition-opacity hover:opacity-85 active:opacity-70"
     >
       End of Session

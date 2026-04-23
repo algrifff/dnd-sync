@@ -15,6 +15,9 @@ import {
 } from '@/lib/imports';
 import { parseImportZip } from '@/lib/import-parse';
 import { randomUUID } from 'node:crypto';
+import { captureServer } from '@/lib/analytics/capture';
+import { EVENTS } from '@/lib/analytics/events';
+import { apiErrorResponse } from '@/lib/analytics/api-error';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -35,14 +38,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   try {
     return await handleUpload(req);
   } catch (err) {
-    console.error('[import.upload] unhandled:', err);
-    return json(
-      {
-        error: 'unhandled',
-        message: err instanceof Error ? err.message : String(err),
-      },
-      500,
-    );
+    return apiErrorResponse('api/import.upload', err);
   }
 }
 
@@ -121,6 +117,17 @@ async function handleUpload(req: NextRequest): Promise<Response> {
   });
   adminUploadLimiter.recordSuccess(session.userId);
 
+  void captureServer({
+    userId: session.userId,
+    groupId: session.currentGroupId,
+    event: EVENTS.IMPORT_UPLOADED,
+    properties: {
+      job_id: job.id,
+      filename: file instanceof File ? file.name : null,
+      size_bytes: file.size,
+    },
+  });
+
   // Classical parse pass runs inline. Fast enough that the chat can
   // show the parsed totals without waiting for the async analyse
   // step. Failures drop the job into 'failed' so the client can
@@ -132,11 +139,33 @@ async function handleUpload(req: NextRequest): Promise<Response> {
       ...job,
       plan,
     };
+    void captureServer({
+      userId: session.userId,
+      groupId: session.currentGroupId,
+      event: EVENTS.IMPORT_PARSED,
+      properties: {
+        job_id: job.id,
+        note_count: plan.totals.noteCount,
+        asset_count: plan.totals.assetCount,
+        skipped_count: plan.totals.skippedCount,
+        total_bytes: plan.totals.totalBytes,
+      },
+    });
   } catch (err) {
     updateImportJob(job.id, {
       status: 'failed',
       stats: {
         parseError: err instanceof Error ? err.message : String(err),
+      },
+    });
+    void captureServer({
+      userId: session.userId,
+      groupId: session.currentGroupId,
+      event: EVENTS.IMPORT_FAILED,
+      properties: {
+        job_id: job.id,
+        stage: 'parse',
+        message: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
       },
     });
     return json(

@@ -15,6 +15,7 @@
 // /api/import/:id/answer.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { EVENTS, track } from '@/lib/analytics/client';
 import posthog from '@/lib/posthog-web';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -106,6 +107,16 @@ export function ImportJobPanel({
     ?.orchestration;
   const orchestrating = isOrchestratingStatus(liveJob.status);
   const orchestrationDone = liveJob.status === 'applied' && !!orch;
+
+  // Fire once per panel mount so the funnel shows how many users
+  // reach the review screen vs. abandon earlier in the pipeline.
+  useEffect(() => {
+    track(EVENTS.IMPORT_REVIEW_VIEWED, {
+      job_id: job.id,
+      status: job.status,
+      row_count: plannedNotes?.length ?? 0,
+    });
+  }, [job.id, job.status, plannedNotes]);
 
   useEffect(() => {
     if (!orchestrating) return;

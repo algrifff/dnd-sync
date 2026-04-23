@@ -14,7 +14,9 @@ import { prosemirrorJSONToYDoc } from 'y-prosemirror';
 import * as Y from 'yjs';
 import { getDb } from '@/lib/db';
 import { getPmSchema } from '@/lib/pm-schema';
-import { loadNote } from '@/lib/notes';
+import { loadNote, isAllowedPath } from '@/lib/notes';
+import { captureServer } from '@/lib/analytics/capture';
+import { EVENTS } from '@/lib/analytics/events';
 import { getCampaignBySlug, listCampaigns } from '@/lib/characters';
 import { canonicalFolder, nameToSlug, type EntityKind } from '@/lib/ai/paths';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
@@ -51,9 +53,71 @@ export function createTools(ctx: ToolContext) {
 
 export function getToolsForRole(ctx: ToolContext) {
   const all = createTools(ctx);
-  if (ctx.role === 'dm') return all;
-  const { session_close: _sc, session_apply: _sa, entity_move: _em, note_write_section: _nws, ...playerTools } = all;
-  return playerTools;
+  const filtered = ctx.role === 'dm'
+    ? all
+    : (() => {
+        const { session_close: _sc, session_apply: _sa, entity_move: _em, note_write_section: _nws, ...playerTools } = all;
+        return playerTools;
+      })();
+  return wrapToolsWithTelemetry(ctx, filtered);
+}
+
+/** Wrap each tool's `execute` to fire a `chat_tool_called` event. Keeps
+ *  tool bodies clean while giving PostHog a per-step record. The
+ *  wrapper preserves the original return value verbatim — it only
+ *  observes. */
+function wrapToolsWithTelemetry<T extends Record<string, unknown>>(
+  ctx: ToolContext,
+  tools: T,
+): T {
+  const wrapped = {} as Record<string, unknown>;
+  for (const [name, original] of Object.entries(tools)) {
+    if (
+      !original ||
+      typeof original !== 'object' ||
+      typeof (original as { execute?: unknown }).execute !== 'function'
+    ) {
+      wrapped[name] = original;
+      continue;
+    }
+    const originalExecute = (original as { execute: (args: unknown, opts: unknown) => unknown })
+      .execute.bind(original);
+    wrapped[name] = {
+      ...original,
+      execute: async (args: unknown, opts: unknown): Promise<unknown> => {
+        const startedAt = Date.now();
+        let ok = true;
+        let errorMessage: string | undefined;
+        try {
+          const result = await originalExecute(args, opts);
+          if (result && typeof result === 'object' && 'ok' in result && (result as { ok: unknown }).ok === false) {
+            ok = false;
+            const errField = (result as { error?: unknown }).error;
+            errorMessage = typeof errField === 'string' ? errField : 'tool_returned_error';
+          }
+          return result;
+        } catch (err) {
+          ok = false;
+          errorMessage = err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200);
+          throw err;
+        } finally {
+          void captureServer({
+            userId: ctx.userId,
+            groupId: ctx.groupId,
+            event: EVENTS.CHAT_TOOL_CALLED,
+            properties: {
+              tool_name: name,
+              role: ctx.role,
+              duration_ms: Date.now() - startedAt,
+              ok,
+              ...(errorMessage ? { error: errorMessage } : {}),
+            },
+          });
+        }
+      },
+    };
+  }
+  return wrapped as T;
 }
 
 // ── Schemas ────────────────────────────────────────────────────────────
@@ -261,6 +325,14 @@ function entityCreate(ctx: ToolContext) {
       });
       const path = `${folder}/${nameToSlug(name)}.md`;
 
+      // Defence in depth: canonicalFolder should already emit
+      // structured paths, but refuse to write anything that would
+      // violate the top-level or hidden-segment invariants.
+      const allowed = isAllowedPath(path);
+      if (!allowed.ok) {
+        return { ok: false as const, error: 'invalid_path', message: allowed.reason };
+      }
+
       const db = getDb();
       const existing = db
         .query<{ n: number }, [string, string]>(
@@ -311,6 +383,19 @@ function entityCreate(ctx: ToolContext) {
       } catch (err) {
         console.error('[ai/tools] derive failed after entity_create:', err);
       }
+
+      void captureServer({
+        userId: ctx.userId,
+        groupId: ctx.groupId,
+        event: EVENTS.NOTE_CREATED,
+        properties: {
+          kind: canonical ?? kind,
+          path_depth: path.split('/').length,
+          top_level: path.split('/')[0],
+          via: 'ai',
+          campaign_slug: slugParam ?? null,
+        },
+      });
 
       return { ok: true as const, path };
     },

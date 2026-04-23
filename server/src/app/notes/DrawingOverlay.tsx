@@ -35,6 +35,7 @@ import { createPortal } from 'react-dom';
 import type { HocuspocusProvider } from '@hocuspocus/provider';
 import type * as Y from 'yjs';
 import { Brush, Eraser, Trash2, ZoomIn, ZoomOut } from 'lucide-react';
+import { EVENTS, track } from '@/lib/analytics/client';
 
 type Stroke = {
   id: string;
@@ -103,6 +104,9 @@ export function DrawingOverlay({
   const drawingRef = useRef<Stroke | null>(null);
   const [drawingTick, setDrawingTick] = useState<number>(0);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const strokeStartAtRef = useRef<number>(0);
+  const lastLocalStrokeAtRef = useRef<number>(0);
+  const lastCoUseReportAtRef = useRef<number>(0);
 
   // v3 key — v2 held 720-wide strokes; widening the canvas to 1600
   // would misplace them, so start fresh. Old data sits inert in the
@@ -192,8 +196,38 @@ export function DrawingOverlay({
     };
     apply();
     strokesYMap.observe(apply);
-    return () => strokesYMap.unobserve(apply);
-  }, [strokesYMap]);
+
+    // Co-use detection: if a remote stroke arrives within 60s of a
+    // local stroke on this doc, count it once as a collaborative
+    // drawing session. Throttled so a continuous back-and-forth
+    // only fires one event per 60s window.
+    const onCoUse = (event: Y.YMapEvent<Stroke>): void => {
+      const now = Date.now();
+      const localWithin60s = lastLocalStrokeAtRef.current > 0 &&
+        now - lastLocalStrokeAtRef.current < 60_000;
+      if (!localWithin60s) return;
+      let sawRemote = false;
+      for (const [id, change] of event.changes.keys) {
+        if (change.action !== 'add' && change.action !== 'update') continue;
+        const stroke = strokesYMap.get(id);
+        if (stroke && stroke.userId !== user.userId) {
+          sawRemote = true;
+          break;
+        }
+      }
+      if (!sawRemote) return;
+      if (now - lastCoUseReportAtRef.current < 60_000) return;
+      lastCoUseReportAtRef.current = now;
+      track(EVENTS.DRAW_SESSION_CO_USED, {
+        document_name: provider.configuration.name,
+      });
+    };
+    strokesYMap.observe(onCoUse);
+    return () => {
+      strokesYMap.unobserve(apply);
+      strokesYMap.unobserve(onCoUse);
+    };
+  }, [strokesYMap, provider, user.userId]);
 
   // Convert viewport coords to virtual-px. The SVG's bounding rect is
   // post-zoom, so rect.width / VIRTUAL_WIDTH yields the effective
@@ -242,8 +276,11 @@ export function DrawingOverlay({
           points: [pt],
         };
         drawingRef.current = stroke;
+        strokeStartAtRef.current = Date.now();
+        lastLocalStrokeAtRef.current = strokeStartAtRef.current;
         setDrawingTick((t) => t + 1);
         strokesYMap.set(stroke.id, { ...stroke });
+        track(EVENTS.DRAW_STROKE_STARTED, { color });
       } else if (mode === 'eraser') {
         eraseAt(strokesYMap, user.userId, pt[0], pt[1]);
       }
@@ -280,9 +317,15 @@ export function DrawingOverlay({
     }
     if (stroke && stroke.points.length > 1) {
       strokesYMap.set(stroke.id, { ...stroke });
+      track(EVENTS.DRAW_STROKE_COMMITTED, {
+        point_count: stroke.points.length,
+        duration_ms: strokeStartAtRef.current ? Date.now() - strokeStartAtRef.current : 0,
+        color: stroke.color,
+      });
     } else if (stroke) {
       strokesYMap.delete(stroke.id);
     }
+    strokeStartAtRef.current = 0;
   }, [strokesYMap]);
 
   const clearMine = useCallback(() => {
