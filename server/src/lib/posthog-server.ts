@@ -40,6 +40,11 @@ export async function getPostHogClient(): Promise<PostHogLike> {
   const token = process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN;
   const host = process.env.NEXT_PUBLIC_POSTHOG_HOST ?? 'https://eu.i.posthog.com';
 
+  if (process.env.NODE_ENV !== 'production') {
+    posthogClient = noopClient;
+    return posthogClient;
+  }
+
   if (!token) {
     if (!warnedMissingToken && process.env.NODE_ENV !== 'production') {
       warnedMissingToken = true;
