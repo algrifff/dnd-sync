@@ -332,7 +332,7 @@ export function LandingClient(): ReactElement {
               src={img.src}
               alt=""
               draggable={false}
-              className="collage-img absolute select-none"
+              className={`collage-img absolute select-none${i === 0 ? '' : ' collage-img-interactive'}`}
               style={{
                 left: img.left,
                 top: img.top,
