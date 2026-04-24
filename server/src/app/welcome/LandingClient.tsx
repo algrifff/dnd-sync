@@ -1,6 +1,12 @@
 'use client';
 
-import { useEffect, useRef, type ReactElement } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react';
+
+// useLayoutEffect on the client, useEffect on the server — avoids the
+// "useLayoutEffect does nothing on the server" warning while still running
+// synchronously before paint in the browser.
+const useIsoLayoutEffect =
+  typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 import Link from 'next/link';
 
 // --- Types ---
@@ -18,14 +24,57 @@ type Ember = {
 };
 
 // --- Constants ---
+// Fixed coordinate space for the collage. All image % positions are
+// relative to this canvas; a single scale() keeps the whole composition
+// uniform as the viewport changes.
+const CANVAS_W = 1000;
+
 const FOOT_LIFETIME = 3500;
 const STRIDE_PX = 40;
 const FOOT_OFFSET_PX = 6;
 const FOOT_W = 10; // display width px
 const FOOT_H = FOOT_W * (121 / 46); // maintain aspect ratio ~26px tall
 
+// Collage layout for the left half. Positions + widths are percentages of
+// the 50vw × 100vh container; the composition mirrors the reference
+// illustration (Main-Image centred, parchment frames pinned around it).
+// `shadow: true` gets a heavier drop-shadow (frontal pieces); smaller
+// "pinned" frames get a lighter one.
+const COLLAGE: Array<{
+  src: string;
+  left: string;
+  top: string;
+  width: string;
+  shadow?: boolean;
+}> = [
+  // Central hydra pit — the anchor of the composition.
+  { src: '/landing/Main-Image.png', left: '10%', top: '-10%', width: '100%', shadow: true },
+  // Top-left: purple arcane explosion with demons.
+  { src: '/landing/Image-comet.png', left: '1%', top: '-20%', width: '40%' },
+  // Top-right: hooded figure over a burning city.
+  { src: '/landing/Image-ignys.png', left: '80%', top: '-23%', width: '51%' },
+  // Mid-left: two armoured figures embracing.
+  { src: '/landing/Image-lumen.png', left: '-2%', top: '11%', width: '27%' },
+  // Mid-right small frame: two bearded dwarves.
+  { src: '/landing/Image-John-Jason.png', left: '81%', top: '12%', width: '20%' },
+  // Right: young figure with green glowing hand.
+  { src: '/landing/Image-erianor.png', left: '88%', top: '36%', width: '30%' },
+  // Mid-left small: wide red desert scroll.
+  { src: '/landing/Image-ket.png', left: '0%', top: '68%', width: '30%' },
+  // Bottom-left: armoured figure at a crystal pool.
+  { src: '/landing/Image-zordaar.png', left: '-4%', top: '80%', width: '42%' },
+  // Bottom-centre tiny: seated cross-legged figure.
+  { src: '/landing/Image-oda.png', left: '30%', top: '84%', width: '26%' },
+  // Bottom-right: King Duke scroll with crowned orc.
+  { src: '/landing/Image-duke.png', left: '74%', top: '70%', width: '48%', shadow: true },
+];
+
 export function LandingClient(): ReactElement {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // null during SSR + first paint; set by the layout-effect below using the
+  // real viewport width. We don't render the collage until scale is known,
+  // so there's no flash of a scale(1) oversize then animating down.
+  const [collageScale, setCollageScale] = useState<number | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -244,6 +293,13 @@ export function LandingClient(): ReactElement {
     };
   }, []);
 
+  useIsoLayoutEffect(() => {
+    const update = (): void => setCollageScale((window.innerWidth * 0.5) / CANVAS_W);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
   return (
     <div className="relative flex h-screen w-screen cursor-crosshair overflow-hidden bg-[#D9C4A0]">
       {/* Full-page canvas: campfire glow + embers + footprints */}
@@ -252,38 +308,69 @@ export function LandingClient(): ReactElement {
         className="pointer-events-none fixed inset-0 z-50 h-screen w-screen"
       />
 
-      {/* Left — artwork pinned to the noticeboard */}
-      <div className="hidden h-full w-1/2 items-center justify-center md:flex">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/landing_01.png"
-          alt="Pit Pals"
-          draggable={false}
-          className="max-h-[88vh] w-auto select-none object-contain"
+      {/* Left — collage rendered inside a fixed CANVAS_W×CANVAS_W coordinate
+          space that is scaled uniformly from its center. This keeps the whole
+          composition together as the viewport changes instead of having each
+          image's % position drift independently. */}
+      <div className="relative hidden h-full w-1/2 md:block">
+        {collageScale !== null && (
+        <div
           style={{
-            filter:
-              'drop-shadow(0px 28px 22px rgba(42,24,10,0.50)) drop-shadow(0px 10px 8px rgba(42,24,10,0.30))',
+            position: 'absolute',
+            width: CANVAS_W,
+            height: CANVAS_W,
+            top: '50%',
+            left: '50%',
+            transform: `translate(-50%, -50%) scale(${collageScale})`,
+            transformOrigin: 'center center',
           }}
-        />
+        >
+          {COLLAGE.map((img, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={img.src}
+              src={img.src}
+              alt=""
+              draggable={false}
+              className="collage-img absolute select-none"
+              style={{
+                left: img.left,
+                top: img.top,
+                width: img.width,
+                height: 'auto',
+                // Stagger the fade-in so the composition assembles top→bottom
+                // in COLLAGE order.
+                animationDelay: `${i * 110}ms`,
+                filter: img.shadow
+                  ? 'drop-shadow(0px 20px 18px rgba(42,24,10,0.45)) drop-shadow(0px 6px 6px rgba(42,24,10,0.25))'
+                  : 'drop-shadow(0px 12px 12px rgba(42,24,10,0.40))',
+              }}
+            />
+          ))}
+        </div>
+        )}
       </div>
 
-      {/* Right — call to action */}
-      <div className="relative z-10 flex h-full w-full flex-col items-center justify-center gap-5 px-8 md:w-1/2">
+      {/* Right — call to action. The container itself is pointer-events:none
+          so empty space on the right half doesn't block hovers on collage
+          images that overflow into it; each interactive child re-enables
+          its own pointer events. */}
+      <div className="pointer-events-none relative z-10 flex h-full w-full flex-col items-center justify-center gap-5 px-8 md:w-1/2">
         <h1
-          className="text-6xl font-bold tracking-tight text-[#2A241E]"
+          className="pointer-events-auto text-6xl font-bold tracking-tight text-[#2A241E]"
           style={{ fontFamily: '"Fraunces", Georgia, serif' }}
         >
           Pit Pals
         </h1>
         <p
-          className="max-w-xs text-center text-lg italic text-[#5A4F42]"
+          className="pointer-events-auto max-w-xs text-center text-lg italic text-[#5A4F42]"
           style={{ fontFamily: '"Fraunces", Georgia, serif' }}
         >
           Notes, sheets &amp; stories for your table.
         </p>
         <Link
           href="/login"
-          className="mt-4 inline-block rounded-[12px] bg-[#2A241E] px-10 py-4 text-lg font-semibold text-[#F4EDE0] shadow-[0_2px_0_rgba(0,0,0,0.2)] transition hover:bg-[#8B4A52]"
+          className="pointer-events-auto mt-4 inline-block rounded-[12px] bg-[#2A241E] px-10 py-4 text-lg font-semibold text-[#F4EDE0] shadow-[0_2px_0_rgba(0,0,0,0.2)] transition hover:bg-[#8B4A52]"
           style={{ fontFamily: '"Fraunces", Georgia, serif' }}
         >
           Begin Your Adventure
