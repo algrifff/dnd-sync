@@ -653,10 +653,7 @@ export function FileTree({
 
   return (
     <KindMapContext.Provider value={kindMap ?? EMPTY_KIND_MAP}>
-    <nav
-      aria-label="Note tree"
-      className="min-h-0 flex-1 overflow-y-auto border-r border-[#D4C7AE] py-3 text-sm"
-    >
+    <div className="flex min-h-0 flex-1 flex-col border-r border-[#D4C7AE]">
       {showCampaignDialog && (
         <CampaignCreateDialog
           csrfToken={csrfToken}
@@ -669,11 +666,17 @@ export function FileTree({
           }}
         />
       )}
-      <ActivePartySection
-        activeCampaignSlug={activeCampaignSlug}
-        csrfToken={csrfToken}
-        activePath={activePath}
-      />
+      <div className="shrink-0 pt-3">
+        <ActivePartySection
+          activeCampaignSlug={activeCampaignSlug}
+          csrfToken={csrfToken}
+          activePath={activePath}
+        />
+      </div>
+    <nav
+      aria-label="Note tree"
+      className="min-h-0 flex-1 overflow-y-auto pb-3 text-sm"
+    >
       {moveLabel && (
         <div
           role="status"
@@ -765,6 +768,7 @@ export function FileTree({
         ))}
       </ul>
     </nav>
+    </div>
     </KindMapContext.Provider>
   );
 }
