@@ -17,6 +17,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import { Check, Link2, Pencil, Plus } from 'lucide-react';
 import { useWorldSwitch } from './(app)/WorldSwitch';
 import { NewWorldDialog } from './NewWorldDialog';
@@ -49,6 +50,9 @@ export function WorldsSidebar({
   worldId: string;
 }): React.JSX.Element {
   const { isPending, switchTo } = useWorldSwitch();
+  const router = useRouter();
+  const pathname = usePathname();
+  const onMe = pathname === '/me' || pathname.startsWith('/me/');
   const [worlds, setWorlds] = useState<World[] | null>(null);
   const [creating, setCreating] = useState<boolean>(false);
   const [busy, setBusy] = useState<boolean>(false);
@@ -139,6 +143,26 @@ export function WorldsSidebar({
         aria-label="Worlds"
         className="hidden h-full w-[56px] shrink-0 flex-col items-center gap-1.5 bg-[var(--shadow)] py-2 md:flex"
       >
+        <button
+          type="button"
+          onClick={() => router.push('/me')}
+          title="Compendium · personal overview"
+          aria-label="Compendium overview"
+          aria-pressed={onMe}
+          className={
+            'flex h-10 w-10 items-center justify-center overflow-hidden bg-[var(--ink)] text-[var(--parchment)] transition-all ' +
+            (onMe
+              ? 'rounded-[14px] ring-2 ring-[var(--parchment)]/20'
+              : 'rounded-full hover:rounded-[14px]')
+          }
+        >
+          <img
+            src="/og-image.png"
+            alt=""
+            className="h-full w-full object-cover"
+          />
+        </button>
+        <div className="h-px w-8 bg-[var(--ink-soft)]/40" aria-hidden />
         {worldsWithLiveActive == null ? (
           <div className="h-10 w-10 animate-pulse rounded-full bg-[var(--ink-soft)]/40" />
         ) : (
