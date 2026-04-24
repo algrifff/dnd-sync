@@ -51,7 +51,7 @@ describe('getActivePersonality', () => {
     const active = getActivePersonality(groupId);
     expect(active.id).toBe(DEFAULT_PERSONALITY.id);
     expect(active.isBuiltin).toBe(true);
-    expect(active.prompt).toContain('grizzled old knight');
+    expect(active.prompt).toContain('Pope Huel');
   });
 
   it('returns the stored row when one is active', () => {
@@ -230,7 +230,7 @@ describe('buildSystemPrompt voice injection', () => {
       role: 'dm',
       skills: [],
     });
-    expect(prompt).toContain('grizzled old knight');
+    expect(prompt).toContain('Pope Huel');
     expect(prompt).toContain('Voice applies only to your final prose reply');
   });
 
@@ -243,7 +243,7 @@ describe('buildSystemPrompt voice injection', () => {
       voice,
     });
     expect(prompt).toContain(voice);
-    expect(prompt).not.toContain('grizzled old knight');
+    expect(prompt).not.toContain('Pope Huel');
     // The guardrail is always appended, no matter the voice.
     expect(prompt).toContain('Voice applies only to your final prose reply');
   });

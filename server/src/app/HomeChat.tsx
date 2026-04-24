@@ -33,7 +33,6 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { ChatMarkdown } from './ChatMarkdown';
-import { SessionReviewPanel, type SessionProposal } from './SessionReviewPanel';
 import { noteEditorHref, useRefreshTreeOnAiNoteMutations } from './chat-tree-refresh';
 import { chatStorageKey, cleanupLegacyChatStorage } from './chat-storage';
 import posthog from '@/lib/posthog-web';
@@ -104,9 +103,11 @@ async function uploadForExtraction(file: File): Promise<string> {
 export function HomeChat({
   groupId,
   userId,
+  campaignSlug,
 }: {
   groupId: string;
   userId: string;
+  campaignSlug?: string | undefined;
 }): ReactElement {
   const [input, setInput] = useState('');
   const [loaded, setLoaded] = useState(false);
@@ -127,9 +128,12 @@ export function HomeChat({
     () =>
       new DefaultChatTransport({
         api: '/api/chat',
-        body: { groupId },
+        body: {
+          groupId,
+          ...(campaignSlug !== undefined ? { campaignSlug } : {}),
+        },
       }),
-    [groupId],
+    [groupId, campaignSlug],
   );
 
   const { messages, status, sendMessage, setMessages } = useChat({ transport });
@@ -293,16 +297,6 @@ export function HomeChat({
     }
   }
 
-  function onApplySession(
-    sessionPath: string,
-    approvedChanges: Array<{ id: string; approved: boolean }>,
-  ) {
-    const json = JSON.stringify(approvedChanges);
-    void sendMessage({
-      text: `Apply the approved session changes. Call session_apply with sessionPath="${sessionPath}" and approvedChanges=${json}`,
-    });
-  }
-
   const anyLoading = attachedFiles.some((f) => f.loading);
 
   function quickSend(prompt: string) {
@@ -339,7 +333,7 @@ export function HomeChat({
       {/* Header */}
       <header className="flex items-center gap-2 border-b border-[#D4C7AE] px-4 py-2">
         <Sparkles size={14} className="text-[#D4A85A]" aria-hidden />
-        <h2 className="flex-1 text-sm font-semibold text-[#2A241E]">Huel</h2>
+        <h2 className="flex-1 text-sm font-semibold text-[#2A241E]">Pope Huel</h2>
         {messages.length > 0 && (
           <button
             type="button"
@@ -365,12 +359,7 @@ export function HomeChat({
         )}
         <div className="min-w-0 space-y-2">
           {messages.map((msg) => (
-            <MessageBubble
-              key={msg.id}
-              msg={msg}
-              role="dm"
-              onApplySession={onApplySession}
-            />
+            <MessageBubble key={msg.id} msg={msg} />
           ))}
           {isStreaming && (
             <div className="flex items-center gap-1.5 text-xs text-[#5A4F42]">
@@ -548,12 +537,8 @@ function AttachmentBadge({
 
 function MessageBubble({
   msg,
-  role,
-  onApplySession,
 }: {
   msg: UIMessage;
-  role: 'dm' | 'player';
-  onApplySession: (sessionPath: string, changes: Array<{ id: string; approved: boolean }>) => void;
 }): ReactElement | null {
   if (msg.role === 'user') {
     const textParts = msg.parts.filter(isTextUIPart);
@@ -589,12 +574,7 @@ function MessageBubble({
   return (
     <div className="flex min-w-0 max-w-full flex-col gap-2">
       {msg.parts.map((part, i) => (
-        <AssistantPart
-          key={i}
-          part={part}
-          role={role}
-          onApplySession={onApplySession}
-        />
+        <AssistantPart key={i} part={part} />
       ))}
     </div>
   );
@@ -624,12 +604,8 @@ function baseName(path: string): string {
 
 function AssistantPart({
   part,
-  role,
-  onApplySession,
 }: {
   part: UIMessagePart<UIDataTypes, UITools>;
-  role: 'dm' | 'player';
-  onApplySession: (sessionPath: string, changes: Array<{ id: string; approved: boolean }>) => void;
 }): ReactElement | null {
   if (isTextUIPart(part)) {
     if (!part.text) return null;
@@ -643,18 +619,6 @@ function AssistantPart({
   if (isToolUIPart(part)) {
     const toolName = 'toolName' in part ? part.toolName : part.type.replace(/^tool-/, '');
     const state = part.state;
-
-    if (toolName === 'session_close' && state === 'output-available' && role === 'dm') {
-      const output = part.output as { ok: boolean; proposal?: SessionProposal } | undefined;
-      if (output?.ok && output.proposal) {
-        return (
-          <SessionReviewPanel
-            proposal={output.proposal}
-            onApply={onApplySession}
-          />
-        );
-      }
-    }
 
     if (toolName === 'entity_create' && state === 'output-available') {
       const output = part.output as

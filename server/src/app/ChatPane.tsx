@@ -22,7 +22,6 @@ import {
 } from 'ai';
 import { Loader2, Send, Sparkles, X, Paperclip, FolderOpen, Trash2 } from 'lucide-react';
 import { ChatMarkdown } from './ChatMarkdown';
-import { SessionReviewPanel, type SessionProposal } from './SessionReviewPanel';
 import { noteEditorHref, useRefreshTreeOnAiNoteMutations } from './chat-tree-refresh';
 import { chatStorageKey, cleanupLegacyChatStorage } from './chat-storage';
 import posthog from '@/lib/posthog-web';
@@ -305,26 +304,6 @@ export function ChatPane({
     }
   }
 
-  // ── Session apply ──────────────────────────────────────────────────
-
-  function onApplySession(
-    sessionPath: string,
-    approvedChanges: Array<{ id: string; approved: boolean }>,
-  ) {
-    const approved = approvedChanges.filter((c) => c.approved).length;
-    const rejected = approvedChanges.length - approved;
-    posthog.capture('session_review_submitted', {
-      session_path: sessionPath,
-      approved_count: approved,
-      rejected_count: rejected,
-      role,
-    });
-    const json = JSON.stringify(approvedChanges);
-    void sendMessage({
-      text: `Apply the approved session changes. Call session_apply with sessionPath="${sessionPath}" and approvedChanges=${json}`,
-    });
-  }
-
   const anyLoading = attachedFiles.some((f) => f.loading);
 
   return (
@@ -354,7 +333,7 @@ export function ChatPane({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label={open ? 'Close Huel' : 'Open Huel'}
+        aria-label={open ? 'Close Pope Huel' : 'Open Pope Huel'}
         aria-hidden={open}
         tabIndex={open ? -1 : 0}
         className={`fixed bottom-6 right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-[#D4A85A] text-white shadow-[0_4px_16px_rgba(42,36,30,0.25)] transition-all duration-200 ease-out hover:bg-[#C49848] active:scale-95 ${
@@ -380,7 +359,7 @@ export function ChatPane({
             </button>
             <span className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold text-[#2A241E]">
               <Sparkles size={13} className="shrink-0 text-[#D4A85A]" aria-hidden />
-              <span className="truncate">Huel</span>
+              <span className="truncate">Pope Huel</span>
             </span>
             {messages.length > 0 && (
               <button
@@ -413,7 +392,6 @@ export function ChatPane({
                   key={msg.id}
                   msg={msg}
                   role={role}
-                  onApplySession={onApplySession}
                 />
               ))}
             </div>
@@ -534,11 +512,9 @@ function AttachmentBadge({
 function MessageBubble({
   msg,
   role,
-  onApplySession,
 }: {
   msg: UIMessage;
   role: 'dm' | 'player';
-  onApplySession: (sessionPath: string, changes: Array<{ id: string; approved: boolean }>) => void;
 }): ReactElement | null {
   if (msg.role === 'user') {
     const textParts = msg.parts.filter(isTextUIPart);
@@ -575,12 +551,7 @@ function MessageBubble({
   return (
     <div className="flex min-w-0 max-w-full flex-col gap-2">
       {msg.parts.map((part, i) => (
-        <AssistantPart
-          key={i}
-          part={part}
-          role={role}
-          onApplySession={onApplySession}
-        />
+        <AssistantPart key={i} part={part} />
       ))}
     </div>
   );
@@ -606,12 +577,8 @@ function UserFilePart({ part }: { part: FileUIPart }): ReactElement {
 
 function AssistantPart({
   part,
-  role,
-  onApplySession,
 }: {
   part: UIMessagePart<UIDataTypes, UITools>;
-  role: 'dm' | 'player';
-  onApplySession: (sessionPath: string, changes: Array<{ id: string; approved: boolean }>) => void;
 }): ReactElement | null {
   if (isTextUIPart(part)) {
     if (!part.text) return null;
@@ -626,18 +593,6 @@ function AssistantPart({
     const toolName =
       'toolName' in part ? part.toolName : part.type.replace(/^tool-/, '');
     const state = part.state;
-
-    if (toolName === 'session_close' && state === 'output-available' && role === 'dm') {
-      const output = part.output as { ok: boolean; proposal?: SessionProposal } | undefined;
-      if (output?.ok && output.proposal) {
-        return (
-          <SessionReviewPanel
-            proposal={output.proposal}
-            onApply={onApplySession}
-          />
-        );
-      }
-    }
 
     if (toolName === 'entity_create' && state === 'output-available') {
       const output = part.output as
@@ -718,8 +673,8 @@ const TOOL_LABELS: Record<string, string> = {
   entity_move:         'Moved',
   backlink_create:     'Linked',
   inventory_add:       'Added to inventory',
-  session_close:       'Session analysed',
-  session_apply:       'Session applied',
+  session_finalize:    'Session closed',
+  note_read:           'Read',
 };
 
 function getToolHint(toolName: string, input: Record<string, unknown>): string {
@@ -729,8 +684,8 @@ function getToolHint(toolName: string, input: Record<string, unknown>): string {
     return baseName(String(input.path ?? input.from ?? ''));
   }
   if (toolName === 'backlink_create') return baseName(String(input.fromPath ?? ''));
-  if (toolName === 'session_close' || toolName === 'session_apply') {
-    return baseName(String(input.sessionPath ?? ''));
+  if (toolName === 'session_finalize' || toolName === 'note_read') {
+    return baseName(String(input.sessionPath ?? input.path ?? ''));
   }
   if (toolName === 'inventory_add') return baseName(String(input.characterPath ?? ''));
   return '';
