@@ -752,6 +752,41 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'day';
     `,
   },
+  {
+    version: 40,
+    description: 'user_characters: user-owned characters + world bindings',
+    sql: `
+      -- First-class, world-independent characters owned by a user. A
+      -- player can bring one of their user_characters into a world's
+      -- active campaign via /api/worlds/.../campaigns/.../join, which
+      -- creates a world note and records the binding below.
+      CREATE TABLE user_characters (
+        id                TEXT PRIMARY KEY,
+        owner_user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name              TEXT NOT NULL,
+        kind              TEXT NOT NULL DEFAULT 'character',
+        sheet_json        TEXT NOT NULL DEFAULT '{}',
+        portrait_url      TEXT,
+        created_at        INTEGER NOT NULL,
+        updated_at        INTEGER NOT NULL
+      );
+      CREATE INDEX user_characters_owner ON user_characters(owner_user_id);
+
+      -- Which user_character is mirrored into which world note. The
+      -- binding drives two-way sync between the master row and the
+      -- per-campaign note.
+      CREATE TABLE user_character_bindings (
+        user_character_id TEXT NOT NULL REFERENCES user_characters(id) ON DELETE CASCADE,
+        group_id          TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        campaign_slug     TEXT NOT NULL,
+        note_id           TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+        joined_at         INTEGER NOT NULL,
+        PRIMARY KEY (user_character_id, group_id, campaign_slug)
+      );
+      CREATE INDEX uc_bindings_note ON user_character_bindings(note_id);
+      CREATE INDEX uc_bindings_group ON user_character_bindings(group_id);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {
