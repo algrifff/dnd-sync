@@ -84,7 +84,7 @@ export type PromptContext = {
   groupId: string;
   campaignSlug?: string;
   campaignName?: string;
-  role: 'dm' | 'player';
+  role: 'dm' | 'player' | 'viewer';
   userDisplayName?: string;
   activeCharacterName?: string;
   openSessionPath?: string;
@@ -102,7 +102,8 @@ export type PromptContext = {
 };
 
 export function buildSystemPrompt(ctx: PromptContext): string {
-  const roleLabel = ctx.role === 'dm' ? 'Game Master' : 'Player';
+  const roleLabel =
+    ctx.role === 'dm' ? 'Game Master' : ctx.role === 'viewer' ? 'Observer (read-only)' : 'Player';
   const campaignLine = ctx.campaignName
     ? `Active campaign: ${ctx.campaignName} (slug: ${ctx.campaignSlug})`
     : 'No campaign selected.';
@@ -142,15 +143,17 @@ Role: ${roleLabel}
 - campaign_list       — list registered campaigns. Call if no campaign is active before entity_create.
 - campaign_browse     — enumerate notes under a campaign (filter by kind or subfolder). Use for recaps, summaries, and "what happened with X" questions where you need to scan the world, not just search for a keyword.
 - entity_search       — FTS search. Always call before entity_create to avoid duplicates.
+- note_read           — read full content + frontmatter of any note.${ctx.role === 'viewer' ? `
+
+You are in a read-only session. You cannot create, edit, move, link, or finalize anything — only read and recap.` : `
 - entity_create       — create a new entity under a registered campaign. Paths are auto-assigned; never invent them.
 - entity_edit_sheet   — merge structured frontmatter fields (stats, HP, AC, level, relationships, etc.).
 - entity_edit_content — append prose to a note body.
-- note_read           — read full content + frontmatter of any note.
 - backlink_create     — add a [[wikilink]] + graph edge between two notes. Use BOTH directions to link entities together.
 - inventory_add       — add an item to a character's inventory.${ctx.role === 'dm' ? `
 - note_write_section  — replace a named section (GM only). Call note_read first.
 - entity_move         — rename or move a note (GM only).
-- session_finalize    — mark a session closed. Call LAST, after all distribution work (GM only).` : ''}
+- session_finalize    — mark a session closed. Call LAST, after all distribution work (GM only).` : ''}`}
 
 ## Behaviour
 - Act on the information given. Fill unspecified fields with sensible defaults; don't ask about optional details.

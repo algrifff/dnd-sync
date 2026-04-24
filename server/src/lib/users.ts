@@ -460,7 +460,7 @@ export async function signupUser(input: SignupUserInput): Promise<User> {
     db.query(
       `INSERT INTO group_members (group_id, user_id, role, joined_at)
        VALUES (?, ?, ?, ?)`,
-    ).run(groupId, id, 'viewer', now);
+    ).run(groupId, id, 'editor', now);
   })();
 
   logAudit({
@@ -481,6 +481,38 @@ export async function signupUser(input: SignupUserInput): Promise<User> {
     lastLoginAt: null,
     emailVerifiedAt: null,
   };
+}
+
+/** Change a member's role within a specific world. Returns false if the
+ *  target isn't a member of the group, or if the change would leave the
+ *  world with zero admins. */
+export function setMemberRole(
+  groupId: string,
+  userId: string,
+  role: UserRole,
+): { ok: true } | { ok: false; error: 'not_member' | 'would_orphan_admin' } {
+  const db = getDb();
+  const current = db
+    .query<{ role: UserRole }, [string, string]>(
+      'SELECT role FROM group_members WHERE group_id = ? AND user_id = ?',
+    )
+    .get(groupId, userId);
+  if (!current) return { ok: false, error: 'not_member' };
+  if (current.role === role) return { ok: true };
+
+  if (current.role === 'admin' && role !== 'admin') {
+    const remaining = db
+      .query<{ n: number }, [string]>(
+        `SELECT COUNT(*) AS n FROM group_members WHERE group_id = ? AND role = 'admin'`,
+      )
+      .get(groupId);
+    if ((remaining?.n ?? 0) <= 1) return { ok: false, error: 'would_orphan_admin' };
+  }
+
+  db.query(
+    'UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?',
+  ).run(role, groupId, userId);
+  return { ok: true };
 }
 
 /** Mark a user's email as verified. Idempotent — safe to call twice. */

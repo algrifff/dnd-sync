@@ -28,7 +28,7 @@ import { validateSheet } from '@/lib/validateSheet';
 export type ToolContext = {
   groupId: string;
   userId: string;
-  role: 'dm' | 'player';
+  role: 'dm' | 'player' | 'viewer';
   campaignSlug?: string | undefined;
 };
 
@@ -53,12 +53,27 @@ export function createTools(ctx: ToolContext) {
 
 export function getToolsForRole(ctx: ToolContext) {
   const all = createTools(ctx);
-  const filtered = ctx.role === 'dm'
-    ? all
-    : (() => {
-        const { session_finalize: _sf, entity_move: _em, note_write_section: _nws, ...playerTools } = all;
-        return playerTools;
-      })();
+  let filtered: Partial<typeof all>;
+  if (ctx.role === 'dm') {
+    filtered = all;
+  } else if (ctx.role === 'player') {
+    const { session_finalize: _sf, entity_move: _em, note_write_section: _nws, ...playerTools } = all;
+    filtered = playerTools;
+  } else {
+    // viewer: read-only surface — no mutating tools at all.
+    const {
+      session_finalize: _sf,
+      entity_move: _em,
+      note_write_section: _nws,
+      entity_create: _ec,
+      entity_edit_sheet: _ees,
+      entity_edit_content: _eec,
+      backlink_create: _bc,
+      inventory_add: _ia,
+      ...readOnlyTools
+    } = all;
+    filtered = readOnlyTools;
+  }
   return wrapToolsWithTelemetry(ctx, filtered);
 }
 

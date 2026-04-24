@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { listUsersInGroup, type UserWithRole } from '@/lib/users';
+import { MemberRoleSelect } from './MemberRoleSelect';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,9 +23,15 @@ export default async function WorldMembersPage(): Promise<ReactElement> {
     <div className="space-y-6">
       <p className="text-sm text-[#5A4F42]">
         Everyone who belongs to this world, and their role within it. New members join via the
-        invite link under the World tab.
+        invite link under the World tab. Demote a member to <em>viewer</em> to make them
+        read-only; promote back to <em>editor</em> to restore editing.
       </p>
-      <MemberTable members={members} currentUserId={session.userId} />
+      <MemberTable
+        members={members}
+        currentUserId={session.userId}
+        groupId={session.currentGroupId}
+        csrfToken={session.csrfToken}
+      />
     </div>
   );
 }
@@ -32,9 +39,13 @@ export default async function WorldMembersPage(): Promise<ReactElement> {
 function MemberTable({
   members,
   currentUserId,
+  groupId,
+  csrfToken,
 }: {
   members: UserWithRole[];
   currentUserId: string;
+  groupId: string;
+  csrfToken: string;
 }): ReactElement {
   return (
     <section className="overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8]">
@@ -70,9 +81,15 @@ function MemberTable({
                 </div>
               </td>
               <td className="px-4 py-3">
-                <span className="rounded-full border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-0.5 text-xs">
-                  {m.role}
-                </span>
+                <MemberRoleSelect
+                  groupId={groupId}
+                  userId={m.id}
+                  initialRole={m.role}
+                  csrfToken={csrfToken}
+                  {...(m.id === currentUserId
+                    ? { disabled: true, disabledReason: 'Transfer world ownership to change your own role.' }
+                    : {})}
+                />
               </td>
               <td className="px-4 py-3 text-[#5A4F42]">
                 {new Date(m.createdAt).toISOString().slice(0, 10)}

@@ -46,8 +46,12 @@ export async function POST(req: NextRequest): Promise<Response> {
     return json({ error: 'ai_not_configured', reason: 'OPENAI_API_KEY is not set' }, 503);
   }
 
-  const role: 'dm' | 'player' =
-    session.role === 'admin' || session.role === 'editor' ? 'dm' : 'player';
+  const role: 'dm' | 'player' | 'viewer' =
+    session.role === 'admin' || session.role === 'editor'
+      ? 'dm'
+      : session.role === 'viewer'
+        ? 'viewer'
+        : 'player';
 
   // Extract last user message text for skill detection before conversion
   const lastUserMessage = extractLastUserText(body.messages);

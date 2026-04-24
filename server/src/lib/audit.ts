@@ -33,6 +33,7 @@ export type AuditAction =
   | 'group.join'
   | 'group.switch'
   | 'group.transfer_ownership'
+  | 'group.member_role_changed'
   | 'personality.create'
   | 'personality.update'
   | 'personality.delete'
