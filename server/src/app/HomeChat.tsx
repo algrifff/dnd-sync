@@ -513,7 +513,6 @@ function AttachmentBadge({
     >
       {file.loading && <Loader2 size={9} className="shrink-0 animate-spin" aria-hidden />}
       {file.kind === 'image' && !file.loading && (
-        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={file.content}
           alt=""
@@ -583,7 +582,6 @@ function MessageBubble({
 function UserFilePart({ part }: { part: FileUIPart }): ReactElement {
   if (part.mediaType.startsWith('image/')) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element
       <img
         src={part.url}
         alt="Attached image"

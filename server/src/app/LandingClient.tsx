@@ -328,7 +328,6 @@ export function LandingClient(): ReactElement {
           }}
         >
           {COLLAGE.map((img, i) => (
-            // eslint-disable-next-line @next/next/no-img-element
             <img
               key={img.src}
               src={img.src}

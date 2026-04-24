@@ -2,7 +2,7 @@
 // the per-character runtime fields (equipped/attuned/quantity live on
 // the inventory entry, not on the canonical item).
 
-import { z } from 'zod';
+import type { z } from 'zod';
 import { ItemSheet } from '../item';
 
 export const ItemDef = ItemSheet;

@@ -1,7 +1,7 @@
 // Canonical monster stat block. Same shape as a world-note creature but
 // without the player's personal observations field.
 
-import { z } from 'zod';
+import type { z } from 'zod';
 import { CreatureSheet } from '../creature';
 
 export const MonsterDef = CreatureSheet.omit({

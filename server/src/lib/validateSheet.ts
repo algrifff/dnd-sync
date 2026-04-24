@@ -6,7 +6,7 @@
 // preserved rather than rejected. Required keys with wrong types DO
 // fail — `level: "banana"` is rejected.
 
-import { z } from 'zod';
+import type { z } from 'zod';
 import {
   dnd5e,
   isSheetedKind,

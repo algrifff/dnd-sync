@@ -13,7 +13,6 @@
 
 import { existsSync } from 'node:fs';
 import AdmZip from 'adm-zip';
-import YAML from 'yaml';
 import { getDb } from './db';
 import {
   getImportJob,
@@ -41,7 +40,7 @@ import {
 } from './ai/skills/common';
 import { generateStructured } from './ai/openai';
 import { runRelink, type EntityIndexEntry } from './ai/skills/relink';
-import { canonicalPath, nameToSlug, type EntityKind } from './ai/paths';
+import { canonicalPath, type EntityKind } from './ai/paths';
 import { listCampaigns, ensureCampaignForPath } from './characters';
 import { ensureIndexNote } from './index-notes';
 import { deriveAllIndexes } from './derive-indexes';

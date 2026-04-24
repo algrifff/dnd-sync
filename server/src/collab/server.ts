@@ -6,6 +6,7 @@
 
 import type { IncomingMessage } from 'node:http';
 import type { WebSocket } from 'ws';
+import type * as Y from 'yjs';
 import { Hocuspocus } from '@hocuspocus/server';
 import { Database } from '@hocuspocus/extension-database';
 import { Logger } from '@hocuspocus/extension-logger';
@@ -285,7 +286,7 @@ export const collabServer = new Hocuspocus({
               `.graph-state:${context.groupId}`,
             );
             if (graphStateDoc) {
-              (graphStateDoc.getMap('meta') as import('yjs').Map<number>).set(
+              (graphStateDoc.getMap('meta') as Y.Map<number>).set(
                 'graphDirty',
                 Date.now(),
               );

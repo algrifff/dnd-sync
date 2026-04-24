@@ -27,14 +27,6 @@ type ModalPhase =
   | { kind: 'running'; jobId: string; liveJob: LiveJob }
   | { kind: 'done'; jobId: string; summary: string | null };
 
-const ORCHESTRATING = new Set([
-  'orchestrating_assets',
-  'orchestrating_campaign',
-  'orchestrating_entities',
-  'orchestrating_quality',
-  'waiting_for_answer',
-]);
-
 const PHASE_STEPS = [
   { label: 'Assets',   statuses: ['orchestrating_assets'] },
   { label: 'Campaign', statuses: ['orchestrating_campaign'] },
