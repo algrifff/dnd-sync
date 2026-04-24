@@ -787,6 +787,14 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX uc_bindings_group ON user_character_bindings(group_id);
     `,
   },
+  {
+    version: 41,
+    description: 'user_characters: body_json + body_md for TipTap notes',
+    sql: `
+      ALTER TABLE user_characters ADD COLUMN body_json TEXT;
+      ALTER TABLE user_characters ADD COLUMN body_md TEXT;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

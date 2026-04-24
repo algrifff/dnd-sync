@@ -24,6 +24,8 @@ const PatchBody = z.object({
   name: z.string().min(1).max(200).optional(),
   sheet: z.record(z.string(), z.unknown()).optional(),
   portraitUrl: z.string().max(2048).nullable().optional(),
+  bodyJson: z.record(z.string(), z.unknown()).nullable().optional(),
+  bodyMd: z.string().max(200_000).nullable().optional(),
 });
 
 export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response> {

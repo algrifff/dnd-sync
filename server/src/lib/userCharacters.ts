@@ -22,6 +22,8 @@ export type UserCharacter = {
   kind: UserCharacterKind;
   sheet: Record<string, unknown>;
   portraitUrl: string | null;
+  bodyJson: Record<string, unknown> | null;
+  bodyMd: string | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -33,6 +35,8 @@ type Row = {
   kind: string;
   sheet_json: string;
   portrait_url: string | null;
+  body_json: string | null;
+  body_md: string | null;
   created_at: number;
   updated_at: number;
 };
@@ -47,6 +51,17 @@ function rowToUc(row: Row): UserCharacter {
   } catch {
     /* tolerate corrupt JSON — treat as empty */
   }
+  let bodyJson: Record<string, unknown> | null = null;
+  if (row.body_json) {
+    try {
+      const parsed = JSON.parse(row.body_json) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        bodyJson = parsed as Record<string, unknown>;
+      }
+    } catch {
+      /* tolerate corrupt JSON */
+    }
+  }
   return {
     id: row.id,
     ownerUserId: row.owner_user_id,
@@ -54,6 +69,8 @@ function rowToUc(row: Row): UserCharacter {
     kind: (row.kind === 'person' ? 'person' : 'character') as UserCharacterKind,
     sheet,
     portraitUrl: row.portrait_url,
+    bodyJson,
+    bodyMd: row.body_md,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -98,6 +115,8 @@ export function createUserCharacter(
     kind,
     sheet: (val.data as Record<string, unknown>) ?? sheet,
     portraitUrl: input.portraitUrl ?? null,
+    bodyJson: null,
+    bodyMd: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -106,7 +125,7 @@ export function createUserCharacter(
 export function listUserCharacters(ownerUserId: string): UserCharacter[] {
   const rows = getDb()
     .query<Row, [string]>(
-      `SELECT id, owner_user_id, name, kind, sheet_json, portrait_url, created_at, updated_at
+      `SELECT id, owner_user_id, name, kind, sheet_json, portrait_url, body_json, body_md, created_at, updated_at
        FROM user_characters
        WHERE owner_user_id = ?
        ORDER BY updated_at DESC`,
@@ -118,7 +137,7 @@ export function listUserCharacters(ownerUserId: string): UserCharacter[] {
 export function getUserCharacter(id: string, ownerUserId: string): UserCharacter | null {
   const row = getDb()
     .query<Row, [string, string]>(
-      `SELECT id, owner_user_id, name, kind, sheet_json, portrait_url, created_at, updated_at
+      `SELECT id, owner_user_id, name, kind, sheet_json, portrait_url, body_json, body_md, created_at, updated_at
        FROM user_characters
        WHERE id = ? AND owner_user_id = ?`,
     )
@@ -130,6 +149,8 @@ export type UpdateUserCharacterPatch = {
   name?: string | undefined;
   sheet?: Record<string, unknown> | undefined;
   portraitUrl?: string | null | undefined;
+  bodyJson?: Record<string, unknown> | null | undefined;
+  bodyMd?: string | null | undefined;
 };
 
 /** Shallow-merge patch. Nested keys (hit_points, ability_scores) are
@@ -157,18 +178,24 @@ export function updateUserCharacter(
 
   const nextPortrait =
     patch.portraitUrl === undefined ? current.portraitUrl : patch.portraitUrl;
+  const nextBodyJson =
+    patch.bodyJson === undefined ? current.bodyJson : patch.bodyJson;
+  const nextBodyMd =
+    patch.bodyMd === undefined ? current.bodyMd : patch.bodyMd;
   const now = Date.now();
 
   getDb()
     .query(
       `UPDATE user_characters
-         SET name = ?, sheet_json = ?, portrait_url = ?, updated_at = ?
+         SET name = ?, sheet_json = ?, portrait_url = ?, body_json = ?, body_md = ?, updated_at = ?
        WHERE id = ? AND owner_user_id = ?`,
     )
     .run(
       nextName,
       JSON.stringify(val.data ?? mergedSheet),
       nextPortrait,
+      nextBodyJson === null ? null : JSON.stringify(nextBodyJson),
+      nextBodyMd,
       now,
       id,
       ownerUserId,
@@ -181,6 +208,8 @@ export function updateUserCharacter(
     name: nextName,
     sheet: (val.data as Record<string, unknown>) ?? mergedSheet,
     portraitUrl: nextPortrait,
+    bodyJson: nextBodyJson,
+    bodyMd: nextBodyMd,
     updatedAt: now,
   };
 }

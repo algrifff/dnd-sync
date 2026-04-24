@@ -20,6 +20,7 @@ import {
 } from '@/app/notes/sheet-header/util';
 import type { TemplateField, TemplateSection } from '@/lib/templates';
 import type { UserCharacter } from '@/lib/userCharacters';
+import { UserCharacterBody } from './UserCharacterBody';
 
 const PATCH_DEBOUNCE_MS = 400;
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
@@ -368,6 +369,12 @@ export function UserCharacterEditor({
             </Field>
           </div>
         </section>
+
+        <UserCharacterBody
+          characterId={character.id}
+          csrfToken={csrfToken}
+          initialBody={character.bodyJson}
+        />
 
         <div className="mt-8 flex items-center justify-between border-t border-[var(--rule)] pt-6">
           <span className="text-[11px] text-[var(--ink-soft)]">
