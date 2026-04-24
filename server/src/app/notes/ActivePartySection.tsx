@@ -90,10 +90,12 @@ type SheetCacheValue =
   | { state: 'error' };
 
 export function ActivePartySection({
+  groupId,
   activeCampaignSlug,
   csrfToken,
   activePath,
 }: {
+  groupId: string;
   activeCampaignSlug: string | null;
   csrfToken: string;
   activePath: string;
@@ -349,9 +351,166 @@ export function ActivePartySection({
           {error && characters.length > 0 && (
             <p className="mt-1 px-2 text-[11px] text-[var(--wine)]">{error}</p>
           )}
+          {activeCampaignSlug && (
+            <JoinCampaignButton
+              groupId={groupId}
+              campaignSlug={activeCampaignSlug}
+              csrfToken={csrfToken}
+            />
+          )}
         </div>
       )}
     </section>
+  );
+}
+
+type MeCharacter = {
+  id: string;
+  name: string;
+  kind: 'character' | 'person';
+  portraitUrl: string | null;
+};
+
+function JoinCampaignButton({
+  groupId,
+  campaignSlug,
+  csrfToken,
+}: {
+  groupId: string;
+  campaignSlug: string;
+  csrfToken: string;
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [characters, setCharacters] = useState<MeCharacter[] | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    if (characters !== null) return;
+    const controller = new AbortController();
+    setLoading(true);
+    fetch('/api/me/characters', { signal: controller.signal })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`failed (${res.status})`);
+        const body = (await res.json()) as { characters: MeCharacter[] };
+        setCharacters(body.characters ?? []);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setError(err instanceof Error ? err.message : 'failed to load');
+      })
+      .finally(() => setLoading(false));
+    return () => controller.abort();
+  }, [open, characters]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent): void => {
+      if (wrapperRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const join = useCallback(
+    async (characterId: string): Promise<void> => {
+      setError(null);
+      try {
+        const res = await fetch(
+          `/api/worlds/${encodeURIComponent(groupId)}/campaigns/${encodeURIComponent(
+            campaignSlug,
+          )}/join`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': csrfToken,
+            },
+            body: JSON.stringify({ userCharacterId: characterId }),
+          },
+        );
+        const body = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error?: string;
+          reason?: string;
+          detail?: string;
+        };
+        if (!res.ok || !body.ok) {
+          setError(body.reason ?? body.detail ?? body.error ?? `join failed (${res.status})`);
+          return;
+        }
+        setOpen(false);
+        // Party list + sidebar both read from the server; a soft reload
+        // is the simplest way to pick up the new bound note.
+        window.location.reload();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'network error');
+      }
+    },
+    [groupId, campaignSlug, csrfToken],
+  );
+
+  return (
+    <div ref={wrapperRef} className="relative mt-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full rounded-[6px] border border-dashed border-[var(--rule)] px-2 py-1 text-left text-[11px] font-medium text-[var(--ink-soft)] hover:bg-[var(--candlelight)]/15 hover:text-[var(--ink)]"
+      >
+        + Join with a character
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-auto rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] p-1 shadow-lg">
+          {loading && (
+            <p className="px-2 py-1 text-[11px] italic text-[var(--ink-muted)]">
+              Loading…
+            </p>
+          )}
+          {error && (
+            <p className="px-2 py-1 text-[11px] text-[var(--wine)]">{error}</p>
+          )}
+          {!loading && characters && characters.length === 0 && (
+            <p className="px-2 py-1 text-[11px] italic text-[var(--ink-muted)]">
+              You have no characters yet.{' '}
+              <Link href="/me" className="underline">
+                Create one
+              </Link>
+              .
+            </p>
+          )}
+          {characters?.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => void join(c.id)}
+              className="flex w-full items-center gap-2 rounded-[4px] px-2 py-1 text-left text-[12px] text-[var(--ink)] hover:bg-[var(--candlelight)]/20"
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--rule)] bg-[var(--parchment-sunk)]">
+                {c.portraitUrl ? (
+                  <img src={c.portraitUrl} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <span className="text-[9px] font-semibold text-[var(--ink-muted)]">
+                    {initials(c.name)}
+                  </span>
+                )}
+              </span>
+              <span className="truncate font-serif">{c.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

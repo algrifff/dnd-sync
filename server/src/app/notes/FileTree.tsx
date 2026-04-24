@@ -668,6 +668,7 @@ export function FileTree({
       )}
       <div className="shrink-0 pt-3">
         <ActivePartySection
+          groupId={groupId}
           activeCampaignSlug={activeCampaignSlug}
           csrfToken={csrfToken}
           activePath={activePath}
