@@ -27,6 +27,7 @@ import {
   FolderPlus,
   Ghost,
   Globe,
+  Loader2,
   Lock,
   Map as MapIcon,
   MapPin,
@@ -42,6 +43,7 @@ import {
 } from 'lucide-react';
 import type { Tree, TreeDir } from '@/lib/tree';
 import { broadcastTreeChange } from '@/lib/tree-sync';
+import { canDropOn, isDraggableSource } from '@/lib/move-policy';
 import { RowMenu } from './RowMenu';
 import { PeerStack } from './PeerStack';
 import { ActivePartySection } from './ActivePartySection';
@@ -246,6 +248,21 @@ export function FileTree({
     { kind: 'file' | 'folder'; path: string } | null
   >(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
+  // The path currently in flight from /api/notes/move or /api/folders/move.
+  // Folder moves can take a couple of seconds when the subtree is large
+  // (every nested note's path gets rewritten + the FTS row rebuilt) — show
+  // a spinner on the source row so the drop doesn't feel like a no-op.
+  // movingPath/movingTo drive the in-flight UI: the source row stays
+  // EXACTLY where it was, gets a spinner overlay, and the rest of the
+  // tree freezes in place until the refreshed tree (with the row at
+  // its new home) arrives. This avoids the row disappearing → popping
+  // back → relocating sequence the optimistic-filter approach caused.
+  // moveBaselineAt is the tree.updatedAt observed at the moment the
+  // move started; the effect below clears the spinner once tree.updatedAt
+  // advances past it (i.e. the server's bumped value lands).
+  const [movingPath, setMovingPath] = useState<string | null>(null);
+  const [movingTo, setMovingTo] = useState<string | null>(null);
+  const [moveBaselineAt, setMoveBaselineAt] = useState<number | null>(null);
 
   useEffect(() => {
     try {
@@ -505,6 +522,15 @@ export function FileTree({
       }
 
       const url = src.kind === 'file' ? '/api/notes/move' : '/api/folders/move';
+      // Hold the row in place with a spinner. Open the destination so
+      // when the refreshed tree lands, the row is visible at its new
+      // home rather than collapsed inside a closed folder.
+      if (destFolder) {
+        setOpen((prev) => new Set(prev).add(destFolder));
+      }
+      setMovingPath(src.path);
+      setMovingTo(to);
+      setMoveBaselineAt(tree.updatedAt);
       try {
         const res = await fetch(url, {
           method: 'POST',
@@ -521,23 +547,52 @@ export function FileTree({
               ? `"${basename}" already exists in that folder.`
               : (body.error ?? `Move failed (HTTP ${res.status})`),
           );
+          // Server failed — clear immediately, no tree change is coming.
+          setMovingPath(null);
+          setMovingTo(null);
+          setMoveBaselineAt(null);
           return;
-        }
-        // Expand the destination so the user sees where things landed.
-        if (destFolder) {
-          setOpen((prev) => new Set(prev).add(destFolder));
         }
         if (src.kind === 'file' && activePath === src.path) {
           router.push('/notes/' + to.split('/').map(encodeURIComponent).join('/'));
         }
         router.refresh();
         broadcastTreeChange();
+        // Spinner stays on until the effect below sees tree.updatedAt
+        // advance past the baseline we captured. That's what gives us
+        // a single clean reflow instead of the disappear/popback/jump
+        // sequence.
       } catch (err) {
         alert(err instanceof Error ? err.message : 'network error');
+        setMovingPath(null);
+        setMovingTo(null);
+        setMoveBaselineAt(null);
       }
     },
-    [activePath, csrfToken, router],
+    [activePath, csrfToken, router, tree.updatedAt],
   );
+
+  // Clear the spinner once the refreshed tree (with the moved row at
+  // its new path) actually lands. tree.updatedAt is bumped by both
+  // /api/notes/move and /api/folders/move on every moved note, so a
+  // strict-greater check is reliable. The 3s safety timeout exists
+  // only to recover from the impossible case where the server returns
+  // 200 but the SSR re-render never bumps the prop.
+  useEffect(() => {
+    if (movingPath === null || moveBaselineAt === null) return;
+    if (tree.updatedAt > moveBaselineAt) {
+      setMovingPath(null);
+      setMovingTo(null);
+      setMoveBaselineAt(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setMovingPath(null);
+      setMovingTo(null);
+      setMoveBaselineAt(null);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [tree.updatedAt, movingPath, moveBaselineAt]);
 
   const uploadAsset = useCallback(
     async (files: FileList, folder: string) => {
@@ -579,7 +634,22 @@ export function FileTree({
       if (child.kind === 'dir') effective.add(child.path);
     }
     return flatten(tree.root, effective, 0);
+    // No optimistic filter: the source row stays visible at its old
+    // position with a spinner overlay until the refreshed tree arrives.
+    // That gives us a single clean reflow instead of disappear → popback
+    // → relocate.
   }, [tree.root, open]);
+
+  // Pretty label for the "Moving X → Y…" pill. Truncated so a deep path
+  // doesn't blow up the sidebar width.
+  const moveLabel = useMemo(() => {
+    if (!movingPath || !movingTo) return null;
+    const fromName = movingPath.split('/').pop() ?? movingPath;
+    const toFolder =
+      movingTo.includes('/') ? movingTo.slice(0, movingTo.lastIndexOf('/')) : '';
+    const toName = toFolder.split('/').pop() ?? toFolder;
+    return { fromName, toName };
+  }, [movingPath, movingTo]);
 
   return (
     <KindMapContext.Provider value={kindMap ?? EMPTY_KIND_MAP}>
@@ -604,33 +674,32 @@ export function FileTree({
         csrfToken={csrfToken}
         activePath={activePath}
       />
+      {moveLabel && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mx-2 mb-2 flex items-center gap-2 rounded-[6px] border border-[#D4C7AE] bg-[#EAE1CF]/70 px-2 py-1.5 text-xs text-[#5A4F42]"
+        >
+          <Loader2 size={12} className="animate-spin text-[#8B4A52]" aria-hidden />
+          <span className="truncate">
+            Moving <span className="font-medium">{moveLabel.fromName}</span>
+            {moveLabel.toName ? (
+              <>
+                {' '}→ <span className="font-medium">{moveLabel.toName}</span>
+              </>
+            ) : null}
+            …
+          </span>
+        </div>
+      )}
       <ul
         role="tree"
-        className={
-          'px-2 ' +
-          (dragging && dragOver === '' ? 'rounded-[6px] bg-[#D4A85A]/10' : '')
-        }
-        onDragOver={(e) => {
-          if (!dragging) return;
-          // A child (folder row) may have already set a more-specific
-          // target; only claim root when no one's consumed it yet.
-          if (e.defaultPrevented) return;
-          e.preventDefault();
-          setDragOver('');
-        }}
+        className="px-2"
         onDragLeave={(e) => {
           // Only clear when leaving the ul entirely.
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
             setDragOver(null);
           }
-        }}
-        onDrop={(e) => {
-          if (!dragging) return;
-          if (e.defaultPrevented) return;
-          e.preventDefault();
-          void moveEntry(dragging, '');
-          setDragging(null);
-          setDragOver(null);
         }}
       >
         {items.map((item) => (
@@ -648,6 +717,7 @@ export function FileTree({
             renameError={renamingPath === item.path ? error : null}
             dragging={dragging}
             isDropTarget={item.kind === 'dir' && dragOver === item.path}
+            isMoving={movingPath === item.path}
             onDragStartRow={(src) => setDragging(src)}
             onDragEndRow={() => {
               setDragging(null);
@@ -811,6 +881,7 @@ function TreeRow({
   renameError,
   dragging,
   isDropTarget,
+  isMoving,
   activeCampaignSlug,
   onToggleActiveCampaign,
   onDragStartRow,
@@ -835,6 +906,7 @@ function TreeRow({
   renameError: string | null;
   dragging: { kind: 'file' | 'folder'; path: string } | null;
   isDropTarget: boolean;
+  isMoving: boolean;
   activeCampaignSlug: string | null;
   onToggleActiveCampaign: (slug: string) => void;
   onDragStartRow: (src: { kind: 'file' | 'folder'; path: string }) => void;
@@ -851,41 +923,44 @@ function TreeRow({
 }): React.JSX.Element {
   const isSystem = item.kind === 'dir' && item.system;
 
-  const rowDragProps = canCreate && !isSystem
+  // Source policy: locked entities (PCs, campaign roots, canonical
+  // subfolders, top-level headings) don't initiate a drag at all so the
+  // cursor stays default and no ghost spawns.
+  const sourceKind: 'file' | 'folder' = item.kind === 'dir' ? 'folder' : 'file';
+  const canDragThisRow =
+    canCreate && isDraggableSource({ kind: sourceKind, path: item.path });
+
+  const rowDragProps = canDragThisRow
     ? {
         draggable: true,
         onDragStart: (e: React.DragEvent) => {
           e.dataTransfer.effectAllowed = 'move';
           // Some browsers require setData to initiate a drag.
           e.dataTransfer.setData('text/plain', item.path);
-          onDragStartRow({
-            kind: item.kind === 'dir' ? 'folder' : 'file',
-            path: item.path,
-          });
+          onDragStartRow({ kind: sourceKind, path: item.path });
         },
         onDragEnd: () => onDragEndRow(),
       }
     : {};
 
-  const isInvalidDrop =
-    !dragging ||
-    item.kind !== 'dir' ||
-    isSystem ||
-    (dragging.kind === 'folder' &&
-      (dragging.path === item.path ||
-        item.path.startsWith(dragging.path + '/') ||
-        dragging.path === item.path));
+  // Destination policy: ask the shared move-policy whether this drop is
+  // structurally legal (cross-section rules, session confinement, etc.).
+  // Server enforces the same matrix — this is purely a UX hint.
+  const canAcceptDrop =
+    !!dragging &&
+    item.kind === 'dir' &&
+    canDropOn(dragging, item.path).ok;
   const dirDropProps =
     item.kind === 'dir'
       ? {
           onDragOver: (e: React.DragEvent) => {
-            if (isInvalidDrop) return;
+            if (!canAcceptDrop) return;
             e.preventDefault();
             e.stopPropagation();
             onDragOverDir(item.path);
           },
           onDrop: (e: React.DragEvent) => {
-            if (isInvalidDrop) return;
+            if (!canAcceptDrop) return;
             e.preventDefault();
             e.stopPropagation();
             onDropDir(item.path);
@@ -948,6 +1023,7 @@ function TreeRow({
           className={
             'group flex items-center rounded-[6px] transition ' +
             (isTopLevel ? 'mt-2 first:mt-0 ' : '') +
+            (isMoving ? 'opacity-60 pointer-events-none ' : '') +
             (isDropTarget
               ? 'bg-[#8B4A52]/15 ring-1 ring-[#8B4A52]/40'
               : isIndexActive
@@ -1000,6 +1076,15 @@ function TreeRow({
               {folderIcon}
               {nameLabel}
             </button>
+          )}
+          {isMoving && (
+            <span
+              className="mr-1 flex items-center text-[#8B4A52]"
+              aria-label="Moving folder"
+              title="Moving…"
+            >
+              <Loader2 size={12} className="animate-spin" aria-hidden />
+            </span>
           )}
           {(() => {
             const isCampaignRoot = /^Campaigns\/[^/]+$/.test(item.path);
@@ -1088,6 +1173,7 @@ function TreeRow({
         {...rowDragProps}
         className={
           'group flex items-center rounded-[6px] transition ' +
+          (isMoving ? 'opacity-60 pointer-events-none ' : '') +
           (isActive ? 'bg-[#D4A85A]/25' : 'hover:bg-[#D4A85A]/10')
         }
       >
@@ -1103,6 +1189,15 @@ function TreeRow({
           <span className="truncate">{item.title || item.name}</span>
           <PeerStack notePath={item.path} />
         </Link>
+        {isMoving && (
+          <span
+            className="mr-2 flex items-center text-[#8B4A52]"
+            aria-label="Moving note"
+            title="Moving…"
+          >
+            <Loader2 size={12} className="animate-spin" aria-hidden />
+          </span>
+        )}
         {canCreate && (
           <div className="mr-1 hidden items-center group-hover:flex">
             <RowMenu

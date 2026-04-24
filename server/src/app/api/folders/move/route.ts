@@ -10,6 +10,7 @@ import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
+import { assertMoveAllowed } from '@/lib/move-policy';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,9 @@ export async function POST(req: NextRequest): Promise<Response> {
   if ((to + '/').startsWith(from + '/')) {
     return json({ error: 'cannot_move_into_self' }, 400);
   }
+
+  const policy = assertMoveAllowed({ kind: 'folder', from, to });
+  if (!policy.ok) return json({ error: policy.error, reason: policy.reason }, 403);
 
   const db = getDb();
   const groupId = session.currentGroupId;
@@ -85,9 +89,18 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   db.transaction(() => {
+    // Derived-index tables hold FKs on notes(group_id, path) with
+    // ON DELETE CASCADE but no ON UPDATE CASCADE. Defer FK checks until
+    // COMMIT so the in-flight UPDATEs don't trip SQLITE_CONSTRAINT_FOREIGNKEY.
+    db.exec('PRAGMA defer_foreign_keys = 1');
+    // One bumped timestamp for every moved row so the tree cache + ETag
+    // rotate. Folder moves can move many notes — they all share the same
+    // moment so the snapshot is internally consistent.
+    const movedAt = Date.now();
     for (const m of moved) {
-      db.query('UPDATE notes SET path = ? WHERE group_id = ? AND path = ?').run(
+      db.query('UPDATE notes SET path = ?, updated_at = ? WHERE group_id = ? AND path = ?').run(
         m.to,
+        movedAt,
         groupId,
         m.from,
       );
@@ -107,7 +120,9 @@ export async function POST(req: NextRequest): Promise<Response> {
         groupId,
         m.from,
       );
-      // Character / session index tables use note_path as PK too.
+      // Every derived-index table that FKs notes(group_id, path) must
+      // be rewritten before COMMIT — defer_foreign_keys lets us update
+      // them in any order, but skipping one will trip the check.
       db.query(
         'UPDATE characters SET note_path = ? WHERE group_id = ? AND note_path = ?',
       ).run(m.to, groupId, m.from);
@@ -117,6 +132,23 @@ export async function POST(req: NextRequest): Promise<Response> {
       db.query(
         'UPDATE session_notes SET note_path = ? WHERE group_id = ? AND note_path = ?',
       ).run(m.to, groupId, m.from);
+      db.query(
+        'UPDATE items SET note_path = ? WHERE group_id = ? AND note_path = ?',
+      ).run(m.to, groupId, m.from);
+      db.query(
+        'UPDATE locations SET note_path = ? WHERE group_id = ? AND note_path = ?',
+      ).run(m.to, groupId, m.from);
+      db.query(
+        'UPDATE creatures SET note_path = ? WHERE group_id = ? AND note_path = ?',
+      ).run(m.to, groupId, m.from);
+      db.query(
+        'UPDATE locations SET parent_path = ? WHERE group_id = ? AND parent_path = ?',
+      ).run(m.to, groupId, m.from);
+      // users.active_character_path is a soft (no-FK) reference. Bring
+      // it along so a moved PC's pin doesn't end up orphaned.
+      db.query(
+        'UPDATE users SET active_character_path = ? WHERE active_character_path = ?',
+      ).run(m.to, m.from);
       db.query('DELETE FROM notes_fts WHERE path = ? AND group_id = ?').run(
         m.from,
         groupId,

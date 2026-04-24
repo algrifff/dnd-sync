@@ -12,6 +12,8 @@ import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
+import { assertMoveAllowed } from '@/lib/move-policy';
+import { rewriteWikilinksForRenames } from '@/lib/move-rewrite';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +43,9 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!from || !to) return json({ error: 'invalid_path' }, 400);
   if (from === to) return json({ ok: true, path: to });
 
+  const policy = assertMoveAllowed({ kind: 'file', from, to });
+  if (!policy.ok) return json({ error: policy.error, reason: policy.reason }, 403);
+
   const db = getDb();
   const existing = db
     .query<{ n: number }, [string, string]>(
@@ -64,8 +69,20 @@ export async function POST(req: NextRequest): Promise<Response> {
     .get(session.currentGroupId, from);
 
   db.transaction(() => {
-    db.query('UPDATE notes SET path = ? WHERE group_id = ? AND path = ?').run(
+    // Derived-index tables (characters, session_notes, character_campaigns)
+    // hold FKs on notes(group_id, path) with ON DELETE CASCADE but no
+    // ON UPDATE CASCADE — without deferring, the UPDATE on notes below
+    // would trip SQLITE_CONSTRAINT_FOREIGNKEY before we get a chance to
+    // rewrite the dependent rows. Defer until COMMIT so the whole
+    // transaction is checked once everything is consistent.
+    db.exec('PRAGMA defer_foreign_keys = 1');
+    // Bump updated_at so the in-process tree cache snapshot key changes
+    // AND the /api/tree ETag rotates. Without this the client refetches
+    // /api/tree, gets 304, re-renders the stale tree, and the row snaps
+    // back to the old position.
+    db.query('UPDATE notes SET path = ?, updated_at = ? WHERE group_id = ? AND path = ?').run(
       to,
+      Date.now(),
       session.currentGroupId,
       from,
     );
@@ -89,7 +106,10 @@ export async function POST(req: NextRequest): Promise<Response> {
       session.currentGroupId,
       from,
     );
-    // Structured-note index tables also use note_path as the key.
+    // Structured-note index tables also use note_path as the key. Each
+    // of these holds an FK on notes(group_id, path); the deferred-FK
+    // pragma above lets us update them in any order, but every table
+    // pointing at the old path must be rewritten before COMMIT.
     db.query(
       'UPDATE characters SET note_path = ? WHERE group_id = ? AND note_path = ?',
     ).run(to, session.currentGroupId, from);
@@ -99,6 +119,26 @@ export async function POST(req: NextRequest): Promise<Response> {
     db.query(
       'UPDATE session_notes SET note_path = ? WHERE group_id = ? AND note_path = ?',
     ).run(to, session.currentGroupId, from);
+    db.query(
+      'UPDATE items SET note_path = ? WHERE group_id = ? AND note_path = ?',
+    ).run(to, session.currentGroupId, from);
+    db.query(
+      'UPDATE locations SET note_path = ? WHERE group_id = ? AND note_path = ?',
+    ).run(to, session.currentGroupId, from);
+    db.query(
+      'UPDATE creatures SET note_path = ? WHERE group_id = ? AND note_path = ?',
+    ).run(to, session.currentGroupId, from);
+    // locations.parent_path is a soft reference (no FK), but rewrite it
+    // anyway so children stay anchored to the renamed parent.
+    db.query(
+      'UPDATE locations SET parent_path = ? WHERE group_id = ? AND parent_path = ?',
+    ).run(to, session.currentGroupId, from);
+    // users.active_character_path is also a soft reference — any user
+    // who pinned this note as their active PC needs the path rewritten
+    // so the party sidebar / chat context don't lose track of them.
+    db.query(
+      'UPDATE users SET active_character_path = ? WHERE active_character_path = ?',
+    ).run(to, from);
     // FTS mirror — triggers fire on title/content_text updates, not on
     // path, so reseed manually. group_id is part of the FTS row since
     // migration #33 to keep MATCH queries scoped per world.
@@ -114,6 +154,26 @@ export async function POST(req: NextRequest): Promise<Response> {
   })();
 
   await closeDocumentConnections(from);
+
+  // Rewrite wikilink targets in every note that pointed at the old
+  // path, then kick their live editors so they pull the rewritten
+  // body. Done after the move transaction so note_links is already in
+  // its final shape (the linker's edge for `to_path = from` is gone,
+  // but rewriteWikilinksForRenames re-derives from content_json).
+  // Actually no — we need to query note_links BEFORE the transaction
+  // rewrites them. Doing it here works because the move route only
+  // updates note_links rows where the moved note is the from_path or
+  // to_path of an OUTGOING/INCOMING edge owned by the moved note —
+  // edges from OTHER notes pointing at the moved note are untouched
+  // by the route's UPDATE. So linkers are still discoverable here.
+  try {
+    const touched = rewriteWikilinksForRenames(session.currentGroupId, [
+      { from, to },
+    ]);
+    for (const linker of touched) await closeDocumentConnections(linker);
+  } catch (err) {
+    console.error('[notes/move] wikilink rewrite failed:', err);
+  }
 
   logAudit({
     action: 'note.rename',

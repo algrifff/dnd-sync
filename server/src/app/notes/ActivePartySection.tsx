@@ -20,7 +20,14 @@ import {
   Shield,
   UserRound,
 } from 'lucide-react';
-import { portraitUrl } from './sheet-header/util';
+import {
+  abilityModifier,
+  formatModifier,
+  portraitUrl,
+  readAbilityScores,
+  readArmorClass,
+  readSpeed,
+} from './sheet-header/util';
 import type { CharacterListRow } from '@/lib/characters';
 
 const OPEN_STORAGE_KEY = 'compendium.party.open';
@@ -53,6 +60,34 @@ const HP_PILL_CLASS: Record<HpTone, string> = {
 };
 
 type HpPatch = { current?: number; temporary?: number };
+
+/** readAbilityScores only reads the nested `ability_scores` shape; many
+ *  sheets still carry legacy flat `str/dex/con/int/wis/cha`. Try the new
+ *  shape first, then fall back. */
+function abilityScoresWithLegacy(
+  sheet: Record<string, unknown>,
+): { str: number; dex: number; con: number; int: number; wis: number; cha: number } | null {
+  const nested = readAbilityScores(sheet);
+  if (nested) return nested;
+  const keys = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
+  const out = {} as Record<(typeof keys)[number], number>;
+  let any = false;
+  for (const k of keys) {
+    const v = sheet[k];
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      out[k] = v;
+      any = true;
+    } else {
+      out[k] = 10;
+    }
+  }
+  return any ? out : null;
+}
+
+type SheetCacheValue =
+  | { state: 'loading' }
+  | { state: 'ready'; sheet: Record<string, unknown> }
+  | { state: 'error' };
 
 export function ActivePartySection({
   activeCampaignSlug,
@@ -121,6 +156,37 @@ export function ActivePartySection({
   const [hpOverride, setHpOverride] = useState<
     Record<string, { current: number | null; temporary: number | null }>
   >({});
+
+  // Lazy-fetched sheet blobs for the hover card. Keyed by notePath.
+  const [sheetCache, setSheetCache] = useState<Record<string, SheetCacheValue>>(
+    {},
+  );
+
+  const ensureSheet = useCallback(
+    (notePath: string): void => {
+      if (sheetCache[notePath]) return;
+      setSheetCache((m) => ({ ...m, [notePath]: { state: 'loading' } }));
+      const url =
+        '/api/notes/' +
+        notePath.split('/').map(encodeURIComponent).join('/');
+      fetch(url)
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`failed (${res.status})`);
+          const body = (await res.json()) as {
+            frontmatter?: { sheet?: Record<string, unknown> };
+          };
+          const sheet = body.frontmatter?.sheet ?? {};
+          setSheetCache((m) => ({
+            ...m,
+            [notePath]: { state: 'ready', sheet },
+          }));
+        })
+        .catch(() => {
+          setSheetCache((m) => ({ ...m, [notePath]: { state: 'error' } }));
+        });
+    },
+    [sheetCache],
+  );
 
   const applyHp = useCallback(
     async (character: CharacterListRow, patch: HpPatch): Promise<void> => {
@@ -274,6 +340,8 @@ export function ActivePartySection({
                   character={c}
                   isActive={activePath === c.notePath}
                   onApplyHp={(patch) => void applyHp(c, patch)}
+                  sheetCache={sheetCache[c.notePath]}
+                  onHoverStart={() => ensureSheet(c.notePath)}
                 />
               ))}
             </ul>
@@ -291,18 +359,83 @@ function PartyRow({
   character,
   isActive,
   onApplyHp,
+  sheetCache,
+  onHoverStart,
 }: {
   character: CharacterListRow;
   isActive: boolean;
   onApplyHp: (patch: HpPatch) => void;
+  sheetCache: SheetCacheValue | undefined;
+  onHoverStart: () => void;
 }): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(
     null,
   );
+  const [hoverOpen, setHoverOpen] = useState(false);
+  const [hoverAnchor, setHoverAnchor] = useState<
+    { top: number; left: number } | null
+  >(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const pillRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const nameRef = useRef<HTMLAnchorElement | null>(null);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const beginHover = useCallback((): void => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => {
+      if (!nameRef.current) return;
+      const r = nameRef.current.getBoundingClientRect();
+      // Anchor against the whole row wrapper so the card floats off the
+      // right edge of the sidebar, not off the name span.
+      const rowRect =
+        wrapperRef.current?.getBoundingClientRect() ?? r;
+      setHoverAnchor({ top: r.top, left: rowRect.right + 8 });
+      setHoverOpen(true);
+      onHoverStart();
+    }, 220);
+  }, [onHoverStart]);
+
+  const endHover = useCallback((): void => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(() => {
+      setHoverOpen(false);
+    }, 120);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hoverOpen) return;
+    const onScrollOrResize = (): void => {
+      if (!nameRef.current) return;
+      const r = nameRef.current.getBoundingClientRect();
+      const rowRect =
+        wrapperRef.current?.getBoundingClientRect() ?? r;
+      setHoverAnchor({ top: r.top, left: rowRect.right + 8 });
+    };
+    window.addEventListener('resize', onScrollOrResize);
+    window.addEventListener('scroll', onScrollOrResize, true);
+    return () => {
+      window.removeEventListener('resize', onScrollOrResize);
+      window.removeEventListener('scroll', onScrollOrResize, true);
+    };
+  }, [hoverOpen]);
 
   const openMenu = useCallback(() => {
     if (!pillRef.current) return;
@@ -360,7 +493,15 @@ function PartyRow({
           (isActive ? 'bg-[#D4A85A]/25' : '')
         }
       >
-        <Link href={href} className="flex min-w-0 flex-1 items-center gap-2">
+        <Link
+          ref={nameRef}
+          href={href}
+          onMouseEnter={beginHover}
+          onMouseLeave={endHover}
+          onFocus={beginHover}
+          onBlur={endHover}
+          className="flex min-w-0 flex-1 items-center gap-2"
+        >
           <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#D4C7AE] bg-[#EAE1CF]">
             {portrait ? (
               <img
@@ -418,6 +559,20 @@ function PartyRow({
           <span className="text-[#8A7E6B]">/</span>
           {character.hpMax ?? '—'}
         </button>
+        {hoverOpen && hoverAnchor && (
+          <PartyHoverCard
+            anchor={hoverAnchor}
+            character={character}
+            cache={sheetCache}
+            onMouseEnter={() => {
+              if (closeTimerRef.current) {
+                clearTimeout(closeTimerRef.current);
+                closeTimerRef.current = null;
+              }
+            }}
+            onMouseLeave={endHover}
+          />
+        )}
         {menuOpen && anchor && (
           <HpAdjustMenu
             ref={menuRef}
@@ -434,6 +589,168 @@ function PartyRow({
         )}
       </div>
     </li>
+  );
+}
+
+function PartyHoverCard({
+  anchor,
+  character,
+  cache,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  anchor: { top: number; left: number };
+  character: CharacterListRow;
+  cache: SheetCacheValue | undefined;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+}): React.JSX.Element {
+  if (typeof document === 'undefined') return <></>;
+
+  const portrait = portraitUrl(character.portraitPath);
+  const sheet = cache?.state === 'ready' ? cache.sheet : null;
+  const scores = sheet ? abilityScoresWithLegacy(sheet) : null;
+  const ac = sheet ? readArmorClass(sheet) : null;
+  const speed = sheet ? readSpeed(sheet) : null;
+  const initiative = scores
+    ? abilityModifier(scores.dex) +
+      (typeof sheet?.initiative_bonus === 'number' ? sheet.initiative_bonus : 0)
+    : null;
+  const tone = hpTone(character.hpCurrent, character.hpMax);
+  const pillClass = HP_PILL_CLASS[tone];
+  const tempHp = character.hpTemporary ?? 0;
+
+  const subtitleParts = [
+    character.race ?? null,
+    character.class ?? null,
+    character.level ? `Level ${character.level}` : null,
+  ].filter(Boolean) as string[];
+
+  return createPortal(
+    <div
+      role="tooltip"
+      aria-label={`${character.displayName} details`}
+      style={{ top: anchor.top, left: anchor.left }}
+      className="fixed z-[1000] w-72 rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] p-3 shadow-lg"
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      <div className="flex items-center gap-3">
+        <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#D4C7AE] bg-[#EAE1CF]">
+          {portrait ? (
+            <img
+              src={portrait}
+              alt=""
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span className="font-serif text-lg text-[#8A7E6B]">
+              {character.displayName ? initials(character.displayName) : '?'}
+            </span>
+          )}
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate font-serif text-lg leading-tight text-[#2A241E]">
+            {character.displayName}
+          </span>
+          {subtitleParts.length > 0 && (
+            <span className="truncate text-[11px] text-[#5A4F42]">
+              {subtitleParts.join(' · ')}
+            </span>
+          )}
+          <div className="mt-1.5 flex flex-wrap items-center gap-1">
+            <span
+              className={
+                'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-serif text-[12px] tabular-nums ' +
+                pillClass
+              }
+              title={
+                character.hpCurrent != null && character.hpMax != null
+                  ? `${character.hpCurrent} / ${character.hpMax} HP`
+                  : 'HP'
+              }
+            >
+              <Heart className="h-3 w-3" aria-hidden />
+              {character.hpCurrent ?? '—'}
+              <span className="text-[#8A7E6B]">/</span>
+              {character.hpMax ?? '—'}
+            </span>
+            {tempHp > 0 && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full border border-[#6B8AA8]/50 bg-[#6B8AA8]/15 px-2 py-0.5 font-serif text-[12px] tabular-nums text-[#3e5770]"
+                title={`${tempHp} temporary HP`}
+              >
+                <Shield className="h-3 w-3" aria-hidden />
+                {tempHp}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-1.5">
+        <StatTile label="AC" value={ac != null ? String(ac) : '—'} />
+        <StatTile
+          label="Initiative"
+          value={initiative != null ? formatModifier(initiative) : '—'}
+        />
+        <StatTile label="Speed" value={speed != null ? `${speed} ft` : '—'} />
+      </div>
+
+      <div className="mt-2 grid grid-cols-6 gap-1">
+        {(['str', 'dex', 'con', 'int', 'wis', 'cha'] as const).map((k) => {
+          const score = scores ? scores[k] : null;
+          const mod = score != null ? abilityModifier(score) : null;
+          return (
+            <div
+              key={k}
+              className="flex flex-col items-center rounded-[6px] border border-[#D4C7AE] bg-[#EAE1CF]/60 px-1 py-1.5"
+            >
+              <span className="text-[9px] font-semibold uppercase tracking-wider text-[#8A7E6B]">
+                {k}
+              </span>
+              <span className="font-serif text-base leading-none text-[#2A241E]">
+                {score != null ? score : '—'}
+              </span>
+              <span className="mt-0.5 font-serif text-[10px] text-[#5A4F42]">
+                {mod != null ? formatModifier(mod) : ''}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {cache?.state === 'loading' && !scores && (
+        <p className="mt-2 text-center text-[10px] italic text-[#8A7E6B]">
+          Loading sheet…
+        </p>
+      )}
+      {cache?.state === 'error' && (
+        <p className="mt-2 text-center text-[10px] text-[#8B4A52]">
+          Failed to load sheet
+        </p>
+      )}
+    </div>,
+    document.body,
+  );
+}
+
+function StatTile({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}): React.JSX.Element {
+  return (
+    <div className="flex flex-col items-center rounded-[6px] border border-[#D4C7AE] bg-[#EAE1CF]/60 px-1 py-1.5">
+      <span className="text-[9px] font-semibold uppercase tracking-wider text-[#8A7E6B]">
+        {label}
+      </span>
+      <span className="font-serif text-base leading-none text-[#2A241E]">
+        {value}
+      </span>
+    </div>
   );
 }
 
