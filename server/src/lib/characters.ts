@@ -89,6 +89,8 @@ export function deriveCharacterFromFrontmatter(opts: {
   const ac = extractAc(sheet);
   const hpMax = extractHp(sheet, 'max') ?? intOrNull(sheet.hp_max);
   const hpCurrent = extractHp(sheet, 'current') ?? intOrNull(sheet.hp_current);
+  const hpTemporary =
+    extractHp(sheet, 'temporary') ?? intOrNull(sheet.hp_temporary);
   const proficiencyBonus = intOrNull(sheet.proficiency_bonus);
 
   // The player field can be on the sheet (new) or on frontmatter (legacy).
@@ -114,8 +116,8 @@ export function deriveCharacterFromFrontmatter(opts: {
       `INSERT INTO characters
          (group_id, note_path, kind, player_user_id, display_name,
           portrait_path, level, class, race, ac, hp_max, hp_current,
-          proficiency_bonus, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          hp_temporary, proficiency_bonus, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (group_id, note_path) DO UPDATE SET
          kind              = excluded.kind,
          player_user_id    = excluded.player_user_id,
@@ -127,6 +129,7 @@ export function deriveCharacterFromFrontmatter(opts: {
          ac                = excluded.ac,
          hp_max            = excluded.hp_max,
          hp_current        = excluded.hp_current,
+         hp_temporary      = excluded.hp_temporary,
          proficiency_bonus = excluded.proficiency_bonus,
          updated_at        = excluded.updated_at`,
     ).run(
@@ -142,6 +145,7 @@ export function deriveCharacterFromFrontmatter(opts: {
       ac,
       hpMax,
       hpCurrent,
+      hpTemporary,
       proficiencyBonus,
       now,
     );
@@ -199,6 +203,7 @@ export type CharacterListRow = {
   ac: number | null;
   hpMax: number | null;
   hpCurrent: number | null;
+  hpTemporary: number | null;
   proficiencyBonus: number | null;
   campaigns: string[];
   updatedAt: number;
@@ -216,6 +221,7 @@ type CharacterDbRow = {
   ac: number | null;
   hp_max: number | null;
   hp_current: number | null;
+  hp_temporary: number | null;
   proficiency_bonus: number | null;
   updated_at: number;
 };
@@ -236,6 +242,7 @@ function rowToListEntry(
     ac: r.ac,
     hpMax: r.hp_max,
     hpCurrent: r.hp_current,
+    hpTemporary: r.hp_temporary,
     proficiencyBonus: r.proficiency_bonus,
     campaigns,
     updatedAt: r.updated_at,
@@ -261,8 +268,8 @@ export function listCharacters(
   const rows = db
     .query<CharacterDbRow, string[]>(
       `SELECT note_path, kind, player_user_id, display_name, portrait_path,
-              level, class, race, ac, hp_max, hp_current, proficiency_bonus,
-              updated_at
+              level, class, race, ac, hp_max, hp_current, hp_temporary,
+              proficiency_bonus, updated_at
          FROM characters
         WHERE ${wheres.join(' AND ')}
         ORDER BY display_name COLLATE NOCASE`,
@@ -465,7 +472,7 @@ function extractAc(sheet: Record<string, unknown>): number | null {
 
 function extractHp(
   sheet: Record<string, unknown>,
-  key: 'max' | 'current',
+  key: 'max' | 'current' | 'temporary',
 ): number | null {
   const hp = sheet.hit_points;
   if (!hp || typeof hp !== 'object') return null;

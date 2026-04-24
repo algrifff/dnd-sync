@@ -44,6 +44,7 @@ import type { Tree, TreeDir } from '@/lib/tree';
 import { broadcastTreeChange } from '@/lib/tree-sync';
 import { RowMenu } from './RowMenu';
 import { PeerStack } from './PeerStack';
+import { ActivePartySection } from './ActivePartySection';
 
 export type FileTreeKind = 'pc' | 'npc' | 'ally' | 'villain' | 'session';
 type KindMap = Record<string, FileTreeKind>;
@@ -598,6 +599,11 @@ export function FileTree({
           }}
         />
       )}
+      <ActivePartySection
+        activeCampaignSlug={activeCampaignSlug}
+        csrfToken={csrfToken}
+        activePath={activePath}
+      />
       <ul
         role="tree"
         className={

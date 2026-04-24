@@ -738,6 +738,13 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE groups ADD COLUMN active_campaign_slug TEXT;
     `,
   },
+  {
+    version: 38,
+    description: 'characters: hp_temporary for temp HP in the party sidebar',
+    sql: `
+      ALTER TABLE characters ADD COLUMN hp_temporary INTEGER;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {
