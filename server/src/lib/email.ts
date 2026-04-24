@@ -5,6 +5,7 @@
 // dev can copy the magic-link out of the terminal. Production deploys are
 // expected to set RESEND_API_KEY, RESEND_FROM_EMAIL, and PUBLIC_APP_URL.
 
+import { headers } from 'next/headers';
 import { Resend } from 'resend';
 
 type SendEmailInput = {
@@ -62,10 +63,24 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   }
 }
 
-export function publicAppUrl(): string {
+export async function publicAppUrl(): Promise<string> {
   const raw = process.env.PUBLIC_APP_URL?.trim();
-  if (!raw) return 'http://localhost:3000';
-  return raw.replace(/\/+$/, '');
+  if (raw) return raw.replace(/\/+$/, '');
+
+  // Fall back to the forwarded host headers so self-hosted deployments
+  // that haven't set PUBLIC_APP_URL still generate real links. Only
+  // degrade to localhost when running outside a request (tests, etc).
+  try {
+    const hdrs = await headers();
+    const forwardedHost = hdrs.get('x-forwarded-host') ?? hdrs.get('host');
+    const forwardedProto = hdrs.get('x-forwarded-proto') ?? 'https';
+    if (forwardedHost) {
+      return `${forwardedProto}://${forwardedHost}`.replace(/\/+$/, '');
+    }
+  } catch {
+    // headers() throws outside a request scope — fall through.
+  }
+  return 'http://localhost:3000';
 }
 
 // ── Templates ──────────────────────────────────────────────────────────

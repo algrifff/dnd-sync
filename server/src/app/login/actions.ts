@@ -318,7 +318,7 @@ export async function signupAction(
   // non-fatal — the user sees the "check your scroll" screen either way,
   // and can click "resend" if nothing arrives.
   const { token } = createEmailVerificationToken(user.id);
-  const url = `${publicAppUrl()}/login/verify?token=${encodeURIComponent(token)}`;
+  const url = `${await publicAppUrl()}/login/verify?token=${encodeURIComponent(token)}`;
   const payload = buildVerificationEmail({ displayName: user.displayName, url });
   await sendEmail({
     to: user.email ?? '',
@@ -392,7 +392,7 @@ export async function resendVerificationAction(
   const user = findUserByEmail(parsed.data.email);
   if (user && user.emailVerifiedAt == null) {
     const { token } = createEmailVerificationToken(user.id);
-    const url = `${publicAppUrl()}/login/verify?token=${encodeURIComponent(token)}`;
+    const url = `${await publicAppUrl()}/login/verify?token=${encodeURIComponent(token)}`;
     const payload = buildVerificationEmail({ displayName: user.displayName, url });
     await sendEmail({
       to: user.email ?? '',
@@ -446,7 +446,7 @@ export async function requestPasswordResetAction(
   const user = findUserByEmail(parsed.data.email);
   if (user) {
     const { token } = createPasswordResetToken(user.id, ip);
-    const url = `${publicAppUrl()}/login/reset?token=${encodeURIComponent(token)}`;
+    const url = `${await publicAppUrl()}/login/reset?token=${encodeURIComponent(token)}`;
     const payload = buildResetEmail({ displayName: user.displayName, url });
     await sendEmail({
       to: user.email ?? '',
