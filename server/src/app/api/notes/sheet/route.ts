@@ -26,6 +26,7 @@ import { loadNote } from '@/lib/notes';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { validateSheet } from '@/lib/validateSheet';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
+import { syncNoteToMaster } from '@/lib/userCharacterSync';
 
 export const dynamic = 'force-dynamic';
 
@@ -142,6 +143,16 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     });
   } catch (err) {
     console.error('[api/notes/sheet] derive failed:', err);
+  }
+
+  // If this note mirrors a user-level character, reverse-merge the
+  // updated sheet back into the master record. The sync helper is a
+  // no-op for notes that aren't bound, and self-loop-guarded against
+  // the master→notes direction.
+  try {
+    syncNoteToMaster(note.id);
+  } catch (err) {
+    console.error('[api/notes/sheet] sync to master failed:', err);
   }
 
   return json({ ok: true, sheet: validatedSheet, canWriteAll });

@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
 import { validateSheet } from './validateSheet';
+import { syncMasterToNotes } from './userCharacterSync';
 
 export type UserCharacterKind = 'character' | 'person';
 
@@ -172,6 +173,8 @@ export function updateUserCharacter(
       id,
       ownerUserId,
     );
+
+  syncMasterToNotes(id);
 
   return {
     ...current,
