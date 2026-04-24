@@ -223,6 +223,35 @@ export function recentlyUpdated(groupId: string, limit: number): Array<{ path: s
     .all(groupId, Math.max(1, Math.min(limit, 200)));
 }
 
+export type RecentForUserRow = {
+  groupId: string;
+  groupName: string;
+  path: string;
+  title: string;
+  updatedAt: number;
+};
+
+/** Recently updated notes across every world the user is a member of.
+ *  Used on the personal overview (`/me`) to surface what the user was
+ *  last touching regardless of which world it lived in. */
+export function listRecentForUser(userId: string, limit: number): RecentForUserRow[] {
+  return getDb()
+    .query<RecentForUserRow, [string, number]>(
+      `SELECT n.group_id AS groupId,
+              g.name     AS groupName,
+              n.path     AS path,
+              n.title    AS title,
+              n.updated_at AS updatedAt
+         FROM notes n
+         JOIN group_members gm ON gm.group_id = n.group_id
+         JOIN groups g         ON g.id = n.group_id
+        WHERE gm.user_id = ?
+        ORDER BY n.updated_at DESC
+        LIMIT ?`,
+    )
+    .all(userId, Math.max(1, Math.min(limit, 100)));
+}
+
 /** Decode a Next `[...path]` catch-all segment array into a canonical
  *  forward-slash path string, rejecting `..`/null bytes/drive letters. */
 export function decodePath(segments: string[]): string | null {
