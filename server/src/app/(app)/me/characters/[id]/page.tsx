@@ -8,6 +8,7 @@ import { cookies } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { getUserCharacter } from '@/lib/userCharacters';
+import { getTemplate } from '@/lib/templates';
 import { UserCharacterEditor } from './UserCharacterEditor';
 
 export const dynamic = 'force-dynamic';
@@ -28,7 +29,14 @@ export default async function UserCharacterPage({
   const character = getUserCharacter(id, session.userId);
   if (!character) notFound();
 
+  const template = getTemplate(character.kind) ?? getTemplate('character');
+  const sections = template?.schema.sections ?? [];
+
   return (
-    <UserCharacterEditor csrfToken={session.csrfToken} character={character} />
+    <UserCharacterEditor
+      csrfToken={session.csrfToken}
+      character={character}
+      sections={sections}
+    />
   );
 }
