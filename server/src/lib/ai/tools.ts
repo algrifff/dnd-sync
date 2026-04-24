@@ -37,6 +37,7 @@ export type ToolContext = {
 export function createTools(ctx: ToolContext) {
   return {
     campaign_list:       campaignList(ctx),
+    campaign_browse:     campaignBrowse(ctx),
     entity_search:       entitySearch(ctx),
     entity_create:       entityCreate(ctx),
     entity_edit_sheet:   entityEditSheet(ctx),
@@ -122,6 +123,20 @@ function wrapToolsWithTelemetry<T extends Record<string, unknown>>(
 // ── Schemas ────────────────────────────────────────────────────────────
 
 const CampaignListSchema = z.object({});
+
+const CampaignBrowseSchema = z.object({
+  campaignSlug: z.string().optional().describe(
+    'Registered campaign slug. Defaults to the active campaign. Required if none is active.',
+  ),
+  kind: z.enum([
+    'character', 'person', 'creature',
+    'item', 'location', 'session', 'lore', 'note',
+  ]).optional().describe('Filter by canonical kind.'),
+  subfolder: z.string().optional().describe(
+    'Relative subfolder inside the campaign (e.g. "Sessions", "Characters"). Case-insensitive.',
+  ),
+  limit: z.number().int().positive().max(100).optional().default(50),
+});
 
 const SearchSchema = z.object({
   query: z.string().describe('Name or keywords to search'),
@@ -216,6 +231,90 @@ function campaignList(ctx: ToolContext) {
           campaigns.length === 0
             ? 'No campaigns yet — an admin must create a campaign folder from the file tree before the AI can add campaign notes.'
             : undefined,
+      };
+    },
+  });
+}
+
+// ── campaign_browse ──────────────────────────────────────────────────
+
+function campaignBrowse(ctx: ToolContext) {
+  return tool({
+    description:
+      'Enumerate notes under a campaign so you can pick what to read. ' +
+      'Use this when the user asks for a recap, summary, connections, or any question ' +
+      'that requires looking across many notes — not just one. Returns path, title, kind, ' +
+      'a short excerpt, and updatedAt, ordered most-recent first. Follow up with note_read ' +
+      'on the rows that look relevant. Filter by `kind` (e.g. "session" for recaps, ' +
+      '"character"/"person" for who-is-who) or `subfolder` to narrow the result.',
+    inputSchema: CampaignBrowseSchema,
+    execute: async ({ campaignSlug, kind, subfolder, limit }: z.infer<typeof CampaignBrowseSchema>) => {
+      const slugParam = (campaignSlug?.trim() ?? ctx.campaignSlug?.trim()) || undefined;
+      if (!slugParam) {
+        return {
+          ok: false as const,
+          error: 'campaign_required',
+          message: 'Pass campaignSlug or set an active campaign. Call campaign_list to see options.',
+        };
+      }
+      const camp = getCampaignBySlug(ctx.groupId, slugParam);
+      if (!camp) {
+        return {
+          ok: false as const,
+          error: 'unknown_campaign',
+          message: `No registered campaign for slug "${slugParam}". Call campaign_list.`,
+        };
+      }
+
+      const base = subfolder?.trim()
+        ? `${camp.folderPath}/${subfolder.trim().replace(/^\/+|\/+$/g, '')}/`
+        : `${camp.folderPath}/`;
+
+      type Row = {
+        path: string;
+        title: string;
+        frontmatter_json: string;
+        content_text: string;
+        updated_at: number;
+        dm_only: number;
+      };
+      const rows = getDb()
+        .query<Row, [string, string, number]>(
+          `SELECT path, title, frontmatter_json, content_text, updated_at, dm_only
+             FROM notes
+            WHERE group_id = ? AND path LIKE ? || '%'
+            ORDER BY updated_at DESC
+            LIMIT ?`,
+        )
+        .all(ctx.groupId, base, Math.min(limit ?? 50, 100) * 2);
+
+      const kindFilter = kind ? normalizeKind(kind as EntityKind) : null;
+
+      const results = rows
+        .filter((r) => ctx.role === 'dm' || r.dm_only === 0)
+        .map((r) => {
+          let fmKind: string | undefined;
+          try {
+            const fm = JSON.parse(r.frontmatter_json) as { kind?: unknown };
+            if (typeof fm.kind === 'string') fmKind = fm.kind;
+          } catch { /* ignore */ }
+          const text = (r.content_text ?? '').replace(/\s+/g, ' ').trim();
+          return {
+            path: r.path,
+            title: r.title,
+            kind: fmKind,
+            excerpt: text.slice(0, 240),
+            updatedAt: r.updated_at,
+          };
+        })
+        .filter((r) => !kindFilter || r.kind === kindFilter)
+        .slice(0, limit ?? 50);
+
+      return {
+        ok: true as const,
+        campaign: { slug: camp.slug, name: camp.name, folderPath: camp.folderPath },
+        count: results.length,
+        results,
       };
     },
   });
