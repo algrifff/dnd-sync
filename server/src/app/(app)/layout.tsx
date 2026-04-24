@@ -2,6 +2,7 @@ import type { ReactElement, ReactNode } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
+import { UpdateToast } from '../UpdateToast';
 import { WorldsSidebar } from '../WorldsSidebar';
 import { WorldSwitchOverlay, WorldSwitchProvider } from './WorldSwitch';
 
@@ -42,6 +43,7 @@ export default async function AppLayout({
           <WorldSwitchOverlay />
         </div>
       </WorldSwitchProvider>
+      <UpdateToast />
     </div>
   );
 }

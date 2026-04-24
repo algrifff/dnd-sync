@@ -16,7 +16,7 @@ const fraunces = Fraunces({
   axes: ['SOFT', 'WONK'],
 });
 
-const APP_URL = process.env.APP_URL ?? 'https://pitpals.app';
+const APP_URL = process.env.APP_URL ?? 'https://pit-pals.com';
 
 const DESCRIPTION =
   'The best TTRPG note-taking app. Real-time collaborative notes, character sheets, session logs, and AI assistance — purpose-built for tabletop campaigns.';
