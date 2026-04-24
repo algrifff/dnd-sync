@@ -4,6 +4,7 @@ import { CreateUserForm } from '@/app/settings/users/CreateUserForm';
 import { RevokeButton } from '@/app/settings/users/RevokeButton';
 import { DeleteUserButton } from '@/app/settings/users/DeleteUserButton';
 import { DangerZone } from '@/app/settings/users/DangerZone';
+import { RoleSelect } from '@/app/settings/users/RoleSelect';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,9 +90,7 @@ function UserTable({
                   </div>
                 </td>
                 <td className="px-4 py-3">
-                  <span className="rounded-full border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-0.5 text-xs">
-                    {u.role}
-                  </span>
+                  <RoleSelect userId={u.id} initialRole={u.role} />
                 </td>
                 <td className="px-4 py-3 text-[#5A4F42]">
                   {stats ? (

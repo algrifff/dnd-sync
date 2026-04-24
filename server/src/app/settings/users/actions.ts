@@ -8,7 +8,8 @@ import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { CreateUserRequestSchema, UserRoleSchema } from '@compendium/shared';
 import { isSuperAdmin } from '@/lib/superadmin';
-import { createUser, clearAllData, DEFAULT_GROUP_ID, deleteUserWithContent, revokeUser } from '@/lib/users';
+import { logAudit } from '@/lib/audit';
+import { createUser, clearAllData, DEFAULT_GROUP_ID, deleteUserWithContent, revokeUser, setMemberRole } from '@/lib/users';
 
 export type CreateUserResult =
   | { ok: true; username: string; password: string; message: string }
@@ -87,6 +88,38 @@ export async function deleteUserWithContentAction(userId: string): Promise<Revok
   deleteUserWithContent(userId, 'superadmin');
   revalidatePath('/admin/users');
   return { ok: true };
+}
+
+export type SetRoleResult = { ok: true; role: 'admin' | 'editor' | 'viewer' } | { ok: false; error: string };
+
+export async function setUserRoleAction(userId: string, role: unknown): Promise<SetRoleResult> {
+  if (!(await requireSuperAdmin())) return { ok: false, error: 'forbidden' };
+  const parsed = UserRoleSchema.safeParse(role);
+  if (!parsed.success) return { ok: false, error: 'invalid_role' };
+
+  const result = setMemberRole(DEFAULT_GROUP_ID, userId, parsed.data);
+  if (!result.ok) {
+    return {
+      ok: false,
+      error:
+        result.error === 'would_orphan_admin'
+          ? 'Cannot demote the last admin of this world.'
+          : result.error === 'not_member'
+            ? 'User is not a member of this world.'
+            : 'Could not update role.',
+    };
+  }
+
+  logAudit({
+    action: 'group.member_role_changed',
+    actorId: null,
+    groupId: DEFAULT_GROUP_ID,
+    target: userId,
+    details: { role: parsed.data, actor: 'superadmin' },
+  });
+
+  revalidatePath('/admin/users');
+  return { ok: true, role: parsed.data };
 }
 
 export async function clearDatabaseAction(): Promise<RevokeUserResult> {
