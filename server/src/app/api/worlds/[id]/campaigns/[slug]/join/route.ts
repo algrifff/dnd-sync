@@ -63,7 +63,18 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
     )
     .get(groupId);
   if (!group) return json({ error: 'not_found', detail: 'world' }, 404);
-  if (group.active_campaign_slug !== slug) {
+  // Mirror the layout's fallback: if no campaign is pinned, treat the
+  // most-recently-created campaign as active. Without this the sidebar
+  // shows a party for a campaign the join route refuses to accept.
+  const effectiveActiveSlug =
+    group.active_campaign_slug ??
+    db
+      .query<{ slug: string }, [string]>(
+        'SELECT slug FROM campaigns WHERE group_id = ? ORDER BY created_at DESC LIMIT 1',
+      )
+      .get(groupId)?.slug ??
+    null;
+  if (effectiveActiveSlug !== slug) {
     return json(
       { error: 'not_active_campaign', detail: 'only the active campaign is joinable' },
       400,

@@ -52,47 +52,6 @@ export function MeDashboard({
       <main className="flex-1 px-8 py-6">
         <section className="mb-10">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="font-serif text-lg text-[var(--ink)]">Worlds</h2>
-            <button
-              type="button"
-              onClick={() => setNewWorldOpen(true)}
-              className="flex items-center gap-1 rounded-[6px] bg-[var(--ink)] px-3 py-1.5 text-xs font-medium text-[var(--parchment)] transition hover:bg-[var(--ink-soft)]"
-            >
-              <Plus size={12} aria-hidden /> New world
-            </button>
-          </div>
-          {worlds.length === 0 ? (
-            <EmptyState
-              message="You're not in any worlds yet."
-              action="Create your first world"
-              onAction={() => setNewWorldOpen(true)}
-            />
-          ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {worlds.map((w) => (
-                <button
-                  key={w.id}
-                  type="button"
-                  onClick={() => void openWorld(w.id)}
-                  className="flex items-center gap-3 rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] p-3 text-left transition hover:border-[var(--candlelight)]"
-                >
-                  <WorldChip world={w} />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-[var(--ink)]">
-                      {w.name}
-                    </div>
-                    <div className="text-[11px] uppercase tracking-wide text-[var(--ink-soft)]">
-                      {w.role}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="mb-10">
-          <div className="mb-3 flex items-center justify-between">
             <h2 className="font-serif text-lg text-[var(--ink)]">
               Your characters
             </h2>
@@ -128,6 +87,47 @@ export function MeDashboard({
                     </div>
                   </div>
                 </Link>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="mb-10">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-serif text-lg text-[var(--ink)]">Worlds</h2>
+            <button
+              type="button"
+              onClick={() => setNewWorldOpen(true)}
+              className="flex items-center gap-1 rounded-[6px] bg-[var(--ink)] px-3 py-1.5 text-xs font-medium text-[var(--parchment)] transition hover:bg-[var(--ink-soft)]"
+            >
+              <Plus size={12} aria-hidden /> New world
+            </button>
+          </div>
+          {worlds.length === 0 ? (
+            <EmptyState
+              message="You're not in any worlds yet."
+              action="Create your first world"
+              onAction={() => setNewWorldOpen(true)}
+            />
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {worlds.map((w) => (
+                <button
+                  key={w.id}
+                  type="button"
+                  onClick={() => void openWorld(w.id)}
+                  className="flex items-center gap-3 rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] p-3 text-left transition hover:border-[var(--candlelight)]"
+                >
+                  <WorldChip world={w} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-[var(--ink)]">
+                      {w.name}
+                    </div>
+                    <div className="text-[11px] uppercase tracking-wide text-[var(--ink-soft)]">
+                      {w.role}
+                    </div>
+                  </div>
+                </button>
               ))}
             </div>
           )}

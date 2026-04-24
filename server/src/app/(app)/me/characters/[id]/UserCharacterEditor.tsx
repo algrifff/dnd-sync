@@ -12,31 +12,22 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft, Heart, Shield, Trash2, UserRound } from 'lucide-react';
 import {
   abilityModifier,
+  formatClassList,
   formatModifier,
+  parseClassList,
   readAbilityScores,
   readArmorClass,
   readHitPoints,
   readSpeed,
+  refName,
 } from '@/app/notes/sheet-header/util';
-import type { TemplateField, TemplateSection } from '@/lib/templates';
+import { uploadImageAsset } from '@/lib/image-upload';
 import type { UserCharacter } from '@/lib/userCharacters';
 import { UserCharacterBody } from './UserCharacterBody';
 
 const PATCH_DEBOUNCE_MS = 400;
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
 type AbilityKey = (typeof ABILITY_KEYS)[number];
-
-// Fields the hero strip already owns — skip them when rendering the
-// template sections below so we don't render the same field twice.
-const HERO_FIELD_IDS = new Set<string>([
-  'name',
-  'hp_current',
-  'hp_max',
-  'ac',
-  'speed',
-  'initiative_bonus',
-  ...ABILITY_KEYS,
-]);
 
 type HpTone = 'full' | 'injured' | 'down' | 'unknown';
 function hpTone(current: number | null, max: number | null): HpTone {
@@ -46,9 +37,9 @@ function hpTone(current: number | null, max: number | null): HpTone {
   return 'injured';
 }
 const HP_PILL_CLASS: Record<HpTone, string> = {
-  full: 'bg-[var(--moss)]/20 text-[#556049] border-[var(--moss)]/40',
-  injured: 'bg-[var(--candlelight)]/25 text-[#6b5120] border-[var(--candlelight)]/50',
-  down: 'bg-[var(--wine)]/20 text-[var(--wine)] border-[var(--wine)]/50',
+  full: 'bg-[rgb(var(--moss-rgb)/0.2)] text-[var(--moss)] border-[rgb(var(--moss-rgb)/0.5)]',
+  injured: 'bg-[rgb(var(--candlelight-rgb)/0.25)] text-[var(--candlelight)] border-[rgb(var(--candlelight-rgb)/0.55)]',
+  down: 'bg-[rgb(var(--wine-rgb)/0.2)] text-[var(--wine)] border-[rgb(var(--wine-rgb)/0.55)]',
   unknown: 'bg-[var(--rule)]/30 text-[var(--ink-muted)] border-[var(--rule)]',
 };
 
@@ -68,11 +59,9 @@ function abilityScoresWithLegacy(
 export function UserCharacterEditor({
   csrfToken,
   character,
-  sections,
 }: {
   csrfToken: string;
   character: UserCharacter;
-  sections: TemplateSection[];
 }): React.JSX.Element {
   const router = useRouter();
   const [name, setName] = useState<string>(character.name);
@@ -156,12 +145,6 @@ export function UserCharacterEditor({
     schedule({ name: trimmed });
   };
 
-  const commitPortrait = (): void => {
-    const trimmed = portraitUrl.trim();
-    if (trimmed === (character.portraitUrl ?? '')) return;
-    schedule({ portraitUrl: trimmed || null });
-  };
-
   const onDelete = async (): Promise<void> => {
     if (!window.confirm(`Delete ${character.name}? This cannot be undone.`))
       return;
@@ -219,10 +202,6 @@ export function UserCharacterEditor({
       [k]: value,
     });
   };
-  const setInitiativeBonus = (value: number | null): void => {
-    patchSheet({ initiative_bonus: value ?? 0 });
-  };
-
   const statusLabel = useMemo<string>(() => {
     if (error) return `Error: ${error}`;
     if (saving) return 'Saving…';
@@ -259,29 +238,29 @@ export function UserCharacterEditor({
       </header>
 
       <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-8">
-        {/* Hero strip — PartyHoverCard styling. */}
-        <div className="mb-6 rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)]/60 p-4">
-          <div className="flex items-start gap-4">
-            <span className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--rule)] bg-[var(--parchment-sunk)]">
-              {portraitUrl ? (
-                <img src={portraitUrl} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <UserRound size={32} aria-hidden className="text-[var(--ink-muted)]" />
-              )}
-            </span>
+        {/* Hero strip — sized to match the in-world character note header. */}
+        <div className="mb-6">
+          <div className="flex items-start gap-5">
+            <PortraitButton
+              url={portraitUrl}
+              csrfToken={csrfToken}
+              onUpload={(url) => {
+                setPortraitUrl(url);
+                schedule({ portraitUrl: url });
+              }}
+            />
             <div className="flex min-w-0 flex-1 flex-col">
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onBlur={commitName}
-                className="w-full bg-transparent font-serif text-3xl leading-tight text-[var(--ink)] outline-none"
+                className="w-full bg-transparent font-serif text-4xl font-semibold leading-tight text-[var(--ink)] outline-none"
                 placeholder="Character name"
               />
-              <span className="mt-0.5 text-[11px] uppercase tracking-wider text-[var(--ink-soft)]">
-                {character.kind}
-              </span>
-              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <SubtitleRow sheet={sheet} onPatch={patchSheet} />
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
                 <HpPill
                   tone={tone}
                   current={hp.current}
@@ -294,29 +273,29 @@ export function UserCharacterEditor({
                   onChange={(v) => setHp({ temporary: v })}
                 />
               </div>
+
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <EditableTile
+                  label="AC"
+                  value={ac}
+                  onChange={setAc}
+                />
+                <ReadOnlyTile
+                  label="Initiative"
+                  value={formatModifier(initiative)}
+                  hint="DEX mod + bonus"
+                />
+                <EditableTile
+                  label="Speed"
+                  value={speed}
+                  suffix="ft"
+                  onChange={setSpeed}
+                />
+              </div>
             </div>
           </div>
 
-          <div className="mt-3 grid grid-cols-3 gap-1.5">
-            <EditableTile
-              label="AC"
-              value={ac}
-              onChange={setAc}
-            />
-            <ReadOnlyTile
-              label="Initiative"
-              value={formatModifier(initiative)}
-              hint="DEX mod + bonus"
-            />
-            <EditableTile
-              label="Speed"
-              value={speed}
-              suffix="ft"
-              onChange={setSpeed}
-            />
-          </div>
-
-          <div className="mt-2 grid grid-cols-6 gap-1">
+          <div className="mt-5 grid grid-cols-6 gap-2 border-t border-[var(--rule)] pt-4">
             {ABILITY_KEYS.map((k) => (
               <AbilityTile
                 key={k}
@@ -328,47 +307,7 @@ export function UserCharacterEditor({
           </div>
         </div>
 
-        {/* Remaining template sections. */}
-        {sections.map((section) => {
-          const fields = section.fields.filter((f) => !HERO_FIELD_IDS.has(f.id));
-          if (fields.length === 0) return null;
-          return (
-            <section key={section.id} className="mb-6">
-              <h2 className="mb-3 font-serif text-base text-[var(--ink)]">
-                {section.label}
-              </h2>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {fields.map((f) => (
-                  <FieldEditor
-                    key={f.id}
-                    field={f}
-                    value={sheet[f.id]}
-                    onChange={(v) => patchSheet({ [f.id]: v })}
-                  />
-                ))}
-              </div>
-            </section>
-          );
-        })}
 
-        <section className="mb-6">
-          <h2 className="mb-3 font-serif text-base text-[var(--ink)]">Initiative bonus</h2>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Field label="Initiative bonus">
-              <NumberInput value={initiativeBonus} onChange={setInitiativeBonus} />
-            </Field>
-            <Field label="Portrait URL">
-              <input
-                type="url"
-                value={portraitUrl}
-                onChange={(e) => setPortraitUrl(e.target.value)}
-                onBlur={commitPortrait}
-                placeholder="https://…"
-                className={fieldCls}
-              />
-            </Field>
-          </div>
-        </section>
 
         <UserCharacterBody
           characterId={character.id}
@@ -411,12 +350,12 @@ function HpPill({
   return (
     <span
       className={
-        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-serif text-[12px] tabular-nums ' +
+        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-serif text-base font-semibold tabular-nums ' +
         HP_PILL_CLASS[tone]
       }
       title="Hit points"
     >
-      <Heart className="h-3 w-3" aria-hidden />
+      <Heart className="h-4 w-4" aria-hidden />
       <PillNumber value={current} onChange={onCurrent} />
       <span className="text-[var(--ink-muted)]">/</span>
       <PillNumber value={max} onChange={onMax} />
@@ -433,10 +372,10 @@ function TempHpPill({
 }): React.JSX.Element {
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full border border-[#6B8AA8]/50 bg-[#6B8AA8]/15 px-2 py-0.5 font-serif text-[12px] tabular-nums text-[#3e5770]"
+      className="inline-flex items-center gap-1.5 rounded-full border border-[rgb(var(--sage-rgb)/0.55)] bg-[rgb(var(--sage-rgb)/0.18)] px-3 py-1 font-serif text-base font-semibold tabular-nums text-[var(--sage)]"
       title="Temporary HP"
     >
-      <Shield className="h-3 w-3" aria-hidden />
+      <Shield className="h-4 w-4" aria-hidden />
       <PillNumber value={value || null} onChange={onChange} placeholder="0" />
     </span>
   );
@@ -460,7 +399,7 @@ function PillNumber({
       onChange={(e) =>
         onChange(e.target.value === '' ? null : Number(e.target.value))
       }
-      className="w-8 bg-transparent text-center font-serif tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      className="w-10 bg-transparent text-center font-serif tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
     />
   );
 }
@@ -477,11 +416,11 @@ function EditableTile({
   onChange: (v: number | null) => void;
 }): React.JSX.Element {
   return (
-    <div className="flex flex-col items-center rounded-[6px] border border-[var(--rule)] bg-[var(--parchment-sunk)]/60 px-1 py-1.5">
-      <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--ink-muted)]">
+    <div className="flex flex-col items-center rounded-[10px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-2">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
         {label}
       </span>
-      <div className="flex items-baseline gap-0.5">
+      <div className="flex items-baseline gap-1">
         <input
           type="number"
           inputMode="numeric"
@@ -490,10 +429,10 @@ function EditableTile({
             onChange(e.target.value === '' ? null : Number(e.target.value))
           }
           placeholder="—"
-          className="w-12 bg-transparent text-center font-serif text-base leading-none text-[var(--ink)] outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className="w-14 bg-transparent text-center font-serif text-lg font-semibold leading-tight text-[var(--ink)] outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
         {suffix && (
-          <span className="font-serif text-[10px] text-[var(--ink-soft)]">
+          <span className="font-serif text-xs text-[var(--ink-soft)]">
             {suffix}
           </span>
         )}
@@ -513,13 +452,13 @@ function ReadOnlyTile({
 }): React.JSX.Element {
   return (
     <div
-      className="flex flex-col items-center rounded-[6px] border border-[var(--rule)] bg-[var(--parchment-sunk)]/60 px-1 py-1.5"
+      className="flex flex-col items-center rounded-[10px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-2"
       title={hint}
     >
-      <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--ink-muted)]">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
         {label}
       </span>
-      <span className="font-serif text-base leading-none text-[var(--ink)]">
+      <span className="font-serif text-lg font-semibold leading-tight text-[var(--ink)]">
         {value}
       </span>
     </div>
@@ -537,8 +476,8 @@ function AbilityTile({
 }): React.JSX.Element {
   const mod = abilityModifier(score);
   return (
-    <div className="flex flex-col items-center rounded-[6px] border border-[var(--rule)] bg-[var(--parchment-sunk)]/60 px-1 py-1.5">
-      <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--ink-muted)]">
+    <div className="flex aspect-square w-full flex-col items-center justify-center rounded-[10px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-2">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
         {ability}
       </span>
       <input
@@ -550,176 +489,158 @@ function AbilityTile({
         onChange={(e) =>
           onChange(e.target.value === '' ? null : Number(e.target.value))
         }
-        className="w-10 bg-transparent text-center font-serif text-base leading-none text-[var(--ink)] outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="w-16 bg-transparent text-center font-serif text-3xl font-normal leading-tight text-[var(--ink)] outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
-      <span className="mt-0.5 font-serif text-[10px] text-[var(--ink-soft)]">
+      <span className="mt-0.5 text-sm font-medium text-[var(--ink-soft)]">
         {formatModifier(mod)}
       </span>
     </div>
   );
 }
 
-// ── Generic field editor (for the template sections below the hero) ────
+// ── Portrait (click to upload) ─────────────────────────────────────────
 
-function FieldEditor({
-  field,
-  value,
-  onChange,
+function PortraitButton({
+  url,
+  csrfToken,
+  onUpload,
 }: {
-  field: TemplateField;
-  value: unknown;
-  onChange: (v: unknown) => void;
+  url: string;
+  csrfToken: string;
+  onUpload: (url: string) => void;
 }): React.JSX.Element {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const onPick = async (file: File): Promise<void> => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const asset = await uploadImageAsset(file, csrfToken);
+      onUpload(`/api/assets/${asset.id}`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'upload failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <Field label={field.label} hint={field.hint}>
-      {renderControl(field, value, onChange)}
-    </Field>
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        aria-label="Change portrait"
+        disabled={busy}
+        className="group relative h-44 w-44 shrink-0 overflow-hidden rounded-[12px] border border-[var(--rule)] bg-[var(--parchment-sunk)] transition hover:border-[var(--ink)]"
+      >
+        {url ? (
+          <img src={url} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[var(--ink-soft)]">
+            <UserRound size={48} aria-hidden />
+            <span className="text-[11px] font-medium uppercase tracking-wide">
+              Upload portrait
+            </span>
+          </div>
+        )}
+        {url && (
+          <span className="absolute inset-x-0 bottom-0 bg-[rgb(0_0_0/0.55)] py-1 text-center text-[11px] font-medium uppercase tracking-wide text-[var(--parchment)] opacity-0 transition group-hover:opacity-100">
+            {busy ? 'Uploading…' : 'Change'}
+          </span>
+        )}
+      </button>
+      {err && (
+        <span className="mt-1 block text-[10px] text-[var(--wine)]">{err}</span>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void onPick(file);
+          e.target.value = '';
+        }}
+      />
+    </div>
   );
 }
 
-function renderControl(
-  field: TemplateField,
-  value: unknown,
-  onChange: (v: unknown) => void,
-): React.JSX.Element {
-  switch (field.type) {
-    case 'integer':
-    case 'number':
-      return (
-        <NumberInput
-          value={typeof value === 'number' ? value : null}
-          onChange={(v) => onChange(v)}
-          min={field.min}
-          max={field.max}
-        />
-      );
-    case 'boolean':
-      return (
-        <input
-          type="checkbox"
-          checked={value === true}
-          onChange={(e) => onChange(e.target.checked)}
-          className="h-4 w-4 rounded border-[var(--rule)] text-[var(--candlelight)]"
-        />
-      );
-    case 'enum':
-      return (
-        <select
-          value={typeof value === 'string' ? value : ''}
-          onChange={(e) => onChange(e.target.value || undefined)}
-          className={fieldCls}
-        >
-          <option value="">—</option>
-          {(field.options ?? []).map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
-      );
-    case 'longtext':
-      return (
-        <textarea
-          value={typeof value === 'string' ? value : ''}
-          onChange={(e) => onChange(e.target.value || undefined)}
-          rows={3}
-          className={fieldCls + ' resize-y'}
-        />
-      );
-    case 'list<text>':
-      return (
-        <input
-          type="text"
-          value={Array.isArray(value) ? value.join(', ') : ''}
-          onChange={(e) => {
-            const raw = e.target.value;
-            const arr = raw
-              .split(',')
-              .map((s) => s.trim())
-              .filter(Boolean);
-            onChange(arr);
-          }}
-          placeholder="comma, separated"
-          className={fieldCls}
-        />
-      );
-    case 'text':
-    default:
-      // Tolerate legacy nested { ref: { name } } shapes for race / background.
-      return (
-        <input
-          type="text"
-          value={readTextLike(value)}
-          onChange={(e) => onChange(e.target.value || undefined)}
-          className={fieldCls}
-        />
-      );
-  }
-}
+// ── Race · Class · Background subtitle ─────────────────────────────────
 
-function readTextLike(v: unknown): string {
-  if (typeof v === 'string') return v;
-  if (v && typeof v === 'object') {
-    const obj = v as Record<string, unknown>;
-    const ref = obj.ref as Record<string, unknown> | undefined;
-    if (typeof ref?.name === 'string') return ref.name;
-    if (typeof obj.name === 'string') return obj.name;
-  }
-  return '';
-}
-
-function NumberInput({
-  value,
-  onChange,
-  min,
-  max,
+function SubtitleRow({
+  sheet,
+  onPatch,
 }: {
-  value: number | null;
-  onChange: (v: number | null) => void;
-  min?: number | undefined;
-  max?: number | undefined;
+  sheet: Record<string, unknown>;
+  onPatch: (partial: Record<string, unknown>) => void;
 }): React.JSX.Element {
+  const race = refName(sheet.race) ?? '';
+  const classes = formatClassList(sheet.classes);
+  const background = refName(sheet.background) ?? '';
+  return (
+    <div className="mt-1 flex flex-nowrap items-baseline gap-x-2 overflow-hidden font-serif text-base text-[var(--ink-soft)]">
+      <SubtitleInput
+        value={race}
+        placeholder="Race"
+        ariaLabel="Race"
+        onCommit={(next) =>
+          onPatch({ race: next ? { ref: { name: next } } : null })
+        }
+      />
+      <span aria-hidden className="text-[var(--ink-muted)]">·</span>
+      <SubtitleInput
+        value={classes}
+        placeholder="Class"
+        ariaLabel="Classes"
+        onCommit={(next) =>
+          onPatch({ classes: next ? parseClassList(next) : [] })
+        }
+      />
+      <span aria-hidden className="text-[var(--ink-muted)]">·</span>
+      <SubtitleInput
+        value={background}
+        placeholder="Background"
+        ariaLabel="Background"
+        onCommit={(next) =>
+          onPatch({ background: next ? { ref: { name: next } } : null })
+        }
+      />
+    </div>
+  );
+}
+
+function SubtitleInput({
+  value,
+  placeholder,
+  ariaLabel,
+  onCommit,
+}: {
+  value: string;
+  placeholder: string;
+  ariaLabel: string;
+  onCommit: (next: string) => void;
+}): React.JSX.Element {
+  const [draft, setDraft] = useState<string>(value);
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
   return (
     <input
-      type="number"
-      inputMode="numeric"
-      min={min}
-      max={max}
-      value={value ?? ''}
-      onChange={(e) =>
-        onChange(e.target.value === '' ? null : Number(e.target.value))
-      }
-      className={numCls}
+      type="text"
+      value={draft}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        const trimmed = draft.trim();
+        if (trimmed !== value.trim()) onCommit(trimmed);
+      }}
+      className="min-w-[4ch] border-0 border-b-2 border-transparent bg-transparent p-0 font-serif text-base text-[var(--ink-soft)] outline-none placeholder:text-[var(--ink-muted)] hover:border-[var(--world-accent,#8A7E6B)] focus:border-[var(--world-accent,#8A7E6B)] focus:outline-0 focus:ring-0 focus-visible:outline-0"
     />
   );
 }
 
-const fieldCls =
-  'w-full rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-1.5 text-sm text-[var(--ink)] outline-none focus:border-[var(--candlelight)]';
-
-const numCls =
-  'w-24 rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-1.5 text-sm text-[var(--ink)] outline-none focus:border-[var(--candlelight)] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string | undefined;
-  children: React.ReactNode;
-}): React.JSX.Element {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-[var(--ink-soft)]">
-        {label}
-      </span>
-      {children}
-      {hint && (
-        <span className="mt-1 block text-[10px] italic text-[var(--ink-muted)]">
-          {hint}
-        </span>
-      )}
-    </label>
-  );
-}
