@@ -7,6 +7,6 @@ if (projectToken && process.env.NODE_ENV === 'production') {
     ui_host: 'https://eu.posthog.com',
     defaults: '2026-01-30',
     capture_exceptions: true,
-    debug: process.env.NODE_ENV === 'development',
+    debug: false,
   });
 }
