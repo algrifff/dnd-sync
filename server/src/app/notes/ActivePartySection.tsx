@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   ChevronDown,
   ChevronRight,
@@ -385,6 +386,7 @@ function JoinCampaignButton({
   const [error, setError] = useState<string | null>(null);
   const [characters, setCharacters] = useState<MeCharacter[] | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     if (!open) return;
@@ -450,14 +452,12 @@ function JoinCampaignButton({
           return;
         }
         setOpen(false);
-        // Party list + sidebar both read from the server; a soft reload
-        // is the simplest way to pick up the new bound note.
-        window.location.reload();
+        router.refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'network error');
       }
     },
-    [groupId, campaignSlug, csrfToken],
+    [groupId, campaignSlug, csrfToken, router],
   );
 
   return (
