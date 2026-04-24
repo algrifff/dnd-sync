@@ -50,7 +50,9 @@ const COLLAGE: Array<{
   // Central hydra pit — the anchor of the composition.
   { src: '/landing/Main-Image.png', left: '10%', top: '-10%', width: '100%', shadow: true },
   // Top-left: purple arcane explosion with demons.
-  { src: '/landing/Image-comet.png', left: '1%', top: '-20%', width: '40%' },
+  { src: '/landing/Image-comet.png', left: '1%', top: '-20%', width: '47%' },
+  // Top-middle.
+  { src: '/landing/Image-claye.png', left: '40%', top: '-18%', width: '25%' },
   // Top-right: hooded figure over a burning city.
   { src: '/landing/Image-ignys.png', left: '80%', top: '-23%', width: '51%' },
   // Mid-left: two armoured figures embracing.
