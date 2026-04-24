@@ -101,14 +101,14 @@ function snapshotKey(groupId: string, hideDmOnly: boolean): string {
   const row = getDb()
     .query<
       { u: number | null; n: number; m: number },
-      [string, string]
+      [string, string, string]
     >(
       `SELECT
          (SELECT COALESCE(MAX(updated_at), 0) FROM notes WHERE group_id = ?) AS u,
-         (SELECT COUNT(*) FROM notes WHERE group_id = ?1) AS n,
-         (SELECT COUNT(*) FROM folder_markers WHERE group_id = ?2) AS m`,
+         (SELECT COUNT(*) FROM notes WHERE group_id = ?) AS n,
+         (SELECT COUNT(*) FROM folder_markers WHERE group_id = ?) AS m`,
     )
-    .get(groupId, groupId);
+    .get(groupId, groupId, groupId);
   const u = row?.u ?? 0;
   const n = row?.n ?? 0;
   const m = row?.m ?? 0;
