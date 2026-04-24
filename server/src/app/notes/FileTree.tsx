@@ -568,14 +568,15 @@ export function FileTree({
     [csrfToken, router],
   );
 
-  // The top-level Campaigns folder is always expanded — it's the
-  // primary navigation surface, so we force it open regardless of
-  // the persisted state. Individual campaign subfolders remain
-  // toggleable (they're seeded open on first visit via the effect
-  // above, but the user is free to collapse them afterwards).
+  // Top-level vault sections (Campaigns, World Lore, …) are always
+  // expanded — they act as section headings, not collapsible folders.
+  // Everything deeper stays toggleable (campaign subfolders are seeded
+  // open on first visit via the effect above, then user-controlled).
   const items = useMemo(() => {
     const effective = new Set(open);
-    effective.add('Campaigns');
+    for (const child of tree.root.children) {
+      if (child.kind === 'dir') effective.add(child.path);
+    }
     return flatten(tree.root, effective, 0);
   }, [tree.root, open]);
 
@@ -908,17 +909,27 @@ function TreeRow({
       ? '/notes/' + item.indexPath.split('/').map(encodeURIComponent).join('/')
       : null;
     const isIndexActive = item.indexPath === activePath;
+    const isTopLevel = item.depth === 0;
+    // Second-level folders under the always-open section headings
+    // (Campaign-1, World Info, …). Slightly larger + bolder than
+    // deeper nested rows so each section reads as a real roster.
+    const isPromoted = item.depth === 1;
+    const isActiveCampaign =
+      /^Campaigns\/[^/]+$/.test(item.path) &&
+      activeCampaignSlug === item.path.slice('Campaigns/'.length);
     const folderIcon = (() => {
       const fi = getFolderIcon(item.path);
       return fi ? (
-        <fi.Icon size={13} aria-hidden className="shrink-0" style={{ color: fi.color }} />
+        <fi.Icon size={isPromoted ? 14 : 13} aria-hidden className="shrink-0" style={{ color: fi.color }} />
       ) : null;
     })();
     const nameLabel = (
       <span
-        className={`truncate font-medium ${
-          isSystem ? 'tracking-wide text-xs uppercase text-[#5A4F42]/70' : ''
-        } ${isIndexActive ? 'text-[#2A241E]' : ''}`}
+        className={`truncate ${
+          isPromoted
+            ? `font-medium text-[13.5px] ${isActiveCampaign ? 'text-[#8B4A52]' : 'text-[#5A4F42]'}`
+            : `font-medium ${isSystem ? 'tracking-wide text-xs uppercase text-[#5A4F42]/70' : ''}`
+        } ${!isPromoted && isIndexActive ? 'text-[#2A241E]' : ''}`}
       >
         {item.name}
       </span>
@@ -930,36 +941,50 @@ function TreeRow({
           {...dirDropProps}
           className={
             'group flex items-center rounded-[6px] transition ' +
+            (isTopLevel ? 'mt-2 first:mt-0 ' : '') +
             (isDropTarget
               ? 'bg-[#8B4A52]/15 ring-1 ring-[#8B4A52]/40'
               : isIndexActive
                 ? 'bg-[#D4A85A]/25'
-                : 'hover:bg-[#D4A85A]/15')
+                : isTopLevel
+                  ? 'hover:bg-[#D4A85A]/10'
+                  : 'hover:bg-[#D4A85A]/15')
           }
         >
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onToggle(item.path); }}
-            aria-label={item.open ? 'Collapse' : 'Expand'}
-            className="flex items-center px-1 py-1 text-[#5A4F42]"
-            style={{ paddingLeft: padding }}
-          >
-            <ChevronRight
-              size={14}
-              className="transition"
-              style={{ transform: item.open ? 'rotate(90deg)' : 'none' }}
-              aria-hidden
-            />
-          </button>
+          {!isTopLevel && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onToggle(item.path); }}
+              aria-label={item.open ? 'Collapse' : 'Expand'}
+              className="flex items-center px-1 py-1 text-[#5A4F42]"
+              style={{ paddingLeft: padding }}
+            >
+              <ChevronRight
+                size={14}
+                className="transition"
+                style={{ transform: item.open ? 'rotate(90deg)' : 'none' }}
+                aria-hidden
+              />
+            </button>
+          )}
           {indexHref ? (
             <Link
               href={indexHref}
               onClick={() => { if (!item.open) onToggle(item.path); }}
               className="flex flex-1 items-center gap-1 py-1 pr-2 text-left text-[#5A4F42]"
+              style={isTopLevel ? { paddingLeft: padding } : undefined}
             >
               {folderIcon}
               {nameLabel}
             </Link>
+          ) : isTopLevel ? (
+            <div
+              className="flex flex-1 cursor-default items-center gap-1 py-1 pr-2 text-[#5A4F42]"
+              style={{ paddingLeft: padding }}
+            >
+              {folderIcon}
+              {nameLabel}
+            </div>
           ) : (
             <button
               type="button"
