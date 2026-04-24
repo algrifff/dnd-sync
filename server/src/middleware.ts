@@ -73,15 +73,19 @@ export function middleware(req: NextRequest): NextResponse {
   if (!isPublic(pathname)) {
     if (!sidCookie) {
       const url = req.nextUrl.clone();
-      // Root visit without a session → show the landing page.
+      // Root visit without a session → serve the landing page at `/`
+      // (rewrite, not redirect, so the URL bar stays at the top-level
+      // domain).
       if (pathname === '/') {
         url.pathname = '/welcome';
         url.search = '';
-      } else {
-        url.pathname = '/login';
-        url.search = '';
-        url.searchParams.set('next', req.nextUrl.pathname + req.nextUrl.search);
+        const res = NextResponse.rewrite(url);
+        for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
+        return res;
       }
+      url.pathname = '/login';
+      url.search = '';
+      url.searchParams.set('next', req.nextUrl.pathname + req.nextUrl.search);
       const res = NextResponse.redirect(url);
       for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
       return res;

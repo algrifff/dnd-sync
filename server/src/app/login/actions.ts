@@ -214,7 +214,7 @@ export async function logoutAction(): Promise<void> {
       maxAge: 0,
     });
   }
-  redirect('/login');
+  redirect('/');
 }
 
 // ── helpers ────────────────────────────────────────────────────────────
