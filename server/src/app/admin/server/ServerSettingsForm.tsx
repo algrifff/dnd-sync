@@ -31,6 +31,11 @@ export type MemberItem = {
   username: string;
 };
 
+export type CampaignItem = {
+  slug: string;
+  name: string;
+};
+
 export function ServerSettingsForm({
   worldId,
   worldName,
@@ -42,6 +47,8 @@ export function ServerSettingsForm({
   activePersonalityId,
   builtinPersonality,
   members,
+  campaigns,
+  activeCampaignSlug,
 }: {
   worldId: string;
   worldName: string;
@@ -53,9 +60,19 @@ export function ServerSettingsForm({
   activePersonalityId: string;
   builtinPersonality: PersonalityItem;
   members: MemberItem[];
+  campaigns: CampaignItem[];
+  activeCampaignSlug: string | null;
 }): React.JSX.Element {
   return (
     <div className="space-y-8">
+      {campaigns.length > 0 && (
+        <ActiveCampaignSection
+          worldId={worldId}
+          csrfToken={csrfToken}
+          campaigns={campaigns}
+          initialActiveCampaignSlug={activeCampaignSlug}
+        />
+      )}
       <RenameSection worldId={worldId} worldName={worldName} csrfToken={csrfToken} />
       <WorldIconSection
         worldId={worldId}
@@ -74,6 +91,86 @@ export function ServerSettingsForm({
       <InviteSection worldId={worldId} csrfToken={csrfToken} initialToken={initialToken} />
       <DangerZone worldId={worldId} worldName={worldName} csrfToken={csrfToken} members={members} />
     </div>
+  );
+}
+
+function ActiveCampaignSection({
+  worldId,
+  csrfToken,
+  campaigns,
+  initialActiveCampaignSlug,
+}: {
+  worldId: string;
+  csrfToken: string;
+  campaigns: CampaignItem[];
+  initialActiveCampaignSlug: string | null;
+}): React.JSX.Element {
+  const router = useRouter();
+  const [selected, setSelected] = useState<string>(initialActiveCampaignSlug ?? '');
+  const [pending, setPending] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/worlds/${encodeURIComponent(worldId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ activeCampaignSlug: selected || null }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; detail?: string };
+      if (!res.ok || !body.ok) {
+        setError(body.detail ?? `HTTP ${res.status}`);
+        return;
+      }
+      router.refresh();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'network error');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <section className="rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-5">
+      <h2 className="mb-1 text-base font-semibold text-[#2A241E]">Active campaign</h2>
+      <p className="mb-4 text-sm text-[#5A4F42]">
+        The pinned campaign is the target for the{' '}
+        <span className="font-medium text-[#2A241E]">+ New Session</span> button in the sidebar.
+        You can also toggle it directly from the file tree using the crown icon on any campaign
+        folder.
+      </p>
+      <form onSubmit={submit} className="flex items-end gap-3">
+        <label className="flex-1">
+          <span className="mb-1 block text-xs font-medium text-[#5A4F42]">Campaign</span>
+          <select
+            value={selected}
+            onChange={(e) => setSelected(e.target.value)}
+            className="w-full rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-3 py-1.5 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
+          >
+            <option value="">— none (use most recent) —</option>
+            {campaigns.map((c) => (
+              <option key={c.slug} value={c.slug}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-[6px] bg-[#2A241E] px-4 py-1.5 text-sm font-medium text-[#F4EDE0] transition hover:bg-[#3A342E] disabled:opacity-40"
+        >
+          {pending ? 'Saving…' : saved ? 'Saved' : 'Save'}
+        </button>
+      </form>
+      {error && <p className="mt-2 text-xs text-[#8B4A52]">{error}</p>}
+    </section>
   );
 }
 

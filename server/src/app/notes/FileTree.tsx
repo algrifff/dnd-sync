@@ -22,6 +22,7 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronRight,
+  Crown,
   FileText,
   FolderPlus,
   Ghost,
@@ -170,6 +171,7 @@ export function FileTree({
   canCreate,
   isWorldOwner,
   kindMap,
+  activeCampaignSlug: activeCampaignSlugProp,
 }: {
   tree: Tree;
   /** Optional override. When omitted, the active path is derived from
@@ -186,6 +188,8 @@ export function FileTree({
   /** Path → note kind. Rows with a kind get a small icon so the
    *  sidebar reads like a roster at a glance. */
   kindMap?: KindMap;
+  /** Slug of the campaign pinned as the default for new sessions. */
+  activeCampaignSlug?: string | null;
 }): React.JSX.Element {
   const router = useRouter();
   const pathname = usePathname() ?? '';
@@ -195,6 +199,36 @@ export function FileTree({
   // that never unmounts across navigations.
   const activePath = activePathProp ?? decodeActiveNotePath(pathname);
   const storageKey = `${STORAGE_KEY}.${groupId}`;
+
+  // Optimistic local state for the pinned campaign — updated immediately
+  // on crown click, synced to the server in the background.
+  const [activeCampaignSlug, setActiveCampaignSlug] = useState<string | null>(
+    activeCampaignSlugProp ?? null,
+  );
+
+  const toggleActiveCampaign = useCallback(
+    async (slug: string): Promise<void> => {
+      const next = activeCampaignSlug === slug ? null : slug;
+      setActiveCampaignSlug(next);
+      try {
+        const res = await fetch(`/api/worlds/${encodeURIComponent(groupId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+          body: JSON.stringify({ activeCampaignSlug: next }),
+        });
+        if (!res.ok) {
+          // Revert on failure.
+          setActiveCampaignSlug(activeCampaignSlug);
+        } else {
+          router.refresh();
+        }
+      } catch {
+        setActiveCampaignSlug(activeCampaignSlug);
+      }
+    },
+    [activeCampaignSlug, groupId, csrfToken, router],
+  );
+
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const [creatingIn, setCreatingIn] = useState<
     { parent: string; kind: CreateKind } | null
@@ -600,6 +634,8 @@ export function FileTree({
             canCreate={canCreate}
             isWorldOwner={isWorldOwner}
             csrfToken={csrfToken}
+            activeCampaignSlug={activeCampaignSlug}
+            onToggleActiveCampaign={toggleActiveCampaign}
             isRenaming={renamingPath === item.path}
             renameDisabled={renaming}
             renameError={renamingPath === item.path ? error : null}
@@ -768,6 +804,8 @@ function TreeRow({
   renameError,
   dragging,
   isDropTarget,
+  activeCampaignSlug,
+  onToggleActiveCampaign,
   onDragStartRow,
   onDragEndRow,
   onDragOverDir,
@@ -790,6 +828,8 @@ function TreeRow({
   renameError: string | null;
   dragging: { kind: 'file' | 'folder'; path: string } | null;
   isDropTarget: boolean;
+  activeCampaignSlug: string | null;
+  onToggleActiveCampaign: (slug: string) => void;
   onDragStartRow: (src: { kind: 'file' | 'folder'; path: string }) => void;
   onDragEndRow: () => void;
   onDragOverDir: (dirPath: string) => void;
@@ -930,6 +970,38 @@ function TreeRow({
               {nameLabel}
             </button>
           )}
+          {(() => {
+            const isCampaignRoot = /^Campaigns\/[^/]+$/.test(item.path);
+            if (!isCampaignRoot) return null;
+            const slug = item.path.slice('Campaigns/'.length);
+            const isActive = activeCampaignSlug === slug;
+            if (isWorldOwner) {
+              return (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onToggleActiveCampaign(slug); }}
+                  title={isActive ? 'Unpin active campaign' : 'Pin as active campaign'}
+                  aria-label={isActive ? 'Unpin active campaign' : 'Pin as active campaign'}
+                  className={
+                    'mr-1 rounded p-1 transition ' +
+                    (isActive
+                      ? 'text-[#D4A85A]'
+                      : 'text-[#5A4F42]/0 hover:text-[#5A4F42]/50 group-hover:text-[#5A4F42]/50')
+                  }
+                >
+                  <Crown size={12} aria-hidden fill={isActive ? 'currentColor' : 'none'} />
+                </button>
+              );
+            }
+            if (isActive) {
+              return (
+                <span className="mr-1 p-1 text-[#D4A85A]" title="Active campaign">
+                  <Crown size={12} aria-hidden fill="currentColor" />
+                </span>
+              );
+            }
+            return null;
+          })()}
           {canCreate && (
             <div className="mr-1 hidden items-center gap-0.5 group-hover:flex">
               <NewEntryDropdown

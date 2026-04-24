@@ -727,6 +727,17 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX email_verification_tokens_user_idx ON email_verification_tokens(user_id);
     `,
   },
+  {
+    version: 37,
+    description: 'groups: active_campaign_slug for pinning the default campaign',
+    sql: `
+      -- Stores the slug of the campaign that the "+ New Session" button
+      -- targets and that the crown icon in the file tree reflects.
+      -- NULL means no campaign is pinned; the UI falls back to the most
+      -- recently created campaign in that case.
+      ALTER TABLE groups ADD COLUMN active_campaign_slug TEXT;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

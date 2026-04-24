@@ -65,7 +65,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const slugTitle = body.title ? slugify(body.title) : null;
   const fileStem = slugTitle ? `${body.date}-${slugTitle}` : body.date;
-  const path = `${campaign.folder_path}/Sessions/${fileStem}.md`;
+  const path = `${campaign.folder_path}/Adventure Log/${fileStem}.md`;
 
   const existing = db
     .query<{ n: number }, [string, string]>(

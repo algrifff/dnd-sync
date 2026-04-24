@@ -35,6 +35,12 @@ export default async function HomePage(): Promise<ReactElement> {
     )
     .get(session.currentGroupId, session.currentGroupId) ?? { notes: 0, assets: 0 };
 
+  const activeCampaignSlug = getDb()
+    .query<{ active_campaign_slug: string | null }, [string]>(
+      'SELECT active_campaign_slug FROM groups WHERE id = ?',
+    )
+    .get(session.currentGroupId)?.active_campaign_slug ?? null;
+
   const recent = recentlyUpdated(session.currentGroupId, 12);
   // Tree is also fetched by the parent layout, but the snapshot-
   // keyed cache in buildTree makes this a ~1ms lookup rather than a
@@ -62,7 +68,11 @@ export default async function HomePage(): Promise<ReactElement> {
         </section>
 
         <section className="mb-10">
-          <HomeChat groupId={session.currentGroupId} userId={session.userId} />
+          <HomeChat
+            groupId={session.currentGroupId}
+            userId={session.userId}
+            campaignSlug={activeCampaignSlug ?? undefined}
+          />
         </section>
 
         {topFolders.length > 0 && (

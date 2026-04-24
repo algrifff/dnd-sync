@@ -20,20 +20,28 @@ export default async function WorldSettingsPage(): Promise<ReactElement> {
   if (!session) redirect('/login?next=/settings/world');
   if (session.role !== 'admin') redirect('/settings/profile');
 
-  const group = getDb()
+  const db = getDb();
+  const group = db
     .query<
       {
         name: string;
         header_color: string | null;
         active_personality_id: string | null;
+        active_campaign_slug: string | null;
         icon_updated_at: number;
       },
       [string]
     >(
-      `SELECT name, header_color, active_personality_id, icon_updated_at
+      `SELECT name, header_color, active_personality_id, active_campaign_slug, icon_updated_at
          FROM groups WHERE id = ?`,
     )
     .get(session.currentGroupId);
+
+  const campaigns = db
+    .query<{ slug: string; name: string }, [string]>(
+      'SELECT slug, name FROM campaigns WHERE group_id = ? ORDER BY created_at ASC',
+    )
+    .all(session.currentGroupId);
 
   const worldName = group?.name ?? 'Unknown';
   const inviteToken = getInviteToken(session.currentGroupId);
@@ -64,6 +72,8 @@ export default async function WorldSettingsPage(): Promise<ReactElement> {
         prompt: DEFAULT_PERSONALITY.prompt,
       }}
       members={members}
+      campaigns={campaigns}
+      activeCampaignSlug={group?.active_campaign_slug ?? null}
     />
   );
 }

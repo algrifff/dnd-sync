@@ -19,6 +19,8 @@ const Body = z.object({
   // null (or the built-in sentinel) reverts to the default scribe voice;
   // any other string must be the id of a personality in this world.
   activePersonalityId: z.string().min(1).nullable().optional(),
+  // null clears the pin; any string must be an existing campaign slug.
+  activeCampaignSlug: z.string().min(1).nullable().optional(),
 });
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -54,7 +56,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
   if (
     body.name === undefined &&
     body.headerColor === undefined &&
-    body.activePersonalityId === undefined
+    body.activePersonalityId === undefined &&
+    body.activeCampaignSlug === undefined
   ) {
     return json({ error: 'invalid_body', detail: 'Nothing to update' }, 400);
   }
@@ -74,6 +77,22 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
       );
     }
   }
+  if (body.activeCampaignSlug !== undefined) {
+    if (body.activeCampaignSlug !== null) {
+      const campaign = db
+        .query<{ slug: string }, [string, string]>(
+          'SELECT slug FROM campaigns WHERE group_id = ? AND slug = ?',
+        )
+        .get(id, body.activeCampaignSlug);
+      if (!campaign) {
+        return json({ error: 'not_found', detail: 'Unknown campaign for this world.' }, 404);
+      }
+    }
+    db.query('UPDATE groups SET active_campaign_slug = ? WHERE id = ?').run(
+      body.activeCampaignSlug,
+      id,
+    );
+  }
 
   logAudit({
     action: 'group.switch',
@@ -84,6 +103,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
       rename: body.name,
       headerColor: body.headerColor,
       activePersonalityId: body.activePersonalityId,
+      activeCampaignSlug: body.activeCampaignSlug,
     },
   });
 

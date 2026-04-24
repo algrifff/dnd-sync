@@ -1,112 +1,89 @@
 ## Session Skill
 
-Path (server-assigned, you do NOT pick it): `Campaigns/<slug>/Adventure Log/<name-slugified>.md`. You only pass `name` + `campaignSlug` to `entity_create`; the folder is derived from `canonicalFolder({ kind: 'session' })`.
+Paths are server-assigned: `Campaigns/<slug>/Adventure Log/<name-slug>.md`. You only pass `name` + `campaignSlug` to `entity_create`.
 
-Required sheet fields on create: **only `date`** (`YYYY-MM-DD`). `session_number` and `attendees` are optional — leave them out unless the user supplied them; they can be filled in later from the sheet UI.
+### Starting a new session — ACT IMMEDIATELY
 
-### Starting a new session — DEFINITIVE, ACT IMMEDIATELY
+Phrasings: "start a new session", "open a session", "begin a new session", "new session", "log tonight's session".
 
-Any of these phrasings is a **definitive command**, not a question:
-
-- "Start a new session"
-- "Open a session"
-- "Begin a new session"
-- "Log tonight's session"
-- "New session"
-
-When you see one, read the `User:` and `Today:` lines from the system context and build this title:
-
-```
-<User value> — <Today value>
-```
-
-Example — if the system context says `User: Magi` and `Today: 2026-04-22`, the title is **`Magi — 2026-04-22`** (em dash, space-padded). Now call `entity_create` exactly like this, in a single turn with no preamble:
+Build the title from the system context: `<User value> — <Today value>` (em dash, space-padded). Then call `entity_create` in one turn:
 
 ```json
 {
   "kind": "session",
-  "name": "Magi — 2026-04-22",
-  "campaignSlug": "<from context, or from campaign_list if context has none>",
-  "sheet": {
-    "date": "2026-04-22",
-    "title": "Magi — 2026-04-22"
-  }
+  "name": "<User> — <Today>",
+  "campaignSlug": "<from context, else campaign_list>",
+  "sheet": { "date": "<Today>", "title": "<User> — <Today>" }
 }
 ```
 
-Then reply with ONE short scribe-voice line confirming the log was opened. That's it.
+If the user supplied a title ("start session three: the vault"), use theirs verbatim as both `name` and `sheet.title`; `sheet.date` stays `<Today>`.
 
-**Do NOT, under any circumstance:**
-- ask what to title it
-- ask for a session number
-- ask for attendees
-- ask whether they want to proceed
-- ask which date (`Today:` is the date — always)
-
-**Campaign resolution** (defer to base rule #9, do not ask up front):
-- If `Active campaign:` is set in context → use that slug.
-- Else call `campaign_list`. If one campaign → use it silently. Only if there are multiple AND no active slug may you ask which one.
-
-If the user **did** supply a title ("start session three: the vault") use theirs verbatim as both `name` and `sheet.title`, still with `sheet.date = <Today>`.
+Never ask for a title, session number, attendees, or confirmation.
 
 ### During play
 
-- Append with `entity_edit_content` — never replace whole session bodies.
-- When the user says "add to session" / "log this", target the **open session** from the `Open session:` context line if present.
-- Add a small heading if the user did not supply one.
+- Append to the open session with `entity_edit_content`. Never replace the body.
+- "Add to session" / "log this" → target the `Open session:` path from context.
 
-### End of session processing — DEFINITIVE, ACT IMMEDIATELY
+### Ending a session — ACT IMMEDIATELY, FULL CHAIN
 
-Triggered by: "End of session", "end session", "session ended", or a message containing a session path with "end"/"close"/"wrap".
+Triggers: "end of session", "end session", "close session", "session ended", or a message containing a session path with end/close/wrap.
 
-**This is a multi-step agentic task. Execute the full chain without interruption.**
+**This is a multi-step agentic task. Do every step in one turn. The whole point is to link everything together and propagate changes — an end-session call that only reads and finalises has failed.**
 
-#### Step 1 — Read the session note
+#### Step 1 — Read
 
-Call `note_read` with the session path provided in the message (or from `Active note:` / `Open session:` context if no path given).
+Call `note_read` with the session path (from the message, or from `Active note:` / `Open session:` context).
 
-#### Step 2 — Extract entities
+#### Step 2 — Extract
 
-From the note content, identify every named entity that should exist in the compendium:
-- **NPCs / people** — any named individual who is not a player character
-- **Creatures / monsters** — named beasts, undead, fiends, constructs, etc.
+From the body, identify:
+- **NPCs / people** — named non-player individuals
+- **Creatures / monsters** — named beasts, undead, fiends, constructs
 - **Locations** — named places visited or mentioned
-- **Notable items** — named weapons, artifacts, unique gear
+- **Notable items** — named weapons, artifacts, unique gear given/found/lost
+- **Character changes** — HP changes, level ups, new class features, injuries, conditions
+- **Inventory changes** — items gained or lost by named PCs
 
-**Skip:** player characters (kind=character), generic unnamed enemies ("the guards"), and vague references ("a merchant").
+Skip: player characters themselves (kind=character), generic unnamed enemies ("the guards"), vague references ("a merchant").
 
 #### Step 3 — Create or update each entity
 
-For each entity found:
-1. Call `entity_search` with the entity name.
-2. **If found:** Call `entity_edit_content` to append a brief session note (1–2 sentences, with the session name as heading).
-3. **If not found:** Call `entity_create` with the appropriate kind and campaign slug. Use `dmOnly=true` for villains.
+For each extracted entity, in this order:
 
-Use the campaign slug from the session path (e.g. `Campaigns/<slug>/...`) or from `Active campaign:` context.
+1. `entity_search` with the name.
+2. **If found:** `entity_edit_content` to append a brief session note (1–2 sentences, past tense, heading = session title).
+3. **If not found:** `entity_create` with kind, campaignSlug, and any sheet fields the notes mentioned (location, disposition, relationships, CR, etc.). Villains/hostile creatures get `dmOnly: true`.
 
-#### Step 4 — Add backlinks in both directions
+Resolve campaignSlug from the session path (`Campaigns/<slug>/…`) or context.
 
-For each entity (whether created or updated), call `backlink_create` **twice**:
-1. `fromPath = sessionPath`, `toPath = entityPath` — so the session note links to the entity
-2. `fromPath = entityPath`, `toPath = sessionPath` — so the entity links back to this session
+#### Step 4 — Apply character and inventory changes
 
-#### Step 5 — Reply
+For each named PC affected:
+- HP / level / condition changes → `entity_edit_sheet` with the relevant nested field (`hit_points: { current, max, temporary }`, `classes: [{ ref: { name }, level }]`, `conditions: [...]`).
+- Items gained → `inventory_add` with `characterPath` + either `itemPath` (if the item note exists/was just created) or `freeformName`.
+- Significant narrative moments → `entity_edit_content` appended to the character's note under a heading named after the session.
 
-After completing all tool calls, reply with a single scribe-voice paragraph listing every entity you processed, with its full note path. Keep it terse — one line per entity is enough.
+#### Step 5 — Backlinks, BOTH DIRECTIONS
+
+For every entity touched in steps 3–4 call `backlink_create` twice:
+1. `fromPath = sessionPath, toPath = entityPath`
+2. `fromPath = entityPath, toPath = sessionPath`
+
+Also link entities to each other when the notes imply it: NPC ↔ location they inhabit, item ↔ owner, creature ↔ lair. Two calls each, one per direction.
+
+#### Step 6 — Finalize
+
+Call `session_finalize` with the session path. Idempotent — fine even if the session was pre-marked closed by the End-of-Session button.
+
+#### Step 7 — Reply
+
+One terse scribe-voice paragraph. List each entity processed with its note path. No "would you like me to…".
 
 **Do NOT:**
-- Ask for confirmation before starting
-- Stop after step 1 and wait for instructions
-- Skip entities because you're unsure — create stubs with minimal fields
-- Create player characters (kind=character/pc/ally)
-
-### Closing a session (legacy GM review workflow)
-
-- `session_close` only proposes changes — it does **not** commit.
-- After `session_close`, summarise the proposal in plain language before any review UI.
-- Do **not** call `session_apply` until the GM explicitly approves ("apply", "commit", "looks good").
-- If the session row is already `closed`, refuse to reopen without GM confirmation.
-
-### After session_apply
-
-Confirm what was applied, then offer to stub missing entities (new NPCs / places) via `entity_search` → `entity_create`.
+- Stop after `note_read` and wait
+- Skip entities because details are thin — stub them with minimal fields
+- Create player characters
+- Call `session_finalize` before steps 3–5
+- Omit the reverse-direction backlink in step 5

@@ -46,8 +46,7 @@ export function createTools(ctx: ToolContext) {
     entity_move:         entityMove(ctx),
     backlink_create:     backlinkCreate(ctx),
     inventory_add:       inventoryAdd(ctx),
-    session_close:       sessionClose(ctx),
-    session_apply:       sessionApply(ctx),
+    session_finalize:    sessionFinalize(ctx),
   };
 }
 
@@ -56,7 +55,7 @@ export function getToolsForRole(ctx: ToolContext) {
   const filtered = ctx.role === 'dm'
     ? all
     : (() => {
-        const { session_close: _sc, session_apply: _sa, entity_move: _em, note_write_section: _nws, ...playerTools } = all;
+        const { session_finalize: _sf, entity_move: _em, note_write_section: _nws, ...playerTools } = all;
         return playerTools;
       })();
   return wrapToolsWithTelemetry(ctx, filtered);
@@ -193,16 +192,8 @@ const NoteWriteSectionSchema = z.object({
   content: z.string().describe('Markdown content for this section (without the heading line)'),
 });
 
-const SessionCloseSchema = z.object({
+const SessionFinalizeSchema = z.object({
   sessionPath: z.string().min(1).max(512),
-});
-
-const SessionApplySchema = z.object({
-  sessionPath: z.string().min(1).max(512),
-  approvedChanges: z.array(z.object({
-    id:       z.string(),
-    approved: z.boolean(),
-  })).describe('Per-change approval decisions from the review panel'),
 });
 
 // ── campaign_list ────────────────────────────────────────────────────
@@ -774,97 +765,37 @@ function writeFullContent(
   return { ok: true as const };
 }
 
-// ── session_close ─────────────────────────────────────────────────────
+// ── session_finalize ──────────────────────────────────────────────────
+// Terminal step after the model has distributed info (entity_create /
+// entity_edit_sheet / inventory_add / backlink_create). Idempotent —
+// calling it on an already-closed session is a no-op, not an error,
+// so the End-of-Session button's pre-flight mark-closed doesn't trip
+// the agent mid-chain.
 
-function sessionClose(ctx: ToolContext) {
+function sessionFinalize(ctx: ToolContext) {
   return tool({
     description:
-      'Analyse a session and produce proposed changes for GM review. Does NOT commit — always requires session_apply.',
-    inputSchema: SessionCloseSchema,
-    execute: async ({ sessionPath }: z.infer<typeof SessionCloseSchema>) => {
+      'Mark a session note as closed after all distribution work is done. ' +
+      'Call this LAST, only after creating/updating every extracted entity and adding backlinks. ' +
+      'Idempotent — safe to call on already-closed sessions.',
+    inputSchema: SessionFinalizeSchema,
+    execute: async ({ sessionPath }: z.infer<typeof SessionFinalizeSchema>) => {
       if (ctx.role !== 'dm') return { ok: false as const, error: 'GM only' };
 
       const note = loadNote(ctx.groupId, sessionPath);
       if (!note) return { ok: false as const, error: `Not found: ${sessionPath}` };
 
-      const row = getDb()
-        .query<{ status: string }, [string, string]>(
-          `SELECT status FROM session_notes WHERE group_id=? AND note_path=?`,
-        )
-        .get(ctx.groupId, sessionPath);
-
-      if (row?.status === 'closed') {
-        return { ok: false as const, error: 'Session already closed.' };
-      }
-
-      const proposal: SessionProposal = {
-        sessionPath, extractedAt: Date.now(),
-        characterUpdates: [], inventoryChanges: [], newBacklinks: [],
-        note: 'Review proposed changes and call session_apply to commit.',
-      };
-
+      const now = Date.now();
       getDb()
-        .query(`UPDATE session_notes SET status='review', dm_review_json=? WHERE group_id=? AND note_path=?`)
-        .run(JSON.stringify(proposal), ctx.groupId, sessionPath);
-
-      return { ok: true as const, proposal };
-    },
-  });
-}
-
-// ── session_apply ─────────────────────────────────────────────────────
-
-function sessionApply(ctx: ToolContext) {
-  return tool({
-    description: 'Commit GM-approved session changes after review.',
-    inputSchema: SessionApplySchema,
-    execute: async ({ sessionPath, approvedChanges }: z.infer<typeof SessionApplySchema>) => {
-      if (ctx.role !== 'dm') return { ok: false as const, error: 'GM only' };
-
-      const db = getDb();
-      const row = db
-        .query<{ status: string; dm_review_json: string | null }, [string, string]>(
-          `SELECT status, dm_review_json FROM session_notes WHERE group_id=? AND note_path=?`,
+        .query(
+          `INSERT INTO session_notes (group_id, note_path, updated_at, status, closed_at, closed_by)
+           VALUES (?, ?, ?, 'closed', ?, ?)
+           ON CONFLICT (group_id, note_path)
+           DO UPDATE SET status='closed', closed_at=excluded.closed_at, closed_by=excluded.closed_by`,
         )
-        .get(ctx.groupId, sessionPath);
+        .run(ctx.groupId, sessionPath, now, now, ctx.userId);
 
-      if (!row) return { ok: false as const, error: `Not found: ${sessionPath}` };
-      if (row.status !== 'review') return { ok: false as const, error: 'Must be in review status' };
-
-      const approved = new Set(approvedChanges.filter((c) => c.approved).map((c) => c.id));
-      let applied = 0;
-      let proposal: SessionProposal | null = null;
-      try { proposal = JSON.parse(row.dm_review_json ?? '{}') as SessionProposal; }
-      catch { /* empty proposal */ }
-
-      db.transaction(() => {
-        if (proposal) {
-          for (const cu of proposal.characterUpdates) {
-            if (!approved.has(cu.id)) continue;
-            const n = loadNote(ctx.groupId, cu.path);
-            if (!n) continue;
-            let fm: Record<string, unknown>;
-            try { fm = JSON.parse(n.frontmatter_json) as Record<string, unknown>; }
-            catch { continue; }
-            const s = fm.sheet && typeof fm.sheet === 'object' ? { ...(fm.sheet as Record<string, unknown>) } : {};
-            s[cu.field] = cu.to;
-            db.query(`UPDATE notes SET frontmatter_json=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
-              .run(JSON.stringify({ ...fm, sheet: s }), Date.now(), ctx.userId, ctx.groupId, cu.path);
-            applied++;
-          }
-          for (const bl of proposal.newBacklinks) {
-            if (!approved.has(bl.id)) continue;
-            if (bl.from === bl.to) continue; // no self-loops
-            db.query(`INSERT OR IGNORE INTO note_links (group_id, from_path, to_path) VALUES (?,?,?)`)
-              .run(ctx.groupId, bl.from, bl.to);
-            applied++;
-          }
-        }
-        db.query(`UPDATE session_notes SET status='closed', closed_at=?, closed_by=? WHERE group_id=? AND note_path=?`)
-          .run(Date.now(), ctx.userId, ctx.groupId, sessionPath);
-      })();
-
-      return { ok: true as const, applied };
+      return { ok: true as const, sessionPath };
     },
   });
 }
@@ -1001,17 +932,6 @@ function extractText(doc: PmDoc): string {
   for (const child of doc.content) walk(child);
   return parts.join(' ').trim();
 }
-
-// ── Types ─────────────────────────────────────────────────────────────
-
-type SessionProposal = {
-  sessionPath: string;
-  extractedAt: number;
-  note: string;
-  characterUpdates: Array<{ id: string; path: string; field: string; from: unknown; to: unknown }>;
-  inventoryChanges: Array<{ id: string; characterPath: string; action: 'add' | 'remove'; item: string }>;
-  newBacklinks: Array<{ id: string; from: string; to: string }>;
-};
 
 // ── Frontmatter builder ────────────────────────────────────────────────
 

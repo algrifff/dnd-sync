@@ -19,12 +19,14 @@ import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { buildTree } from '@/lib/tree';
 import { listNoteKinds } from '@/lib/characters';
+import { getDb } from '@/lib/db';
 import { AppHeader } from '../../AppHeader';
 import { NoteTabBar } from '../../NoteTabBar';
 import { SidebarHeader } from '../../SidebarHeader';
 import { SidebarFooter } from '../../SidebarFooter';
 import { FileTree } from '../../notes/FileTree';
 import { CollapsibleSidebar } from '../../CollapsibleSidebar';
+import { NewSessionButton } from '../../NewSessionButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,6 +47,20 @@ export default async function ContentLayout({
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
   const sidebarOpen = jar.get('compendium_sidebar_open')?.value !== 'false';
 
+  const db = getDb();
+  const groupRow = db
+    .query<{ active_campaign_slug: string | null }, [string]>(
+      'SELECT active_campaign_slug FROM groups WHERE id = ?',
+    )
+    .get(session.currentGroupId);
+  const activeCampaignSlug =
+    groupRow?.active_campaign_slug ??
+    (db
+      .query<{ slug: string }, [string]>(
+        'SELECT slug FROM campaigns WHERE group_id = ? ORDER BY created_at DESC LIMIT 1',
+      )
+      .get(session.currentGroupId)?.slug ?? null);
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <AppHeader
@@ -63,6 +79,11 @@ export default async function ContentLayout({
       <div className="flex min-h-0 flex-1">
         <CollapsibleSidebar initialOpen={sidebarOpen}>
           <SidebarHeader role={session.role} />
+          <NewSessionButton
+            campaignSlug={activeCampaignSlug}
+            csrfToken={session.csrfToken}
+            canCreate={session.role !== 'viewer'}
+          />
           <FileTree
             tree={tree}
             groupId={session.currentGroupId}
@@ -70,6 +91,7 @@ export default async function ContentLayout({
             canCreate={session.role !== 'viewer'}
             isWorldOwner={session.role === 'admin'}
             kindMap={kindMap}
+            activeCampaignSlug={activeCampaignSlug}
           />
           <SidebarFooter username={session.username} />
         </CollapsibleSidebar>
