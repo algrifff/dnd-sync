@@ -164,14 +164,23 @@ export function UserCharacterEditor({
         >
           <ArrowLeft size={14} aria-hidden /> Back to overview
         </button>
-        <span
-          className={
-            'text-[11px] ' +
-            (error ? 'text-[var(--wine)]' : 'text-[var(--ink-soft)]')
-          }
-        >
-          {statusLabel}
-        </span>
+        <div className="flex items-center gap-3">
+          <span
+            className={
+              'text-[11px] ' +
+              (error ? 'text-[var(--wine)]' : 'text-[var(--ink-soft)]')
+            }
+          >
+            {statusLabel}
+          </span>
+          <button
+            type="button"
+            onClick={() => router.push('/me')}
+            className="rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-1 text-xs font-medium text-[var(--ink)] transition hover:bg-[var(--candlelight)]/20"
+          >
+            Done
+          </button>
+        </div>
       </header>
 
       <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-8">
