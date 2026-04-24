@@ -36,14 +36,14 @@ export default async function LoginPage({
       footer={
         <div className="space-y-2">
           {resetOk && (
-            <p className="text-[#7B8A5F]">
+            <p className="text-[var(--moss)]">
               Password updated — sign in with your new one.
             </p>
           )}
           <p>
             <Link
               href="/login/forgot"
-              className="text-[#5A4F42] underline decoration-[#D4C7AE] underline-offset-4 hover:text-[#2A241E] hover:decoration-[#D4A85A]"
+              className="text-[var(--ink-soft)] underline decoration-[var(--rule)] underline-offset-4 hover:text-[var(--ink)] hover:decoration-[var(--candlelight)]"
             >
               Forgot your password?
             </Link>
@@ -52,7 +52,7 @@ export default async function LoginPage({
             New to the realm?{' '}
             <Link
               href="/signup"
-              className="text-[#2A241E] underline decoration-[#D4A85A] underline-offset-4 hover:decoration-[#2A241E]"
+              className="text-[var(--ink)] underline decoration-[var(--candlelight)] underline-offset-4 hover:decoration-[var(--ink)]"
             >
               Create an account
             </Link>

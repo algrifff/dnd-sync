@@ -42,13 +42,13 @@ export function CheckEmailNotice({
 
   return (
     <div className="auth-fade space-y-6 text-center">
-      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border-2 border-[#D4A85A]/60 bg-[#FBF5E8]/40">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border-2 border-[var(--candlelight)]/60 bg-[var(--vellum)]/40">
         <svg
           width="28"
           height="28"
           viewBox="0 0 24 24"
           fill="none"
-          stroke="#2A241E"
+          stroke="var(--ink)"
           strokeWidth="1.6"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -59,12 +59,12 @@ export function CheckEmailNotice({
       </div>
 
       <h2
-        className="text-[28px] font-semibold text-[#2A241E]"
+        className="text-[28px] font-semibold text-[var(--ink)]"
         style={{ fontFamily: '"Fraunces", Georgia, serif' }}
       >
         {c.title}
       </h2>
-      <p className="text-[#5A4F42]">{c.body(email)}</p>
+      <p className="text-[var(--ink-soft)]">{c.body(email)}</p>
 
       {flavour === 'verify' && (
         <form action={formAction} className="space-y-3 pt-2">
@@ -72,7 +72,7 @@ export function CheckEmailNotice({
           <button
             type="submit"
             disabled={pending || state.status === 'sent'}
-            className="text-sm text-[#5A4F42] underline decoration-[#D4C7AE] underline-offset-4 transition hover:text-[#2A241E] hover:decoration-[#D4A85A] disabled:opacity-60"
+            className="text-sm text-[var(--ink-soft)] underline decoration-[var(--rule)] underline-offset-4 transition hover:text-[var(--ink)] hover:decoration-[var(--candlelight)] disabled:opacity-60"
           >
             {state.status === 'sent' ? 'Sent — check again in a moment' : pending ? 'Sending…' : c.resendCta}
           </button>
@@ -83,7 +83,7 @@ export function CheckEmailNotice({
         <p className="pt-2">
           <Link
             href="/login"
-            className="text-sm text-[#2A241E] underline decoration-[#D4A85A] underline-offset-4"
+            className="text-sm text-[var(--ink)] underline decoration-[var(--candlelight)] underline-offset-4"
           >
             Back to sign in
           </Link>

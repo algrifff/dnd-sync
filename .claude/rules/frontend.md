@@ -27,12 +27,19 @@ paths:
 - Use CSS Modules or Tailwind
 - Avoid inline styles except for dynamic values
 - Mobile-first responsive design
-- Parchment palette only. Canonical hex: `#F4EDE0` parchment, `#EAE1CF` vellum,
-  `#D4C7AE` rule, `#2A241E` ink, `#5A4F42` ink-soft, `#8A7E6B` ink-muted,
-  `#D4A85A` candlelight, `#8B4A52` wine, `#7B8A5F` moss. CSS variables of the
-  same names live in `server/src/app/globals.css` — prefer the variable when
-  the value is themed (focus rings, world accents); hex is fine for
-  one-off borders / backgrounds already keyed to the palette.
+- **All palette colours must be `var(--*)` references.** Hex literals for
+  palette values are forbidden outside `server/src/app/globals.css`. The app
+  ships both a day (parchment) and night palette under the same variable
+  names — hardcoding a hex freezes that surface to one theme and breaks
+  nighttime mode. Canonical variables (defined in `:root` and
+  `[data-theme="night"]`): `--parchment`, `--parchment-sunk`, `--vellum`,
+  `--ink`, `--ink-soft`, `--ink-muted`, `--rule`, `--candlelight`, `--wine`,
+  `--moss`, `--sage`, `--embers`, `--shadow`. For opacity tints use
+  `rgb(var(--wine-rgb) / 0.12)` against the matching `--*-rgb` tokens.
+- Any new colour must be added as a variable in **both** the `:root` and
+  `[data-theme="night"]` blocks in the same commit. Night values derive
+  from inverting the tonal role (canvas ↔ text) while keeping the warm
+  hue family — see `DESIGN.md` § Night mode palette.
 - Fonts: Fraunces serif (`font-serif`) for titles and stat numbers; Inter sans
   (default) for body copy and chrome. **Display and edit states of the same
   field must share the same font family, size, and weight** — clicking an

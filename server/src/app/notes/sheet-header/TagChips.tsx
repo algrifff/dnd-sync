@@ -36,7 +36,7 @@ export function TagChips({
       {tags.map((t) => (
         <span
           key={t}
-          className="inline-flex items-center gap-1 rounded-full border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-0.5 text-[11px] text-[#2A241E]"
+          className="inline-flex items-center gap-1 rounded-full border border-[var(--rule)] bg-[var(--parchment)] px-2 py-0.5 text-[11px] text-[var(--ink)]"
         >
           {t}
           {!readOnly && (
@@ -44,7 +44,7 @@ export function TagChips({
               type="button"
               onClick={() => remove(t)}
               aria-label={`Remove ${t}`}
-              className="text-[#5A4F42] hover:text-[#8B4A52]"
+              className="text-[var(--ink-soft)] hover:text-[var(--wine)]"
             >
               <X size={11} />
             </button>
@@ -67,7 +67,7 @@ export function TagChips({
           }}
           onBlur={() => add(draft)}
           placeholder={placeholder}
-          className="min-w-[80px] rounded border border-transparent bg-transparent px-1 py-0.5 text-[11px] outline-none focus:border-[#D4C7AE] focus:bg-white"
+          className="min-w-[80px] rounded border border-transparent bg-transparent px-1 py-0.5 text-[11px] outline-none focus:border-[var(--rule)] focus:bg-white"
         />
       )}
     </div>

@@ -26,7 +26,7 @@ export default async function AssetsPage(): Promise<ReactElement> {
         <h1 className="mb-1 text-3xl font-bold" style={{ fontFamily: '"Fraunces", Georgia, serif' }}>
           Assets
         </h1>
-        <p className="mb-6 text-sm text-[#5A4F42]">
+        <p className="mb-6 text-sm text-[var(--ink-soft)]">
           Every image, map, and token in this world. Click a tile to open a full-size
           preview.
         </p>

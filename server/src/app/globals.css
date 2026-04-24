@@ -1,12 +1,16 @@
 @import 'tailwindcss';
 
-/* TTRPG palette — "round table, neatly typeset" */
+/* TTRPG palette — "round table, neatly typeset"
+   Both themes share variable names; only values differ. Any component
+   referencing a palette colour must go through these vars, not hex. */
 :root {
   --parchment: #F4EDE0;
   --parchment-sunk: #EAE1CF;
+  --parchment-deep: #D9CCAF;
   --vellum: #FBF5E8;
   --ink: #2A241E;
   --ink-soft: #5A4F42;
+  --ink-muted: #8A7E6B;
   --rule: #D4C7AE;
   --candlelight: #D4A85A;
   --moss: #7B8A5F;
@@ -14,6 +18,42 @@
   --sage: #6B7F8E;
   --embers: #B5572A;
   --shadow: #1E1A15;
+
+  /* RGB triplets for rgba-style tints: rgb(var(--wine-rgb) / 0.12) */
+  --parchment-rgb: 244 237 224;
+  --ink-rgb: 42 36 30;
+  --ink-soft-rgb: 90 79 66;
+  --wine-rgb: 139 74 82;
+  --candlelight-rgb: 212 168 90;
+  --moss-rgb: 123 138 95;
+  --sage-rgb: 107 127 142;
+  --embers-rgb: 181 87 42;
+}
+
+[data-theme="night"] {
+  --parchment: #2A241E;
+  --parchment-sunk: #1E1A15;
+  --parchment-deep: #0A0806;
+  --vellum: #3A342E;
+  --ink: #F4EDE0;
+  --ink-soft: #D4C7AE;
+  --ink-muted: #8A7E6B;
+  --rule: #3A342E;
+  --candlelight: #E8B865;
+  --moss: #9CAC7E;
+  --wine: #B16770;
+  --sage: #8BA1B2;
+  --embers: #D06E3E;
+  --shadow: #151210;
+
+  --parchment-rgb: 42 36 30;
+  --ink-rgb: 244 237 224;
+  --ink-soft-rgb: 212 199 174;
+  --wine-rgb: 177 103 112;
+  --candlelight-rgb: 232 184 101;
+  --moss-rgb: 156 172 126;
+  --sage-rgb: 139 161 178;
+  --embers-rgb: 208 110 62;
 }
 
 html, body {
@@ -67,7 +107,7 @@ html, body {
   font-weight: 600;
   line-height: 1.2;
   color: #2A241E;
-  background-color: var(--caret-color-light, rgba(90, 79, 66, 0.35));
+  background-color: var(--caret-color-light, rgb(var(--ink-soft-rgb) / 0.35));
   border: 1px solid var(--caret-color, #5A4F42);
   white-space: nowrap;
   user-select: none;
@@ -87,7 +127,7 @@ html, body {
   position: absolute;
   left: 0;
   top: 0;
-  color: rgba(90, 79, 66, 0.55);
+  color: rgb(var(--ink-soft-rgb) / 0.55);
   pointer-events: none;
   user-select: none;
 }
@@ -114,7 +154,7 @@ html, body {
 .note-surface .ProseMirror strong { color: var(--ink); font-weight: 600; }
 .note-surface .ProseMirror em { font-style: italic; }
 .note-surface .ProseMirror code {
-  background-color: rgba(212, 168, 90, 0.15);
+  background-color: rgb(var(--candlelight-rgb) / 0.15);
   color: var(--ink);
   border-radius: 4px;
   padding: 0.06em 0.35em;
@@ -194,15 +234,15 @@ html, body {
   color: var(--wine);
   text-decoration: underline;
   text-decoration-thickness: 1.5px;
-  text-decoration-color: rgba(139, 74, 82, 0.55);
+  text-decoration-color: rgb(var(--wine-rgb) / 0.55);
   text-underline-offset: 3px;
   transition: color 120ms ease, text-decoration-color 120ms ease,
     background-color 120ms ease;
 }
 .note-surface .ProseMirror a:hover {
-  color: #6f3a41;
+  color: rgb(var(--wine-rgb) / 0.85);
   text-decoration-color: var(--wine);
-  background-color: rgba(139, 74, 82, 0.08);
+  background-color: rgb(var(--wine-rgb) / 0.08);
   border-radius: 2px;
 }
 
@@ -212,7 +252,7 @@ html, body {
   font-weight: 500;
   text-decoration: underline;
   text-decoration-thickness: 1.75px;
-  text-decoration-color: rgba(139, 74, 82, 0.65);
+  text-decoration-color: rgb(var(--wine-rgb) / 0.65);
   text-underline-offset: 3px;
   padding: 0 1px;
   border-radius: 2px;
@@ -230,13 +270,13 @@ html, body {
   opacity: 0.55;
 }
 .note-surface .ProseMirror a.wikilink:hover {
-  background-color: rgba(139, 74, 82, 0.12);
+  background-color: rgb(var(--wine-rgb) / 0.12);
   text-decoration-color: var(--wine);
 }
 .note-surface .ProseMirror a.wikilink-orphan {
   color: var(--ink-soft);
   font-style: italic;
-  text-decoration: underline dotted rgba(139, 74, 82, 0.4) 1.5px;
+  text-decoration: underline dotted rgb(var(--wine-rgb) / 0.4) 1.5px;
 }
 .note-surface .ProseMirror a.wikilink-orphan::before {
   background: var(--ink-soft);
@@ -248,9 +288,9 @@ html, body {
   display: inline-block;
   font-size: 0.85em;
   font-weight: 500;
-  color: #5E3A3F;
-  background: rgba(139, 74, 82, 0.12);
-  border: 1px solid rgba(139, 74, 82, 0.35);
+  color: var(--wine);
+  background: rgb(var(--wine-rgb) / 0.12);
+  border: 1px solid rgb(var(--wine-rgb) / 0.35);
   border-radius: 999px;
   padding: 1px 10px;
   text-decoration: none;
@@ -258,8 +298,8 @@ html, body {
   transition: background-color 120ms ease, transform 120ms ease, color 120ms ease;
 }
 .note-surface .ProseMirror a.tag:hover {
-  background: rgba(139, 74, 82, 0.22);
-  color: #4A2E32;
+  background: rgb(var(--wine-rgb) / 0.22);
+  color: var(--wine);
   transform: translateY(-1px);
 }
 
@@ -310,15 +350,15 @@ html, body {
 /* ── Callouts ─────────────────────────────────────────────────────── */
 .note-surface .ProseMirror aside[data-callout] {
   border-left: 4px solid var(--candlelight);
-  background: rgba(212, 168, 90, 0.1);
+  background: rgb(var(--candlelight-rgb) / 0.1);
   border-radius: 8px;
   padding: 10px 14px;
   margin: 1.1em 0;
 }
-.note-surface .ProseMirror aside[data-callout="warning"] { border-color: var(--embers); background: rgba(181, 87, 42, 0.1); }
-.note-surface .ProseMirror aside[data-callout="danger"] { border-color: var(--wine); background: rgba(139, 74, 82, 0.1); }
-.note-surface .ProseMirror aside[data-callout="tip"] { border-color: var(--moss); background: rgba(123, 138, 95, 0.1); }
-.note-surface .ProseMirror aside[data-callout="info"] { border-color: var(--sage); background: rgba(107, 127, 142, 0.1); }
+.note-surface .ProseMirror aside[data-callout="warning"] { border-color: var(--embers); background: rgb(var(--embers-rgb) / 0.1); }
+.note-surface .ProseMirror aside[data-callout="danger"] { border-color: var(--wine); background: rgb(var(--wine-rgb) / 0.1); }
+.note-surface .ProseMirror aside[data-callout="tip"] { border-color: var(--moss); background: rgb(var(--moss-rgb) / 0.1); }
+.note-surface .ProseMirror aside[data-callout="info"] { border-color: var(--sage); background: rgb(var(--sage-rgb) / 0.1); }
 .note-surface .ProseMirror aside[data-callout]::before {
   display: block;
   font-size: 0.8em;

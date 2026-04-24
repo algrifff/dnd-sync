@@ -24,9 +24,9 @@ export default async function SettingsTemplatesPage(): Promise<ReactElement> {
   );
 
   return (
-    <section className="rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-5">
+    <section className="rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-5">
       <h2 className="mb-1 text-lg font-semibold">Templates</h2>
-      <p className="mb-4 text-sm text-[#5A4F42]">
+      <p className="mb-4 text-sm text-[var(--ink-soft)]">
         The schema that shapes every character sheet and session log in every world on this server.
         Players don&rsquo;t see this page - they fill in values via the sheet UI.
       </p>

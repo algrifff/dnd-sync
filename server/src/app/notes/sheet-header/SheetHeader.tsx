@@ -62,7 +62,7 @@ export function SheetHeader({
 
   // Fallback matches parchment ink-soft so notes without a custom world
   // colour still get a visible underline instead of nothing.
-  const accent = accentColor ?? '#8A7E6B';
+  const accent = accentColor ?? 'var(--ink-muted)';
   return (
     // `sheet-header` marker lets globals.css opt this subtree out of
     // the universal candlelight focus ring — inline editors draw their

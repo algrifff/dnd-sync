@@ -47,11 +47,11 @@ export default async function DataModelPlayground(): Promise<ReactElement> {
     .all();
 
   return (
-    <div className="min-h-screen bg-[#F4EDE0] px-6 py-8 text-[#2A241E]">
+    <div className="min-h-screen bg-[var(--parchment)] px-6 py-8 text-[var(--ink)]">
       <div className="mx-auto max-w-5xl space-y-8">
         <header>
           <h1 className="text-2xl font-semibold">Data-model playground</h1>
-          <p className="mt-1 text-sm text-[#5A4F42]">
+          <p className="mt-1 text-sm text-[var(--ink-soft)]">
             Read-only view of the new index tables + a live Zod validator.
             Scope: world <code className="font-mono">{groupId}</code>.
           </p>
@@ -120,9 +120,9 @@ export default async function DataModelPlayground(): Promise<ReactElement> {
           empty="No creatures yet. Create a kind:creature note to see a row here."
         />
 
-        <section className="rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-5">
+        <section className="rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-5">
           <h2 className="text-lg font-semibold">Compendium entries</h2>
-          <p className="mb-3 text-sm text-[#5A4F42]">
+          <p className="mb-3 text-sm text-[var(--ink-soft)]">
             v24 — global <code className="font-mono">compendium_entries</code> table (ruleset-scoped).
             {compendiumCounts.length === 0
               ? ' Empty — the seed loader is scaffolded but no entries are loaded yet.'
@@ -153,16 +153,16 @@ function IndexTable(props: {
   empty: string;
 }): ReactElement {
   return (
-    <section className="rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-5">
+    <section className="rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-5">
       <h2 className="text-lg font-semibold">{props.title}</h2>
-      <p className="mb-3 text-sm text-[#5A4F42]">{props.blurb}</p>
+      <p className="mb-3 text-sm text-[var(--ink-soft)]">{props.blurb}</p>
       {props.rows.length === 0 ? (
-        <p className="text-sm italic text-[#8A7E6B]">{props.empty}</p>
+        <p className="text-sm italic text-[var(--ink-muted)]">{props.empty}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="border-b border-[#D4C7AE] text-xs uppercase tracking-wide text-[#5A4F42]">
+              <tr className="border-b border-[var(--rule)] text-xs uppercase tracking-wide text-[var(--ink-soft)]">
                 {props.columns.map((c) => (
                   <th key={c} className="px-2 py-1 font-semibold">{c}</th>
                 ))}

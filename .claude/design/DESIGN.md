@@ -1,4 +1,66 @@
-Notion Design System
+# Pit Pals Palette (authoritative)
+
+The app ships two themes under identical variable names — components never
+reference the hex directly. All palette colours must be `var(--*)` references
+outside `server/src/app/globals.css`; hardcoded hex breaks nighttime mode.
+
+## Day mode palette (default — `:root`)
+
+| Token | Hex | Role |
+|-------|-----|------|
+| `--parchment` | `#F4EDE0` | Primary canvas |
+| `--parchment-sunk` | `#EAE1CF` | Recessed surfaces, table heads |
+| `--vellum` | `#FBF5E8` | Elevated cards, code blocks, embeds |
+| `--ink` | `#2A241E` | Primary text, strong UI emphasis |
+| `--ink-soft` | `#5A4F42` | Secondary text, helper labels |
+| `--ink-muted` | `#8A7E6B` | Disabled / tertiary content |
+| `--rule` | `#D4C7AE` | Borders, dividers |
+| `--candlelight` | `#D4A85A` | Focus ring, callouts, accents |
+| `--wine` | `#8B4A52` | Links, wikilinks, destructive warmth |
+| `--moss` | `#7B8A5F` | Tip callouts, positive states |
+| `--sage` | `#6B7F8E` | Info callouts, cool neutrals |
+| `--embers` | `#B5572A` | Warning callouts, CTA energy |
+| `--shadow` | `#1E1A15` | Deep shadow, darkest ink shade |
+
+## Night mode palette (`[data-theme="night"]`)
+
+Derived by inverting tonal roles while keeping the warm hue family. Canvas
+becomes the old ink, text becomes the old parchment. Accent hues lift ~15%
+to preserve contrast on the dark canvas.
+
+| Token | Hex | Role |
+|-------|-----|------|
+| `--parchment` | `#2A241E` | Primary canvas (was ink) |
+| `--parchment-sunk` | `#1E1A15` | Recessed surface |
+| `--vellum` | `#3A342E` | Elevated surface |
+| `--ink` | `#F4EDE0` | Primary text (was parchment) |
+| `--ink-soft` | `#D4C7AE` | Secondary text |
+| `--ink-muted` | `#8A7E6B` | Unchanged — works both ways |
+| `--rule` | `#5A4F42` | Divider |
+| `--candlelight` | `#E8B865` | Focus ring (brighter) |
+| `--wine` | `#B16770` | Links |
+| `--moss` | `#9CAC7E` | Tip |
+| `--sage` | `#8BA1B2` | Info |
+| `--embers` | `#D06E3E` | Warning |
+| `--shadow` | `#000000` | Deepest |
+
+## Opacity tints
+
+For rgba-style tints, reference the matching `--*-rgb` triplet:
+`rgb(var(--wine-rgb) / 0.12)`. Available: `--wine-rgb`, `--candlelight-rgb`,
+`--moss-rgb`, `--sage-rgb`, `--embers-rgb`, `--ink-rgb`. Both themes define
+them so tints flip with the palette.
+
+## Persistence
+
+Per-user theme stored on `users.theme` (`'day' | 'night'`), mirrored to a
+`theme` cookie so the root layout can render `<html data-theme="…">` without
+a FOUC. Toggle lives in `/settings/profile`.
+
+---
+
+# Reference: Notion Design System (inspiration)
+
 Connected workspace with editorial calm. The live site currently serves NotionInter webfonts and pairs warm white surfaces (#FFFFFF, #F9F9F8, #FCF8F5) with charcoal content text (#191919, #37352F), quiet gray structure, and selective accent bursts from current marketing surfaces such as teal (#03C1BA), violet (#A361FF), yellow (#FFB600), and orange (#FF6522).
 
 1. Visual Theme & Atmosphere

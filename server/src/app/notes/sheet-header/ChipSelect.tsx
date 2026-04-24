@@ -39,10 +39,10 @@ export function ChipSelect({
   if (readOnly || !editing) {
     const chip = (
       <span
-        className="inline-flex items-center rounded-full border bg-[#F4EDE0] px-2 py-0.5 text-[11px] font-medium"
+        className="inline-flex items-center rounded-full border bg-[var(--parchment)] px-2 py-0.5 text-[11px] font-medium"
         style={{
-          borderColor: color ?? '#D4C7AE',
-          color: color ?? '#2A241E',
+          borderColor: color ?? 'var(--rule)',
+          color: color ?? 'var(--ink)',
         }}
       >
         {label}
@@ -54,7 +54,7 @@ export function ChipSelect({
         type="button"
         onClick={() => setEditing(true)}
         aria-label={ariaLabel ?? 'Change'}
-        className="rounded-full hover:outline hover:outline-1 hover:outline-offset-1 hover:outline-[#D4C7AE]"
+        className="rounded-full hover:outline hover:outline-1 hover:outline-offset-1 hover:outline-[var(--rule)]"
       >
         {chip}
       </button>
@@ -72,7 +72,7 @@ export function ChipSelect({
       }}
       onBlur={() => setEditing(false)}
       aria-label={ariaLabel ?? 'Select'}
-      className="rounded-full border border-[#D4C7AE] bg-white px-2 py-0.5 text-[11px] outline-none focus:border-[#2A241E]"
+      className="rounded-full border border-[var(--rule)] bg-white px-2 py-0.5 text-[11px] outline-none focus:border-[var(--ink)]"
     >
       {!value && <option value="" disabled>{placeholder ?? 'Choose…'}</option>}
       {options.map((o) => (

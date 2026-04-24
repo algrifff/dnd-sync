@@ -73,8 +73,8 @@ export function LocationHeader({
                 <InlineText
                   value={name}
                   readOnly={!canEdit}
-                  className={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
-                  inputClassName={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
+                  className={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[var(--ink)]`}
+                  inputClassName={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[var(--ink)]`}
                   onCommit={(next) => {
                     const trimmed = next.trim();
                     if (trimmed) patchSheet({ name: trimmed });
@@ -84,7 +84,7 @@ export function LocationHeader({
                 <SaveIndicator saving={saving} error={error} />
               </div>
 
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[#5A4F42]">
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--ink-soft)]">
                 <ChipSelect
                   value={type}
                   options={TYPES}
@@ -93,18 +93,18 @@ export function LocationHeader({
                   placeholder="Type"
                   ariaLabel="Type"
                 />
-                <span className="text-[#5A4F42]">·</span>
-                <span className="text-[#5A4F42]">Region:</span>
+                <span className="text-[var(--ink-soft)]">·</span>
+                <span className="text-[var(--ink-soft)]">Region:</span>
                 <InlineText
                   value={region}
                   readOnly={!canEdit}
-                  className="text-[11px] text-[#2A241E]"
+                  className="text-[11px] text-[var(--ink)]"
                   placeholder="none"
                   onCommit={(next) => patchSheet({ region: next })}
                   ariaLabel="Region"
                 />
-                <span className="text-[#5A4F42]">·</span>
-                <span className="inline-flex items-center gap-1 text-[#5A4F42]">
+                <span className="text-[var(--ink-soft)]">·</span>
+                <span className="inline-flex items-center gap-1 text-[var(--ink-soft)]">
                   <MapPin size={11} /> Parent:
                 </span>
                 <NoteAutocomplete
@@ -114,7 +114,7 @@ export function LocationHeader({
                   onCommit={(next) => patchSheet({ parent_path: next })}
                   placeholder="Link a parent location…"
                   ariaLabel="Parent link"
-                  className="font-mono text-[11px] text-[#2A241E]"
+                  className="font-mono text-[11px] text-[var(--ink)]"
                 />
               </div>
             </div>
@@ -123,7 +123,7 @@ export function LocationHeader({
               <button
                 type="button"
                 onClick={() => setPickerOpen(true)}
-                className="rounded border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1 text-xs text-[#2A241E] hover:bg-[#EAE1CF]"
+                className="rounded border border-[var(--rule)] bg-[var(--parchment)] px-2 py-1 text-xs text-[var(--ink)] hover:bg-[var(--parchment-sunk)]"
               >
                 Add hero image
               </button>
@@ -154,7 +154,7 @@ export function LocationHeader({
             onClick={() => canEdit && setPickerOpen(true)}
             aria-label={canEdit ? 'Change hero image' : 'Hero image'}
             disabled={!canEdit}
-            className="block w-full overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#EAE1CF]"
+            className="block w-full overflow-hidden rounded-[12px] border border-[var(--rule)] bg-[var(--parchment-sunk)]"
           >
             <img
               src={pUrl}
@@ -189,13 +189,13 @@ function KVRow({
 }): React.JSX.Element {
   return (
     <div className="flex items-baseline gap-2">
-      <span className="w-24 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[#5A4F42]">
+      <span className="w-24 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
         {label}
       </span>
       <InlineText
         value={value}
         readOnly={readOnly}
-        className="flex-1 text-[#2A241E]"
+        className="flex-1 text-[var(--ink)]"
         placeholder="—"
         onCommit={onCommit}
         ariaLabel={label}

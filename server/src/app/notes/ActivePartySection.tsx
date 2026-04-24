@@ -53,10 +53,10 @@ function hpTone(current: number | null, max: number | null): HpTone {
 }
 
 const HP_PILL_CLASS: Record<HpTone, string> = {
-  full: 'bg-[#7B8A5F]/20 text-[#556049] border-[#7B8A5F]/40',
-  injured: 'bg-[#D4A85A]/25 text-[#6b5120] border-[#D4A85A]/50',
-  down: 'bg-[#8B4A52]/20 text-[#8B4A52] border-[#8B4A52]/50',
-  unknown: 'bg-[#D4C7AE]/30 text-[#8A7E6B] border-[#D4C7AE]',
+  full: 'bg-[var(--moss)]/20 text-[#556049] border-[var(--moss)]/40',
+  injured: 'bg-[var(--candlelight)]/25 text-[#6b5120] border-[var(--candlelight)]/50',
+  down: 'bg-[var(--wine)]/20 text-[var(--wine)] border-[var(--wine)]/50',
+  unknown: 'bg-[var(--rule)]/30 text-[var(--ink-muted)] border-[var(--rule)]',
 };
 
 type HpPatch = { current?: number; temporary?: number };
@@ -296,23 +296,23 @@ export function ActivePartySection({
   return (
     <section
       aria-label="Active party"
-      className="mb-2 border-b border-[#D4C7AE] pb-2"
+      className="mb-2 border-b border-[var(--rule)] pb-2"
     >
       <button
         type="button"
         onClick={toggleOpen}
         aria-expanded={open}
-        className="group flex w-full items-center gap-1 px-2 py-1 text-left text-[11px] font-semibold uppercase tracking-wider text-[#5A4F42] hover:text-[#2A241E]"
+        className="group flex w-full items-center gap-1 px-2 py-1 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--ink-soft)] hover:text-[var(--ink)]"
       >
         {open ? (
           <ChevronDown className="h-3.5 w-3.5" aria-hidden />
         ) : (
           <ChevronRight className="h-3.5 w-3.5" aria-hidden />
         )}
-        <Heart className="h-3.5 w-3.5 text-[#8B4A52]" aria-hidden />
+        <Heart className="h-3.5 w-3.5 text-[var(--wine)]" aria-hidden />
         <span className="flex-1">Active Party</span>
         {characters.length > 0 && (
-          <span className="text-[10px] font-normal text-[#8A7E6B]">
+          <span className="text-[10px] font-normal text-[var(--ink-muted)]">
             {characters.length}
           </span>
         )}
@@ -321,15 +321,15 @@ export function ActivePartySection({
       {open && (
         <div className="mt-1 px-1">
           {!activeCampaignSlug ? (
-            <p className="px-2 py-1 text-xs italic text-[#8A7E6B]">
+            <p className="px-2 py-1 text-xs italic text-[var(--ink-muted)]">
               Pin a campaign to see the active party.
             </p>
           ) : loading && characters.length === 0 ? (
-            <p className="px-2 py-1 text-xs italic text-[#8A7E6B]">Loading…</p>
+            <p className="px-2 py-1 text-xs italic text-[var(--ink-muted)]">Loading…</p>
           ) : error && characters.length === 0 ? (
-            <p className="px-2 py-1 text-xs text-[#8B4A52]">{error}</p>
+            <p className="px-2 py-1 text-xs text-[var(--wine)]">{error}</p>
           ) : characters.length === 0 ? (
-            <p className="px-2 py-1 text-xs italic text-[#8A7E6B]">
+            <p className="px-2 py-1 text-xs italic text-[var(--ink-muted)]">
               No party members yet.
             </p>
           ) : (
@@ -347,7 +347,7 @@ export function ActivePartySection({
             </ul>
           )}
           {error && characters.length > 0 && (
-            <p className="mt-1 px-2 text-[11px] text-[#8B4A52]">{error}</p>
+            <p className="mt-1 px-2 text-[11px] text-[var(--wine)]">{error}</p>
           )}
         </div>
       )}
@@ -489,8 +489,8 @@ function PartyRow({
       <div
         ref={wrapperRef}
         className={
-          'group relative flex items-center gap-2 rounded-[6px] px-1.5 py-1 transition hover:bg-[#D4A85A]/15 ' +
-          (isActive ? 'bg-[#D4A85A]/25' : '')
+          'group relative flex items-center gap-2 rounded-[6px] px-1.5 py-1 transition hover:bg-[var(--candlelight)]/15 ' +
+          (isActive ? 'bg-[var(--candlelight)]/25' : '')
         }
       >
         <Link
@@ -502,7 +502,7 @@ function PartyRow({
           onBlur={endHover}
           className="flex min-w-0 flex-1 items-center gap-2"
         >
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#D4C7AE] bg-[#EAE1CF]">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--rule)] bg-[var(--parchment-sunk)]">
             {portrait ? (
               <img
                 src={portrait}
@@ -510,7 +510,7 @@ function PartyRow({
                 className="h-full w-full object-cover"
               />
             ) : (
-              <span className="flex items-center justify-center text-[10px] font-semibold text-[#8A7E6B]">
+              <span className="flex items-center justify-center text-[10px] font-semibold text-[var(--ink-muted)]">
                 {character.displayName ? (
                   initials(character.displayName)
                 ) : (
@@ -520,11 +520,11 @@ function PartyRow({
             )}
           </span>
           <span className="flex min-w-0 flex-1 flex-col leading-tight">
-            <span className="truncate font-serif text-[13px] text-[#2A241E]">
+            <span className="truncate font-serif text-[13px] text-[var(--ink)]">
               {character.displayName}
             </span>
             {levelClass && (
-              <span className="truncate text-[10px] text-[#5A4F42]">
+              <span className="truncate text-[10px] text-[var(--ink-soft)]">
                 {levelClass}
               </span>
             )}
@@ -546,7 +546,7 @@ function PartyRow({
           aria-expanded={menuOpen}
           onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
           className={
-            'shrink-0 rounded-full border px-1.5 py-px font-serif text-[11px] tabular-nums transition hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--world-accent,#D4A85A)] ' +
+            'shrink-0 rounded-full border px-1.5 py-px font-serif text-[11px] tabular-nums transition hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--world-accent,var(--candlelight))] ' +
             pillClass
           }
           title={
@@ -556,7 +556,7 @@ function PartyRow({
           }
         >
           {character.hpCurrent ?? '—'}
-          <span className="text-[#8A7E6B]">/</span>
+          <span className="text-[var(--ink-muted)]">/</span>
           {character.hpMax ?? '—'}
         </button>
         {hoverOpen && hoverAnchor && (
@@ -631,12 +631,12 @@ function PartyHoverCard({
       role="tooltip"
       aria-label={`${character.displayName} details`}
       style={{ top: anchor.top, left: anchor.left }}
-      className="fixed z-[1000] w-72 rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] p-3 shadow-lg"
+      className="fixed z-[1000] w-72 rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)] p-3 shadow-lg"
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
       <div className="flex items-center gap-3">
-        <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#D4C7AE] bg-[#EAE1CF]">
+        <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--rule)] bg-[var(--parchment-sunk)]">
           {portrait ? (
             <img
               src={portrait}
@@ -644,17 +644,17 @@ function PartyHoverCard({
               className="h-full w-full object-cover"
             />
           ) : (
-            <span className="font-serif text-lg text-[#8A7E6B]">
+            <span className="font-serif text-lg text-[var(--ink-muted)]">
               {character.displayName ? initials(character.displayName) : '?'}
             </span>
           )}
         </span>
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate font-serif text-lg leading-tight text-[#2A241E]">
+          <span className="truncate font-serif text-lg leading-tight text-[var(--ink)]">
             {character.displayName}
           </span>
           {subtitleParts.length > 0 && (
-            <span className="truncate text-[11px] text-[#5A4F42]">
+            <span className="truncate text-[11px] text-[var(--ink-soft)]">
               {subtitleParts.join(' · ')}
             </span>
           )}
@@ -672,7 +672,7 @@ function PartyHoverCard({
             >
               <Heart className="h-3 w-3" aria-hidden />
               {character.hpCurrent ?? '—'}
-              <span className="text-[#8A7E6B]">/</span>
+              <span className="text-[var(--ink-muted)]">/</span>
               {character.hpMax ?? '—'}
             </span>
             {tempHp > 0 && (
@@ -704,15 +704,15 @@ function PartyHoverCard({
           return (
             <div
               key={k}
-              className="flex flex-col items-center rounded-[6px] border border-[#D4C7AE] bg-[#EAE1CF]/60 px-1 py-1.5"
+              className="flex flex-col items-center rounded-[6px] border border-[var(--rule)] bg-[var(--parchment-sunk)]/60 px-1 py-1.5"
             >
-              <span className="text-[9px] font-semibold uppercase tracking-wider text-[#8A7E6B]">
+              <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--ink-muted)]">
                 {k}
               </span>
-              <span className="font-serif text-base leading-none text-[#2A241E]">
+              <span className="font-serif text-base leading-none text-[var(--ink)]">
                 {score != null ? score : '—'}
               </span>
-              <span className="mt-0.5 font-serif text-[10px] text-[#5A4F42]">
+              <span className="mt-0.5 font-serif text-[10px] text-[var(--ink-soft)]">
                 {mod != null ? formatModifier(mod) : ''}
               </span>
             </div>
@@ -721,12 +721,12 @@ function PartyHoverCard({
       </div>
 
       {cache?.state === 'loading' && !scores && (
-        <p className="mt-2 text-center text-[10px] italic text-[#8A7E6B]">
+        <p className="mt-2 text-center text-[10px] italic text-[var(--ink-muted)]">
           Loading sheet…
         </p>
       )}
       {cache?.state === 'error' && (
-        <p className="mt-2 text-center text-[10px] text-[#8B4A52]">
+        <p className="mt-2 text-center text-[10px] text-[var(--wine)]">
           Failed to load sheet
         </p>
       )}
@@ -743,11 +743,11 @@ function StatTile({
   value: string;
 }): React.JSX.Element {
   return (
-    <div className="flex flex-col items-center rounded-[6px] border border-[#D4C7AE] bg-[#EAE1CF]/60 px-1 py-1.5">
-      <span className="text-[9px] font-semibold uppercase tracking-wider text-[#8A7E6B]">
+    <div className="flex flex-col items-center rounded-[6px] border border-[var(--rule)] bg-[var(--parchment-sunk)]/60 px-1 py-1.5">
+      <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--ink-muted)]">
         {label}
       </span>
-      <span className="font-serif text-base leading-none text-[#2A241E]">
+      <span className="font-serif text-base leading-none text-[var(--ink)]">
         {value}
       </span>
     </div>
@@ -821,13 +821,13 @@ const HpAdjustMenu = function HpAdjustMenu({
       role="menu"
       aria-label="Adjust hit points"
       style={{ top: anchor.top, left: anchor.left }}
-      className="fixed z-[1000] w-52 rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] p-2 shadow-lg"
+      className="fixed z-[1000] w-52 rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] p-2 shadow-lg"
       onClick={(e) => e.stopPropagation()}
     >
       <div className="mb-1 flex items-center justify-between px-0.5">
-        <span className="font-serif text-[11px] text-[#5A4F42]">
+        <span className="font-serif text-[11px] text-[var(--ink-soft)]">
           {cur}
-          <span className="text-[#8A7E6B]">/</span>
+          <span className="text-[var(--ink-muted)]">/</span>
           {hardMax || '—'} HP
           {curTemp > 0 && (
             <span className="ml-1 text-[#3e5770]">+{curTemp} temp</span>
@@ -837,28 +837,28 @@ const HpAdjustMenu = function HpAdjustMenu({
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="text-[10px] text-[#8A7E6B] hover:text-[#2A241E]"
+          className="text-[10px] text-[var(--ink-muted)] hover:text-[var(--ink)]"
         >
           ✕
         </button>
       </div>
       <HpInputRow
         buttonLabel="Damage"
-        buttonTone="#8B4A52"
+        buttonTone="var(--wine)"
         value={damage}
         onChange={setDamage}
         onApply={applyDamage}
       />
       <HpInputRow
         buttonLabel="Heal"
-        buttonTone="#7B8A5F"
+        buttonTone="var(--moss)"
         value={heal}
         onChange={setHeal}
         onApply={applyHeal}
       />
       <HpInputRow
         buttonLabel="Set"
-        buttonTone="#5A4F42"
+        buttonTone="var(--ink-soft)"
         value={set}
         onChange={setSet}
         onApply={applySet}
@@ -902,7 +902,7 @@ function HpInputRow({
             onApply();
           }
         }}
-        className="w-14 rounded-[4px] border border-[#D4C7AE] bg-white/60 px-1 py-0.5 text-right text-xs tabular-nums text-[#2A241E] outline-none focus:border-[var(--world-accent,#D4A85A)] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="w-14 rounded-[4px] border border-[var(--rule)] bg-white/60 px-1 py-0.5 text-right text-xs tabular-nums text-[var(--ink)] outline-none focus:border-[var(--world-accent,var(--candlelight))] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
       <button
         type="button"

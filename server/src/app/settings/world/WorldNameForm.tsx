@@ -61,7 +61,7 @@ export function WorldNameForm({
   return (
     <form onSubmit={submit} className="space-y-3">
       <label className="block">
-        <span className="mb-1 block text-xs font-medium text-[#5A4F42]">
+        <span className="mb-1 block text-xs font-medium text-[var(--ink-soft)]">
           World name
         </span>
         <input
@@ -70,20 +70,20 @@ export function WorldNameForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           maxLength={80}
-          className="w-full max-w-sm rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-3 py-2 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
+          className="w-full max-w-sm rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--candlelight)]"
         />
       </label>
-      {error && <p className="text-xs text-[#8B4A52]">{error}</p>}
+      {error && <p className="text-xs text-[var(--wine)]">{error}</p>}
       <div className="flex items-center gap-3">
         <button
           type="submit"
           disabled={pending || !name.trim()}
-          className="rounded-[6px] bg-[#2A241E] px-4 py-1.5 text-xs font-medium text-[#F4EDE0] transition hover:bg-[#3A342E] disabled:opacity-50"
+          className="rounded-[6px] bg-[var(--ink)] px-4 py-1.5 text-xs font-medium text-[var(--parchment)] transition hover:bg-[var(--vellum)] disabled:opacity-50"
         >
           {pending ? 'Saving…' : 'Save'}
         </button>
         {saved && (
-          <span className="text-xs text-[#7B8A5F]">Saved</span>
+          <span className="text-xs text-[var(--moss)]">Saved</span>
         )}
       </div>
     </form>

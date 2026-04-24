@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import type { ReactElement, ReactNode } from 'react';
+import { cookies } from 'next/headers';
 import { Fraunces, Inter } from 'next/font/google';
+import { THEME_COOKIE } from '@/lib/session';
 import './globals.css';
 
 const inter = Inter({
@@ -58,13 +60,18 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: ReactNode;
-}): ReactElement {
+}): Promise<ReactElement> {
+  const theme = (await cookies()).get(THEME_COOKIE)?.value === 'night' ? 'night' : 'day';
   return (
-    <html lang="en" className={`${inter.variable} ${fraunces.variable}`}>
+    <html
+      lang="en"
+      data-theme={theme}
+      className={`${inter.variable} ${fraunces.variable}`}
+    >
       <body
         className="antialiased"
         style={{

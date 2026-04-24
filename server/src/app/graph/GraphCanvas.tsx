@@ -40,6 +40,18 @@ import forceAtlas2 from 'graphology-layout-forceatlas2';
 import { clusterSeedPositions, colorForTags, radiusForDegree } from './graphStyle';
 import { NotePicker } from '../notes/NotePicker';
 
+// Sigma's WebGL renderer can't read CSS variables, so we snapshot the
+// `--ink-rgb` triplet at render time and rebuild `rgba()` strings from it.
+// In SSR contexts (where `document` is undefined) fall back to the day value.
+function inkRgba(alpha: number): string {
+  if (typeof document === 'undefined') return `rgba(42, 36, 30, ${alpha})`;
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue('--ink-rgb')
+    .trim();
+  const [r, g, b] = raw ? raw.split(/\s+/).map(Number) : [42, 36, 30];
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 type RemoteGraphCursor = {
   clientId: number;
   userId: string;
@@ -270,7 +282,7 @@ export function GraphCanvas({
         if (!g.hasEdge(key)) {
           g.addEdgeWithKey(key, e.source, e.target, {
             size: 1,
-            color: `rgba(42, 36, 30, ${edgeOpacityRef.current})`,
+            color: inkRgba(edgeOpacityRef.current),
           });
           affectedNodes.add(e.source);
           affectedNodes.add(e.target);
@@ -513,7 +525,7 @@ export function GraphCanvas({
             label: n.title,
             size: radiusForDegree(n.degree) * nodeScaleRef.current,
             color: (colorForRef.current ?? colorFor)(n.id, n.tags),
-            labelColor: `rgba(42, 36, 30, ${labelOpacityRef.current})`,
+            labelColor: inkRgba(labelOpacityRef.current),
             x: pin?.x ?? seed.x,
             y: pin?.y ?? seed.y,
             tags: n.tags,
@@ -540,8 +552,8 @@ export function GraphCanvas({
 
         const labelSettings = labelModeToSigmaSettings(labelMode);
         const renderer = new Sigma(g, container, {
-          defaultNodeColor: '#5A4F42',
-          defaultEdgeColor: `rgba(42, 36, 30, ${edgeOpacityRef.current})`,
+          defaultNodeColor: 'var(--ink-soft)',
+          defaultEdgeColor: inkRgba(edgeOpacityRef.current),
           labelColor: { attribute: 'labelColor' },
           labelWeight: '500',
           labelFont: 'Inter, system-ui, sans-serif',
@@ -592,7 +604,7 @@ export function GraphCanvas({
                 if (g.hasEdge(key)) continue;
                 g.addEdgeWithKey(key, e.source, e.target, {
                   size: 1,
-                  color: `rgba(42, 36, 30, ${edgeOpacityRef.current})`,
+                  color: inkRgba(edgeOpacityRef.current),
                 });
                 touched.add(e.source);
                 touched.add(e.target);
@@ -677,7 +689,7 @@ export function GraphCanvas({
               clientId,
               userId: s.user.userId ?? '',
               name: s.user.name ?? 'Anonymous',
-              color: s.user.color ?? '#5A4F42',
+              color: s.user.color ?? 'var(--ink-soft)',
               cursorMode: s.user.cursorMode === 'image' ? 'image' : 'color',
               avatarVersion:
                 typeof s.user.avatarVersion === 'number'
@@ -823,8 +835,8 @@ export function GraphCanvas({
           if (linkModeRef.current) {
             renderer.setSetting('nodeReducer', (n, data) => {
               if (n === linkSourceRef.current)
-                return { ...data, color: '#D4A85A', highlighted: true };
-              if (n === node) return { ...data, color: '#8B4A52' };
+                return { ...data, color: 'var(--candlelight)', highlighted: true };
+              if (n === node) return { ...data, color: 'var(--wine)' };
               return data;
             });
             return;
@@ -832,15 +844,15 @@ export function GraphCanvas({
           const neighbours = new Set<string>(g.neighbors(node));
           neighbours.add(node);
           renderer.setSetting('nodeReducer', (n, data) => {
-            if (!neighbours.has(n)) return { ...data, color: '#D4C7AE', label: '' };
+            if (!neighbours.has(n)) return { ...data, color: 'var(--rule)', label: '' };
             return data;
           });
           renderer.setSetting('edgeReducer', (_e, data) => {
             const [s, t] = g.extremities(_e);
             if (!neighbours.has(s) || !neighbours.has(t)) {
-              return { ...data, color: 'rgba(42, 36, 30, 0.1)' };
+              return { ...data, color: 'rgb(var(--ink-rgb) / 0.1)' };
             }
-            return { ...data, color: '#D4A85A' };
+            return { ...data, color: 'var(--candlelight)' };
           });
         });
         renderer.on('leaveNode', () => {
@@ -924,7 +936,7 @@ export function GraphCanvas({
               if (g.hasNode(source) && g.hasNode(target) && !g.hasEdge(key)) {
                 g.addEdgeWithKey(key, source, target, {
                   size: 1,
-                  color: `rgba(42, 36, 30, ${edgeOpacityRef.current})`,
+                  color: inkRgba(edgeOpacityRef.current),
                 });
                 for (const id of [source, target]) {
                   const d = g.degree(id);
@@ -1077,7 +1089,7 @@ export function GraphCanvas({
     labelOpacityRef.current = labelOpacity;
     const g = graphRef.current;
     if (!g) return;
-    const color = `rgba(42, 36, 30, ${labelOpacity})`;
+    const color = inkRgba(labelOpacity);
     g.forEachNode((node) => g.setNodeAttribute(node, 'labelColor', color));
   }, [labelOpacity]);
 
@@ -1086,7 +1098,7 @@ export function GraphCanvas({
     edgeOpacityRef.current = edgeOpacity;
     const g = graphRef.current;
     if (!g) return;
-    const color = `rgba(42, 36, 30, ${edgeOpacity})`;
+    const color = inkRgba(edgeOpacity);
     g.forEachEdge((edge) => g.setEdgeAttribute(edge, 'color', color));
   }, [edgeOpacity]);
 
@@ -1116,7 +1128,7 @@ export function GraphCanvas({
     const group: Group = {
       id,
       name: `Group ${groups.length + 1}`,
-      color: '#8B4A52',
+      color: 'var(--wine)',
       tags: [],
       notes: [],
     };
@@ -1138,7 +1150,7 @@ export function GraphCanvas({
       <div
         ref={containerRef}
         id={GRAPH_SCOPE_ID}
-        className="absolute inset-0 bg-[#F4EDE0]"
+        className="absolute inset-0 bg-[var(--parchment)]"
         style={linkMode ? { cursor: 'crosshair' } : undefined}
       />
 
@@ -1167,7 +1179,7 @@ export function GraphCanvas({
               refY="3"
               orient="auto"
             >
-              <polygon points="0 0, 8 3, 0 6" fill="#8B4A52" />
+              <polygon points="0 0, 8 3, 0 6" fill="var(--wine)" />
             </marker>
           </defs>
           <line
@@ -1175,7 +1187,7 @@ export function GraphCanvas({
             y1={rubberBand.from.y}
             x2={rubberBand.to.x}
             y2={rubberBand.to.y}
-            stroke="#8B4A52"
+            stroke="var(--wine)"
             strokeWidth={2}
             strokeDasharray="7 4"
             strokeLinecap="round"
@@ -1195,20 +1207,20 @@ export function GraphCanvas({
           aria-checked={linkMode}
           onClick={() => setLinkMode((m) => !m)}
           title={linkMode ? 'Weave mode — drag between nodes to forge a link' : 'Roam mode — drag to explore'}
-          className="relative flex h-11 w-60 select-none items-center rounded-full border border-[#D4C7AE] bg-[#FBF5E8] p-1 shadow-[0_4px_14px_rgba(42,36,30,0.14)] transition-shadow hover:shadow-[0_6px_18px_rgba(42,36,30,0.18)]"
+          className="relative flex h-11 w-60 select-none items-center rounded-full border border-[var(--rule)] bg-[var(--vellum)] p-1 shadow-[0_4px_14px_rgb(var(--ink-rgb) / 0.14)] transition-shadow hover:shadow-[0_6px_18px_rgb(var(--ink-rgb) / 0.18)]"
         >
           {/* Sliding pill */}
           <span
             aria-hidden
             className={[
               'absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-full transition-all duration-200',
-              linkMode ? 'left-[calc(50%+0px)] bg-[#8B4A52]' : 'left-1 bg-[#D4A85A]',
+              linkMode ? 'left-[calc(50%+0px)] bg-[var(--wine)]' : 'left-1 bg-[var(--candlelight)]',
             ].join(' ')}
           />
           <span
             className={[
               'relative z-10 flex flex-1 items-center justify-center gap-1.5 transition-colors',
-              !linkMode ? 'text-[#2A241E]' : 'text-[#5A4F42]/70',
+              !linkMode ? 'text-[var(--ink)]' : 'text-[var(--ink-soft)]/70',
             ].join(' ')}
           >
             <span className="text-2xl leading-none">⚔</span>
@@ -1217,7 +1229,7 @@ export function GraphCanvas({
           <span
             className={[
               'relative z-10 flex flex-1 items-center justify-center gap-1.5 transition-colors',
-              linkMode ? 'text-white' : 'text-[#5A4F42]/70',
+              linkMode ? 'text-white' : 'text-[var(--ink-soft)]/70',
             ].join(' ')}
           >
             <span className="text-2xl leading-none">✦</span>
@@ -1234,15 +1246,15 @@ export function GraphCanvas({
           onClick={() => setMenuOpen((o) => !o)}
           title={menuOpen ? 'Hide controls' : 'Show controls'}
           aria-label={menuOpen ? 'Hide controls' : 'Show controls'}
-          className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] text-[#5A4F42] shadow-[0_6px_18px_rgba(42,36,30,0.08)] transition hover:bg-[#F4EDE0] hover:text-[#2A241E]"
+          className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] text-[var(--ink-soft)] shadow-[0_6px_18px_rgb(var(--ink-rgb) / 0.08)] transition hover:bg-[var(--parchment)] hover:text-[var(--ink)]"
         >
           {menuOpen ? <X size={15} aria-hidden /> : <Menu size={15} aria-hidden />}
         </button>
 
         {menuOpen && (
           <div className="flex w-64 flex-col gap-2">
-            <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-3 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+            <div className="pointer-events-auto rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] p-3 shadow-[0_6px_18px_rgb(var(--ink-rgb) / 0.08)]">
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
                 Scope
               </label>
               <select
@@ -1252,7 +1264,7 @@ export function GraphCanvas({
                   if (v === 'all') setScope({ kind: 'all' });
                   else if (v.startsWith('tag:')) setScope({ kind: 'tag', tag: v.slice(4) });
                 }}
-                className="w-full rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
+                className="w-full rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-1 text-sm text-[var(--ink)] outline-none focus:border-[var(--candlelight)]"
               >
                 <option value="all">All notes</option>
                 {allTags.length > 0 && (
@@ -1270,8 +1282,8 @@ export function GraphCanvas({
             <MenuSection label="Labels" open={sectLabels} onToggle={() => setSectLabels((o) => !o)}>
               <div>
                 <div className="mb-1 flex items-center justify-between">
-                  <span className="text-xs text-[#8A7E6B]">Visibility</span>
-                  <span className="text-xs text-[#5A4F42]">{labelModeLabel(labelMode)}</span>
+                  <span className="text-xs text-[var(--ink-muted)]">Visibility</span>
+                  <span className="text-xs text-[var(--ink-soft)]">{labelModeLabel(labelMode)}</span>
                 </div>
                 <input
                   type="range"
@@ -1283,13 +1295,13 @@ export function GraphCanvas({
                     const v = Number(e.target.value);
                     setLabelMode(v === 0 ? 'none' : v === 1 ? 'some' : 'all');
                   }}
-                  className="w-full accent-[#8B4A52]"
+                  className="w-full accent-[var(--wine)]"
                 />
               </div>
               <div>
                 <div className="mb-1 flex items-center justify-between">
-                  <span className="text-xs text-[#8A7E6B]">Opacity</span>
-                  <span className="text-xs text-[#5A4F42]">{Math.round(labelOpacity * 100)}%</span>
+                  <span className="text-xs text-[var(--ink-muted)]">Opacity</span>
+                  <span className="text-xs text-[var(--ink-soft)]">{Math.round(labelOpacity * 100)}%</span>
                 </div>
                 <input
                   type="range"
@@ -1302,13 +1314,13 @@ export function GraphCanvas({
                     setLabelOpacity(v);
                     metaMap.set('labelOpacity', v);
                   }}
-                  className="w-full accent-[#8B4A52]"
+                  className="w-full accent-[var(--wine)]"
                 />
               </div>
               <div>
                 <div className="mb-1 flex items-center justify-between">
-                  <span className="text-xs text-[#8A7E6B]">Edge opacity</span>
-                  <span className="text-xs text-[#5A4F42]">{Math.round(edgeOpacity * 100)}%</span>
+                  <span className="text-xs text-[var(--ink-muted)]">Edge opacity</span>
+                  <span className="text-xs text-[var(--ink-soft)]">{Math.round(edgeOpacity * 100)}%</span>
                 </div>
                 <input
                   type="range"
@@ -1321,7 +1333,7 @@ export function GraphCanvas({
                     setEdgeOpacity(v);
                     metaMap.set('edgeOpacity', v);
                   }}
-                  className="w-full accent-[#8B4A52]"
+                  className="w-full accent-[var(--wine)]"
                 />
               </div>
             </MenuSection>
@@ -1329,8 +1341,8 @@ export function GraphCanvas({
             <MenuSection label="Nodes" open={sectNodes} onToggle={() => setSectNodes((o) => !o)}>
               <div>
                 <div className="mb-1 flex items-center justify-between">
-                  <span className="text-xs text-[#8A7E6B]">Size</span>
-                  <span className="text-xs text-[#5A4F42]">{nodeScale.toFixed(1)}×</span>
+                  <span className="text-xs text-[var(--ink-muted)]">Size</span>
+                  <span className="text-xs text-[var(--ink-soft)]">{nodeScale.toFixed(1)}×</span>
                 </div>
                 <input
                   type="range"
@@ -1339,7 +1351,7 @@ export function GraphCanvas({
                   step={0.1}
                   value={nodeScale}
                   onChange={(e) => metaMap.set('nodeScale', Number(e.target.value))}
-                  className="w-full accent-[#8B4A52]"
+                  className="w-full accent-[var(--wine)]"
                 />
               </div>
             </MenuSection>
@@ -1347,8 +1359,8 @@ export function GraphCanvas({
             <MenuSection label="Physics" open={sectPhysics} onToggle={() => setSectPhysics((o) => !o)}>
               <div>
                 <div className="mb-1 flex items-center justify-between">
-                  <span className="text-xs text-[#8A7E6B]">Gravity</span>
-                  <span className="text-xs text-[#5A4F42]">{gravity.toFixed(2)}</span>
+                  <span className="text-xs text-[var(--ink-muted)]">Gravity</span>
+                  <span className="text-xs text-[var(--ink-soft)]">{gravity.toFixed(2)}</span>
                 </div>
                 <input
                   type="range"
@@ -1357,13 +1369,13 @@ export function GraphCanvas({
                   step={0.05}
                   value={gravity}
                   onChange={(e) => metaMap.set('gravity', Number(e.target.value))}
-                  className="w-full accent-[#8B4A52]"
+                  className="w-full accent-[var(--wine)]"
                 />
               </div>
               <div>
                 <div className="mb-1 flex items-center justify-between">
-                  <span className="text-xs text-[#8A7E6B]">Repulsion</span>
-                  <span className="text-xs text-[#5A4F42]">{repulsion}</span>
+                  <span className="text-xs text-[var(--ink-muted)]">Repulsion</span>
+                  <span className="text-xs text-[var(--ink-soft)]">{repulsion}</span>
                 </div>
                 <input
                   type="range"
@@ -1372,13 +1384,13 @@ export function GraphCanvas({
                   step={1}
                   value={repulsion}
                   onChange={(e) => metaMap.set('repulsion', Number(e.target.value))}
-                  className="w-full accent-[#8B4A52]"
+                  className="w-full accent-[var(--wine)]"
                 />
               </div>
               <div>
                 <div className="mb-1 flex items-center justify-between">
-                  <span className="text-xs text-[#8A7E6B]">Cluster spacing</span>
-                  <span className="text-xs text-[#5A4F42]">{pendingSpacing.toFixed(1)}</span>
+                  <span className="text-xs text-[var(--ink-muted)]">Cluster spacing</span>
+                  <span className="text-xs text-[var(--ink-soft)]">{pendingSpacing.toFixed(1)}</span>
                 </div>
                 <input
                   type="range"
@@ -1392,18 +1404,18 @@ export function GraphCanvas({
                     setClusterSpacing(v);
                     metaMap.set('clusterSpacing', v);
                   }}
-                  className="w-full accent-[#8B4A52]"
+                  className="w-full accent-[var(--wine)]"
                 />
               </div>
             </MenuSection>
 
             {/* Colours */}
             <MenuSection label="Colours" open={sectColours} onToggle={() => setSectColours((o) => !o)}>
-              <div className="text-xs text-[#5A4F42]">
+              <div className="text-xs text-[var(--ink-soft)]">
                 Override the colour for any tag. Reset to default by clicking ⟲.
               </div>
               {paletteTags.length === 0 ? (
-                <div className="text-xs text-[#8A7E6B]">No tags yet.</div>
+                <div className="text-xs text-[var(--ink-muted)]">No tags yet.</div>
               ) : (
                 <ul className="max-h-48 space-y-1 overflow-y-auto">
                   {paletteTags.map((t) => {
@@ -1415,16 +1427,16 @@ export function GraphCanvas({
                           type="color"
                           value={current}
                           onChange={(e) => coloursMap.set(t, e.target.value)}
-                          className="h-6 w-6 cursor-pointer rounded-[4px] border border-[#D4C7AE] bg-transparent p-0"
+                          className="h-6 w-6 cursor-pointer rounded-[4px] border border-[var(--rule)] bg-transparent p-0"
                         />
-                        <span className="flex-1 truncate text-xs text-[#2A241E]">#{t}</span>
+                        <span className="flex-1 truncate text-xs text-[var(--ink)]">#{t}</span>
                         {isOverride && (
                           <button
                             type="button"
                             onClick={() => coloursMap.delete(t)}
                             title="Reset"
                             aria-label={`Reset colour for #${t}`}
-                            className="rounded-[4px] px-1 text-xs text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]"
+                            className="rounded-[4px] px-1 text-xs text-[var(--ink-soft)] transition hover:bg-[var(--ink)]/10 hover:text-[var(--ink)]"
                           >
                             ⟲
                           </button>
@@ -1439,17 +1451,17 @@ export function GraphCanvas({
             {/* Groups */}
             <MenuSection label="Groups" open={sectGroups} onToggle={() => setSectGroups((o) => !o)}>
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-[#5A4F42]">Paint tags or notes a shared colour.</span>
+                <span className="text-xs text-[var(--ink-soft)]">Paint tags or notes a shared colour.</span>
                 <button
                   type="button"
                   onClick={createGroup}
-                  className="shrink-0 rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-0.5 text-xs text-[#5A4F42] transition hover:bg-[#EAE1CF] hover:text-[#2A241E]"
+                  className="shrink-0 rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-0.5 text-xs text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)]"
                 >
                   + New
                 </button>
               </div>
               {groups.length === 0 ? (
-                <div className="text-xs text-[#8A7E6B]">No groups yet.</div>
+                <div className="text-xs text-[var(--ink-muted)]">No groups yet.</div>
               ) : (
                 <ul className="max-h-60 space-y-2 overflow-y-auto">
                   {groups.map((g) => (
@@ -1465,14 +1477,14 @@ export function GraphCanvas({
               )}
             </MenuSection>
 
-            <div className="pointer-events-auto flex items-center gap-1 rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] p-1 shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
+            <div className="pointer-events-auto flex items-center gap-1 rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] p-1 shadow-[0_6px_18px_rgb(var(--ink-rgb) / 0.08)]">
               <ToolButton onClick={() => zoomBy(1 / 1.4)} label="−" title="Zoom in" />
               <ToolButton onClick={() => zoomBy(1.4)} label="＋" title="Zoom out" />
               <ToolButton onClick={fit} label="Fit" title="Recentre" />
               <ToolButton onClick={clearPins} label="Unpin" title="Clear all pins" />
             </div>
 
-            <div className="pointer-events-none text-xs text-[#5A4F42]">
+            <div className="pointer-events-none text-xs text-[var(--ink-soft)]">
               {status === 'loading' && 'Loading graph…'}
               {status === 'ready' &&
                 !linkMode &&
@@ -1484,10 +1496,10 @@ export function GraphCanvas({
                     </span>
                     <span
                       aria-hidden
-                      className="inline-block h-1.5 w-24 overflow-hidden rounded-full bg-[#D4C7AE]"
+                      className="inline-block h-1.5 w-24 overflow-hidden rounded-full bg-[var(--rule)]"
                     >
                       <span
-                        className="block h-full bg-[#D4A85A] transition-[width] duration-150 ease-linear"
+                        className="block h-full bg-[var(--candlelight)] transition-[width] duration-150 ease-linear"
                         style={{
                           width: `${Math.round(
                             (edgeProgress.loaded / edgeProgress.total) * 100,
@@ -1508,11 +1520,11 @@ export function GraphCanvas({
                   </>
                 )}
               {status === 'ready' && linkMode && (
-                <span className="font-medium text-[#8B4A52]">
+                <span className="font-medium text-[var(--wine)]">
                   Weave mode — drag from one node to another to forge a link
                 </span>
               )}
-              {status === 'error' && <span className="text-[#8B4A52]">Error: {error}</span>}
+              {status === 'error' && <span className="text-[var(--wine)]">Error: {error}</span>}
             </div>
           </div>
         )}
@@ -1533,16 +1545,16 @@ function MenuSection({
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <div className="pointer-events-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_6px_18px_rgba(42,36,30,0.08)]">
+    <div className="pointer-events-auto rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] shadow-[0_6px_18px_rgb(var(--ink-rgb) / 0.08)]">
       <button
         type="button"
         onClick={onToggle}
         className="flex w-full items-center justify-between px-3 py-2.5 text-left"
       >
-        <span className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
           {label}
         </span>
-        <span className="text-[#8A7E6B]" aria-hidden>
+        <span className="text-[var(--ink-muted)]" aria-hidden>
           {open ? '▾' : '▸'}
         </span>
       </button>
@@ -1591,20 +1603,20 @@ function GroupEditor({
   );
 
   return (
-    <li className="rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] p-2">
+    <li className="rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)] p-2">
       <div className="mb-1 flex items-center gap-2">
         <input
           type="color"
           value={group.color}
           onChange={(e) => onUpdate({ ...group, color: e.target.value })}
-          className="h-6 w-6 shrink-0 cursor-pointer rounded-[4px] border border-[#D4C7AE] bg-transparent p-0"
+          className="h-6 w-6 shrink-0 cursor-pointer rounded-[4px] border border-[var(--rule)] bg-transparent p-0"
         />
         <input
           type="text"
           value={group.name}
           onChange={(e) => onUpdate({ ...group, name: e.target.value })}
           placeholder="Group name"
-          className="min-w-0 flex-1 rounded-[6px] border border-[#D4C7AE] bg-[#FBF5E8] px-1.5 py-0.5 text-xs text-[#2A241E] outline-none focus:border-[#D4A85A]"
+          className="min-w-0 flex-1 rounded-[6px] border border-[var(--rule)] bg-[var(--vellum)] px-1.5 py-0.5 text-xs text-[var(--ink)] outline-none focus:border-[var(--candlelight)]"
         />
         <button
           type="button"
@@ -1613,7 +1625,7 @@ function GroupEditor({
           }}
           title="Delete group"
           aria-label={`Delete group ${group.name}`}
-          className="rounded-[4px] px-1 text-xs text-[#8B4A52] transition hover:bg-[#8B4A52]/10"
+          className="rounded-[4px] px-1 text-xs text-[var(--wine)] transition hover:bg-[var(--wine)]/10"
         >
           ×
         </button>
@@ -1624,14 +1636,14 @@ function GroupEditor({
         {group.tags.map((t) => (
           <span
             key={t}
-            className="inline-flex items-center gap-1 rounded-full border border-[#D4C7AE] bg-[#FBF5E8] px-2 text-[10px] text-[#2A241E]"
+            className="inline-flex items-center gap-1 rounded-full border border-[var(--rule)] bg-[var(--vellum)] px-2 text-[10px] text-[var(--ink)]"
           >
             #{t}
             <button
               type="button"
               onClick={() => removeTag(t)}
               aria-label={`Remove tag ${t}`}
-              className="text-[#5A4F42] hover:text-[#8B4A52]"
+              className="text-[var(--ink-soft)] hover:text-[var(--wine)]"
             >
               ×
             </button>
@@ -1646,7 +1658,7 @@ function GroupEditor({
               }
             }}
             defaultValue=""
-            className="rounded-[6px] border border-[#D4C7AE] bg-[#FBF5E8] px-1 py-0.5 text-[10px] text-[#5A4F42]"
+            className="rounded-[6px] border border-[var(--rule)] bg-[var(--vellum)] px-1 py-0.5 text-[10px] text-[var(--ink-soft)]"
           >
             <option value="">+ tag</option>
             {availableTags.map((t) => (
@@ -1666,14 +1678,14 @@ function GroupEditor({
             <span
               key={p}
               title={p}
-              className="inline-flex items-center gap-1 rounded-full border border-[#D4C7AE] bg-[#FBF5E8] px-2 text-[10px] text-[#2A241E]"
+              className="inline-flex items-center gap-1 rounded-full border border-[var(--rule)] bg-[var(--vellum)] px-2 text-[10px] text-[var(--ink)]"
             >
               {label}
               <button
                 type="button"
                 onClick={() => removeNote(p)}
                 aria-label={`Remove note ${label}`}
-                className="text-[#5A4F42] hover:text-[#8B4A52]"
+                className="text-[var(--ink-soft)] hover:text-[var(--wine)]"
               >
                 ×
               </button>
@@ -1688,7 +1700,7 @@ function GroupEditor({
             if (!rect) return;
             setNotePickerAnchor({ left: rect.right + 6, top: rect.top });
           }}
-          className="rounded-[6px] border border-[#D4C7AE] bg-[#FBF5E8] px-1.5 py-0.5 text-[10px] text-[#5A4F42] transition hover:bg-[#EAE1CF]"
+          className="rounded-[6px] border border-[var(--rule)] bg-[var(--vellum)] px-1.5 py-0.5 text-[10px] text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)]"
         >
           + note
         </button>
@@ -1729,8 +1741,8 @@ function ToolButton({
       className={
         'rounded-[6px] px-2 py-1 text-xs font-medium transition ' +
         (active
-          ? 'bg-[#8B4A52]/15 text-[#8B4A52] hover:bg-[#8B4A52]/25'
-          : 'text-[#5A4F42] hover:bg-[#D4A85A]/15 hover:text-[#2A241E]')
+          ? 'bg-[var(--wine)]/15 text-[var(--wine)] hover:bg-[var(--wine)]/25'
+          : 'text-[var(--ink-soft)] hover:bg-[var(--candlelight)]/15 hover:text-[var(--ink)]')
       }
     >
       {label}
@@ -1799,7 +1811,7 @@ function GraphCursors({
                   height="14"
                   viewBox="0 0 14 14"
                   fill={r.color}
-                  stroke="#FBF5E8"
+                  stroke="var(--vellum)"
                   strokeWidth="1"
                 >
                   <path d="M1 1 L1 11 L4 8 L6.5 13 L8.5 12.2 L6 7.3 L11 7.3 Z" />
@@ -1809,12 +1821,12 @@ function GraphCursors({
                     <img
                       src={avatarUrl}
                       alt=""
-                      className="h-10 w-10 rounded-full border-2 object-cover shadow-[0_2px_6px_rgba(42,36,30,0.3)]"
+                      className="h-10 w-10 rounded-full border-2 object-cover shadow-[0_2px_6px_rgb(var(--ink-rgb) / 0.3)]"
                       style={{ borderColor: r.color }}
                     />
                   )}
                   <span
-                    className="whitespace-nowrap rounded-[4px] px-1 text-[10px] font-medium text-[#2A241E]"
+                    className="whitespace-nowrap rounded-[4px] px-1 text-[10px] font-medium text-[var(--ink)]"
                     style={{ backgroundColor: r.color }}
                   >
                     {r.name}

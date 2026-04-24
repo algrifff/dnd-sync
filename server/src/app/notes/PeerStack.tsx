@@ -69,7 +69,7 @@ export function PeerStack({ notePath }: { notePath: string }): React.JSX.Element
       })}
       {extra > 0 && (
         <span
-          className="flex h-4 items-center justify-center rounded-full border-2 border-[#D4C7AE] bg-[#FBF5E8] px-1 text-[8px] font-semibold text-[#5A4F42]"
+          className="flex h-4 items-center justify-center rounded-full border-2 border-[var(--rule)] bg-[var(--vellum)] px-1 text-[8px] font-semibold text-[var(--ink-soft)]"
           style={{ marginLeft: -6, zIndex: 0 }}
         >
           +{extra}

@@ -136,10 +136,10 @@ export function WorldsSidebar({
     <>
       <aside
         aria-label="Worlds"
-        className="hidden h-full w-[56px] shrink-0 flex-col items-center gap-1.5 bg-[#2A241E] py-2 md:flex"
+        className="hidden h-full w-[56px] shrink-0 flex-col items-center gap-1.5 bg-[var(--shadow)] py-2 md:flex"
       >
         {worldsWithLiveActive == null ? (
-          <div className="h-10 w-10 animate-pulse rounded-full bg-[#5A4F42]/40" />
+          <div className="h-10 w-10 animate-pulse rounded-full bg-[var(--ink-soft)]/40" />
         ) : (
           worldsWithLiveActive.map((w) => (
             <WorldIcon
@@ -152,13 +152,13 @@ export function WorldsSidebar({
             />
           ))
         )}
-        <div className="mt-1 h-px w-8 bg-[#5A4F42]/40" aria-hidden />
+        <div className="mt-1 h-px w-8 bg-[var(--ink-soft)]/40" aria-hidden />
         <button
           type="button"
           onClick={() => setCreating(true)}
           title="New world"
           aria-label="New world"
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-[#5A4F42]/40 text-[#F4EDE0] transition hover:rounded-[14px] hover:bg-[#7B8A5F] hover:text-[#F4EDE0]"
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--ink-soft)]/40 text-[var(--parchment)] transition hover:rounded-[14px] hover:bg-[var(--moss)] hover:text-[var(--parchment)]"
         >
           <Plus size={18} aria-hidden />
         </button>
@@ -206,7 +206,7 @@ function WorldIcon({
       <span
         aria-hidden
         className={
-          'absolute -left-1.5 top-1/2 -translate-y-1/2 rounded-r-full bg-[#F4EDE0] transition-all ' +
+          'absolute -left-1.5 top-1/2 -translate-y-1/2 rounded-r-full bg-[var(--parchment)] transition-all ' +
           (world.isActive ? 'h-8 w-1' : 'h-0 w-0.5')
         }
       />
@@ -217,12 +217,12 @@ function WorldIcon({
         aria-label={world.name}
         aria-pressed={world.isActive}
         className={
-          'flex h-10 w-10 items-center justify-center overflow-hidden text-sm font-semibold text-[#F4EDE0] transition-all ' +
+          'flex h-10 w-10 items-center justify-center overflow-hidden text-sm font-semibold text-[var(--parchment)] transition-all ' +
           (world.isActive
-            ? 'rounded-[14px] ring-2 ring-[#F4EDE0]/20'
+            ? 'rounded-[14px] ring-2 ring-[var(--parchment)]/20'
             : 'rounded-full hover:rounded-[14px]')
         }
-        style={{ backgroundColor: hasIcon ? '#2A241E' : bg }}
+        style={{ backgroundColor: hasIcon ? 'var(--ink)' : bg }}
       >
         {hasIcon ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -244,7 +244,7 @@ function WorldIcon({
           }}
           title={`Edit ${world.name}`}
           aria-label={`Edit ${world.name}`}
-          className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-[#2A241E] bg-[#F4EDE0] text-[#2A241E] opacity-0 transition hover:scale-110 group-hover:opacity-100"
+          className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-[var(--ink)] bg-[var(--parchment)] text-[var(--ink)] opacity-0 transition hover:scale-110 group-hover:opacity-100"
         >
           <Pencil size={9} aria-hidden />
         </button>
@@ -313,28 +313,28 @@ function NewWorldDialog({
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[#2A241E]/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--ink)]/50 p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <form
         onSubmit={submit}
-        className="w-full max-w-sm rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-4 shadow-[0_16px_48px_rgba(42,36,30,0.3)]"
+        className="w-full max-w-sm rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-4 shadow-[0_16px_48px_rgb(var(--ink-rgb) / 0.3)]"
       >
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-[#2A241E]">New world</h3>
+          <h3 className="text-sm font-semibold text-[var(--ink)]">New world</h3>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded-[6px] p-1 text-[#5A4F42] transition hover:bg-[#F4EDE0]"
+            className="rounded-[6px] p-1 text-[var(--ink-soft)] transition hover:bg-[var(--parchment)]"
           >
             <X size={14} aria-hidden />
           </button>
         </div>
         <label className="mb-3 block">
-          <span className="mb-1 block text-xs font-medium text-[#5A4F42]">
+          <span className="mb-1 block text-xs font-medium text-[var(--ink-soft)]">
             Name
           </span>
           <input
@@ -344,27 +344,27 @@ function NewWorldDialog({
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. The Crownfall"
             maxLength={80}
-            className="w-full rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1.5 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
+            className="w-full rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-1.5 text-sm text-[var(--ink)] outline-none focus:border-[var(--candlelight)]"
           />
         </label>
-        <p className="mb-3 text-[11px] text-[#5A4F42]">
+        <p className="mb-3 text-[11px] text-[var(--ink-soft)]">
           You&rsquo;ll be the first admin. A starter folder skeleton
           (Campaigns / Assets / World) gets seeded automatically so you can
           start creating notes right away.
         </p>
-        {error && <p className="mb-3 text-xs text-[#8B4A52]">{error}</p>}
+        {error && <p className="mb-3 text-xs text-[var(--wine)]">{error}</p>}
         <div className="flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-[6px] px-3 py-1.5 text-xs font-medium text-[#5A4F42] transition hover:text-[#2A241E]"
+            className="rounded-[6px] px-3 py-1.5 text-xs font-medium text-[var(--ink-soft)] transition hover:text-[var(--ink)]"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={pending || !name.trim()}
-            className="rounded-[6px] bg-[#2A241E] px-3 py-1.5 text-xs font-medium text-[#F4EDE0] transition hover:bg-[#3A342E] disabled:opacity-50"
+            className="rounded-[6px] bg-[var(--ink)] px-3 py-1.5 text-xs font-medium text-[var(--parchment)] transition hover:bg-[var(--vellum)] disabled:opacity-50"
           >
             {pending ? 'Creating…' : 'Create'}
           </button>
@@ -425,8 +425,8 @@ function ShareLinkButton({
       className={
         'flex h-10 w-10 items-center justify-center rounded-full transition-all ' +
         (copied
-          ? 'bg-[#7B8A5F] text-[#F4EDE0] ring-2 ring-[#7B8A5F]/50'
-          : 'bg-[#5A4F42]/40 text-[#F4EDE0] hover:rounded-[14px] hover:bg-[#7B8A5F]')
+          ? 'bg-[var(--moss)] text-[var(--parchment)] ring-2 ring-[var(--moss)]/50'
+          : 'bg-[var(--ink-soft)]/40 text-[var(--parchment)] hover:rounded-[14px] hover:bg-[var(--moss)]')
       }
     >
       {copied ? <Check size={16} aria-hidden /> : <Link2 size={16} aria-hidden />}
@@ -453,7 +453,7 @@ function ProfileAvatar({
       href="/settings/profile"
       title={`Profile · ${displayName}`}
       aria-label="Profile settings"
-      className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full transition-all hover:rounded-[14px] hover:ring-2 hover:ring-[#F4EDE0]/20"
+      className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full transition-all hover:rounded-[14px] hover:ring-2 hover:ring-[var(--parchment)]/20"
     >
       {hasAvatar ? (
         <img
@@ -463,7 +463,7 @@ function ProfileAvatar({
         />
       ) : (
         <span
-          className="flex h-full w-full items-center justify-center text-sm font-semibold text-[#F4EDE0]"
+          className="flex h-full w-full items-center justify-center text-sm font-semibold text-[var(--parchment)]"
           style={{ backgroundColor: accentColor }}
         >
           {initial}
@@ -484,11 +484,11 @@ function initialsOf(name: string): string {
  *  gets the same colour chip without persisting one on the row. */
 function colorFor(id: string): string {
   const palette = [
-    '#8B4A52', // wine
-    '#7B8A5F', // moss
-    '#6B7F8E', // sage
-    '#D4A85A', // candlelight
-    '#B5572A', // embers
+    'var(--wine)', // wine
+    'var(--moss)', // moss
+    'var(--sage)', // sage
+    'var(--candlelight)', // candlelight
+    'var(--embers)', // embers
     '#6A5D8B', // wisteria
     '#4A6B7B', // deep water
     '#8E6E53', // chestnut

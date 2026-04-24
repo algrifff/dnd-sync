@@ -16,16 +16,16 @@ export default function AdminUsersPage(): ReactElement {
     <div className="space-y-6">
       <div>
         <h1
-          className="mb-1 text-3xl font-bold text-[#2A241E]"
+          className="mb-1 text-3xl font-bold text-[var(--ink)]"
           style={{ fontFamily: '"Fraunces", Georgia, serif' }}
         >
           Users
         </h1>
-        <p className="text-sm text-[#5A4F42]">
+        <p className="text-sm text-[var(--ink-soft)]">
           Create accounts and manage who can access this server.
         </p>
       </div>
-      <p className="text-sm text-[#5A4F42]">
+      <p className="text-sm text-[var(--ink-soft)]">
         Create accounts for your players and DMs. Share the generated
         password out-of-band — it is displayed only once.
       </p>
@@ -54,9 +54,9 @@ function UserTable({
   storageMap: Map<string, UserStorageStats>;
 }): ReactElement {
   return (
-    <section className="overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8]">
+    <section className="overflow-hidden rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)]">
       <table className="w-full text-left text-sm">
-        <thead className="bg-[#EAE1CF] text-xs uppercase tracking-wide text-[#5A4F42]">
+        <thead className="bg-[var(--parchment-sunk)] text-xs uppercase tracking-wide text-[var(--ink-soft)]">
           <tr>
             <th className="px-4 py-3">User</th>
             <th className="px-4 py-3">Role</th>
@@ -69,7 +69,7 @@ function UserTable({
         <tbody>
           {users.length === 0 && (
             <tr>
-              <td colSpan={6} className="px-4 py-6 text-center text-[#5A4F42]">
+              <td colSpan={6} className="px-4 py-6 text-center text-[var(--ink-soft)]">
                 No users yet.
               </td>
             </tr>
@@ -77,7 +77,7 @@ function UserTable({
           {users.map((u) => {
             const stats = storageMap.get(u.id);
             return (
-              <tr key={u.id} className="border-t border-[#D4C7AE]/50">
+              <tr key={u.id} className="border-t border-[var(--rule)]/50">
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
                     <span
@@ -86,23 +86,23 @@ function UserTable({
                       style={{ backgroundColor: u.accentColor }}
                     />
                     <span className="font-medium">{u.displayName}</span>
-                    <span className="text-[#5A4F42]">({u.username})</span>
+                    <span className="text-[var(--ink-soft)]">({u.username})</span>
                   </div>
                 </td>
                 <td className="px-4 py-3">
                   <RoleSelect userId={u.id} initialRole={u.role} />
                 </td>
-                <td className="px-4 py-3 text-[#5A4F42]">
+                <td className="px-4 py-3 text-[var(--ink-soft)]">
                   {stats ? (
                     <span title={`Notes: ${formatBytes(stats.notesBytes)} · Assets: ${formatBytes(stats.assetsBytes)} · Avatar: ${formatBytes(stats.avatarBytes)}`}>
                       {formatBytes(stats.totalBytes)}
                     </span>
                   ) : '—'}
                 </td>
-                <td className="px-4 py-3 text-[#5A4F42]">
+                <td className="px-4 py-3 text-[var(--ink-soft)]">
                   {new Date(u.createdAt).toISOString().slice(0, 10)}
                 </td>
-                <td className="px-4 py-3 text-[#5A4F42]">
+                <td className="px-4 py-3 text-[var(--ink-soft)]">
                   {u.lastLoginAt
                     ? new Date(u.lastLoginAt).toISOString().slice(0, 10)
                     : '—'}

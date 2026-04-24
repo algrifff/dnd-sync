@@ -165,7 +165,7 @@ export function NoteWorkspace({
       <DrawingOverlay provider={provider} user={{ userId: user.userId }} />
 
       {authFailed && (
-        <p className="mt-4 rounded-[8px] border border-[#8B4A52]/40 bg-[#8B4A52]/10 px-3 py-2 text-sm text-[#8B4A52]">
+        <p className="mt-4 rounded-[8px] border border-[var(--wine)]/40 bg-[var(--wine)]/10 px-3 py-2 text-sm text-[var(--wine)]">
           Live collaboration couldn&apos;t authenticate. Sign out and back
           in, then refresh.
         </p>
@@ -180,10 +180,10 @@ function StatusDot({
   state: 'connecting' | 'connected' | 'disconnected' | 'error';
 }): React.JSX.Element {
   const map = {
-    connecting: { color: '#D4A85A', title: 'Connecting live sync…' },
-    connected: { color: '#7B8A5F', title: 'Live' },
-    disconnected: { color: '#8B4A52', title: 'Disconnected — reconnecting…' },
-    error: { color: '#8B4A52', title: 'Auth failed' },
+    connecting: { color: 'var(--candlelight)', title: 'Connecting live sync…' },
+    connected: { color: 'var(--moss)', title: 'Live' },
+    disconnected: { color: 'var(--wine)', title: 'Disconnected — reconnecting…' },
+    error: { color: 'var(--wine)', title: 'Auth failed' },
   } as const;
   const { color, title } = map[state];
   return (

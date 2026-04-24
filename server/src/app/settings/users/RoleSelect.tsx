@@ -36,7 +36,7 @@ export function RoleSelect({
         value={role}
         disabled={pending}
         onChange={(e) => onChange(e.target.value as UserRole)}
-        className="rounded-full border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-0.5 text-xs capitalize disabled:opacity-60"
+        className="rounded-full border border-[var(--rule)] bg-[var(--parchment)] px-2 py-0.5 text-xs capitalize disabled:opacity-60"
       >
         {ROLES.map((r) => (
           <option key={r} value={r}>
@@ -44,7 +44,7 @@ export function RoleSelect({
           </option>
         ))}
       </select>
-      {error && <span className="text-xs text-[#8B4A52]">{error}</span>}
+      {error && <span className="text-xs text-[var(--wine)]">{error}</span>}
     </div>
   );
 }

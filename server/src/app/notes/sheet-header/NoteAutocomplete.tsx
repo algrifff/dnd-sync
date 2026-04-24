@@ -84,7 +84,7 @@ export function NoteAutocomplete({
     return (
       <span className={className}>
         {display || (
-          <span className="text-[#8A7E6B]">{placeholder ?? '—'}</span>
+          <span className="text-[var(--ink-muted)]">{placeholder ?? '—'}</span>
         )}
       </span>
     );
@@ -97,10 +97,10 @@ export function NoteAutocomplete({
           type="button"
           onClick={() => setEditing(true)}
           aria-label={ariaLabel ?? 'Edit link'}
-          className={`rounded text-left hover:outline hover:outline-1 hover:outline-offset-2 hover:outline-[#D4C7AE] ${className ?? ''}`}
+          className={`rounded text-left hover:outline hover:outline-1 hover:outline-offset-2 hover:outline-[var(--rule)] ${className ?? ''}`}
         >
           {display || (
-            <span className="text-[#8A7E6B]">
+            <span className="text-[var(--ink-muted)]">
               {placeholder ?? 'Click to link…'}
             </span>
           )}
@@ -110,7 +110,7 @@ export function NoteAutocomplete({
             type="button"
             onClick={() => onCommit(null)}
             aria-label="Remove link"
-            className="text-[#8A7E6B] hover:text-[#8B4A52]"
+            className="text-[var(--ink-muted)] hover:text-[var(--wine)]"
           >
             <X size={11} />
           </button>
@@ -163,12 +163,12 @@ export function NoteAutocomplete({
         }}
         placeholder={placeholder ?? 'search or paste a path…'}
         aria-label={ariaLabel ?? 'Link to note'}
-        className="w-56 rounded border border-[#D4C7AE] bg-white px-2 py-1 text-[11px] outline-none focus:border-[#2A241E]"
+        className="w-56 rounded border border-[var(--rule)] bg-white px-2 py-1 text-[11px] outline-none focus:border-[var(--ink)]"
       />
       {hits.length > 0 && (
         <ul
           role="listbox"
-          className="absolute left-0 top-full z-20 mt-1 max-h-60 w-64 overflow-auto rounded-[8px] border border-[#D4C7AE] bg-white shadow-lg"
+          className="absolute left-0 top-full z-20 mt-1 max-h-60 w-64 overflow-auto rounded-[8px] border border-[var(--rule)] bg-white shadow-lg"
         >
           {hits.map((h, i) => (
             <li key={h.path}>
@@ -184,12 +184,12 @@ export function NoteAutocomplete({
                 onMouseEnter={() => setHighlight(i)}
                 className={`block w-full px-2 py-1 text-left text-[11px] ${
                   i === highlight
-                    ? 'bg-[#EAE1CF] text-[#2A241E]'
-                    : 'text-[#2A241E] hover:bg-[#F4EDE0]'
+                    ? 'bg-[var(--parchment-sunk)] text-[var(--ink)]'
+                    : 'text-[var(--ink)] hover:bg-[var(--parchment)]'
                 }`}
               >
                 <div className="truncate">{h.name}</div>
-                <div className="truncate font-mono text-[10px] text-[#8A7E6B]">
+                <div className="truncate font-mono text-[10px] text-[var(--ink-muted)]">
                   {h.path}
                 </div>
               </button>

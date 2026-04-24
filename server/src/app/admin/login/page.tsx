@@ -37,10 +37,10 @@ export default function AdminLoginPage(): React.JSX.Element {
     <div className="max-w-sm">
       <form
         onSubmit={submit}
-        className="rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-6 shadow-sm"
+        className="rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-6 shadow-sm"
       >
         <label className="mb-4 block">
-          <span className="mb-1.5 block text-xs font-medium text-[#5A4F42]">
+          <span className="mb-1.5 block text-xs font-medium text-[var(--ink-soft)]">
             Admin token
           </span>
           <input
@@ -49,14 +49,14 @@ export default function AdminLoginPage(): React.JSX.Element {
             onChange={(e) => setToken(e.target.value)}
             placeholder="ADMIN_TOKEN"
             autoComplete="current-password"
-            className="w-full rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] px-3 py-2 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
+            className="w-full rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--candlelight)]"
           />
         </label>
-        {error && <p className="mb-3 text-xs text-[#8B4A52]">{error}</p>}
+        {error && <p className="mb-3 text-xs text-[var(--wine)]">{error}</p>}
         <button
           type="submit"
           disabled={pending || !token.trim()}
-          className="w-full rounded-[8px] bg-[#2A241E] py-2 text-sm font-medium text-[#F4EDE0] transition hover:bg-[#3A342E] disabled:opacity-50"
+          className="w-full rounded-[8px] bg-[var(--ink)] py-2 text-sm font-medium text-[var(--parchment)] transition hover:bg-[var(--vellum)] disabled:opacity-50"
         >
           {pending ? 'Signing in…' : 'Sign in'}
         </button>

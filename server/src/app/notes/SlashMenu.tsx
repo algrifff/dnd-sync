@@ -433,11 +433,11 @@ export function SlashMenu({
         ref={popoverRef}
         role="listbox"
         aria-label="Slash commands"
-        className="fixed z-50 w-72 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_12px_32px_rgba(42,36,30,0.18)]"
+        className="fixed z-50 w-72 overflow-hidden rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] shadow-[0_12px_32px_rgb(var(--ink-rgb) / 0.18)]"
         style={{ left: menuLeft, top: menuTop }}
       >
         {options.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-[#5A4F42]">No matches</div>
+          <div className="px-3 py-2 text-xs text-[var(--ink-soft)]">No matches</div>
         ) : (
           <ul className="max-h-80 overflow-y-auto py-1">
             {options.map((cmd, i) => (
@@ -454,16 +454,16 @@ export function SlashMenu({
                   className={
                     'flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition ' +
                     (i === highlight
-                      ? 'bg-[#D4A85A]/20 text-[#2A241E]'
-                      : 'text-[#2A241E] hover:bg-[#D4A85A]/10')
+                      ? 'bg-[var(--candlelight)]/20 text-[var(--ink)]'
+                      : 'text-[var(--ink)] hover:bg-[var(--candlelight)]/10')
                   }
                 >
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] text-[#5A4F42]">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] text-[var(--ink-soft)]">
                     {cmd.icon}
                   </span>
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate font-medium">{cmd.label}</span>
-                    <span className="truncate text-xs text-[#5A4F42]">{cmd.hint}</span>
+                    <span className="truncate text-xs text-[var(--ink-soft)]">{cmd.hint}</span>
                   </span>
                 </button>
               </li>

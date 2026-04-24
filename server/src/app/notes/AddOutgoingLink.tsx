@@ -58,7 +58,7 @@ export function AddOutgoingLink({
         disabled={loading}
         title="Add a note this note links to"
         aria-label="Add a note this note links to"
-        className="rounded-[4px] p-0.5 text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E] disabled:opacity-40"
+        className="rounded-[4px] p-0.5 text-[var(--ink-soft)] transition hover:bg-[var(--ink)]/10 hover:text-[var(--ink)] disabled:opacity-40"
       >
         <Plus size={12} aria-hidden />
       </button>

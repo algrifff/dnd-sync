@@ -22,10 +22,10 @@ export function DangerZone(): React.JSX.Element {
   }
 
   return (
-    <section className="overflow-hidden rounded-[12px] border border-[#8B4A52]/40 bg-[#FBF5E8]">
-      <div className="border-b border-[#8B4A52]/20 bg-[#8B4A52]/5 px-4 py-3">
+    <section className="overflow-hidden rounded-[12px] border border-[var(--wine)]/40 bg-[var(--vellum)]">
+      <div className="border-b border-[var(--wine)]/20 bg-[var(--wine)]/5 px-4 py-3">
         <h2
-          className="text-sm font-semibold text-[#8B4A52]"
+          className="text-sm font-semibold text-[var(--wine)]"
           style={{ fontFamily: '"Fraunces", Georgia, serif' }}
         >
           Danger Zone
@@ -33,8 +33,8 @@ export function DangerZone(): React.JSX.Element {
       </div>
       <div className="flex items-center justify-between px-4 py-4">
         <div>
-          <p className="text-sm font-medium text-[#2A241E]">Wipe database</p>
-          <p className="mt-0.5 text-xs text-[#5A4F42]">
+          <p className="text-sm font-medium text-[var(--ink)]">Wipe database</p>
+          <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
             Deletes all users, notes, assets, and worlds. Admin re-seeds on next restart.
           </p>
         </div>
@@ -42,7 +42,7 @@ export function DangerZone(): React.JSX.Element {
           type="button"
           disabled={pending}
           onClick={handleClear}
-          className="rounded-[6px] border border-[#8B4A52] bg-[#8B4A52] px-3 py-1.5 text-xs font-medium text-[#FBF5E8] hover:bg-[#7a3f47] disabled:opacity-60"
+          className="rounded-[6px] border border-[var(--wine)] bg-[var(--wine)] px-3 py-1.5 text-xs font-medium text-[var(--vellum)] hover:bg-[#7a3f47] disabled:opacity-60"
         >
           {pending ? 'Wiping…' : 'Wipe database'}
         </button>

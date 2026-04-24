@@ -127,8 +127,8 @@ export function CharacterHeader({
               <InlineText
                 value={name}
                 readOnly={!canEdit}
-                className={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
-                inputClassName={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
+                className={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[var(--ink)]`}
+                inputClassName={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[var(--ink)]`}
                 onCommit={(next) => {
                   // Schema requires a non-empty name; a blank clear
                   // would otherwise bounce the whole PATCH as invalid.
@@ -142,7 +142,7 @@ export function CharacterHeader({
 
             {/* Race / class / background — serif, see-through buttons so
              *  they read as part of the title block, not as pills. */}
-            <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1 font-serif text-base text-[#5A4F42]">
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1 font-serif text-base text-[var(--ink-soft)]">
               <InlineText
                 value={raceName ?? ''}
                 readOnly={!canEdit}
@@ -154,7 +154,7 @@ export function CharacterHeader({
                 }
                 ariaLabel="Race"
               />
-              <span aria-hidden className="text-[#8A7E6B]">
+              <span aria-hidden className="text-[var(--ink-muted)]">
                 ·
               </span>
               <InlineText
@@ -168,7 +168,7 @@ export function CharacterHeader({
                 }
                 ariaLabel="Classes"
               />
-              <span aria-hidden className="text-[#8A7E6B]">
+              <span aria-hidden className="text-[var(--ink-muted)]">
                 ·
               </span>
               <InlineText
@@ -193,17 +193,17 @@ export function CharacterHeader({
                   value={hp.current}
                   onCommit={setHpCurrent}
                   readOnly={!canEdit}
-                  className="font-serif text-lg font-semibold text-[#2A241E]"
-                  inputClassName="font-serif text-lg font-semibold w-12 text-[#2A241E]"
+                  className="font-serif text-lg font-semibold text-[var(--ink)]"
+                  inputClassName="font-serif text-lg font-semibold w-12 text-[var(--ink)]"
                   ariaLabel="HP current"
                 />
-                <span className="text-xs text-[#5A4F42]">/</span>
+                <span className="text-xs text-[var(--ink-soft)]">/</span>
                 <InlineNumber
                   value={hp.max}
                   onCommit={setHpMax}
                   readOnly={!canEdit}
-                  className="font-serif text-lg font-semibold text-[#2A241E]"
-                  inputClassName="font-serif text-lg font-semibold w-12 text-[#2A241E]"
+                  className="font-serif text-lg font-semibold text-[var(--ink)]"
+                  inputClassName="font-serif text-lg font-semibold w-12 text-[var(--ink)]"
                   ariaLabel="HP max"
                 />
               </StatTile>
@@ -229,8 +229,8 @@ export function CharacterHeader({
                         })
                   }
                   format={(n) => (n == null ? '—' : formatModifier(n))}
-                  className="font-serif text-lg font-semibold text-[#2A241E]"
-                  inputClassName="font-serif text-lg font-semibold w-12 text-[#2A241E]"
+                  className="font-serif text-lg font-semibold text-[var(--ink)]"
+                  inputClassName="font-serif text-lg font-semibold w-12 text-[var(--ink)]"
                   ariaLabel="Initiative"
                 />
               </StatTile>
@@ -238,7 +238,7 @@ export function CharacterHeader({
           </div>
         </div>
 
-        <div className="mt-4 border-t border-[#D4C7AE] pt-4">
+        <div className="mt-4 border-t border-[var(--rule)] pt-4">
           <AbilityScoreStrip
             scores={scores}
             readOnly={!canEdit}
@@ -273,19 +273,19 @@ function Portrait({
     // object-contain so the portrait is never cropped
     <img src={url} alt="" className="h-full w-full object-contain" />
   ) : (
-    <div className="flex h-full w-full items-center justify-center text-5xl font-semibold text-[#5A4F42]">
+    <div className="flex h-full w-full items-center justify-center text-5xl font-semibold text-[var(--ink-soft)]">
       {displayName.slice(0, 1).toUpperCase() || <User size={48} />}
     </div>
   );
   const cls =
-    'h-44 w-44 shrink-0 overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#EAE1CF]';
+    'h-44 w-44 shrink-0 overflow-hidden rounded-[12px] border border-[var(--rule)] bg-[var(--parchment-sunk)]';
   if (!canEdit) return <div className={cls}>{inner}</div>;
   return (
     <button
       type="button"
       onClick={onOpen}
       aria-label="Change portrait"
-      className={`${cls} relative hover:border-[#2A241E]`}
+      className={`${cls} relative hover:border-[var(--ink)]`}
     >
       {inner}
     </button>

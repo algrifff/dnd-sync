@@ -53,7 +53,7 @@ export function TableToolbar({
 
   return (
     <div
-      className="fixed z-20 flex items-center gap-1 rounded-[8px] border border-[#D4C7AE] bg-[#FBF5E8] px-1 py-0.5 shadow-[0_6px_18px_rgba(42,36,30,0.18)]"
+      className="fixed z-20 flex items-center gap-1 rounded-[8px] border border-[var(--rule)] bg-[var(--vellum)] px-1 py-0.5 shadow-[0_6px_18px_rgb(var(--ink-rgb) / 0.18)]"
       style={{ left: anchor.left, top: anchor.top - 34 }}
     >
       <TbButton
@@ -108,8 +108,8 @@ function TbButton({
 }): React.JSX.Element {
   const colour =
     tone === 'danger'
-      ? 'text-[#8B4A52] hover:bg-[#8B4A52]/10'
-      : 'text-[#5A4F42] hover:bg-[#D4A85A]/15 hover:text-[#2A241E]';
+      ? 'text-[var(--wine)] hover:bg-[var(--wine)]/10'
+      : 'text-[var(--ink-soft)] hover:bg-[var(--candlelight)]/15 hover:text-[var(--ink)]';
   return (
     <button
       type="button"
@@ -128,7 +128,7 @@ function TbButton({
 }
 
 function TbDivider(): React.JSX.Element {
-  return <span aria-hidden className="mx-0.5 h-4 w-px bg-[#D4C7AE]" />;
+  return <span aria-hidden className="mx-0.5 h-4 w-px bg-[var(--rule)]" />;
 }
 
 function computeAnchor(editor: Editor): Anchor | null {

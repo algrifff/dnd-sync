@@ -19,7 +19,7 @@ export default async function SignupPage(): Promise<React.ReactElement> {
     .map((c) => `${c.name}=${c.value}`)
     .join('; ');
   const session = readSession(cookieHeader, false);
-  if (session) redirect('/');
+  if (session) redirect('/home');
 
   return (
     <AuthShell
@@ -30,7 +30,7 @@ export default async function SignupPage(): Promise<React.ReactElement> {
           Already have an account?{' '}
           <Link
             href="/login"
-            className="text-[#2A241E] underline decoration-[#D4A85A] underline-offset-4 hover:decoration-[#2A241E]"
+            className="text-[var(--ink)] underline decoration-[var(--candlelight)] underline-offset-4 hover:decoration-[var(--ink)]"
           >
             Sign in
           </Link>

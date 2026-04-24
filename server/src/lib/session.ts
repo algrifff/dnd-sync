@@ -38,6 +38,8 @@ export type UserRole = 'admin' | 'editor' | 'viewer';
 
 export type CursorMode = 'color' | 'image';
 
+export type Theme = 'day' | 'night';
+
 export type Session = {
   id: string;
   userId: string;
@@ -49,6 +51,7 @@ export type Session = {
   csrfToken: string;
   expiresAt: number;
   cursorMode: CursorMode;
+  theme: Theme;
   // Monotonic counter bumped each time the avatar blob changes. Used
   // as a cache-buster when loading /api/users/:id/avatar?v=<n> and
   // also as a "has avatar?" flag (0 = no avatar uploaded).
@@ -101,6 +104,11 @@ export function buildSessionCookies(session: Session): CookiePair[] {
   return [
     { name: COOKIE_SID, value: session.id, maxAge: maxAgeSeconds },
     { name: COOKIE_CSRF, value: session.csrfToken, maxAge: maxAgeSeconds },
+    // Mirror the user's theme preference into a readable cookie so the
+    // root layout can server-render `<html data-theme>` without a session
+    // lookup. 1 year lifetime — persists across logouts so the login page
+    // honours the last theme the user chose.
+    { name: THEME_COOKIE, value: session.theme, maxAge: 60 * 60 * 24 * 365 },
   ];
 }
 
@@ -108,7 +116,15 @@ export function buildClearSessionCookies(): CookiePair[] {
   return [
     { name: COOKIE_SID, value: '', maxAge: 0 },
     { name: COOKIE_CSRF, value: '', maxAge: 0 },
+    // Keep the theme cookie — it's a UI preference, not an auth credential,
+    // and the login page should still render in the chosen theme.
   ];
+}
+
+export const THEME_COOKIE = 'pp_theme';
+
+export function buildThemeCookie(theme: Theme): CookiePair {
+  return { name: THEME_COOKIE, value: theme, maxAge: 60 * 60 * 24 * 365 };
 }
 
 /** Serialize a cookie pair to a Set-Cookie header value with our
@@ -160,6 +176,7 @@ type SessionJoinRow = {
   cursor_mode: string;
   avatar_updated_at: number;
   active_character_path: string | null;
+  theme: string;
 };
 
 /** Create a new session row and return the full Session shape, including
@@ -275,7 +292,7 @@ function loadSessionRowById(id: string): SessionJoinRow | null {
         `SELECT s.id, s.user_id, s.current_group_id, s.csrf_token, s.expires_at,
                 u.username, u.display_name, u.accent_color,
                 u.cursor_mode, u.avatar_updated_at,
-                u.active_character_path,
+                u.active_character_path, u.theme,
                 gm.role AS role
            FROM sessions s
            JOIN users u ON u.id = s.user_id
@@ -299,6 +316,7 @@ function shapeSession(row: SessionJoinRow): Session {
     csrfToken: row.csrf_token,
     expiresAt: row.expires_at,
     cursorMode: (row.cursor_mode === 'image' ? 'image' : 'color') as CursorMode,
+    theme: (row.theme === 'night' ? 'night' : 'day') as Theme,
     avatarVersion: row.avatar_updated_at,
     activeCharacterPath: row.active_character_path,
   };

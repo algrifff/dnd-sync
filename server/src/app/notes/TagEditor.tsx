@@ -192,7 +192,7 @@ export function TagEditor({
 
   return (
     <div className="relative flex flex-wrap items-center gap-1.5">
-      <Tag size={14} className="text-[#5A4F42]" aria-hidden />
+      <Tag size={14} className="text-[var(--ink-soft)]" aria-hidden />
 
       {tags.map((t) => (
         <Chip key={t} onRemove={canEdit ? () => void removeTag(t) : undefined}>
@@ -210,7 +210,7 @@ export function TagEditor({
           type="button"
           onClick={() => setAdding(true)}
           disabled={pending}
-          className="inline-flex items-center gap-1 rounded-full border border-dashed border-[#D4C7AE] px-2 py-0.5 text-xs text-[#5A4F42] transition hover:border-[#8B4A52]/50 hover:bg-[#8B4A52]/10 hover:text-[#5E3A3F] disabled:opacity-60"
+          className="inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--rule)] px-2 py-0.5 text-xs text-[var(--ink-soft)] transition hover:border-[var(--wine)]/50 hover:bg-[var(--wine)]/10 hover:text-[#5E3A3F] disabled:opacity-60"
         >
           <Plus size={12} aria-hidden />
           <span>Add tag</span>
@@ -228,12 +228,12 @@ export function TagEditor({
             }}
             onKeyDown={onKeyDown}
             placeholder="Type a tag…"
-            className="rounded-full border border-[#D4C7AE] bg-[#FBF5E8] px-2.5 py-0.5 text-xs text-[#2A241E] outline-none placeholder:text-[#5A4F42]/60"
+            className="rounded-full border border-[var(--rule)] bg-[var(--vellum)] px-2.5 py-0.5 text-xs text-[var(--ink)] outline-none placeholder:text-[var(--ink-soft)]/60"
           />
           {options.length > 0 && (
             <ul
               role="listbox"
-              className="absolute left-0 top-full z-20 mt-1 max-h-60 w-56 overflow-auto rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_8px_24px_rgba(42,36,30,0.12)]"
+              className="absolute left-0 top-full z-20 mt-1 max-h-60 w-56 overflow-auto rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] shadow-[0_8px_24px_rgb(var(--ink-rgb) / 0.12)]"
             >
               {options.map((opt, i) => (
                 <li key={opt.kind + ':' + opt.value}>
@@ -246,8 +246,8 @@ export function TagEditor({
                     className={
                       'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition ' +
                       (i === highlight
-                        ? 'bg-[#D4A85A]/20 text-[#2A241E]'
-                        : 'text-[#5A4F42] hover:bg-[#D4A85A]/10')
+                        ? 'bg-[var(--candlelight)]/20 text-[var(--ink)]'
+                        : 'text-[var(--ink-soft)] hover:bg-[var(--candlelight)]/10')
                     }
                   >
                     {opt.kind === 'new' ? (
@@ -265,7 +265,7 @@ export function TagEditor({
       )}
 
       {error && (
-        <p className="w-full text-xs text-[#8B4A52]">{error}</p>
+        <p className="w-full text-xs text-[var(--wine)]">{error}</p>
       )}
     </div>
   );
@@ -282,7 +282,7 @@ function Chip({
   return (
     <span
       title={label}
-      className="inline-flex max-w-[200px] items-center gap-1 rounded-full border border-[#8B4A52]/40 bg-[#8B4A52]/10 px-2.5 py-0.5 text-xs font-medium text-[#5E3A3F]"
+      className="inline-flex max-w-[200px] items-center gap-1 rounded-full border border-[var(--wine)]/40 bg-[var(--wine)]/10 px-2.5 py-0.5 text-xs font-medium text-[#5E3A3F]"
     >
       <span className="truncate">{children}</span>
       {onRemove && (
@@ -290,7 +290,7 @@ function Chip({
           type="button"
           onClick={onRemove}
           aria-label="Remove tag"
-          className="-mr-1 rounded-full p-0.5 text-[#5E3A3F]/60 transition hover:bg-[#8B4A52]/20 hover:text-[#4A2E32]"
+          className="-mr-1 rounded-full p-0.5 text-[#5E3A3F]/60 transition hover:bg-[var(--wine)]/20 hover:text-[#4A2E32]"
         >
           <X size={10} aria-hidden />
         </button>

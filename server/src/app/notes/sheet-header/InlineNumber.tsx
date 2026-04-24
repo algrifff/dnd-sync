@@ -64,7 +64,7 @@ export function InlineNumber({
         type="button"
         onClick={() => setEditing(true)}
         aria-label={ariaLabel ?? 'Edit'}
-        className={`text-center min-w-[3ch] border-b-2 border-transparent hover:border-[var(--world-accent,#8A7E6B)] ${className ?? ''}`}
+        className={`text-center min-w-[3ch] border-b-2 border-transparent hover:border-[var(--world-accent,var(--ink-muted))] ${className ?? ''}`}
       >
         {display}
       </button>
@@ -112,7 +112,7 @@ export function InlineNumber({
       // border, no UA focus ring, just the underline lighting up on
       // focus. Native number spinners hidden so the input doesn't
       // change width when clicked.
-      className={`bg-transparent p-0 text-center border-0 border-b-2 border-transparent focus:border-[var(--world-accent,#8A7E6B)] outline-none focus:outline-0 focus-visible:outline-0 focus:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${inputClassName ?? ''}`}
+      className={`bg-transparent p-0 text-center border-0 border-b-2 border-transparent focus:border-[var(--world-accent,var(--ink-muted))] outline-none focus:outline-0 focus-visible:outline-0 focus:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${inputClassName ?? ''}`}
     />
   );
 }

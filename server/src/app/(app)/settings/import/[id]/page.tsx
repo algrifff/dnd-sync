@@ -28,10 +28,10 @@ export default async function ImportJobPage({ params }: Ctx): Promise<ReactEleme
   const plan = job.plan as ImportPlan | null;
 
   return (
-    <section className="rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-5">
+    <section className="rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-5">
       <h2 className="mb-1 text-lg font-semibold">Import job</h2>
-      <p className="mb-4 text-sm text-[#5A4F42]">
-        <code>{job.id}</code> · status <span className="font-medium text-[#2A241E]">{job.status}</span>
+      <p className="mb-4 text-sm text-[var(--ink-soft)]">
+        <code>{job.id}</code> · status <span className="font-medium text-[var(--ink)]">{job.status}</span>
       </p>
       <ImportJobPanel job={job} plan={plan} csrfToken={session.csrfToken} />
     </section>

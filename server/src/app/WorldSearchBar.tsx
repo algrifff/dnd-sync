@@ -96,7 +96,7 @@ export function WorldSearchBar(): React.JSX.Element {
   return (
     <div ref={containerRef} className="relative w-72">
       {/* Input pill */}
-      <div className="flex items-center gap-1.5 rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0]/70 px-2.5 py-1.5 text-sm text-[#5A4F42] transition focus-within:border-[#D4A85A] focus-within:bg-[#FBF5E8]">
+      <div className="flex items-center gap-1.5 rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)]/70 px-2.5 py-1.5 text-sm text-[var(--ink-soft)] transition focus-within:border-[var(--candlelight)] focus-within:bg-[var(--vellum)]">
         <Search size={12} className="shrink-0 text-[#8A7E6E]" aria-hidden />
         <input
           ref={inputRef}
@@ -107,17 +107,17 @@ export function WorldSearchBar(): React.JSX.Element {
           onFocus={() => { if (results.length > 0) setOpen(true); }}
           placeholder="Search notes & assets…"
           aria-label="Search world"
-          className="min-w-0 flex-1 bg-transparent text-xs text-[#2A241E] placeholder-[#8A7E6E] outline-none"
+          className="min-w-0 flex-1 bg-transparent text-xs text-[var(--ink)] placeholder-[#8A7E6E] outline-none"
         />
         {loading && (
-          <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-[#D4C7AE] border-t-[#D4A85A]" aria-hidden />
+          <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-[var(--rule)] border-t-[var(--candlelight)]" aria-hidden />
         )}
         {query && !loading ? (
-          <button type="button" onClick={clear} className="shrink-0 text-[#8A7E6E] hover:text-[#2A241E]" aria-label="Clear">
+          <button type="button" onClick={clear} className="shrink-0 text-[#8A7E6E] hover:text-[var(--ink)]" aria-label="Clear">
             <X size={11} aria-hidden />
           </button>
         ) : (
-          <kbd className="shrink-0 rounded border border-[#D4C7AE] px-1 py-px text-[10px] leading-none text-[#8A7E6E]">
+          <kbd className="shrink-0 rounded border border-[var(--rule)] px-1 py-px text-[10px] leading-none text-[#8A7E6E]">
             {isMac ? '⌘K' : 'Ctrl K'}
           </kbd>
         )}
@@ -128,7 +128,7 @@ export function WorldSearchBar(): React.JSX.Element {
         <div
           role="listbox"
           aria-label="Search results"
-          className="absolute left-1/2 top-full z-50 mt-1.5 w-[380px] -translate-x-1/2 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-lg"
+          className="absolute left-1/2 top-full z-50 mt-1.5 w-[380px] -translate-x-1/2 overflow-hidden rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] shadow-lg"
         >
           {results.map((r, i) => (
             <button
@@ -138,17 +138,17 @@ export function WorldSearchBar(): React.JSX.Element {
               type="button"
               onMouseEnter={() => setActive(i)}
               onClick={() => navigate(r)}
-              className={`flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition ${i === active ? 'bg-[#F4EDE0]' : 'hover:bg-[#F4EDE0]'} ${i > 0 ? 'border-t border-[#D4C7AE]/50' : ''}`}
+              className={`flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition ${i === active ? 'bg-[var(--parchment)]' : 'hover:bg-[var(--parchment)]'} ${i > 0 ? 'border-t border-[var(--rule)]/50' : ''}`}
             >
               <span className="mt-0.5 shrink-0 text-[#8A7E6E]">
                 {r.kind === 'note' ? <FileText size={13} aria-hidden /> : <ImageIcon size={13} aria-hidden />}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs font-medium text-[#2A241E]">
+                <span className="block truncate text-xs font-medium text-[var(--ink)]">
                   {r.kind === 'note' ? r.title : r.filename}
                 </span>
                 {r.kind === 'note' && r.snippet && (
-                  <span className="block truncate text-[11px] text-[#5A4F42]" dangerouslySetInnerHTML={{ __html: r.snippet }} />
+                  <span className="block truncate text-[11px] text-[var(--ink-soft)]" dangerouslySetInnerHTML={{ __html: r.snippet }} />
                 )}
                 {r.kind === 'note' && (
                   <span className="block truncate text-[10px] text-[#8A7E6E]">{r.path}</span>
@@ -160,7 +160,7 @@ export function WorldSearchBar(): React.JSX.Element {
       )}
 
       {open && query.trim() && results.length === 0 && !loading && (
-        <div className="absolute left-1/2 top-full z-50 mt-1.5 w-[300px] -translate-x-1/2 rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] px-3 py-3 shadow-lg">
+        <div className="absolute left-1/2 top-full z-50 mt-1.5 w-[300px] -translate-x-1/2 rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] px-3 py-3 shadow-lg">
           <p className="text-xs text-[#8A7E6E]">No results for &ldquo;{query}&rdquo;</p>
         </div>
       )}

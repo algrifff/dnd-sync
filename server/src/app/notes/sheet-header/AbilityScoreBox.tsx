@@ -23,12 +23,12 @@ export function AbilityScoreBox({
     // aspect-square keeps the ~1:1 ratio as the grid cell widens;
     // padding and fonts scale up so the label / score / modifier
     // stay centred and readable at the larger size.
-    <div className="flex aspect-square w-full flex-col items-center justify-center rounded-[10px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-2">
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-[#5A4F42]">
+    <div className="flex aspect-square w-full flex-col items-center justify-center rounded-[10px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-2">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
         {label}
       </span>
       {readOnly || !onCommit ? (
-        <span className="font-serif text-3xl font-normal leading-tight text-[#2A241E]">
+        <span className="font-serif text-3xl font-normal leading-tight text-[var(--ink)]">
           {score}
         </span>
       ) : (
@@ -40,12 +40,12 @@ export function AbilityScoreBox({
           // Same classes on both display button and edit input so the
           // font / size / weight stay identical whether you're editing
           // or just looking at the number.
-          className="font-serif text-3xl font-normal leading-tight text-[#2A241E]"
-          inputClassName="font-serif text-3xl font-normal leading-tight w-16 text-[#2A241E]"
+          className="font-serif text-3xl font-normal leading-tight text-[var(--ink)]"
+          inputClassName="font-serif text-3xl font-normal leading-tight w-16 text-[var(--ink)]"
           ariaLabel={label}
         />
       )}
-      <span className="text-sm font-medium text-[#5A4F42]">
+      <span className="text-sm font-medium text-[var(--ink-soft)]">
         {formatModifier(mod)}
       </span>
     </div>

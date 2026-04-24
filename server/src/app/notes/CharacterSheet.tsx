@@ -278,7 +278,7 @@ export function CharacterSheet({
 
   const renderSection = (section: TemplateSection): React.JSX.Element => (
     <section key={section.id} className="mb-3 last:mb-0">
-      <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+      <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
         {section.label}
       </h3>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
@@ -345,7 +345,7 @@ export function CharacterSheet({
     const sections = sectionsByTab[tab];
     if (sections.length === 0) {
       return (
-        <div className="rounded-[8px] border border-dashed border-[#D4C7AE] bg-[#F4EDE0] p-4 text-center text-xs text-[#8A7E6B]">
+        <div className="rounded-[8px] border border-dashed border-[var(--rule)] bg-[var(--parchment)] p-4 text-center text-xs text-[var(--ink-muted)]">
           Nothing here yet.
         </div>
       );
@@ -365,24 +365,24 @@ export function CharacterSheet({
   return (
     <section
       aria-label="Character sheet"
-      className="mb-6 rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-4"
+      className="mb-6 rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-4"
     >
       <div
-        className="mb-2 h-4 text-right text-xs text-[#5A4F42] transition-opacity"
+        className="mb-2 h-4 text-right text-xs text-[var(--ink-soft)] transition-opacity"
         style={{ opacity: savingAny || flash ? 1 : 0 }}
         aria-live="polite"
       >
         {savingAny ? (
           'Saving…'
         ) : flash ? (
-          <span className="text-[#8B4A52]">{flash}</span>
+          <span className="text-[var(--wine)]">{flash}</span>
         ) : null}
       </div>
 
       <div
         role="tablist"
         aria-label="Character sheet sections"
-        className="mb-3 flex flex-wrap gap-1 border-b border-[#D4C7AE]"
+        className="mb-3 flex flex-wrap gap-1 border-b border-[var(--rule)]"
       >
         {availableTabs.map((t) => (
           <TabButton
@@ -420,7 +420,7 @@ const SkillsPanel = memo(function SkillsPanel({
     typeof sheet.proficiency_bonus === 'number' ? sheet.proficiency_bonus : 2;
 
   return (
-    <ul className="divide-y divide-[#D4C7AE]/60 rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0]">
+    <ul className="divide-y divide-[var(--rule)]/60 rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)]">
       {SKILL_CATALOG.map((s) => {
         const entry = readSkillEntry(sheet, s.key);
         const abilityMod = abilityModifier(scores[s.ability]);
@@ -492,11 +492,11 @@ const SkillRow = memo(function SkillRow({
         onClick={onClick}
         onDoubleClick={onDoubleClick}
       />
-      <span className="flex-1 text-[#2A241E]">{label}</span>
-      <span className="w-10 text-right text-[10px] uppercase tracking-wide text-[#5A4F42]">
+      <span className="flex-1 text-[var(--ink)]">{label}</span>
+      <span className="w-10 text-right text-[10px] uppercase tracking-wide text-[var(--ink-soft)]">
         {ability}
       </span>
-      <span className="w-10 text-right font-serif text-[14px] font-semibold tabular-nums text-[#2A241E]">
+      <span className="w-10 text-right font-serif text-[14px] font-semibold tabular-nums text-[var(--ink)]">
         {formatModifier(modifier)}
       </span>
     </li>
@@ -516,12 +516,12 @@ function ProfDot({
 }): React.JSX.Element {
   const fill =
     state === 'expertise'
-      ? '#2A241E'
+      ? 'var(--ink)'
       : state === 'proficient'
-        ? '#8A7E6B'
+        ? 'var(--ink-muted)'
         : 'transparent';
   const ring =
-    state === 'expertise' ? '#2A241E' : '#8A7E6B';
+    state === 'expertise' ? 'var(--ink)' : 'var(--ink-muted)';
   if (!canEdit) {
     return (
       <span
@@ -605,8 +605,8 @@ const TabButton = memo(function TabButton({
       className={
         '-mb-px rounded-t border px-3 py-1 text-[11px] font-medium transition-colors ' +
         (active
-          ? 'border-[#D4C7AE] border-b-[#FBF5E8] bg-[#FBF5E8] text-[#2A241E]'
-          : 'border-transparent text-[#5A4F42] hover:bg-[#F4EDE0]')
+          ? 'border-[var(--rule)] border-b-[var(--vellum)] bg-[var(--vellum)] text-[var(--ink)]'
+          : 'border-transparent text-[var(--ink-soft)] hover:bg-[var(--parchment)]')
       }
     >
       {label}
@@ -642,13 +642,13 @@ const FieldControl = memo(function FieldControl({
   return (
     <label
       className={
-        'flex flex-col gap-1 ' + (isPlayerField ? 'ring-offset-[#FBF5E8]' : '')
+        'flex flex-col gap-1 ' + (isPlayerField ? 'ring-offset-[var(--vellum)]' : '')
       }
     >
-      <span className="text-[11px] font-medium text-[#5A4F42]">
+      <span className="text-[11px] font-medium text-[var(--ink-soft)]">
         {field.label}
         {field.required && (
-          <span aria-hidden className="ml-0.5 text-[#8B4A52]">*</span>
+          <span aria-hidden className="ml-0.5 text-[var(--wine)]">*</span>
         )}
       </span>
       <FieldInput
@@ -658,7 +658,7 @@ const FieldControl = memo(function FieldControl({
         readOnly={readOnly}
       />
       {field.hint && (
-        <span className="text-[10px] text-[#5A4F42]/80">{field.hint}</span>
+        <span className="text-[10px] text-[var(--ink-soft)]/80">{field.hint}</span>
       )}
     </label>
   );
@@ -676,9 +676,9 @@ function FieldInput({
   readOnly: boolean;
 }): React.JSX.Element {
   const base =
-    'rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]';
+    'rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-1 text-sm text-[var(--ink)] outline-none focus:border-[var(--candlelight)]';
   const ro = readOnly
-    ? ' cursor-not-allowed bg-[#EAE1CF]/70 text-[#5A4F42]'
+    ? ' cursor-not-allowed bg-[var(--parchment-sunk)]/70 text-[var(--ink-soft)]'
     : '';
 
   if (field.type === 'longtext') {
@@ -746,7 +746,7 @@ function FieldInput({
         checked={!!value}
         onChange={(e) => onCommit(e.target.checked)}
         disabled={readOnly}
-        className="h-4 w-4 self-start accent-[#2A241E]"
+        className="h-4 w-4 self-start accent-[var(--ink)]"
       />
     );
   }
@@ -792,11 +792,11 @@ function ListTextInput({
     onCommit(next);
   };
   return (
-    <div className="flex flex-wrap items-center gap-1 rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-1.5 py-1">
+    <div className="flex flex-wrap items-center gap-1 rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-1.5 py-1">
       {items.map((item, idx) => (
         <span
           key={`${item}:${idx}`}
-          className="inline-flex items-center gap-1 rounded-full border border-[#D4C7AE] bg-[#FBF5E8] px-2 py-0.5 text-[11px] text-[#2A241E]"
+          className="inline-flex items-center gap-1 rounded-full border border-[var(--rule)] bg-[var(--vellum)] px-2 py-0.5 text-[11px] text-[var(--ink)]"
         >
           {item}
           {!readOnly && (
@@ -804,7 +804,7 @@ function ListTextInput({
               type="button"
               aria-label={`Remove ${item}`}
               onClick={() => removeAt(idx)}
-              className="text-[#5A4F42] hover:text-[#8B4A52]"
+              className="text-[var(--ink-soft)] hover:text-[var(--wine)]"
             >
               ×
             </button>
@@ -824,7 +824,7 @@ function ListTextInput({
           }}
           onBlur={addItem}
           placeholder="add…"
-          className="min-w-[60px] flex-1 bg-transparent text-[11px] text-[#2A241E] outline-none"
+          className="min-w-[60px] flex-1 bg-transparent text-[11px] text-[var(--ink)] outline-none"
         />
       )}
     </div>

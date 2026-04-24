@@ -23,25 +23,25 @@ export function StatTile({
   children?: ReactNode | undefined;
 }): React.JSX.Element {
   return (
-    <div className="flex min-w-[64px] flex-col items-center rounded-[10px] border border-[#D4C7AE] bg-[#F4EDE0] px-3 py-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-[#5A4F42]">
+    <div className="flex min-w-[64px] flex-col items-center rounded-[10px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-1.5">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
         {label}
       </span>
-      <span className="flex items-center gap-1 font-serif text-lg font-semibold text-[#2A241E]">
+      <span className="flex items-center gap-1 font-serif text-lg font-semibold text-[var(--ink)]">
         {children ? (
           children
         ) : onCommit && !readOnly ? (
           <InlineNumber
             value={value ?? null}
             onCommit={onCommit}
-            className="font-serif text-lg font-semibold text-[#2A241E]"
-            inputClassName="font-serif text-lg font-semibold w-12 text-[#2A241E]"
+            className="font-serif text-lg font-semibold text-[var(--ink)]"
+            inputClassName="font-serif text-lg font-semibold w-12 text-[var(--ink)]"
             ariaLabel={label}
           />
         ) : (
           <span>{value == null ? '—' : String(value)}</span>
         )}
-        {suffix ? <span className="text-xs text-[#5A4F42]">{suffix}</span> : null}
+        {suffix ? <span className="text-xs text-[var(--ink-soft)]">{suffix}</span> : null}
       </span>
     </div>
   );

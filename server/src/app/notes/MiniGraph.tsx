@@ -48,7 +48,7 @@ export function MiniGraph({ path }: { path: string }): React.JSX.Element {
           container.innerHTML = '';
           const note = document.createElement('p');
           note.textContent = 'No links yet.';
-          note.className = 'text-xs text-[#5A4F42] px-1';
+          note.className = 'text-xs text-[var(--ink-soft)] px-1';
           container.appendChild(note);
           return;
         }
@@ -59,7 +59,7 @@ export function MiniGraph({ path }: { path: string }): React.JSX.Element {
           g.addNode(n.id, {
             label: n.title,
             size: isCenter ? radiusForDegree(n.degree) + 2 : radiusForDegree(n.degree),
-            color: isCenter ? '#8B4A52' : colorForTags(n.tags),
+            color: isCenter ? 'var(--wine)' : colorForTags(n.tags),
             x: Math.random() * 2 - 1,
             y: Math.random() * 2 - 1,
           });
@@ -70,7 +70,7 @@ export function MiniGraph({ path }: { path: string }): React.JSX.Element {
           if (g.hasEdge(key)) continue;
           g.addEdgeWithKey(key, e.source, e.target, {
             size: 0.8,
-            color: 'rgba(42, 36, 30, 0.35)',
+            color: 'rgb(var(--ink-rgb) / 0.35)',
           });
         }
 
@@ -88,9 +88,9 @@ export function MiniGraph({ path }: { path: string }): React.JSX.Element {
         }
 
         const renderer = new Sigma(g, container, {
-          defaultNodeColor: '#5A4F42',
-          defaultEdgeColor: 'rgba(42, 36, 30, 0.35)',
-          labelColor: { color: '#2A241E' },
+          defaultNodeColor: 'var(--ink-soft)',
+          defaultEdgeColor: 'rgb(var(--ink-rgb) / 0.35)',
+          labelColor: { color: 'var(--ink)' },
           labelWeight: '500',
           labelFont: 'Inter, system-ui, sans-serif',
           labelSize: 10,
@@ -118,7 +118,7 @@ export function MiniGraph({ path }: { path: string }): React.JSX.Element {
   return (
     <div
       ref={containerRef}
-      className="overflow-hidden rounded-[8px] border border-[#D4C7AE] bg-[#FBF5E8]"
+      className="overflow-hidden rounded-[8px] border border-[var(--rule)] bg-[var(--vellum)]"
       style={{ width: SIDE, height: SIDE }}
       aria-label="Link neighbourhood"
     />

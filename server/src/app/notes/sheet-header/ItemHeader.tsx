@@ -156,8 +156,8 @@ export function ItemHeader({
               <InlineText
                 value={name}
                 readOnly={!canEdit}
-                className={`font-serif ${titleSizeClass(name, 'compact')} font-semibold leading-tight text-[#2A241E]`}
-                inputClassName={`font-serif ${titleSizeClass(name, 'compact')} font-semibold leading-tight text-[#2A241E]`}
+                className={`font-serif ${titleSizeClass(name, 'compact')} font-semibold leading-tight text-[var(--ink)]`}
+                inputClassName={`font-serif ${titleSizeClass(name, 'compact')} font-semibold leading-tight text-[var(--ink)]`}
                 onCommit={(next) => {
                   const trimmed = next.trim();
                   if (trimmed) patchSheet({ name: trimmed });
@@ -211,12 +211,12 @@ export function ItemHeader({
                     ? {
                         borderColor: 'var(--candlelight)',
                         backgroundColor: 'var(--candlelight)',
-                        color: '#2A241E',
+                        color: 'var(--ink)',
                       }
                     : {
-                        borderColor: '#D4C7AE',
-                        backgroundColor: '#F4EDE0',
-                        color: '#5A4F42',
+                        borderColor: 'var(--rule)',
+                        backgroundColor: 'var(--parchment)',
+                        color: 'var(--ink-soft)',
                       }
                 }
                 title={
@@ -229,7 +229,7 @@ export function ItemHeader({
               </button>
             </div>
 
-            <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-[#5A4F42]">
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-[var(--ink-soft)]">
               <span className="inline-flex items-center gap-1">
                 Weight
                 <InlineNumber
@@ -277,8 +277,8 @@ export function ItemHeader({
             )}
 
             {modifiers.length > 0 && (
-              <div className="mt-3 border-t border-[#D4C7AE] pt-2">
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#5A4F42]">
+              <div className="mt-3 border-t border-[var(--rule)] pt-2">
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
                   Modifiers
                 </div>
                 <div className="flex flex-wrap gap-1 text-[11px]">
@@ -316,17 +316,17 @@ function IconBox({
     // object-contain so the item art is never cropped — showcase it
     <img src={url} alt="" className="h-full w-full object-contain p-2" />
   ) : (
-    <Package size={56} className="text-[#5A4F42]" />
+    <Package size={56} className="text-[var(--ink-soft)]" />
   );
   const cls =
-    'flex h-44 w-44 shrink-0 items-center justify-center overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#EAE1CF]';
+    'flex h-44 w-44 shrink-0 items-center justify-center overflow-hidden rounded-[12px] border border-[var(--rule)] bg-[var(--parchment-sunk)]';
   if (!canEdit) return <div className={cls}>{inner}</div>;
   return (
     <button
       type="button"
       onClick={onOpen}
       aria-label="Change icon"
-      className={`${cls} hover:border-[#2A241E]`}
+      className={`${cls} hover:border-[var(--ink)]`}
     >
       {inner}
     </button>
@@ -351,24 +351,24 @@ function WeaponTile({ w }: { w: WeaponDetails }): React.JSX.Element {
     : '';
   const props = (w.properties ?? []).join(', ');
   return (
-    <div className="min-w-[140px] rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] px-3 py-2">
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-[#5A4F42]">
+    <div className="min-w-[140px] rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-2">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
         Damage
       </div>
-      <div className="font-serif text-lg text-[#2A241E]">
+      <div className="font-serif text-lg text-[var(--ink)]">
         {diceLabel}
         {vLabel}
       </div>
       {type && (
-        <div className="text-[11px] capitalize text-[#5A4F42]">{type}</div>
+        <div className="text-[11px] capitalize text-[var(--ink-soft)]">{type}</div>
       )}
       {rangeLabel && (
-        <div className="mt-0.5 text-[11px] text-[#5A4F42]">
+        <div className="mt-0.5 text-[11px] text-[var(--ink-soft)]">
           Range {rangeLabel}
         </div>
       )}
       {props && (
-        <div className="mt-0.5 truncate text-[11px] capitalize text-[#8A7E6B]">
+        <div className="mt-0.5 truncate text-[11px] capitalize text-[var(--ink-muted)]">
           {props}
         </div>
       )}
@@ -379,21 +379,21 @@ function WeaponTile({ w }: { w: WeaponDetails }): React.JSX.Element {
 function ArmorTile({ a }: { a: ArmorDetails }): React.JSX.Element {
   const ac = a.ac_base ?? 10;
   return (
-    <div className="min-w-[140px] rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] px-3 py-2">
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-[#5A4F42]">
+    <div className="min-w-[140px] rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-2">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
         Armor class
       </div>
-      <div className="font-serif text-lg text-[#2A241E]">{ac}</div>
+      <div className="font-serif text-lg text-[var(--ink)]">{ac}</div>
       {a.category && (
-        <div className="text-[11px] capitalize text-[#5A4F42]">
+        <div className="text-[11px] capitalize text-[var(--ink-soft)]">
           {a.category}
         </div>
       )}
       {typeof a.dex_cap === 'number' && (
-        <div className="text-[11px] text-[#5A4F42]">Dex cap +{a.dex_cap}</div>
+        <div className="text-[11px] text-[var(--ink-soft)]">Dex cap +{a.dex_cap}</div>
       )}
       {a.stealth_disadvantage && (
-        <div className="text-[11px] text-[#8B4A52]">Stealth disadvantage</div>
+        <div className="text-[11px] text-[var(--wine)]">Stealth disadvantage</div>
       )}
     </div>
   );
@@ -410,7 +410,7 @@ function ModifierChip({ m }: { m: unknown }): React.JSX.Element | null {
     typeof obj.qualifier === 'string' ? ` (${obj.qualifier})` : '';
   return (
     <span
-      className="inline-flex items-center rounded-full border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-0.5 text-[10px] text-[#2A241E]"
+      className="inline-flex items-center rounded-full border border-[var(--rule)] bg-[var(--parchment)] px-2 py-0.5 text-[10px] text-[var(--ink)]"
       title={when ? `While ${when}${qualifier}` : undefined}
     >
       {target} {op} {value}

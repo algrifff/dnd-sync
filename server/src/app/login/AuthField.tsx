@@ -33,7 +33,7 @@ export function AuthField({
 }: AuthFieldProps) {
   return (
     <label className="block auth-fade">
-      <span className="block text-[11px] font-medium uppercase tracking-[0.12em] text-[#5A4F42]">
+      <span className="block text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--ink-soft)]">
         {label}
       </span>
       <input
@@ -45,10 +45,10 @@ export function AuthField({
         defaultValue={defaultValue}
         required={required}
         autoFocus={autoFocus}
-        className="mt-1.5 w-full bg-transparent border-0 border-b-2 border-[#8A7E6B] px-0 py-2 text-[17px] text-[#2A241E] placeholder:text-[#8A7E6B] outline-none transition-colors duration-150 hover:border-[#5A4F42] focus:border-[#D4A85A] focus:outline-0 focus-visible:outline-0 focus:ring-0"
+        className="mt-1.5 w-full bg-transparent border-0 border-b-2 border-[var(--ink-muted)] px-0 py-2 text-[17px] text-[var(--ink)] placeholder:text-[var(--ink-muted)] outline-none transition-colors duration-150 hover:border-[var(--ink-soft)] focus:border-[var(--candlelight)] focus:outline-0 focus-visible:outline-0 focus:ring-0"
         style={{ fontFamily: '"Fraunces", Georgia, serif' }}
       />
-      {hint && <span className="mt-1 block text-xs text-[#8A7E6B]">{hint}</span>}
+      {hint && <span className="mt-1 block text-xs text-[var(--ink-muted)]">{hint}</span>}
     </label>
   );
 }

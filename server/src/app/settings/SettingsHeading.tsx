@@ -26,7 +26,7 @@ export function SettingsHeading(): React.JSX.Element {
       >
         {title}
       </h1>
-      <p className="mb-6 text-sm text-[#5A4F42]">{subtitle}</p>
+      <p className="mb-6 text-sm text-[var(--ink-soft)]">{subtitle}</p>
     </>
   );
 }

@@ -44,7 +44,7 @@ export function InlineText({
   if (readOnly) {
     return (
       <span className={className}>
-        {value || <span className="text-[#8A7E6B]">{placeholder ?? '—'}</span>}
+        {value || <span className="text-[var(--ink-muted)]">{placeholder ?? '—'}</span>}
       </span>
     );
   }
@@ -58,9 +58,9 @@ export function InlineText({
         type="button"
         onClick={() => setEditing(true)}
         aria-label={ariaLabel ?? 'Edit'}
-        className={`text-left min-w-[4ch] border-b-2 border-transparent hover:border-[var(--world-accent,#8A7E6B)] ${className ?? ''}`}
+        className={`text-left min-w-[4ch] border-b-2 border-transparent hover:border-[var(--world-accent,var(--ink-muted))] ${className ?? ''}`}
       >
-        {value || <span className="text-[#8A7E6B]">{placeholder ?? 'Click to edit'}</span>}
+        {value || <span className="text-[var(--ink-muted)]">{placeholder ?? 'Click to edit'}</span>}
       </button>
     );
   }
@@ -95,7 +95,7 @@ export function InlineText({
     // there's no layout pop on focus, and lights up the underline on
     // focus. outline-0 on top of outline-none belts-and-braces the
     // browser focus ring.
-    className: `bg-transparent p-0 border-0 border-b-2 border-transparent focus:border-[var(--world-accent,#8A7E6B)] outline-none focus:outline-0 focus-visible:outline-0 focus:ring-0 ${
+    className: `bg-transparent p-0 border-0 border-b-2 border-transparent focus:border-[var(--world-accent,var(--ink-muted))] outline-none focus:outline-0 focus-visible:outline-0 focus:ring-0 ${
       multiline ? 'w-full' : 'min-w-0'
     } ${inputClassName ?? ''}`,
     'aria-label': ariaLabel ?? 'Edit',

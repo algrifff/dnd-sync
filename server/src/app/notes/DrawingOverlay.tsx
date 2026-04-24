@@ -65,12 +65,12 @@ const MAX_ZOOM = 2;
 const ZOOM_STEP = 0.1;
 
 const PRESET_COLORS = [
-  '#2A241E', // ink
-  '#8B4A52', // wine
-  '#7B8A5F', // moss
-  '#6B7F8E', // sage
-  '#B5572A', // embers
-  '#D4A85A', // candlelight
+  'var(--ink)', // ink
+  'var(--wine)', // wine
+  'var(--moss)', // moss
+  'var(--sage)', // sage
+  'var(--embers)', // embers
+  'var(--candlelight)', // candlelight
 ];
 
 export function DrawingOverlay({
@@ -429,14 +429,14 @@ export function DrawingOverlay({
 
       {mode === 'brush' && (
         <div
-          className="mt-1 flex flex-col items-center gap-1 rounded-full border border-[#D4C7AE] bg-[#FBF5E8] p-1.5 shadow-[0_4px_12px_rgba(42,36,30,0.12)]"
+          className="mt-1 flex flex-col items-center gap-1 rounded-full border border-[var(--rule)] bg-[var(--vellum)] p-1.5 shadow-[0_4px_12px_rgb(var(--ink-rgb) / 0.12)]"
           onClick={() => setSwatchOpen((o) => !o)}
         >
           <button
             type="button"
             aria-label="Active colour"
             title="Pick colour"
-            className="h-6 w-6 rounded-full border border-[#D4C7AE]"
+            className="h-6 w-6 rounded-full border border-[var(--rule)]"
             style={{ backgroundColor: color }}
           />
           {swatchOpen && (
@@ -454,7 +454,7 @@ export function DrawingOverlay({
                   className="h-5 w-5 rounded-full border transition hover:scale-110"
                   style={{
                     backgroundColor: c,
-                    borderColor: c === color ? '#2A241E' : '#D4C7AE',
+                    borderColor: c === color ? 'var(--ink)' : 'var(--rule)',
                   }}
                 />
               ))}
@@ -464,7 +464,7 @@ export function DrawingOverlay({
                   click (hidden inputs off-screen don't trigger the
                   picker reliably in every browser). */}
               <div
-                className="relative h-5 w-5 overflow-hidden rounded-full border border-[#D4C7AE] bg-gradient-to-br from-[#8B4A52] via-[#D4A85A] to-[#7B8A5F] transition hover:scale-110"
+                className="relative h-5 w-5 overflow-hidden rounded-full border border-[var(--rule)] bg-gradient-to-br from-[var(--wine)] via-[var(--candlelight)] to-[var(--moss)] transition hover:scale-110"
                 onClick={(e) => e.stopPropagation()}
                 title="Custom colour"
               >
@@ -489,7 +489,7 @@ export function DrawingOverlay({
   const zoomPortal = createPortal(
     <div
       aria-label="Drawing zoom"
-      className="absolute bottom-4 left-4 flex flex-col items-center gap-1 rounded-full border border-[#D4C7AE] bg-[#FBF5E8] p-1 shadow-[0_4px_12px_rgba(42,36,30,0.12)]"
+      className="absolute bottom-4 left-4 flex flex-col items-center gap-1 rounded-full border border-[var(--rule)] bg-[var(--vellum)] p-1 shadow-[0_4px_12px_rgb(var(--ink-rgb) / 0.12)]"
       style={{ zIndex: 6, pointerEvents: 'auto' }}
     >
       <ToolButton
@@ -503,7 +503,7 @@ export function DrawingOverlay({
         onClick={zoomReset}
         title={`Zoom ${Math.round(zoom * 100)}% — click to reset`}
         aria-label="Reset zoom"
-        className="rounded-full px-1 text-[10px] font-medium text-[#5A4F42] transition hover:text-[#2A241E]"
+        className="rounded-full px-1 text-[10px] font-medium text-[var(--ink-soft)] transition hover:text-[var(--ink)]"
       >
         {Math.round(zoom * 100)}%
       </button>
@@ -569,14 +569,14 @@ function ToolButton({
       aria-label={title}
       aria-pressed={active}
       className={
-        `flex ${size} items-center justify-center rounded-full border shadow-[0_4px_12px_rgba(42,36,30,0.12)] transition hover:scale-105 ` +
+        `flex ${size} items-center justify-center rounded-full border shadow-[0_4px_12px_rgb(var(--ink-rgb) / 0.12)] transition hover:scale-105 ` +
         (active
-          ? 'border-[#2A241E] bg-[#F4EDE0] text-[#2A241E]'
-          : 'border-[#D4C7AE] bg-[#FBF5E8] text-[#5A4F42] hover:text-[#2A241E]')
+          ? 'border-[var(--ink)] bg-[var(--parchment)] text-[var(--ink)]'
+          : 'border-[var(--rule)] bg-[var(--vellum)] text-[var(--ink-soft)] hover:text-[var(--ink)]')
       }
       style={
         active && activeColor
-          ? { boxShadow: `0 0 0 2px ${activeColor}, 0 4px 12px rgba(42,36,30,0.12)` }
+          ? { boxShadow: `0 0 0 2px ${activeColor}, 0 4px 12px rgb(var(--ink-rgb) / 0.12)` }
           : undefined
       }
     >

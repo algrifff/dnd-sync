@@ -14,7 +14,7 @@ import { readSession } from '@/lib/session';
 import { getDb } from '@/lib/db';
 import { recentlyUpdated } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
-import { HomeChat } from '../../HomeChat';
+import { HomeChat } from '../../../HomeChat';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +25,7 @@ export default async function HomePage(): Promise<ReactElement> {
     .map((c) => `${c.name}=${c.value}`)
     .join('; ');
   const session = readSession(cookieHeader);
-  if (!session) redirect('/login?next=/');
+  if (!session) redirect('/login?next=/home');
 
   const counts = getDb()
     .query<{ notes: number; assets: number }, [string, string]>(
@@ -55,12 +55,12 @@ export default async function HomePage(): Promise<ReactElement> {
         <section className="mb-6">
           <div>
             <h1
-              className="text-4xl font-bold tracking-tight text-[#2A241E]"
+              className="text-4xl font-bold tracking-tight text-[var(--ink)]"
               style={{ fontFamily: '"Fraunces", Georgia, serif' }}
             >
               Welcome, {session.displayName}.
             </h1>
-            <p className="mt-2 text-sm text-[#5A4F42]">
+            <p className="mt-2 text-sm text-[var(--ink-soft)]">
               {counts.notes} note{counts.notes === 1 ? '' : 's'} · {counts.assets} asset
               {counts.assets === 1 ? '' : 's'} · signed in as <code>{session.username}</code>
             </p>
@@ -77,7 +77,7 @@ export default async function HomePage(): Promise<ReactElement> {
 
         {topFolders.length > 0 && (
           <section className="mb-10">
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[#5A4F42]">
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
               Browse
             </h2>
             <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
@@ -88,10 +88,10 @@ export default async function HomePage(): Promise<ReactElement> {
                   <Link
                     key={f.path}
                     href={first ? '/notes/' + encodePath(first) : '#'}
-                    className="block rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-4 transition hover:scale-[1.015] hover:border-[#D4A85A]/60 hover:bg-[#FBF5E8]/80"
+                    className="block rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-4 transition hover:scale-[1.015] hover:border-[var(--candlelight)]/60 hover:bg-[var(--vellum)]/80"
                   >
-                    <div className="text-sm font-semibold text-[#2A241E]">{f.name}</div>
-                    <div className="mt-1 text-xs text-[#5A4F42]">
+                    <div className="text-sm font-semibold text-[var(--ink)]">{f.name}</div>
+                    <div className="mt-1 text-xs text-[var(--ink-soft)]">
                       {countFiles(f)} note{countFiles(f) === 1 ? '' : 's'}
                     </div>
                   </Link>
@@ -103,23 +103,23 @@ export default async function HomePage(): Promise<ReactElement> {
 
         {recent.length > 0 && (
           <section>
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[#5A4F42]">
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
               Recently updated
             </h2>
-            <ul className="divide-y divide-[#D4C7AE]/60 overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8]">
+            <ul className="divide-y divide-[var(--rule)]/60 overflow-hidden rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)]">
               {recent.map((n) => (
                 <li key={n.path}>
                   <Link
                     href={'/notes/' + encodePath(n.path)}
-                    className="flex items-center justify-between px-4 py-3 transition hover:bg-[#F4EDE0]"
+                    className="flex items-center justify-between px-4 py-3 transition hover:bg-[var(--parchment)]"
                   >
                     <span className="truncate">
-                      <span className="font-medium text-[#2A241E]">
+                      <span className="font-medium text-[var(--ink)]">
                         {n.title || baseName(n.path)}
                       </span>
-                      <span className="ml-2 text-xs text-[#5A4F42]">{n.path}</span>
+                      <span className="ml-2 text-xs text-[var(--ink-soft)]">{n.path}</span>
                     </span>
-                    <span className="ml-4 shrink-0 text-xs text-[#5A4F42]">
+                    <span className="ml-4 shrink-0 text-xs text-[var(--ink-soft)]">
                       {fmtAgo(n.updatedAt)}
                     </span>
                   </Link>

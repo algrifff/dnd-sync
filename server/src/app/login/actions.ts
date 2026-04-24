@@ -223,8 +223,8 @@ function toSafeNext(raw: FormDataEntryValue | null): string {
   const value = typeof raw === 'string' ? raw : '';
   // Only allow same-origin, root-relative paths — never redirect to an
   // external host based on a form field.
-  if (!value || !value.startsWith('/') || value.startsWith('//')) return '/';
-  if (value.startsWith('/login')) return '/';
+  if (!value || !value.startsWith('/') || value.startsWith('//')) return '/home';
+  if (value.startsWith('/login')) return '/home';
   return value;
 }
 
@@ -566,5 +566,5 @@ export async function verifyEmailAction(
   const posthog = await getPostHogClient();
   posthog.capture({ distinctId: consumed.userId, event: 'email_verified' });
 
-  redirect('/');
+  redirect('/home');
 }

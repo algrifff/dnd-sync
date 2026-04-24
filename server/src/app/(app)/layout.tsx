@@ -22,7 +22,7 @@ export default async function AppLayout({
   if (!session) redirect('/login?next=/');
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#F4EDE0] text-[#2A241E]">
+    <div className="flex h-screen overflow-hidden bg-[var(--parchment)] text-[var(--ink)]">
       <WorldSwitchProvider
         csrfToken={session.csrfToken}
         activeWorldId={session.currentGroupId}

@@ -117,7 +117,7 @@ export function TemplatesEditor({
     }
   };
 
-  if (!active) return <p className="text-sm text-[#8B4A52]">No template loaded.</p>;
+  if (!active) return <p className="text-sm text-[var(--wine)]">No template loaded.</p>;
 
   return (
     <div className="grid grid-cols-[200px_1fr] gap-5">
@@ -135,8 +135,8 @@ export function TemplatesEditor({
             className={
               'rounded-[8px] border px-3 py-2 text-left text-sm transition ' +
               (k === activeKind
-                ? 'border-[#2A241E] bg-[#2A241E] text-[#F4EDE0]'
-                : 'border-[#D4C7AE] bg-[#F4EDE0] text-[#2A241E] hover:bg-[#EAE1CF]')
+                ? 'border-[var(--ink)] bg-[var(--ink)] text-[var(--parchment)]'
+                : 'border-[var(--rule)] bg-[var(--parchment)] text-[var(--ink)] hover:bg-[var(--parchment-sunk)]')
             }
           >
             {KIND_LABELS[k]}
@@ -149,20 +149,20 @@ export function TemplatesEditor({
         {/* Header: name + preview toggle + save */}
         <div className="flex items-center gap-3">
           <label className="flex flex-1 flex-col gap-1">
-            <span className="text-xs font-medium text-[#5A4F42]">Name</span>
+            <span className="text-xs font-medium text-[var(--ink-soft)]">Name</span>
             <input
               type="text"
               value={active.name}
               onChange={(e) =>
                 updateActive((t) => ({ ...t, name: e.target.value }))
               }
-              className="rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] px-3 py-2 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
+              className="rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--candlelight)]"
             />
           </label>
           <button
             type="button"
             onClick={() => setPreviewMode((p) => !p)}
-            className="flex items-center gap-1 rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] px-3 py-2 text-xs font-medium text-[#2A241E] transition hover:bg-[#EAE1CF]"
+            className="flex items-center gap-1 rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-2 text-xs font-medium text-[var(--ink)] transition hover:bg-[var(--parchment-sunk)]"
           >
             {previewMode ? (
               <>
@@ -178,7 +178,7 @@ export function TemplatesEditor({
             type="button"
             onClick={save}
             disabled={saving}
-            className="rounded-[8px] bg-[#2A241E] px-4 py-2 text-sm font-medium text-[#F4EDE0] transition hover:bg-[#3A342E] disabled:opacity-50"
+            className="rounded-[8px] bg-[var(--ink)] px-4 py-2 text-sm font-medium text-[var(--parchment)] transition hover:bg-[var(--vellum)] disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
@@ -188,7 +188,7 @@ export function TemplatesEditor({
           <span
             className={
               'text-sm ' +
-              (flash.kind === 'ok' ? 'text-[#7B8A5F]' : 'text-[#8B4A52]')
+              (flash.kind === 'ok' ? 'text-[var(--moss)]' : 'text-[var(--wine)]')
             }
           >
             {flash.message}
@@ -263,7 +263,7 @@ function SchemaEditor({
       <button
         type="button"
         onClick={addSection}
-        className="flex items-center justify-center gap-1 rounded-[8px] border border-dashed border-[#D4C7AE] bg-[#F4EDE0]/60 px-3 py-2 text-sm text-[#5A4F42] transition hover:bg-[#F4EDE0]"
+        className="flex items-center justify-center gap-1 rounded-[8px] border border-dashed border-[var(--rule)] bg-[var(--parchment)]/60 px-3 py-2 text-sm text-[var(--ink-soft)] transition hover:bg-[var(--parchment)]"
       >
         <Plus size={14} aria-hidden /> Add section
       </button>
@@ -315,7 +315,7 @@ function SectionCard({
   };
 
   return (
-    <div className="rounded-[10px] border border-[#D4C7AE] bg-[#F4EDE0] p-3">
+    <div className="rounded-[10px] border border-[var(--rule)] bg-[var(--parchment)] p-3">
       <div className="mb-3 flex items-center gap-2">
         <IconButton
           title="Move up"
@@ -336,7 +336,7 @@ function SectionCard({
           value={section.id}
           onChange={(e) => onChange({ ...section, id: slugify(e.target.value) })}
           aria-label="Section id"
-          className="w-28 rounded-[6px] border border-[#D4C7AE] bg-[#FBF5E8] px-2 py-1 font-mono text-xs text-[#2A241E]"
+          className="w-28 rounded-[6px] border border-[var(--rule)] bg-[var(--vellum)] px-2 py-1 font-mono text-xs text-[var(--ink)]"
         />
         <input
           type="text"
@@ -344,7 +344,7 @@ function SectionCard({
           onChange={(e) => onChange({ ...section, label: e.target.value })}
           placeholder="Section label"
           aria-label="Section label"
-          className="flex-1 rounded-[6px] border border-[#D4C7AE] bg-[#FBF5E8] px-2 py-1 text-sm font-medium text-[#2A241E]"
+          className="flex-1 rounded-[6px] border border-[var(--rule)] bg-[var(--vellum)] px-2 py-1 text-sm font-medium text-[var(--ink)]"
         />
         <IconButton title="Remove section" onClick={onRemove}>
           <Trash2 size={14} aria-hidden />
@@ -366,7 +366,7 @@ function SectionCard({
         <button
           type="button"
           onClick={addField}
-          className="flex items-center justify-center gap-1 rounded-[6px] border border-dashed border-[#D4C7AE] px-2 py-1 text-xs text-[#5A4F42] transition hover:bg-[#EAE1CF]"
+          className="flex items-center justify-center gap-1 rounded-[6px] border border-dashed border-[var(--rule)] px-2 py-1 text-xs text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)]"
         >
           <Plus size={12} aria-hidden /> Add field
         </button>
@@ -405,7 +405,7 @@ function FieldRow({
   };
 
   return (
-    <div className="rounded-[8px] border border-[#D4C7AE]/70 bg-[#FBF5E8] p-2">
+    <div className="rounded-[8px] border border-[var(--rule)]/70 bg-[var(--vellum)] p-2">
       <div className="flex flex-wrap items-center gap-1.5">
         <IconButton title="Move up" onClick={() => onMove(-1)} disabled={!canMoveUp}>
           <ChevronUp size={12} aria-hidden />
@@ -419,7 +419,7 @@ function FieldRow({
           onChange={(e) => onChange({ ...field, id: slugify(e.target.value) })}
           placeholder="field_id"
           aria-label="Field id"
-          className="w-28 rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1 font-mono text-xs text-[#2A241E]"
+          className="w-28 rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-1 font-mono text-xs text-[var(--ink)]"
         />
         <input
           type="text"
@@ -427,13 +427,13 @@ function FieldRow({
           onChange={(e) => onChange({ ...field, label: e.target.value })}
           placeholder="Label"
           aria-label="Field label"
-          className="flex-1 rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1 text-xs text-[#2A241E]"
+          className="flex-1 rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-1 text-xs text-[var(--ink)]"
         />
         <select
           value={field.type}
           onChange={(e) => setType(e.target.value as TemplateFieldType)}
           aria-label="Field type"
-          className="rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1 text-xs text-[#2A241E]"
+          className="rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-1 text-xs text-[var(--ink)]"
         >
           {FIELD_TYPES.map((t) => (
             <option key={t} value={t}>
@@ -447,7 +447,7 @@ function FieldRow({
       </div>
 
       {/* Type-specific constraints */}
-      <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-[56px] text-[11px] text-[#5A4F42]">
+      <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-[56px] text-[11px] text-[var(--ink-soft)]">
         <label className="inline-flex items-center gap-1">
           <input
             type="checkbox"
@@ -496,7 +496,7 @@ function FieldRow({
                 })
               }
               placeholder="comma, separated"
-              className="rounded-[4px] border border-[#D4C7AE] bg-[#F4EDE0] px-1 py-0.5 text-xs text-[#2A241E]"
+              className="rounded-[4px] border border-[var(--rule)] bg-[var(--parchment)] px-1 py-0.5 text-xs text-[var(--ink)]"
             />
           </label>
         )}
@@ -508,7 +508,7 @@ function FieldRow({
             onChange={(e) =>
               onChange({ ...field, hint: e.target.value || undefined })
             }
-            className="flex-1 rounded-[4px] border border-[#D4C7AE] bg-[#F4EDE0] px-1 py-0.5 text-xs text-[#2A241E]"
+            className="flex-1 rounded-[4px] border border-[var(--rule)] bg-[var(--parchment)] px-1 py-0.5 text-xs text-[var(--ink)]"
           />
         </label>
       </div>
@@ -539,7 +539,7 @@ function NumberInput({
             onChange(Number.isFinite(n) ? n : undefined);
           }
         }}
-        className="w-16 rounded-[4px] border border-[#D4C7AE] bg-[#F4EDE0] px-1 py-0.5 text-xs text-[#2A241E]"
+        className="w-16 rounded-[4px] border border-[var(--rule)] bg-[var(--parchment)] px-1 py-0.5 text-xs text-[var(--ink)]"
       />
     </label>
   );
@@ -563,7 +563,7 @@ function IconButton({
       disabled={disabled}
       title={title}
       aria-label={title}
-      className="rounded-[4px] p-1 text-[#5A4F42] transition hover:bg-[#EAE1CF] hover:text-[#2A241E] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+      className="rounded-[4px] p-1 text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
     >
       {children}
     </button>
@@ -590,23 +590,23 @@ function SheetPreview({ schema }: { schema: TemplateSchema }): React.JSX.Element
   }, [schema]);
 
   return (
-    <div className="space-y-4 rounded-[10px] border border-[#D4C7AE] bg-[#F4EDE0]/70 p-4">
-      <p className="text-xs text-[#5A4F42]">
+    <div className="space-y-4 rounded-[10px] border border-[var(--rule)] bg-[var(--parchment)]/70 p-4">
+      <p className="text-xs text-[var(--ink-soft)]">
         Preview of a fresh note using this template. Values are defaults; real
         sheets will show whatever the player has filled in.
       </p>
       {schema.sections.map((section) => (
         <section key={section.id}>
-          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
             {section.label}
           </h3>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-[#2A241E]">
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-[var(--ink)]">
             {section.fields.map((field) => (
               <div key={field.id} className="contents">
-                <dt className="text-[#5A4F42]">
+                <dt className="text-[var(--ink-soft)]">
                   {field.label}
                   {field.required && (
-                    <span aria-hidden className="ml-0.5 text-[#8B4A52]">*</span>
+                    <span aria-hidden className="ml-0.5 text-[var(--wine)]">*</span>
                   )}
                 </dt>
                 <dd className="font-mono">{formatValue(values[field.id])}</dd>

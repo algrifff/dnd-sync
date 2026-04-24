@@ -72,8 +72,8 @@ export function PersonHeader({
               <InlineText
                 value={name}
                 readOnly={!canEdit}
-                className={`font-serif ${titleSizeClass(name, 'compact')} font-semibold leading-tight text-[#2A241E]`}
-                inputClassName={`font-serif ${titleSizeClass(name, 'compact')} font-semibold leading-tight text-[#2A241E]`}
+                className={`font-serif ${titleSizeClass(name, 'compact')} font-semibold leading-tight text-[var(--ink)]`}
+                inputClassName={`font-serif ${titleSizeClass(name, 'compact')} font-semibold leading-tight text-[var(--ink)]`}
                 onCommit={(next) => {
                   const trimmed = next.trim();
                   if (trimmed) patchSheet({ name: trimmed });
@@ -87,7 +87,7 @@ export function PersonHeader({
               <InlineText
                 value={tagline}
                 readOnly={!canEdit}
-                className="italic text-[#5A4F42]"
+                className="italic text-[var(--ink-soft)]"
                 inputClassName="italic"
                 placeholder="Add a tagline…"
                 onCommit={(next) => patchSheet({ tagline: next })}
@@ -105,8 +105,8 @@ export function PersonHeader({
                 placeholder="Disposition"
                 ariaLabel="Disposition"
               />
-              <span className="text-[#5A4F42]">·</span>
-              <span className="text-[#5A4F42]">Location:</span>
+              <span className="text-[var(--ink-soft)]">·</span>
+              <span className="text-[var(--ink-soft)]">Location:</span>
               <NoteAutocomplete
                 value={locationPath}
                 readOnly={!canEdit}
@@ -114,7 +114,7 @@ export function PersonHeader({
                 onCommit={(next) => patchSheet({ location_path: next })}
                 placeholder="Link a location…"
                 ariaLabel="Location link"
-                className="font-mono text-[11px] text-[#2A241E]"
+                className="font-mono text-[11px] text-[var(--ink)]"
               />
             </div>
           </div>
@@ -147,19 +147,19 @@ function PortraitSmall({
     // object-contain so the character is never cropped
     <img src={url} alt="" className="h-full w-full object-contain" />
   ) : (
-    <div className="flex h-full w-full items-center justify-center text-5xl font-semibold text-[#5A4F42]">
+    <div className="flex h-full w-full items-center justify-center text-5xl font-semibold text-[var(--ink-soft)]">
       {displayName.slice(0, 1).toUpperCase() || <User size={48} />}
     </div>
   );
   const cls =
-    'h-44 w-44 shrink-0 overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#EAE1CF]';
+    'h-44 w-44 shrink-0 overflow-hidden rounded-[12px] border border-[var(--rule)] bg-[var(--parchment-sunk)]';
   if (!canEdit) return <div className={cls}>{inner}</div>;
   return (
     <button
       type="button"
       onClick={onOpen}
       aria-label="Change portrait"
-      className={`${cls} hover:border-[#2A241E]`}
+      className={`${cls} hover:border-[var(--ink)]`}
     >
       {inner}
     </button>

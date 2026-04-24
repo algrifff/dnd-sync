@@ -88,15 +88,15 @@ export function AssetsGallery({
               className={
                 'flex items-center gap-1 rounded-[8px] border px-2.5 py-1 text-xs font-medium transition ' +
                 (selected
-                  ? 'border-[#2A241E] bg-[#2A241E] text-[#F4EDE0]'
-                  : 'border-[#D4C7AE] bg-[#F4EDE0] text-[#2A241E] hover:bg-[#EAE1CF]')
+                  ? 'border-[var(--ink)] bg-[var(--ink)] text-[var(--parchment)]'
+                  : 'border-[var(--rule)] bg-[var(--parchment)] text-[var(--ink)] hover:bg-[var(--parchment-sunk)]')
               }
             >
               {name}
               <span
                 className={
                   'rounded-full px-1.5 text-[10px] ' +
-                  (selected ? 'bg-[#F4EDE0]/20' : 'bg-[#EAE1CF]')
+                  (selected ? 'bg-[var(--parchment)]/20' : 'bg-[var(--parchment-sunk)]')
                 }
               >
                 {count}
@@ -107,7 +107,7 @@ export function AssetsGallery({
 
         <div className="ml-auto flex items-center gap-2">
           {uploadError && (
-            <span className="text-xs text-[#8B4A52]">{uploadError}</span>
+            <span className="text-xs text-[var(--wine)]">{uploadError}</span>
           )}
           {canEdit && (
             <>
@@ -127,7 +127,7 @@ export function AssetsGallery({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
-                className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] px-3 py-1 text-xs font-medium text-[#2A241E] transition hover:bg-[#EAE1CF] disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-1 text-xs font-medium text-[var(--ink)] transition hover:bg-[var(--parchment-sunk)] disabled:opacity-60"
               >
                 <Upload size={12} aria-hidden />
                 {uploading ? 'Uploading…' : 'Upload'}
@@ -138,24 +138,24 @@ export function AssetsGallery({
       </div>
 
       {initialAssets.length === 0 ? (
-        <p className="rounded-[10px] border border-dashed border-[#D4C7AE] bg-[#FBF5E8]/60 px-4 py-6 text-sm text-[#5A4F42]">
+        <p className="rounded-[10px] border border-dashed border-[var(--rule)] bg-[var(--vellum)]/60 px-4 py-6 text-sm text-[var(--ink-soft)]">
           No assets yet.{canEdit ? ' Click Upload above to add your first file.' : ''}
         </p>
       ) : activeBucket === 'Other' ? (
-        <ul className="divide-y divide-[#D4C7AE]/50 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8]">
+        <ul className="divide-y divide-[var(--rule)]/50 overflow-hidden rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)]">
           {active.map((a) => (
             <li key={a.id}>
               <button
                 type="button"
                 onClick={() => setPreview(a)}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left transition hover:bg-[#F4EDE0]"
+                className="flex w-full items-center gap-3 px-3 py-2 text-left transition hover:bg-[var(--parchment)]"
               >
-                <FileText size={14} aria-hidden className="shrink-0 text-[#5A4F42]" />
+                <FileText size={14} aria-hidden className="shrink-0 text-[var(--ink-soft)]" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm text-[#2A241E]">{a.originalName}</div>
-                  <div className="truncate text-xs text-[#5A4F42]">{a.originalPath}</div>
+                  <div className="truncate text-sm text-[var(--ink)]">{a.originalName}</div>
+                  <div className="truncate text-xs text-[var(--ink-soft)]">{a.originalPath}</div>
                 </div>
-                <div className="shrink-0 text-xs text-[#5A4F42]">{fmtSize(a.size)}</div>
+                <div className="shrink-0 text-xs text-[var(--ink-soft)]">{fmtSize(a.size)}</div>
               </button>
             </li>
           ))}
@@ -167,9 +167,9 @@ export function AssetsGallery({
               key={a.id}
               type="button"
               onClick={() => setPreview(a)}
-              className="group flex flex-col overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] text-left transition hover:border-[#D4A85A]/60 hover:shadow-[0_6px_16px_rgba(42,36,30,0.12)]"
+              className="group flex flex-col overflow-hidden rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] text-left transition hover:border-[var(--candlelight)]/60 hover:shadow-[0_6px_16px_rgb(var(--ink-rgb) / 0.12)]"
             >
-              <div className="aspect-square w-full overflow-hidden bg-[#F4EDE0]">
+              <div className="aspect-square w-full overflow-hidden bg-[var(--parchment)]">
                 <img
                   src={`/api/assets/${encodeURIComponent(a.id)}`}
                   alt={a.originalName}
@@ -178,10 +178,10 @@ export function AssetsGallery({
                 />
               </div>
               <div className="p-2">
-                <div className="truncate text-xs font-medium text-[#2A241E]">
+                <div className="truncate text-xs font-medium text-[var(--ink)]">
                   {a.originalName}
                 </div>
-                <div className="flex items-center justify-between text-[10px] text-[#5A4F42]">
+                <div className="flex items-center justify-between text-[10px] text-[var(--ink-soft)]">
                   <span className="truncate">{shortPath(a.originalPath)}</span>
                   <span className="shrink-0 pl-2">{fmtSize(a.size)}</span>
                 </div>
@@ -190,13 +190,13 @@ export function AssetsGallery({
                     {a.tags.slice(0, 3).map((t) => (
                       <span
                         key={t}
-                        className="rounded-full border border-[#8B4A52]/40 bg-[#8B4A52]/10 px-1.5 py-px text-[9px] font-medium text-[#5E3A3F]"
+                        className="rounded-full border border-[var(--wine)]/40 bg-[var(--wine)]/10 px-1.5 py-px text-[9px] font-medium text-[#5E3A3F]"
                       >
                         #{t}
                       </span>
                     ))}
                     {a.tags.length > 3 && (
-                      <span className="text-[9px] text-[#5A4F42]">+{a.tags.length - 3}</span>
+                      <span className="text-[9px] text-[var(--ink-soft)]">+{a.tags.length - 3}</span>
                     )}
                   </div>
                 )}
@@ -237,19 +237,19 @@ function PreviewModal({
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[#2A241E]/70 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--ink)]/70 p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_16px_48px_rgba(42,36,30,0.5)]">
+      <div className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] shadow-[0_16px_48px_rgb(var(--ink-rgb) / 0.5)]">
         {/* Header */}
-        <div className="flex items-center gap-2 border-b border-[#D4C7AE] px-3 py-2">
+        <div className="flex items-center gap-2 border-b border-[var(--rule)] px-3 py-2">
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium text-[#2A241E]">
+            <div className="truncate text-sm font-medium text-[var(--ink)]">
               {asset.originalName}
             </div>
-            <div className="truncate text-[10px] text-[#5A4F42]">
+            <div className="truncate text-[10px] text-[var(--ink-soft)]">
               {asset.originalPath} · {fmtSize(asset.size)}
             </div>
           </div>
@@ -257,7 +257,7 @@ function PreviewModal({
             href={`/api/assets/${encodeURIComponent(asset.id)}`}
             target="_blank"
             rel="noreferrer"
-            className="rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1 text-xs font-medium text-[#2A241E] transition hover:bg-[#EAE1CF]"
+            className="rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-1 text-xs font-medium text-[var(--ink)] transition hover:bg-[var(--parchment-sunk)]"
           >
             Open
           </a>
@@ -265,7 +265,7 @@ function PreviewModal({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded-[6px] p-1 text-[#5A4F42] transition hover:bg-[#F4EDE0]"
+            className="rounded-[6px] p-1 text-[var(--ink-soft)] transition hover:bg-[var(--parchment)]"
           >
             <X size={14} aria-hidden />
           </button>
@@ -273,7 +273,7 @@ function PreviewModal({
 
         {/* Preview */}
         {isImage && (
-          <div className="flex max-h-[60vh] items-center justify-center overflow-auto bg-[#F4EDE0]">
+          <div className="flex max-h-[60vh] items-center justify-center overflow-auto bg-[var(--parchment)]">
             <img
               src={`/api/assets/${encodeURIComponent(asset.id)}`}
               alt={asset.originalName}
@@ -283,7 +283,7 @@ function PreviewModal({
         )}
 
         {/* Tags */}
-        <div className="border-t border-[#D4C7AE] px-3 py-2.5">
+        <div className="border-t border-[var(--rule)] px-3 py-2.5">
           <AssetTagEditor
             assetId={asset.id}
             initialTags={asset.tags}

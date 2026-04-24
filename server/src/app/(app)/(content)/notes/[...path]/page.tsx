@@ -126,7 +126,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
               <div id="note-scroll-body" className="relative w-[1600px] shrink-0 self-start">
                 <div className="relative mx-auto max-w-[720px]">
                   <header className="mb-2 flex items-center justify-between gap-3">
-                    <p className="text-xs text-[#5A4F42]">
+                    <p className="text-xs text-[var(--ink-soft)]">
                       <code>{path}</code>
                     </p>
                     {canEditNote({
@@ -138,7 +138,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                       <div className="flex items-center gap-2">
                         {note.dm_only === 1 && (
                           <span
-                            className="rounded-full border border-[#8B4A52]/40 bg-[#8B4A52]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#8B4A52]"
+                            className="rounded-full border border-[var(--wine)]/40 bg-[var(--wine)]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--wine)]"
                             title="Only admins and editors can see this note"
                           >
                             DM only
@@ -155,9 +155,9 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
                   <div className="mb-4">
                     {creator && note.created_at > 0 && (
-                      <p className="mb-2 text-[11px] text-[#5A4F42]">
+                      <p className="mb-2 text-[11px] text-[var(--ink-soft)]">
                         Created by{' '}
-                        <span className="font-medium text-[#2A241E]">
+                        <span className="font-medium text-[var(--ink)]">
                           {creator.displayName || creator.username}
                         </span>{' '}
                         · {formatCreatedAt(note.created_at)}

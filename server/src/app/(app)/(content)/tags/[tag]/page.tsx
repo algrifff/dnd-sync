@@ -29,34 +29,34 @@ export default async function TagDetailPage({ params }: Ctx): Promise<ReactEleme
   return (
     <div className="flex-1 overflow-y-auto">
       <main className="mx-auto max-w-[960px] px-8 py-10">
-        <p className="mb-2 text-xs text-[#5A4F42]">
+        <p className="mb-2 text-xs text-[var(--ink-soft)]">
           <Link href="/tags" className="underline-offset-2 hover:underline">
             ← All tags
           </Link>
         </p>
         <h1
-          className="mb-2 text-3xl font-bold text-[#2A241E]"
+          className="mb-2 text-3xl font-bold text-[var(--ink)]"
           style={{ fontFamily: '"Fraunces", Georgia, serif' }}
         >
           <span className="text-[#5E3A3F]">#</span>
           {tag}
         </h1>
-        <p className="mb-8 text-sm text-[#5A4F42]">
+        <p className="mb-8 text-sm text-[var(--ink-soft)]">
           {notes.length} note{notes.length === 1 ? '' : 's'} with this tag.
         </p>
 
         {notes.length === 0 ? (
-          <p className="text-sm text-[#5A4F42]">Nothing yet.</p>
+          <p className="text-sm text-[var(--ink-soft)]">Nothing yet.</p>
         ) : (
           <ul className="space-y-1">
             {notes.map((n) => (
               <li key={n.path}>
                 <Link
                   href={'/notes/' + n.path.split('/').map(encodeURIComponent).join('/')}
-                  className="flex items-baseline justify-between gap-4 rounded-[6px] px-2 py-1.5 transition hover:bg-[#D4A85A]/15"
+                  className="flex items-baseline justify-between gap-4 rounded-[6px] px-2 py-1.5 transition hover:bg-[var(--candlelight)]/15"
                 >
-                  <span className="truncate text-[#2A241E]">{n.title || n.path}</span>
-                  <span className="shrink-0 font-mono text-xs text-[#5A4F42]">{n.path}</span>
+                  <span className="truncate text-[var(--ink)]">{n.title || n.path}</span>
+                  <span className="shrink-0 font-mono text-xs text-[var(--ink-soft)]">{n.path}</span>
                 </Link>
               </li>
             ))}

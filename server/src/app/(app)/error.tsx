@@ -36,7 +36,7 @@ export default function AppError({
           onClick={reset}
           style={{
             padding: '0.5rem 1rem',
-            background: 'var(--world-accent, #8a7e6b)',
+            background: 'var(--world-accent, var(--ink-muted))',
             color: '#fff',
             border: 'none',
             borderRadius: 4,
@@ -46,7 +46,7 @@ export default function AppError({
           Try again
         </button>
         <a
-          href="/"
+          href="/home"
           style={{
             padding: '0.5rem 1rem',
             border: '1px solid currentColor',

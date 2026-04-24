@@ -251,7 +251,7 @@ export function PointerOverlay({
           clientId,
           userId: s.user.userId ?? '',
           name: s.user.name ?? 'Anonymous',
-          color: s.user.color ?? '#5A4F42',
+          color: s.user.color ?? 'var(--ink-soft)',
           x,
           y,
           cursorMode: s.user.cursorMode === 'image' ? 'image' : 'color',
@@ -433,7 +433,7 @@ function PointerDot({
         height="14"
         viewBox="0 0 14 14"
         fill={color}
-        stroke="#FBF5E8"
+        stroke="var(--vellum)"
         strokeWidth="1"
       >
         <path d="M1 1 L1 11 L4 8 L6.5 13 L8.5 12.2 L6 7.3 L11 7.3 Z" />
@@ -443,12 +443,12 @@ function PointerDot({
           <img
             src={avatarUrl}
             alt=""
-            className="h-10 w-10 rounded-full border-2 object-cover shadow-[0_2px_6px_rgba(42,36,30,0.3)]"
+            className="h-10 w-10 rounded-full border-2 object-cover shadow-[0_2px_6px_rgb(var(--ink-rgb) / 0.3)]"
             style={{ borderColor: color }}
           />
         )}
         <span
-          className="whitespace-nowrap rounded-[4px] px-1 text-[10px] font-medium text-[#2A241E]"
+          className="whitespace-nowrap rounded-[4px] px-1 text-[10px] font-medium text-[var(--ink)]"
           style={{ backgroundColor: color }}
         >
           {name}
@@ -476,8 +476,8 @@ function EdgeChip({
     <button
       type="button"
       onClick={onClick}
-      className="pointer-events-auto absolute left-1/2 -translate-x-1/2 rounded-full border px-2 py-0.5 text-[10px] font-medium text-[#2A241E] shadow-[0_4px_12px_rgba(42,36,30,0.12)] transition hover:scale-[1.03]"
-      style={{ top, backgroundColor: '#FBF5E8', borderColor: color }}
+      className="pointer-events-auto absolute left-1/2 -translate-x-1/2 rounded-full border px-2 py-0.5 text-[10px] font-medium text-[var(--ink)] shadow-[0_4px_12px_rgb(var(--ink-rgb) / 0.12)] transition hover:scale-[1.03]"
+      style={{ top, backgroundColor: 'var(--vellum)', borderColor: color }}
     >
       <span aria-hidden className="mr-1" style={{ color }}>
         {arrow}

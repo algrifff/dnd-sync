@@ -87,10 +87,10 @@ export function UpdateToast(): React.ReactElement | null {
       aria-live="polite"
       className="pointer-events-none fixed bottom-4 right-4 z-[9999] flex justify-end"
     >
-      <div className="pointer-events-auto flex max-w-sm items-start gap-3 rounded-lg border border-[#D4C7AE] bg-[#F4EDE0] px-4 py-3 text-[#2A241E] shadow-lg">
+      <div className="pointer-events-auto flex max-w-sm items-start gap-3 rounded-lg border border-[var(--rule)] bg-[var(--parchment)] px-4 py-3 text-[var(--ink)] shadow-lg">
         <div className="flex flex-col gap-1">
           <div className="font-serif text-base font-semibold">A new version is available</div>
-          <div className="text-sm text-[#5A4F42]">
+          <div className="text-sm text-[var(--ink-soft)]">
             Refresh to load the latest updates. Your session will stay signed in.
           </div>
           <div className="mt-2 flex gap-2">
@@ -101,14 +101,14 @@ export function UpdateToast(): React.ReactElement | null {
                 setReloading(true);
                 void hardReload();
               }}
-              className="rounded-md bg-[#8B4A52] px-3 py-1.5 text-sm font-medium text-[#F4EDE0] hover:bg-[#7a3e45] disabled:opacity-60"
+              className="rounded-md bg-[var(--wine)] px-3 py-1.5 text-sm font-medium text-[var(--parchment)] hover:bg-[#7a3e45] disabled:opacity-60"
             >
               {reloading ? 'Refreshing…' : 'Refresh now'}
             </button>
             <button
               type="button"
               onClick={() => setUpdateAvailable(false)}
-              className="rounded-md border border-[#D4C7AE] bg-transparent px-3 py-1.5 text-sm text-[#5A4F42] hover:bg-[#EAE1CF]"
+              className="rounded-md border border-[var(--rule)] bg-transparent px-3 py-1.5 text-sm text-[var(--ink-soft)] hover:bg-[var(--parchment-sunk)]"
             >
               Later
             </button>

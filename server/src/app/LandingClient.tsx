@@ -303,7 +303,7 @@ export function LandingClient(): ReactElement {
   }, []);
 
   return (
-    <div className="relative flex h-screen w-screen cursor-crosshair overflow-hidden bg-[#D9C4A0]">
+    <div className="relative flex h-screen w-screen cursor-crosshair overflow-hidden bg-[var(--parchment-sunk)]">
       {/* Full-page canvas: campfire glow + embers + footprints */}
       <canvas
         ref={canvasRef}
@@ -359,20 +359,20 @@ export function LandingClient(): ReactElement {
           its own pointer events. */}
       <div className="pointer-events-none relative z-10 flex h-full w-full flex-col items-center justify-center gap-5 px-8 md:w-1/2">
         <h1
-          className="pointer-events-auto text-6xl font-bold tracking-tight text-[#2A241E]"
+          className="pointer-events-auto text-6xl font-bold tracking-tight text-[var(--ink)]"
           style={{ fontFamily: '"Fraunces", Georgia, serif' }}
         >
           Pit Pals
         </h1>
         <p
-          className="pointer-events-auto max-w-xs text-center text-lg italic text-[#5A4F42]"
+          className="pointer-events-auto max-w-xs text-center text-lg italic text-[var(--ink-soft)]"
           style={{ fontFamily: '"Fraunces", Georgia, serif' }}
         >
           Notes, sheets &amp; stories for your table.
         </p>
         <Link
           href="/login"
-          className="pointer-events-auto mt-4 inline-block rounded-[12px] bg-[#2A241E] px-10 py-4 text-lg font-semibold text-[#F4EDE0] shadow-[0_2px_0_rgba(0,0,0,0.2)] transition hover:bg-[#8B4A52]"
+          className="pointer-events-auto mt-4 inline-block rounded-[12px] bg-[var(--ink)] px-10 py-4 text-lg font-semibold text-[var(--parchment)] shadow-[0_2px_0_rgba(0,0,0,0.2)] transition hover:bg-[var(--wine)]"
           style={{ fontFamily: '"Fraunces", Georgia, serif' }}
         >
           Begin Your Adventure

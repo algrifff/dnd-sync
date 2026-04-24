@@ -66,8 +66,8 @@ export function CompendiumSearch({
 
   return (
     <div className="relative inline-block">
-      <div className="inline-flex items-center gap-1 rounded border border-[#D4C7AE] bg-white px-2 py-1 text-[11px] focus-within:border-[#2A241E]">
-        <Search size={12} className="text-[#8A7E6B]" />
+      <div className="inline-flex items-center gap-1 rounded border border-[var(--rule)] bg-white px-2 py-1 text-[11px] focus-within:border-[var(--ink)]">
+        <Search size={12} className="text-[var(--ink-muted)]" />
         <input
           type="text"
           value={q}
@@ -103,7 +103,7 @@ export function CompendiumSearch({
       {open && hits.length > 0 && (
         <ul
           role="listbox"
-          className="absolute left-0 top-full z-20 mt-1 max-h-60 w-72 overflow-auto rounded-[8px] border border-[#D4C7AE] bg-white shadow-lg"
+          className="absolute left-0 top-full z-20 mt-1 max-h-60 w-72 overflow-auto rounded-[8px] border border-[var(--rule)] bg-white shadow-lg"
         >
           {hits.map((h, i) => (
             <li key={h.id}>
@@ -118,12 +118,12 @@ export function CompendiumSearch({
                 onMouseEnter={() => setHighlight(i)}
                 className={`block w-full px-2 py-1 text-left text-[11px] ${
                   i === highlight
-                    ? 'bg-[#EAE1CF] text-[#2A241E]'
-                    : 'text-[#2A241E] hover:bg-[#F4EDE0]'
+                    ? 'bg-[var(--parchment-sunk)] text-[var(--ink)]'
+                    : 'text-[var(--ink)] hover:bg-[var(--parchment)]'
                 }`}
               >
                 <div className="truncate">{h.name}</div>
-                <div className="truncate font-mono text-[10px] text-[#8A7E6B]">
+                <div className="truncate font-mono text-[10px] text-[var(--ink-muted)]">
                   {h.kind}
                 </div>
               </button>
@@ -132,7 +132,7 @@ export function CompendiumSearch({
         </ul>
       )}
       {open && q.trim() !== '' && hits.length === 0 && (
-        <div className="absolute left-0 top-full z-20 mt-1 w-72 rounded-[8px] border border-[#D4C7AE] bg-white px-2 py-1.5 text-[11px] text-[#8A7E6B] shadow-lg">
+        <div className="absolute left-0 top-full z-20 mt-1 w-72 rounded-[8px] border border-[var(--rule)] bg-white px-2 py-1.5 text-[11px] text-[var(--ink-muted)] shadow-lg">
           No matches. The compendium may not be seeded yet.
         </div>
       )}

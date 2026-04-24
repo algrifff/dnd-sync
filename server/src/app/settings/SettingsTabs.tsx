@@ -35,7 +35,7 @@ export function SettingsTabs(): React.JSX.Element | null {
     <div
       role="tablist"
       aria-label={isWorld ? 'World settings' : 'Profile settings'}
-      className="flex items-end gap-0.5 border-b border-[#D4C7AE]"
+      className="flex items-end gap-0.5 border-b border-[var(--rule)]"
     >
       {tabs.map((t) => {
         const active =
@@ -49,8 +49,8 @@ export function SettingsTabs(): React.JSX.Element | null {
             className={
               'relative -mb-px rounded-t-[8px] px-4 py-1.5 text-sm transition ' +
               (active
-                ? 'z-10 border border-b-0 border-[#D4C7AE] bg-[#F4EDE0] font-medium text-[#2A241E]'
-                : 'border border-transparent text-[#5A4F42] hover:bg-[#FBF5E8]/70 hover:text-[#2A241E]')
+                ? 'z-10 border border-b-0 border-[var(--rule)] bg-[var(--parchment)] font-medium text-[var(--ink)]'
+                : 'border border-transparent text-[var(--ink-soft)] hover:bg-[var(--vellum)]/70 hover:text-[var(--ink)]')
             }
           >
             {t.label}

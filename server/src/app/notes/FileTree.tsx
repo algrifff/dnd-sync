@@ -153,9 +153,9 @@ function getFolderIcon(path: string): FolderIconDef | null {
   if (path === 'World Lore') return { Icon: BookOpen, color: '#7B5A8B' };
   if (path === 'World Lore/World Info') return { Icon: Globe, color: '#4A7A8B' };
   if (/^Campaigns\/[^/]+$/.test(path)) return { Icon: MapIcon, color: '#4A7A6A' };
-  if (/^Campaigns\/[^/]+\/Characters$/.test(path))    return { Icon: Sword, color: '#7B8A5F' };
-  if (/^Campaigns\/[^/]+\/People$/.test(path))        return { Icon: UserRound, color: '#6B7F8E' };
-  if (/^Campaigns\/[^/]+\/Enemies$/.test(path))       return { Icon: Skull, color: '#8B4A52' };
+  if (/^Campaigns\/[^/]+\/Characters$/.test(path))    return { Icon: Sword, color: 'var(--moss)' };
+  if (/^Campaigns\/[^/]+\/People$/.test(path))        return { Icon: UserRound, color: 'var(--sage)' };
+  if (/^Campaigns\/[^/]+\/Enemies$/.test(path))       return { Icon: Skull, color: 'var(--wine)' };
   if (/^Campaigns\/[^/]+\/Loot$/.test(path))          return { Icon: Package, color: '#7B6A5A' };
   if (/^Campaigns\/[^/]+\/Adventure Log$/.test(path)) return { Icon: CalendarDays, color: '#6A5D8B' };
   if (/^Campaigns\/[^/]+\/Places$/.test(path))        return { Icon: MapPin, color: '#5A7A6A' };
@@ -653,7 +653,7 @@ export function FileTree({
 
   return (
     <KindMapContext.Provider value={kindMap ?? EMPTY_KIND_MAP}>
-    <div className="flex min-h-0 flex-1 flex-col border-r border-[#D4C7AE]">
+    <div className="flex min-h-0 flex-1 flex-col border-r border-[var(--rule)]">
       {showCampaignDialog && (
         <CampaignCreateDialog
           csrfToken={csrfToken}
@@ -681,9 +681,9 @@ export function FileTree({
         <div
           role="status"
           aria-live="polite"
-          className="mx-2 mb-2 flex items-center gap-2 rounded-[6px] border border-[#D4C7AE] bg-[#EAE1CF]/70 px-2 py-1.5 text-xs text-[#5A4F42]"
+          className="mx-2 mb-2 flex items-center gap-2 rounded-[6px] border border-[var(--rule)] bg-[var(--parchment-sunk)]/70 px-2 py-1.5 text-xs text-[var(--ink-soft)]"
         >
-          <Loader2 size={12} className="animate-spin text-[#8B4A52]" aria-hidden />
+          <Loader2 size={12} className="animate-spin text-[var(--wine)]" aria-hidden />
           <span className="truncate">
             Moving <span className="font-medium">{moveLabel.fromName}</span>
             {moveLabel.toName ? (
@@ -796,10 +796,10 @@ const KIND_META: Record<
   FileTreeKind,
   { icon: typeof Sword; color: string; label: string }
 > = {
-  pc: { icon: Sword, color: '#7B8A5F', label: 'Character' },
-  ally: { icon: UserRound, color: '#D4A85A', label: 'Ally' },
-  villain: { icon: Skull, color: '#8B4A52', label: 'Enemy' },
-  npc: { icon: UserRound, color: '#6B7F8E', label: 'Person' },
+  pc: { icon: Sword, color: 'var(--moss)', label: 'Character' },
+  ally: { icon: UserRound, color: 'var(--candlelight)', label: 'Ally' },
+  villain: { icon: Skull, color: 'var(--wine)', label: 'Enemy' },
+  npc: { icon: UserRound, color: 'var(--sage)', label: 'Person' },
   session: { icon: CalendarDays, color: '#6A5D8B', label: 'Session' },
 };
 
@@ -1012,9 +1012,9 @@ function TreeRow({
       <span
         className={`truncate ${
           isPromoted
-            ? `font-medium text-[13.5px] ${isActiveCampaign ? 'text-[#8B4A52]' : 'text-[#5A4F42]'}`
-            : `font-medium ${isSystem ? 'tracking-wide text-xs uppercase text-[#5A4F42]/70' : ''}`
-        } ${!isPromoted && isIndexActive ? 'text-[#2A241E]' : ''}`}
+            ? `font-medium text-[13.5px] ${isActiveCampaign ? 'text-[var(--wine)]' : 'text-[var(--ink-soft)]'}`
+            : `font-medium ${isSystem ? 'tracking-wide text-xs uppercase text-[var(--ink-soft)]/70' : ''}`
+        } ${!isPromoted && isIndexActive ? 'text-[var(--ink)]' : ''}`}
       >
         {item.name}
       </span>
@@ -1029,12 +1029,12 @@ function TreeRow({
             (isTopLevel ? 'mt-2 first:mt-0 ' : '') +
             (isMoving ? 'opacity-60 pointer-events-none ' : '') +
             (isDropTarget
-              ? 'bg-[#8B4A52]/15 ring-1 ring-[#8B4A52]/40'
+              ? 'bg-[var(--wine)]/15 ring-1 ring-[var(--wine)]/40'
               : isIndexActive
-                ? 'bg-[#D4A85A]/25'
+                ? 'bg-[var(--candlelight)]/25'
                 : isTopLevel
-                  ? 'hover:bg-[#D4A85A]/10'
-                  : 'hover:bg-[#D4A85A]/15')
+                  ? 'hover:bg-[var(--candlelight)]/10'
+                  : 'hover:bg-[var(--candlelight)]/15')
           }
         >
           {!isTopLevel && (
@@ -1042,7 +1042,7 @@ function TreeRow({
               type="button"
               onClick={(e) => { e.stopPropagation(); onToggle(item.path); }}
               aria-label={item.open ? 'Collapse' : 'Expand'}
-              className="flex items-center px-1 py-1 text-[#5A4F42]"
+              className="flex items-center px-1 py-1 text-[var(--ink-soft)]"
               style={{ paddingLeft: padding }}
             >
               <ChevronRight
@@ -1057,7 +1057,7 @@ function TreeRow({
             <Link
               href={indexHref}
               onClick={() => { if (!item.open) onToggle(item.path); }}
-              className="flex flex-1 items-center gap-1 py-1 pr-2 text-left text-[#5A4F42]"
+              className="flex flex-1 items-center gap-1 py-1 pr-2 text-left text-[var(--ink-soft)]"
               style={isTopLevel ? { paddingLeft: padding } : undefined}
             >
               {folderIcon}
@@ -1065,7 +1065,7 @@ function TreeRow({
             </Link>
           ) : isTopLevel ? (
             <div
-              className="flex flex-1 cursor-default items-center gap-1 py-1 pr-2 text-[#5A4F42]"
+              className="flex flex-1 cursor-default items-center gap-1 py-1 pr-2 text-[var(--ink-soft)]"
               style={{ paddingLeft: padding }}
             >
               {folderIcon}
@@ -1075,7 +1075,7 @@ function TreeRow({
             <button
               type="button"
               onClick={() => onToggle(item.path)}
-              className="flex flex-1 items-center gap-1 py-1 pr-2 text-left text-[#5A4F42]"
+              className="flex flex-1 items-center gap-1 py-1 pr-2 text-left text-[var(--ink-soft)]"
             >
               {folderIcon}
               {nameLabel}
@@ -1083,7 +1083,7 @@ function TreeRow({
           )}
           {isMoving && (
             <span
-              className="mr-1 flex items-center text-[#8B4A52]"
+              className="mr-1 flex items-center text-[var(--wine)]"
               aria-label="Moving folder"
               title="Moving…"
             >
@@ -1105,8 +1105,8 @@ function TreeRow({
                   className={
                     'mr-1 rounded p-1 transition ' +
                     (isActive
-                      ? 'text-[#D4A85A]'
-                      : 'text-[#5A4F42]/0 hover:text-[#5A4F42]/50 group-hover:text-[#5A4F42]/50')
+                      ? 'text-[var(--candlelight)]'
+                      : 'text-[var(--ink-soft)]/0 hover:text-[var(--ink-soft)]/50 group-hover:text-[var(--ink-soft)]/50')
                   }
                 >
                   <Crown size={12} aria-hidden fill={isActive ? 'currentColor' : 'none'} />
@@ -1115,7 +1115,7 @@ function TreeRow({
             }
             if (isActive) {
               return (
-                <span className="mr-1 p-1 text-[#D4A85A]" title="Active campaign">
+                <span className="mr-1 p-1 text-[var(--candlelight)]" title="Active campaign">
                   <Crown size={12} aria-hidden fill="currentColor" />
                 </span>
               );
@@ -1134,7 +1134,7 @@ function TreeRow({
               />
               {isSystem ? (
                 <span
-                  className="p-1 text-[#5A4F42]/35"
+                  className="p-1 text-[var(--ink-soft)]/35"
                   title="System folder — cannot be deleted or renamed"
                 >
                   <Lock size={11} aria-hidden />
@@ -1178,14 +1178,14 @@ function TreeRow({
         className={
           'group flex items-center rounded-[6px] transition ' +
           (isMoving ? 'opacity-60 pointer-events-none ' : '') +
-          (isActive ? 'bg-[#D4A85A]/25' : 'hover:bg-[#D4A85A]/10')
+          (isActive ? 'bg-[var(--candlelight)]/25' : 'hover:bg-[var(--candlelight)]/10')
         }
       >
         <Link
           href={href}
           className={
             'flex min-w-0 flex-1 items-center gap-1 px-2 py-1 ' +
-            (isActive ? 'text-[#2A241E]' : 'text-[#5A4F42]')
+            (isActive ? 'text-[var(--ink)]' : 'text-[var(--ink-soft)]')
           }
           style={{ paddingLeft: padding + 14 }}
         >
@@ -1195,7 +1195,7 @@ function TreeRow({
         </Link>
         {isMoving && (
           <span
-            className="mr-2 flex items-center text-[#8B4A52]"
+            className="mr-2 flex items-center text-[var(--wine)]"
             aria-label="Moving note"
             title="Moving…"
           >
@@ -1289,8 +1289,8 @@ function NewEntryDropdown({
           aria-label={folderName ? `Upload to ${folderName}` : 'Upload file'}
           className={
             variant === 'wide'
-              ? 'flex w-full items-center gap-1.5 rounded-[6px] px-2 py-1 text-left text-[#5A4F42] transition hover:bg-[#D4A85A]/15 hover:text-[#2A241E]'
-              : 'flex items-center gap-0.5 rounded-[4px] p-1 text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]'
+              ? 'flex w-full items-center gap-1.5 rounded-[6px] px-2 py-1 text-left text-[var(--ink-soft)] transition hover:bg-[var(--candlelight)]/15 hover:text-[var(--ink)]'
+              : 'flex items-center gap-0.5 rounded-[4px] p-1 text-[var(--ink-soft)] transition hover:bg-[var(--ink)]/10 hover:text-[var(--ink)]'
           }
         >
           <Upload size={14} aria-hidden />
@@ -1325,8 +1325,8 @@ function NewEntryDropdown({
         aria-label={folderName ? `New in ${folderName}` : 'New entry'}
         className={
           variant === 'wide'
-            ? 'flex w-full items-center gap-1.5 rounded-[6px] px-2 py-1 text-left text-[#5A4F42] transition hover:bg-[#D4A85A]/15 hover:text-[#2A241E]'
-            : 'flex items-center gap-0.5 rounded-[4px] p-1 text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]'
+            ? 'flex w-full items-center gap-1.5 rounded-[6px] px-2 py-1 text-left text-[var(--ink-soft)] transition hover:bg-[var(--candlelight)]/15 hover:text-[var(--ink)]'
+            : 'flex items-center gap-0.5 rounded-[4px] p-1 text-[var(--ink-soft)] transition hover:bg-[var(--ink)]/10 hover:text-[var(--ink)]'
         }
       >
         <Plus size={14} aria-hidden />
@@ -1346,7 +1346,7 @@ function NewEntryDropdown({
         >
           <ul
             role="menu"
-            className="w-44 overflow-hidden rounded-[8px] border border-[#D4C7AE] bg-[#FBF5E8] py-0.5 shadow-[0_8px_24px_rgba(42,36,30,0.12)]"
+            className="w-44 overflow-hidden rounded-[8px] border border-[var(--rule)] bg-[var(--vellum)] py-0.5 shadow-[0_8px_24px_rgb(var(--ink-rgb) / 0.12)]"
           >
             {visibleOptions.map(({ kind, label, icon: Icon }) => (
               <li key={kind}>
@@ -1358,9 +1358,9 @@ function NewEntryDropdown({
                     setOpen(false);
                     onPick(kind);
                   }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[#2A241E] transition hover:bg-[#D4A85A]/15"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--ink)] transition hover:bg-[var(--candlelight)]/15"
                 >
-                  <Icon size={12} aria-hidden className="text-[#5A4F42]" />
+                  <Icon size={12} aria-hidden className="text-[var(--ink-soft)]" />
                   <span>{labelOverrides[kind] ?? label}</span>
                 </button>
               </li>
@@ -1410,7 +1410,7 @@ function NewEntryRow({
           e.preventDefault();
           onSubmit(value);
         }}
-        className="flex items-center gap-1 rounded-[6px] bg-[#FBF5E8] px-2 py-1"
+        className="flex items-center gap-1 rounded-[6px] bg-[var(--vellum)] px-2 py-1"
         style={{ paddingLeft: padding + 14 }}
       >
         <input
@@ -1435,11 +1435,11 @@ function NewEntryRow({
           }}
           disabled={disabled}
           placeholder={placeholder}
-          className="flex-1 border-0 bg-transparent px-0 text-sm text-[#2A241E] outline-none placeholder:text-[#5A4F42]/60 disabled:opacity-60"
+          className="flex-1 border-0 bg-transparent px-0 text-sm text-[var(--ink)] outline-none placeholder:text-[var(--ink-soft)]/60 disabled:opacity-60"
         />
       </form>
       {error && (
-        <p className="ml-[30px] mt-1 text-xs text-[#8B4A52]">{error}</p>
+        <p className="ml-[30px] mt-1 text-xs text-[var(--wine)]">{error}</p>
       )}
     </div>
   );
@@ -1524,31 +1524,31 @@ function CampaignCreateDialog({
       role="dialog"
       aria-modal="true"
       aria-labelledby="campaign-dialog-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[#2A241E]/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--ink)]/50 p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <form
         onSubmit={submit}
-        className="w-full max-w-sm rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-4 shadow-[0_16px_48px_rgba(42,36,30,0.3)]"
+        className="w-full max-w-sm rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-4 shadow-[0_16px_48px_rgb(var(--ink-rgb) / 0.3)]"
       >
         <div className="mb-3 flex items-center justify-between">
-          <h3 id="campaign-dialog-title" className="text-sm font-semibold text-[#2A241E]">
+          <h3 id="campaign-dialog-title" className="text-sm font-semibold text-[var(--ink)]">
             New campaign
           </h3>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded-[6px] p-1 text-[#5A4F42] transition hover:bg-[#F4EDE0]"
+            className="rounded-[6px] p-1 text-[var(--ink-soft)] transition hover:bg-[var(--parchment)]"
           >
             <X size={14} aria-hidden />
           </button>
         </div>
 
         <label className="mb-3 block">
-          <span className="mb-1 block text-xs font-medium text-[#5A4F42]">Name</span>
+          <span className="mb-1 block text-xs font-medium text-[var(--ink-soft)]">Name</span>
           <input
             ref={nameRef}
             type="text"
@@ -1556,19 +1556,19 @@ function CampaignCreateDialog({
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. The Sunken Crown"
             maxLength={200}
-            className="w-full rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1.5 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
+            className="w-full rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-1.5 text-sm text-[var(--ink)] outline-none focus:border-[var(--candlelight)]"
           />
         </label>
 
         <div className="mb-3">
           <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-xs font-medium text-[#5A4F42]">Subfolders</span>
+            <span className="text-xs font-medium text-[var(--ink-soft)]">Subfolders</span>
             <button
               type="button"
               onClick={() =>
                 setSelected(allSelected ? new Set() : new Set(CAMPAIGN_SUBFOLDERS))
               }
-              className="text-[11px] text-[#5A4F42] underline-offset-2 hover:underline"
+              className="text-[11px] text-[var(--ink-soft)] underline-offset-2 hover:underline"
             >
               {allSelected ? 'None' : 'All'}
             </button>
@@ -1580,28 +1580,28 @@ function CampaignCreateDialog({
                   type="checkbox"
                   checked={selected.has(sf)}
                   onChange={() => toggleSubfolder(sf)}
-                  className="h-3.5 w-3.5 accent-[#D4A85A]"
+                  className="h-3.5 w-3.5 accent-[var(--candlelight)]"
                 />
-                <span className="text-xs text-[#2A241E]">{sf}</span>
+                <span className="text-xs text-[var(--ink)]">{sf}</span>
               </label>
             ))}
           </div>
         </div>
 
-        {error && <p className="mb-3 text-xs text-[#8B4A52]">{error}</p>}
+        {error && <p className="mb-3 text-xs text-[var(--wine)]">{error}</p>}
 
         <div className="flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-[6px] px-3 py-1.5 text-xs font-medium text-[#5A4F42] transition hover:text-[#2A241E]"
+            className="rounded-[6px] px-3 py-1.5 text-xs font-medium text-[var(--ink-soft)] transition hover:text-[var(--ink)]"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={pending || !name.trim()}
-            className="rounded-[6px] bg-[#2A241E] px-3 py-1.5 text-xs font-medium text-[#F4EDE0] transition hover:bg-[#3A342E] disabled:opacity-50"
+            className="rounded-[6px] bg-[var(--ink)] px-3 py-1.5 text-xs font-medium text-[var(--parchment)] transition hover:bg-[var(--vellum)] disabled:opacity-50"
           >
             {pending ? 'Creating…' : 'Create'}
           </button>

@@ -24,7 +24,7 @@ export function AdminSignOut(): React.JSX.Element {
       onClick={signOut}
       disabled={pending}
       title="Sign out of admin"
-      className="flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 text-xs text-[#5A4F42] transition hover:bg-[#EAE1CF] hover:text-[#2A241E] disabled:opacity-50"
+      className="flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 text-xs text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)] disabled:opacity-50"
     >
       <LogOut size={13} aria-hidden />
       {pending ? 'Signing out…' : 'Sign out'}

@@ -49,14 +49,14 @@ export function BacklinksPanel({
   return (
     <section className="mb-6">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
           Backlinks
         </h3>
         <AddBacklink currentPath={currentPath} csrfToken={csrfToken} />
       </div>
 
       {backlinks.length === 0 ? (
-        <p className="text-xs text-[#5A4F42]/80">No backlinks yet.</p>
+        <p className="text-xs text-[var(--ink-soft)]/80">No backlinks yet.</p>
       ) : (
         <ul className="flex flex-wrap gap-1.5">
           {backlinks.map((b) => (
@@ -64,7 +64,7 @@ export function BacklinksPanel({
               <Link
                 href={'/notes/' + encodePath(b.from_path)}
                 title={b.from_path}
-                className="inline-block max-w-[160px] truncate rounded-full border border-[#D4C7AE] bg-[#FBF5E8] px-2.5 py-0.5 text-xs text-[#2A241E] transition hover:-translate-y-px hover:border-[#D4A85A] hover:bg-[#F4EDE0]"
+                className="inline-block max-w-[160px] truncate rounded-full border border-[var(--rule)] bg-[var(--vellum)] px-2.5 py-0.5 text-xs text-[var(--ink)] transition hover:-translate-y-px hover:border-[var(--candlelight)] hover:bg-[var(--parchment)]"
               >
                 {b.title || baseName(b.from_path)}
               </Link>
@@ -77,7 +77,7 @@ export function BacklinksPanel({
                   onClick={() => remove(b.from_path)}
                   title={`Remove link from ${baseName(b.from_path)}`}
                   aria-label={`Remove backlink from ${baseName(b.from_path)}`}
-                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[#5A4F42] opacity-0 transition hover:bg-[#8B4A52]/15 hover:text-[#8B4A52] group-hover:opacity-100"
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--ink-soft)] opacity-0 transition hover:bg-[var(--wine)]/15 hover:text-[var(--wine)] group-hover:opacity-100"
                 >
                   <X size={10} aria-hidden />
                 </button>

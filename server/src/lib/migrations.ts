@@ -745,6 +745,13 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE characters ADD COLUMN hp_temporary INTEGER;
     `,
   },
+  {
+    version: 39,
+    description: 'users: theme preference (day | night) for nighttime mode',
+    sql: `
+      ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'day';
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

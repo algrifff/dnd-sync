@@ -23,6 +23,7 @@ const sessionWithToken: Session = {
   csrfToken: 'a'.repeat(64),
   expiresAt: Date.now() + 60_000,
   cursorMode: 'color',
+  theme: 'day',
   avatarVersion: 0,
   activeCharacterPath: null,
 };

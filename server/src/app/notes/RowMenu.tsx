@@ -141,14 +141,14 @@ export function RowMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Actions"
-        className="rounded-[4px] p-1 text-[#5A4F42] transition hover:bg-[#2A241E]/10 hover:text-[#2A241E]"
+        className="rounded-[4px] p-1 text-[var(--ink-soft)] transition hover:bg-[var(--ink)]/10 hover:text-[var(--ink)]"
       >
         <MoreHorizontal size={14} aria-hidden />
       </button>
       {open && (
         <div
           role="menu"
-          className={`absolute right-0 z-30 w-40 overflow-hidden rounded-[8px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_8px_24px_rgba(42,36,30,0.18)] ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+          className={`absolute right-0 z-30 w-40 overflow-hidden rounded-[8px] border border-[var(--rule)] bg-[var(--vellum)] shadow-[0_8px_24px_rgb(var(--ink-rgb) / 0.18)] ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
         >
           <MenuItem
             onClick={() => {
@@ -164,7 +164,7 @@ export function RowMenu({
               Duplicate
             </MenuItem>
           )}
-          <div className="h-px bg-[#D4C7AE]" />
+          <div className="h-px bg-[var(--rule)]" />
           <MenuItem onClick={destroy} icon={<Trash2 size={13} aria-hidden />} tone="danger">
             Delete
           </MenuItem>
@@ -188,8 +188,8 @@ function MenuItem({
   const base = 'flex w-full items-center gap-2 px-3 py-1.5 text-xs text-left transition';
   const colour =
     tone === 'danger'
-      ? 'text-[#8B4A52] hover:bg-[#8B4A52]/10'
-      : 'text-[#2A241E] hover:bg-[#D4A85A]/15';
+      ? 'text-[var(--wine)] hover:bg-[var(--wine)]/10'
+      : 'text-[var(--ink)] hover:bg-[var(--candlelight)]/15';
   return (
     <button type="button" role="menuitem" onClick={onClick} className={`${base} ${colour}`}>
       {icon}

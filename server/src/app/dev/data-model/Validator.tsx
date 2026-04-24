@@ -132,9 +132,9 @@ export function DataModelValidator({
   }
 
   return (
-    <section className="rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] p-5">
+    <section className="rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-5">
       <h2 className="text-lg font-semibold">Zod validator</h2>
-      <p className="mb-3 text-sm text-[#5A4F42]">
+      <p className="mb-3 text-sm text-[var(--ink-soft)]">
         Feed JSON to{' '}
         <code className="font-mono">validateSheet(kind, sheet)</code>. Passing
         sheets echo the coerced data (with Zod defaults filled in); failing
@@ -150,8 +150,8 @@ export function DataModelValidator({
             onClick={() => loadSample(k)}
             className={`rounded border px-3 py-1 text-sm ${
               kind === k
-                ? 'border-[#2A241E] bg-[#2A241E] text-[#FBF5E8]'
-                : 'border-[#D4C7AE] bg-[#F4EDE0] text-[#2A241E] hover:bg-[#EAE1CF]'
+                ? 'border-[var(--ink)] bg-[var(--ink)] text-[var(--vellum)]'
+                : 'border-[var(--rule)] bg-[var(--parchment)] text-[var(--ink)] hover:bg-[var(--parchment-sunk)]'
             }`}
           >
             {k}
@@ -160,7 +160,7 @@ export function DataModelValidator({
         <button
           type="button"
           onClick={() => loadSample(kind, true)}
-          className="ml-auto rounded border border-[#B46353] bg-[#FBF5E8] px-3 py-1 text-sm text-[#B46353] hover:bg-[#F4DAD2]"
+          className="ml-auto rounded border border-[#B46353] bg-[var(--vellum)] px-3 py-1 text-sm text-[#B46353] hover:bg-[#F4DAD2]"
         >
           Load a bad sample
         </button>
@@ -170,7 +170,7 @@ export function DataModelValidator({
         value={input}
         onChange={(e) => setInput(e.target.value)}
         rows={14}
-        className="w-full rounded border border-[#D4C7AE] bg-white p-3 font-mono text-xs"
+        className="w-full rounded border border-[var(--rule)] bg-white p-3 font-mono text-xs"
         spellCheck={false}
       />
 
@@ -179,11 +179,11 @@ export function DataModelValidator({
           type="button"
           onClick={run}
           disabled={busy}
-          className="rounded bg-[#2A241E] px-4 py-2 text-sm font-semibold text-[#FBF5E8] disabled:opacity-50"
+          className="rounded bg-[var(--ink)] px-4 py-2 text-sm font-semibold text-[var(--vellum)] disabled:opacity-50"
         >
           {busy ? 'Validating…' : 'Validate'}
         </button>
-        <span className="text-xs text-[#5A4F42]">
+        <span className="text-xs text-[var(--ink-soft)]">
           kind = <code className="font-mono">{kind}</code>
         </span>
       </div>
@@ -199,7 +199,7 @@ export function DataModelValidator({
               <div className="mb-2 text-sm font-semibold text-[#2F6A3D]">
                 ✓ valid — coerced data:
               </div>
-              <pre className="overflow-x-auto rounded bg-[#F4EDE0] p-3 font-mono text-xs">
+              <pre className="overflow-x-auto rounded bg-[var(--parchment)] p-3 font-mono text-xs">
                 {JSON.stringify(result.data, null, 2)}
               </pre>
             </div>

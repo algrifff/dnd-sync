@@ -27,7 +27,7 @@ export function NoteSidebar({
   csrfToken: string;
 }): ReactElement {
   return (
-    <aside className="h-full overflow-y-auto border-l border-[#D4C7AE] bg-[#EAE1CF]/40 px-4 py-4 text-sm">
+    <aside className="h-full overflow-y-auto border-l border-[var(--rule)] bg-[var(--parchment-sunk)]/40 px-4 py-4 text-sm">
       <BacklinksPanel
         initialBacklinks={backlinks}
         currentPath={path}
@@ -46,7 +46,7 @@ export function NoteSidebar({
                 <Link
                   href={'/notes/' + encodePath(l.to_path)}
                   title={l.to_path}
-                  className="inline-block max-w-full truncate rounded-full border border-[#D4C7AE] bg-[#FBF5E8] px-2.5 py-0.5 text-xs text-[#2A241E] transition hover:-translate-y-px hover:border-[#D4A85A] hover:bg-[#F4EDE0]"
+                  className="inline-block max-w-full truncate rounded-full border border-[var(--rule)] bg-[var(--vellum)] px-2.5 py-0.5 text-xs text-[var(--ink)] transition hover:-translate-y-px hover:border-[var(--candlelight)] hover:bg-[var(--parchment)]"
                 >
                   {l.title || baseName(l.to_path)}
                 </Link>
@@ -63,7 +63,7 @@ export function NoteSidebar({
               <li key={t}>
                 <Link
                   href={'/tags/' + encodeURIComponent(t)}
-                  className="inline-block rounded-full border border-[#8B4A52]/40 bg-[#8B4A52]/10 px-2.5 py-0.5 text-xs font-medium text-[#5E3A3F] transition hover:-translate-y-px hover:bg-[#8B4A52]/20 hover:text-[#4A2E32]"
+                  className="inline-block rounded-full border border-[var(--wine)]/40 bg-[var(--wine)]/10 px-2.5 py-0.5 text-xs font-medium text-[#5E3A3F] transition hover:-translate-y-px hover:bg-[var(--wine)]/20 hover:text-[#4A2E32]"
                 >
                   #{t}
                 </Link>
@@ -79,7 +79,7 @@ export function NoteSidebar({
             {outline.map((h, i) => (
               <li
                 key={i}
-                className="truncate text-[#5A4F42]"
+                className="truncate text-[var(--ink-soft)]"
                 style={{ paddingLeft: `${(h.level - 1) * 10}px` }}
               >
                 {h.text}
@@ -91,7 +91,7 @@ export function NoteSidebar({
 
       <Section title="Graph">
         <MiniGraph path={path} />
-        <p className="mt-2 text-xs text-[#5A4F42]">
+        <p className="mt-2 text-xs text-[var(--ink-soft)]">
           Full graph →{' '}
           <Link href="/graph" className="underline">
             /graph
@@ -116,12 +116,12 @@ function Section({
   return (
     <section className="mb-6">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-[#5A4F42]">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
           {title}
         </h3>
         {actions}
       </div>
-      {children ?? (empty ? <p className="text-xs text-[#5A4F42]/80">{empty}</p> : null)}
+      {children ?? (empty ? <p className="text-xs text-[var(--ink-soft)]/80">{empty}</p> : null)}
     </section>
   );
 }

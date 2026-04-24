@@ -27,21 +27,21 @@ export function VerifyView({ token }: { token: string }) {
 
       {state.status === 'idle' && (
         <>
-          <p className="text-[#5A4F42]">
+          <p className="text-[var(--ink-soft)]">
             {pending ? 'Verifying your scroll…' : 'Verifying your scroll…'}
           </p>
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#D4C7AE] border-t-[#D4A85A]" />
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[var(--rule)] border-t-[var(--candlelight)]" />
         </>
       )}
 
       {state.status === 'error' && (
         <>
-          <p className="rounded-[8px] border border-[#8B4A52]/40 bg-[#8B4A52]/10 px-3 py-2 text-sm text-[#8B4A52]">
+          <p className="rounded-[8px] border border-[var(--wine)]/40 bg-[var(--wine)]/10 px-3 py-2 text-sm text-[var(--wine)]">
             {state.error}
           </p>
           <Link
             href="/login"
-            className="inline-block rounded-[10px] bg-[#2A241E] px-5 py-3 font-medium text-[#F4EDE0] transition hover:scale-[1.015] hover:bg-[#3A342E]"
+            className="inline-block rounded-[10px] bg-[var(--ink)] px-5 py-3 font-medium text-[var(--parchment)] transition hover:scale-[1.015] hover:bg-[var(--vellum)]"
           >
             Back to sign in
           </Link>

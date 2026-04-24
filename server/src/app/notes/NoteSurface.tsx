@@ -31,7 +31,7 @@ export type SurfaceUser = {
 // selection update replaces the element, which restarts the animation
 // from the start (2 s visible, then fades; caret stays).
 function renderCaret(user: { name?: string | null; color?: string | null }): HTMLElement {
-  const color = user.color ?? '#5A4F42';
+  const color = user.color ?? 'var(--ink-soft)';
   const name = user.name ?? 'Anonymous';
   const caret = document.createElement('span');
   caret.className = 'collab-caret';

@@ -69,8 +69,8 @@ export function EndSessionButton({
   // ── Sent ─────────────────────────────────────────────────────────────
   if (phase === 'sent') {
     return (
-      <div className="mb-5 rounded-[6px] border border-[#8B4A52]/30 bg-[#8B4A52]/8 px-4 py-3">
-        <p className="text-sm text-[#2A241E]">
+      <div className="mb-5 rounded-[6px] border border-[var(--wine)]/30 bg-[var(--wine)]/8 px-4 py-3">
+        <p className="text-sm text-[var(--ink)]">
           Session closed — the AI is processing your notes in the chat panel.
         </p>
       </div>
@@ -80,12 +80,12 @@ export function EndSessionButton({
   // ── Error ─────────────────────────────────────────────────────────────
   if (phase === 'error') {
     return (
-      <div className="mb-5 rounded-[6px] border border-[#8B4A52]/40 bg-[#8B4A52]/10 px-4 py-3">
-        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#8B4A52]">Error</p>
-        <p className="mb-2 text-sm text-[#2A241E]">{errorMsg}</p>
+      <div className="mb-5 rounded-[6px] border border-[var(--wine)]/40 bg-[var(--wine)]/10 px-4 py-3">
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--wine)]">Error</p>
+        <p className="mb-2 text-sm text-[var(--ink)]">{errorMsg}</p>
         <button
           onClick={() => setPhase('idle')}
-          className="text-xs text-[#8B4A52] underline underline-offset-2 hover:opacity-70"
+          className="text-xs text-[var(--wine)] underline underline-offset-2 hover:opacity-70"
         >
           Try again
         </button>
@@ -96,9 +96,9 @@ export function EndSessionButton({
   // ── Working (marking closed) ──────────────────────────────────────────
   if (phase === 'working') {
     return (
-      <div className="mb-5 flex items-center gap-2.5 rounded-[6px] border border-[#D4C7AE] bg-[#EAE1CF]/50 px-4 py-3">
-        <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#8B4A52] border-t-transparent" />
-        <span className="text-sm text-[#5A4F42]">Closing session…</span>
+      <div className="mb-5 flex items-center gap-2.5 rounded-[6px] border border-[var(--rule)] bg-[var(--parchment-sunk)]/50 px-4 py-3">
+        <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--wine)] border-t-transparent" />
+        <span className="text-sm text-[var(--ink-soft)]">Closing session…</span>
       </div>
     );
   }
@@ -106,23 +106,23 @@ export function EndSessionButton({
   // ── Confirming ────────────────────────────────────────────────────────
   if (phase === 'confirming') {
     return (
-      <div className="mb-5 rounded-[6px] border border-[#8B4A52]/40 bg-[#8B4A52]/8 px-4 py-3">
+      <div className="mb-5 rounded-[6px] border border-[var(--wine)]/40 bg-[var(--wine)]/8 px-4 py-3">
         {isAlreadyClosed ? (
           <>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#8B4A52]">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--wine)]">
               Already closed
             </p>
-            <p className="mb-3 text-sm text-[#2A241E]">
+            <p className="mb-3 text-sm text-[var(--ink)]">
               This session has already been ended. Running again may add duplicate
               information to your entity notes. Are you sure?
             </p>
           </>
         ) : (
           <>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#8B4A52]">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--wine)]">
               End of session
             </p>
-            <p className="mb-3 text-sm text-[#2A241E]">
+            <p className="mb-3 text-sm text-[var(--ink)]">
               The AI will read your session notes, create or update entity pages for every
               NPC, location, and creature it finds, and add wikilinks back to this session.
               Progress will stream in the chat panel.
@@ -132,13 +132,13 @@ export function EndSessionButton({
         <div className="flex items-center gap-3">
           <button
             onClick={() => void handleConfirm()}
-            className="rounded-[4px] bg-[#8B4A52] px-3 py-1.5 text-xs font-medium text-[#F4EDE0] hover:bg-[#7a3f47] active:opacity-80"
+            className="rounded-[4px] bg-[var(--wine)] px-3 py-1.5 text-xs font-medium text-[var(--parchment)] hover:bg-[#7a3f47] active:opacity-80"
           >
             {isAlreadyClosed ? 'Run anyway' : 'End session'}
           </button>
           <button
             onClick={handleCancel}
-            className="text-xs text-[#5A4F42] underline underline-offset-2 hover:opacity-70"
+            className="text-xs text-[var(--ink-soft)] underline underline-offset-2 hover:opacity-70"
           >
             Cancel
           </button>
@@ -158,7 +158,7 @@ export function EndSessionButton({
         });
         setPhase('confirming');
       }}
-      className="mb-5 rounded-[4px] bg-[#8B4A52] px-4 py-2 text-sm font-medium text-[#F4EDE0] transition-opacity hover:opacity-85 active:opacity-70"
+      className="mb-5 rounded-[4px] bg-[var(--wine)] px-4 py-2 text-sm font-medium text-[var(--parchment)] transition-opacity hover:opacity-85 active:opacity-70"
     >
       End of Session
     </button>

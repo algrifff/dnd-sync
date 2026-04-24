@@ -25,7 +25,7 @@ export default async function TagsIndexPage(): Promise<ReactElement> {
     <div className="flex-1 overflow-y-auto">
       <main className="mx-auto max-w-[960px] px-8 py-10">
         <h1
-          className="mb-8 text-3xl font-bold text-[#2A241E]"
+          className="mb-8 text-3xl font-bold text-[var(--ink)]"
           style={{ fontFamily: '"Fraunces", Georgia, serif' }}
         >
           Tags

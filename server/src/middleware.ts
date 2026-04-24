@@ -23,9 +23,9 @@ const SESSION_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 /** Paths that must NOT redirect to /login when unauthenticated. Covers
  *  the login surface itself, API routes (self-authing), and static assets. */
 const PUBLIC_PATTERNS: readonly RegExp[] = [
+  /^\/$/,
   /^\/login(\/|$)/,
   /^\/signup(\/|$)/,
-  /^\/welcome(\/|$)/,
   /^\/admin\/login(\/|$)/,
   /^\/api\//,
   /^\/_next\//,
@@ -73,16 +73,6 @@ export function middleware(req: NextRequest): NextResponse {
   if (!isPublic(pathname)) {
     if (!sidCookie) {
       const url = req.nextUrl.clone();
-      // Root visit without a session → serve the landing page at `/`
-      // (rewrite, not redirect, so the URL bar stays at the top-level
-      // domain).
-      if (pathname === '/') {
-        url.pathname = '/welcome';
-        url.search = '';
-        const res = NextResponse.rewrite(url);
-        for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
-        return res;
-      }
       url.pathname = '/login';
       url.search = '';
       url.searchParams.set('next', req.nextUrl.pathname + req.nextUrl.search);

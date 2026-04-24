@@ -25,7 +25,7 @@ export default async function ResetPage({
           <p>
             <Link
               href="/login/forgot"
-              className="text-[#2A241E] underline decoration-[#D4A85A] underline-offset-4"
+              className="text-[var(--ink)] underline decoration-[var(--candlelight)] underline-offset-4"
             >
               Request a new reset link
             </Link>
@@ -45,7 +45,7 @@ export default async function ResetPage({
         <p>
           <Link
             href="/login"
-            className="text-[#5A4F42] underline decoration-[#D4C7AE] underline-offset-4 hover:text-[#2A241E] hover:decoration-[#D4A85A]"
+            className="text-[var(--ink-soft)] underline decoration-[var(--rule)] underline-offset-4 hover:text-[var(--ink)] hover:decoration-[var(--candlelight)]"
           >
             Back to sign in
           </Link>

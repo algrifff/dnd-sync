@@ -19,10 +19,10 @@ export function Pill({
   return (
     <span
       title={title}
-      className="inline-flex items-center rounded-full border bg-[#F4EDE0] px-2 py-0.5 text-[11px] font-medium"
+      className="inline-flex items-center rounded-full border bg-[var(--parchment)] px-2 py-0.5 text-[11px] font-medium"
       style={{
-        borderColor: color ?? '#D4C7AE',
-        color: color ?? '#2A241E',
+        borderColor: color ?? 'var(--rule)',
+        color: color ?? 'var(--ink)',
       }}
     >
       {children}

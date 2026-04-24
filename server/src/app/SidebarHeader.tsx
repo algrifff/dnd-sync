@@ -18,8 +18,8 @@ export function SidebarHeader({
   role: 'admin' | 'editor' | 'viewer';
 }): ReactElement {
   return (
-    <div className="flex shrink-0 items-center justify-center gap-0.5 border-b border-r border-[#D4C7AE] px-2 py-1.5">
-      <IconLink href="/" label="Home" icon={<Home size={16} aria-hidden />} />
+    <div className="flex shrink-0 items-center justify-center gap-0.5 border-b border-r border-[var(--rule)] px-2 py-1.5">
+      <IconLink href="/home" label="Home" icon={<Home size={16} aria-hidden />} />
       <IconLink href="/tags" label="Tags" icon={<Tag size={16} aria-hidden />} />
       <IconLink href="/graph" label="Graph" icon={<Share2 size={16} aria-hidden />} />
       <IconLink href="/assets" label="Assets" icon={<ImageIcon size={16} aria-hidden />} />
@@ -41,7 +41,7 @@ function IconLink({
       href={href}
       title={label}
       aria-label={label}
-      className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#5A4F42] transition hover:bg-[#D4A85A]/20 hover:text-[#2A241E]"
+      className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[var(--ink-soft)] transition hover:bg-[var(--candlelight)]/20 hover:text-[var(--ink)]"
     >
       {icon}
     </Link>

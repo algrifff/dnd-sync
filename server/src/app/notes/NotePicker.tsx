@@ -138,10 +138,10 @@ export function NotePicker({
   return (
     <div
       ref={popoverRef}
-      className="fixed z-40 w-80 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_12px_32px_rgba(42,36,30,0.18)]"
+      className="fixed z-40 w-80 overflow-hidden rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] shadow-[0_12px_32px_rgb(var(--ink-rgb) / 0.18)]"
       style={{ left, top }}
     >
-      <div className="border-b border-[#D4C7AE] p-2">
+      <div className="border-b border-[var(--rule)] p-2">
         <input
           ref={inputRef}
           type="text"
@@ -149,13 +149,13 @@ export function NotePicker({
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder="Link to note…"
-          className="w-full rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] px-2 py-1 text-sm text-[#2A241E] outline-none placeholder:text-[#5A4F42]/60 focus:border-[#D4A85A]"
+          className="w-full rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-1 text-sm text-[var(--ink)] outline-none placeholder:text-[var(--ink-soft)]/60 focus:border-[var(--candlelight)]"
         />
       </div>
       {!loaded ? (
-        <div className="px-3 py-2 text-xs text-[#5A4F42]">Loading…</div>
+        <div className="px-3 py-2 text-xs text-[var(--ink-soft)]">Loading…</div>
       ) : filtered.length === 0 ? (
-        <div className="px-3 py-2 text-xs text-[#5A4F42]">
+        <div className="px-3 py-2 text-xs text-[var(--ink-soft)]">
           {query ? 'No matches' : 'No notes yet'}
         </div>
       ) : (
@@ -174,14 +174,14 @@ export function NotePicker({
                 className={
                   'flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left text-sm transition ' +
                   (i === highlight
-                    ? 'bg-[#D4A85A]/20 text-[#2A241E]'
-                    : 'text-[#2A241E] hover:bg-[#D4A85A]/10')
+                    ? 'bg-[var(--candlelight)]/20 text-[var(--ink)]'
+                    : 'text-[var(--ink)] hover:bg-[var(--candlelight)]/10')
                 }
               >
                 <span className="truncate font-medium">
                   {entry.title || entry.path}
                 </span>
-                <span className="truncate text-xs text-[#5A4F42]">{entry.path}</span>
+                <span className="truncate text-xs text-[var(--ink-soft)]">{entry.path}</span>
               </button>
             </li>
           ))}

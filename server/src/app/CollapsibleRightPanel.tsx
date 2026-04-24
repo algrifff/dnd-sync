@@ -55,7 +55,7 @@ export function CollapsibleRightPanel({
         onClick={toggle}
         title={open ? 'Collapse panel' : 'Expand panel'}
         aria-label={open ? 'Collapse panel' : 'Expand panel'}
-        className="absolute left-0 top-[72px] z-20 flex h-8 w-3 -translate-x-full items-center justify-center rounded-l-[4px] border border-r-0 border-[#D4C7AE] bg-[#EAE1CF] text-[#8A7E6B] transition hover:bg-[#D4C7AE] hover:text-[#2A241E]"
+        className="absolute left-0 top-[72px] z-20 flex h-8 w-3 -translate-x-full items-center justify-center rounded-l-[4px] border border-r-0 border-[var(--rule)] bg-[var(--parchment-sunk)] text-[var(--ink-muted)] transition hover:bg-[var(--rule)] hover:text-[var(--ink)]"
       >
         {open ? <ChevronRight size={10} /> : <ChevronLeft size={10} />}
       </button>

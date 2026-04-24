@@ -217,8 +217,8 @@ export function NoteTabs(): React.JSX.Element {
             className={
               'group relative flex max-w-[220px] min-w-0 shrink-0 items-center gap-1.5 rounded-t-[8px] px-3 py-1.5 text-xs transition ' +
               (isActive
-                ? 'z-10 bg-[#F4EDE0] text-[#2A241E]'
-                : 'text-[#5A4F42] hover:bg-[#FBF5E8]/70 hover:text-[#2A241E]')
+                ? 'z-10 bg-[var(--parchment)] text-[var(--ink)]'
+                : 'text-[var(--ink-soft)] hover:bg-[var(--vellum)]/70 hover:text-[var(--ink)]')
             }
           >
             <FileText size={12} aria-hidden className="shrink-0" />
@@ -227,7 +227,7 @@ export function NoteTabs(): React.JSX.Element {
               type="button"
               onClick={(e) => close(t.path, e)}
               aria-label={`Close ${t.title}`}
-              className="-mr-1 rounded-full p-0.5 text-[#5A4F42]/60 opacity-0 transition hover:bg-[#2A241E]/10 hover:text-[#2A241E] group-hover:opacity-100 aria-[selected=true]:opacity-100"
+              className="-mr-1 rounded-full p-0.5 text-[var(--ink-soft)]/60 opacity-0 transition hover:bg-[var(--ink)]/10 hover:text-[var(--ink)] group-hover:opacity-100 aria-[selected=true]:opacity-100"
             >
               <X size={10} aria-hidden />
             </button>

@@ -34,7 +34,7 @@ export function AppHeader({
   const headerColor = worldHeader?.headerColor ?? 'var(--ink)';
 
   return (
-    <header className="surface-paper grid h-14 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-[#D4C7AE] bg-[#EAE1CF] px-4">
+    <header className="surface-paper grid h-14 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-[var(--rule)] bg-[var(--parchment-sunk)] px-4">
 
       {/* ── Left: gear → title → avatars ── */}
       <div className="flex min-w-0 items-center gap-2.5">
@@ -44,7 +44,7 @@ export function AppHeader({
             href="/settings/world"
             title="World settings"
             aria-label="World settings"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-[#5A4F42] transition hover:bg-[#D4A85A]/20 hover:text-[#2A241E]"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--ink-soft)] transition hover:bg-[var(--candlelight)]/20 hover:text-[var(--ink)]"
           >
             <Settings2 size={14} aria-hidden />
           </Link>
@@ -81,14 +81,14 @@ export function AppHeader({
               className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
               style={{ backgroundColor: user.accentColor }}
             />
-            <span className="truncate text-xs text-[#2A241E]">
+            <span className="truncate text-xs text-[var(--ink)]">
               <span className="font-medium">{user.displayName}</span>{' '}
-              <span className="text-[#5A4F42]">({user.username})</span>
+              <span className="text-[var(--ink-soft)]">({user.username})</span>
             </span>
             <form action={logoutAction}>
               <button
                 type="submit"
-                className="shrink-0 rounded-[6px] border border-[#D4C7AE] bg-[#FBF5E8] px-2 py-1 text-xs text-[#5A4F42] transition hover:bg-[#F4EDE0] hover:text-[#2A241E]"
+                className="shrink-0 rounded-[6px] border border-[var(--rule)] bg-[var(--vellum)] px-2 py-1 text-xs text-[var(--ink-soft)] transition hover:bg-[var(--parchment)] hover:text-[var(--ink)]"
               >
                 Sign out
               </button>

@@ -25,7 +25,7 @@ export default async function VerifyPage({
           <p>
             <Link
               href="/login"
-              className="text-[#2A241E] underline decoration-[#D4A85A] underline-offset-4"
+              className="text-[var(--ink)] underline decoration-[var(--candlelight)] underline-offset-4"
             >
               Back to sign in
             </Link>

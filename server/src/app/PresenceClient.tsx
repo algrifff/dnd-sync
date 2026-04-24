@@ -81,7 +81,7 @@ export function PresenceClient({
         const s = state as Partial<PeerState> | undefined;
         if (!s?.user) continue;
         const viewing = s.viewing ?? null;
-        const color = s.user.color ?? '#5A4F42';
+        const color = s.user.color ?? 'var(--ink-soft)';
         const name = s.user.name ?? 'Anonymous';
         const userId = s.user.userId ?? '';
         const avatarVersion =

@@ -89,7 +89,7 @@ export function PasswordForm({
         <button
           type="submit"
           disabled={pending || !current || !next || !confirm}
-          className="rounded-[8px] bg-[#2A241E] px-4 py-2 text-sm font-medium text-[#F4EDE0] transition hover:scale-[1.015] hover:bg-[#3A342E] disabled:opacity-50 disabled:hover:scale-100"
+          className="rounded-[8px] bg-[var(--ink)] px-4 py-2 text-sm font-medium text-[var(--parchment)] transition hover:scale-[1.015] hover:bg-[var(--vellum)] disabled:opacity-50 disabled:hover:scale-100"
         >
           {pending ? 'Updating…' : 'Change password'}
         </button>
@@ -97,7 +97,7 @@ export function PasswordForm({
           <span
             className={
               'text-sm ' +
-              (flash.kind === 'ok' ? 'text-[#7B8A5F]' : 'text-[#8B4A52]')
+              (flash.kind === 'ok' ? 'text-[var(--moss)]' : 'text-[var(--wine)]')
             }
           >
             {flash.message}
@@ -121,7 +121,7 @@ function Field({
 }): React.JSX.Element {
   return (
     <label className="block">
-      <span className="mb-1 block text-sm font-medium text-[#5A4F42]">
+      <span className="mb-1 block text-sm font-medium text-[var(--ink-soft)]">
         {label}
       </span>
       <input
@@ -129,7 +129,7 @@ function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         autoComplete={autoComplete}
-        className="w-full rounded-[8px] border border-[#D4C7AE] bg-[#FBF5E8] px-3 py-2 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
+        className="w-full rounded-[8px] border border-[var(--rule)] bg-[var(--vellum)] px-3 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--candlelight)]"
       />
     </label>
   );

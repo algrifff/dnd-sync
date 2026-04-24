@@ -502,8 +502,8 @@ export function ImportJobPanel({
           className={
             'rounded-[8px] px-3 py-2 text-xs ' +
             (flash.kind === 'ok'
-              ? 'bg-[#7B8A5F]/15 text-[#2A241E]'
-              : 'bg-[#8B4A52]/15 text-[#8B4A52]')
+              ? 'bg-[var(--moss)]/15 text-[var(--ink)]'
+              : 'bg-[var(--wine)]/15 text-[var(--wine)]')
           }
         >
           {flash.message}
@@ -512,12 +512,12 @@ export function ImportJobPanel({
 
       {/* Orchestration summary card — shown after Smart Import completes */}
       {orchestrationDone && orch?.summary && (
-        <div className="rounded-[10px] border border-[#7B8A5F]/40 bg-[#7B8A5F]/10 px-4 py-3 text-sm text-[#2A241E]">
+        <div className="rounded-[10px] border border-[var(--moss)]/40 bg-[var(--moss)]/10 px-4 py-3 text-sm text-[var(--ink)]">
           <div className="mb-1 flex items-center gap-2 font-medium">
-            <Sparkles size={13} className="text-[#7B8A5F]" />
+            <Sparkles size={13} className="text-[var(--moss)]" />
             Smart Import complete
           </div>
-          <p className="text-xs text-[#5A4F42]">{orch.summary}</p>
+          <p className="text-xs text-[var(--ink-soft)]">{orch.summary}</p>
         </div>
       )}
 
@@ -528,7 +528,7 @@ export function ImportJobPanel({
             type="button"
             onClick={acceptAll}
             disabled={busy}
-            className="rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-3 py-1.5 text-xs font-medium text-[#2A241E] transition hover:bg-[#EAE1CF] disabled:opacity-50"
+            className="rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-1.5 text-xs font-medium text-[var(--ink)] transition hover:bg-[var(--parchment-sunk)] disabled:opacity-50"
           >
             Accept all
           </button>
@@ -536,7 +536,7 @@ export function ImportJobPanel({
             type="button"
             onClick={rejectPlain}
             disabled={busy}
-            className="rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] px-3 py-1.5 text-xs font-medium text-[#2A241E] transition hover:bg-[#EAE1CF] disabled:opacity-50"
+            className="rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-1.5 text-xs font-medium text-[var(--ink)] transition hover:bg-[var(--parchment-sunk)] disabled:opacity-50"
           >
             Reject plain
           </button>
@@ -544,7 +544,7 @@ export function ImportJobPanel({
             type="button"
             onClick={rejectAll}
             disabled={busy}
-            className="rounded-[6px] px-3 py-1.5 text-xs font-medium text-[#5A4F42] transition hover:text-[#2A241E] disabled:opacity-50"
+            className="rounded-[6px] px-3 py-1.5 text-xs font-medium text-[var(--ink-soft)] transition hover:text-[var(--ink)] disabled:opacity-50"
           >
             Reject all
           </button>
@@ -553,7 +553,7 @@ export function ImportJobPanel({
               type="button"
               onClick={cancel}
               disabled={busy || liveJob.status === 'applied'}
-              className="rounded-[6px] px-3 py-1.5 text-xs font-medium text-[#8B4A52] transition hover:bg-[#8B4A52]/10 disabled:opacity-50"
+              className="rounded-[6px] px-3 py-1.5 text-xs font-medium text-[var(--wine)] transition hover:bg-[var(--wine)]/10 disabled:opacity-50"
             >
               Cancel
             </button>
@@ -561,7 +561,7 @@ export function ImportJobPanel({
               type="button"
               onClick={smartImport}
               disabled={smartBusy || !applyable}
-              className="flex items-center gap-1.5 rounded-[8px] border border-[#D4A85A]/60 bg-[#D4A85A]/10 px-3 py-1.5 text-xs font-medium text-[#2A241E] transition hover:bg-[#D4A85A]/20 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-[8px] border border-[var(--candlelight)]/60 bg-[var(--candlelight)]/10 px-3 py-1.5 text-xs font-medium text-[var(--ink)] transition hover:bg-[var(--candlelight)]/20 disabled:opacity-50"
             >
               {smartBusy
                 ? <Loader2 size={11} className="animate-spin" />
@@ -572,7 +572,7 @@ export function ImportJobPanel({
               type="button"
               onClick={apply}
               disabled={busy || !applyable || counts.accepted === 0}
-              className="rounded-[8px] bg-[#2A241E] px-4 py-1.5 text-xs font-medium text-[#F4EDE0] transition hover:bg-[#3A342E] disabled:opacity-50"
+              className="rounded-[8px] bg-[var(--ink)] px-4 py-1.5 text-xs font-medium text-[var(--parchment)] transition hover:bg-[var(--vellum)] disabled:opacity-50"
             >
               {busy ? 'Applying…' : `Apply ${counts.accepted}`}
             </button>
@@ -583,11 +583,11 @@ export function ImportJobPanel({
       {/* Manual review table — hidden when orchestrating */}
       {!orchestrating && !orchestrationDone && (
         rows.length === 0 ? (
-          <p className="text-sm text-[#5A4F42]">
+          <p className="text-sm text-[var(--ink-soft)]">
             No planned notes on this job. {plan ? 'Wait for analyse to finish.' : 'Parse failed — cancel and re-upload.'}
           </p>
         ) : (
-          <ul className="divide-y divide-[#D4C7AE]/50 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#F4EDE0] text-sm">
+          <ul className="divide-y divide-[var(--rule)]/50 overflow-hidden rounded-[10px] border border-[var(--rule)] bg-[var(--parchment)] text-sm">
             {rows.map((r) => (
               <Row
                 key={r.id}
@@ -603,11 +603,11 @@ export function ImportJobPanel({
         )
       )}
 
-      <footer className="flex items-center justify-between text-xs text-[#5A4F42]">
+      <footer className="flex items-center justify-between text-xs text-[var(--ink-soft)]">
         <span>
-          status: <span className="font-medium text-[#2A241E]">{liveJob.status}</span>
+          status: <span className="font-medium text-[var(--ink)]">{liveJob.status}</span>
         </span>
-        <Link href="/" className="text-[#5A4F42] hover:text-[#2A241E] hover:underline">
+        <Link href="/home" className="text-[var(--ink-soft)] hover:text-[var(--ink)] hover:underline">
           Back to home
         </Link>
       </footer>
@@ -677,14 +677,14 @@ function OrchestrationOverlay({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#2A241E]/60 backdrop-blur-sm">
-      <div className="flex h-[90vh] w-full max-w-xl flex-col rounded-[14px] border border-[#D4C7AE] bg-[#F4EDE0] shadow-2xl mx-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--ink)]/60 backdrop-blur-sm">
+      <div className="flex h-[90vh] w-full max-w-xl flex-col rounded-[14px] border border-[var(--rule)] bg-[var(--parchment)] shadow-2xl mx-4">
 
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[#D4C7AE] px-5 py-3.5">
+        <div className="flex items-center justify-between border-b border-[var(--rule)] px-5 py-3.5">
           <div className="flex items-center gap-2">
-            <Sparkles size={14} className="text-[#D4A85A]" />
-            <span className="text-sm font-semibold text-[#2A241E]">
+            <Sparkles size={14} className="text-[var(--candlelight)]" />
+            <span className="text-sm font-semibold text-[var(--ink)]">
               {isDone ? 'Smart Import complete' : isWaiting ? 'Your input needed' : 'Smart Import running…'}
             </span>
           </div>
@@ -693,7 +693,7 @@ function OrchestrationOverlay({
               type="button"
               onClick={onCancel}
               disabled={cancelDisabled}
-              className="rounded-[6px] px-2.5 py-1 text-[11px] font-medium text-[#8B4A52] transition hover:bg-[#8B4A52]/10 disabled:opacity-40"
+              className="rounded-[6px] px-2.5 py-1 text-[11px] font-medium text-[var(--wine)] transition hover:bg-[var(--wine)]/10 disabled:opacity-40"
             >
               Cancel import
             </button>
@@ -701,7 +701,7 @@ function OrchestrationOverlay({
         </div>
 
         {/* Phase step bar */}
-        <div className="flex items-center gap-0 border-b border-[#D4C7AE]/60 px-5 py-2.5">
+        <div className="flex items-center gap-0 border-b border-[var(--rule)]/60 px-5 py-2.5">
           {PHASE_STEPS.map((step, i) => {
             const stepIdx = PHASE_ORDER.indexOf(step.phase);
             const done = activePhaseIdx > stepIdx;
@@ -713,28 +713,28 @@ function OrchestrationOverlay({
                     className={
                       'h-2 w-2 rounded-full transition-colors ' +
                       (done
-                        ? 'bg-[#7B8A5F]'
+                        ? 'bg-[var(--moss)]'
                         : active
-                          ? 'bg-[#D4A85A]'
+                          ? 'bg-[var(--candlelight)]'
                           : isDone
-                            ? 'bg-[#7B8A5F]'
-                            : 'bg-[#D4C7AE]')
+                            ? 'bg-[var(--moss)]'
+                            : 'bg-[var(--rule)]')
                     }
                   />
                   <span
                     className={
                       'text-[10px] font-medium ' +
-                      (active ? 'text-[#2A241E]' : 'text-[#8A7E6B]')
+                      (active ? 'text-[var(--ink)]' : 'text-[var(--ink-muted)]')
                     }
                   >
                     {step.label}
                   </span>
                   {active && !isDone && (
-                    <Loader2 size={10} className="animate-spin text-[#D4A85A]" />
+                    <Loader2 size={10} className="animate-spin text-[var(--candlelight)]" />
                   )}
                 </div>
                 {i < PHASE_STEPS.length - 1 && (
-                  <div className="mx-2 h-px w-4 bg-[#D4C7AE]" />
+                  <div className="mx-2 h-px w-4 bg-[var(--rule)]" />
                 )}
               </div>
             );
@@ -744,7 +744,7 @@ function OrchestrationOverlay({
         {/* Conversation */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
           {orch.conversationHistory.length === 0 && (
-            <p className="text-center text-xs text-[#8A7E6B]">
+            <p className="text-center text-xs text-[var(--ink-muted)]">
               Analysing your notes…
             </p>
           )}
@@ -752,13 +752,13 @@ function OrchestrationOverlay({
             <ChatBubble key={i} msg={msg} />
           ))}
           {!isWaiting && !isDone && (
-            <div className="flex items-center gap-2 text-xs text-[#8A7E6B]">
+            <div className="flex items-center gap-2 text-xs text-[var(--ink-muted)]">
               <Loader2 size={11} className="animate-spin" />
               <span>Working…</span>
             </div>
           )}
           {isDone && orch.summary && (
-            <div className="rounded-[8px] border border-[#7B8A5F]/40 bg-[#7B8A5F]/10 px-3 py-2 text-xs text-[#2A241E]">
+            <div className="rounded-[8px] border border-[var(--moss)]/40 bg-[var(--moss)]/10 px-3 py-2 text-xs text-[var(--ink)]">
               {orch.summary}
             </div>
           )}
@@ -767,7 +767,7 @@ function OrchestrationOverlay({
 
         {/* Input */}
         {!isDone && (
-          <div className="border-t border-[#D4C7AE] px-4 py-3">
+          <div className="border-t border-[var(--rule)] px-4 py-3">
             {isWaiting ? (
               <div className="flex items-end gap-2">
                 <textarea
@@ -778,13 +778,13 @@ function OrchestrationOverlay({
                   placeholder="Type your answer… (Enter to send, Shift+Enter for new line)"
                   rows={2}
                   disabled={sendingAnswer}
-                  className="flex-1 resize-none rounded-[8px] border border-[#D4C7AE] bg-[#FBF5E8] px-3 py-2 text-xs text-[#2A241E] outline-none placeholder:text-[#8A7E6B] focus:border-[#D4A85A] disabled:opacity-60"
+                  className="flex-1 resize-none rounded-[8px] border border-[var(--rule)] bg-[var(--vellum)] px-3 py-2 text-xs text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] focus:border-[var(--candlelight)] disabled:opacity-60"
                 />
                 <button
                   type="button"
                   onClick={onSendAnswer}
                   disabled={sendingAnswer || !answerText.trim()}
-                  className="shrink-0 rounded-[8px] bg-[#2A241E] p-2 text-[#F4EDE0] transition hover:bg-[#3A342E] disabled:opacity-40"
+                  className="shrink-0 rounded-[8px] bg-[var(--ink)] p-2 text-[var(--parchment)] transition hover:bg-[var(--vellum)] disabled:opacity-40"
                 >
                   {sendingAnswer
                     ? <Loader2 size={14} className="animate-spin" />
@@ -792,7 +792,7 @@ function OrchestrationOverlay({
                 </button>
               </div>
             ) : (
-              <p className="text-center text-[11px] text-[#8A7E6B]">
+              <p className="text-center text-[11px] text-[var(--ink-muted)]">
                 Input will appear when a question needs your answer.
               </p>
             )}
@@ -818,8 +818,8 @@ function ChatBubble({ msg }: { msg: OrchestrationMsg }): React.JSX.Element {
         className={
           'max-w-[85%] rounded-[10px] px-3 py-2 text-xs leading-relaxed ' +
           (isAssistant
-            ? 'bg-[#EAE1CF] text-[#2A241E]'
-            : 'bg-[#2A241E] text-[#F4EDE0]')
+            ? 'bg-[var(--parchment-sunk)] text-[var(--ink)]'
+            : 'bg-[var(--ink)] text-[var(--parchment)]')
         }
       >
         {lines.map((line, i) => (
@@ -851,7 +851,7 @@ function StatsBar({
     : 0;
 
   return (
-    <div className="grid grid-cols-2 gap-2 rounded-[10px] border border-[#D4C7AE] bg-[#F4EDE0] p-3 text-xs md:grid-cols-5">
+    <div className="grid grid-cols-2 gap-2 rounded-[10px] border border-[var(--rule)] bg-[var(--parchment)] p-3 text-xs md:grid-cols-5">
       <Stat label="Notes" value={plan?.totals.noteCount ?? 0} />
       <Stat label="Assets" value={plan?.totals.assetCount ?? 0} />
       <Stat label="Accepted" value={acceptedCount} />
@@ -861,7 +861,7 @@ function StatsBar({
       />
       <Stat label="Spent" value={stats ? `$${stats.costUsd.toFixed(3)}` : '—'} />
       {job.status === 'analysing' && (
-        <div className="col-span-full flex items-center gap-2 text-[#5A4F42]">
+        <div className="col-span-full flex items-center gap-2 text-[var(--ink-soft)]">
           <Loader2 size={12} className="animate-spin" aria-hidden />
           <span>
             {stats?.done ?? 0} / {stats?.total ?? plan?.totals.noteCount ?? 0} done
@@ -875,10 +875,10 @@ function StatsBar({
 function Stat({ label, value }: { label: string; value: string | number }): React.JSX.Element {
   return (
     <div>
-      <div className="text-[10px] font-medium uppercase tracking-wide text-[#5A4F42]">
+      <div className="text-[10px] font-medium uppercase tracking-wide text-[var(--ink-soft)]">
         {label}
       </div>
-      <div className="text-sm font-semibold text-[#2A241E]">{value}</div>
+      <div className="text-sm font-semibold text-[var(--ink)]">{value}</div>
     </div>
   );
 }
@@ -912,10 +912,10 @@ function Row({
 
   const confidenceColor =
     c && c.confidence >= 0.8
-      ? 'text-[#7B8A5F]'
+      ? 'text-[var(--moss)]'
       : c && c.confidence >= 0.4
-        ? 'text-[#D4A85A]'
-        : 'text-[#8B4A52]';
+        ? 'text-[var(--candlelight)]'
+        : 'text-[var(--wine)]';
 
   const tagsLabel =
     c?.tags && c.tags.length > 0
@@ -933,14 +933,14 @@ function Row({
           checked={row.accepted}
           onChange={(e) => onToggle(e.target.checked)}
           disabled={disabled}
-          className="h-4 w-4 shrink-0 accent-[#2A241E]"
+          className="h-4 w-4 shrink-0 accent-[var(--ink)]"
         />
         <div className="min-w-0 flex-1">
-          <div className="font-mono text-[11px] text-[#5A4F42]">
+          <div className="font-mono text-[11px] text-[var(--ink-soft)]">
             {row.sourcePath}
           </div>
           <div className="mt-0.5 flex items-center gap-1.5">
-            <span className="text-[#5A4F42]">→</span>
+            <span className="text-[var(--ink-soft)]">→</span>
             <input
               type="text"
               value={pathDraft}
@@ -949,7 +949,7 @@ function Row({
                 if (pathDraft !== upstream) onPath(pathDraft);
               }}
               disabled={disabled || !c}
-              className="flex-1 rounded-[4px] border border-[#D4C7AE] bg-[#FBF5E8] px-1.5 py-0.5 font-mono text-[11px] text-[#2A241E] outline-none focus:border-[#D4A85A] disabled:cursor-not-allowed disabled:opacity-70"
+              className="flex-1 rounded-[4px] border border-[var(--rule)] bg-[var(--vellum)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--ink)] outline-none focus:border-[var(--candlelight)] disabled:cursor-not-allowed disabled:opacity-70"
             />
           </div>
         </div>
@@ -961,7 +961,7 @@ function Row({
                 value={c.kind}
                 onChange={(e) => onKind(e.target.value as Kind)}
                 disabled={disabled}
-                className="rounded-[4px] border border-[#D4C7AE] bg-[#FBF5E8] px-1.5 py-0.5 text-[11px] text-[#2A241E]"
+                className="rounded-[4px] border border-[var(--rule)] bg-[var(--vellum)] px-1.5 py-0.5 text-[11px] text-[var(--ink)]"
               >
                 {KINDS.map((k) => (
                   <option key={k.value} value={k.value}>
@@ -974,7 +974,7 @@ function Row({
                   value={c.role ?? 'npc'}
                   onChange={(e) => onRole(e.target.value as Role)}
                   disabled={disabled}
-                  className="rounded-[4px] border border-[#D4C7AE] bg-[#FBF5E8] px-1.5 py-0.5 text-[11px] text-[#2A241E]"
+                  className="rounded-[4px] border border-[var(--rule)] bg-[var(--vellum)] px-1.5 py-0.5 text-[11px] text-[var(--ink)]"
                 >
                   {ROLES.map((r) => (
                     <option key={r.value} value={r.value}>
@@ -995,7 +995,7 @@ function Row({
       </div>
 
       {c && (
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-7 text-[10px] text-[#5A4F42]">
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-7 text-[10px] text-[var(--ink-soft)]">
           {sheetFields > 0 && <span>sheet: {sheetFields} field{sheetFields === 1 ? '' : 's'}</span>}
           {tagsLabel && <span>{tagsLabel}</span>}
           {linksCount > 0 && <span>{linksCount} link{linksCount === 1 ? '' : 's'}</span>}
@@ -1004,7 +1004,7 @@ function Row({
         </div>
       )}
       {!c && (
-        <div className="mt-1 pl-7 text-[10px] text-[#8B4A52]">
+        <div className="mt-1 pl-7 text-[10px] text-[var(--wine)]">
           Not classified yet — run analyse or accept to keep in place.
         </div>
       )}

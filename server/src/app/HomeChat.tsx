@@ -308,7 +308,7 @@ export function HomeChat({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-    <section className="relative flex min-w-0 flex-col rounded-[14px] border border-[#D4C7AE] bg-[#FBF5E8]">
+    <section className="relative flex min-w-0 flex-col rounded-[14px] border border-[var(--rule)] bg-[var(--vellum)]">
       {/* Hidden file inputs */}
       <input
         ref={fileInputRef}
@@ -331,16 +331,16 @@ export function HomeChat({
       />
 
       {/* Header */}
-      <header className="flex items-center gap-2 border-b border-[#D4C7AE] px-4 py-2">
-        <Sparkles size={14} className="text-[#D4A85A]" aria-hidden />
-        <h2 className="flex-1 text-sm font-semibold text-[#2A241E]">Pope Huel</h2>
+      <header className="flex items-center gap-2 border-b border-[var(--rule)] px-4 py-2">
+        <Sparkles size={14} className="text-[var(--candlelight)]" aria-hidden />
+        <h2 className="flex-1 text-sm font-semibold text-[var(--ink)]">Pope Huel</h2>
         {messages.length > 0 && (
           <button
             type="button"
             onClick={clearChat}
             aria-label="Clear chat history"
             title="Clear chat"
-            className="flex h-6 w-6 items-center justify-center rounded-full text-[#5A4F42] transition-colors hover:bg-[#D4C7AE]/55 hover:text-[#8B4A52] active:scale-95"
+            className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--ink-soft)] transition-colors hover:bg-[var(--rule)]/55 hover:text-[var(--wine)] active:scale-95"
           >
             <Trash2 size={12} aria-hidden />
           </button>
@@ -353,7 +353,7 @@ export function HomeChat({
         className="max-h-[420px] min-h-[240px] min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3"
       >
         {messages.length === 0 && (
-          <p className="mt-2 text-sm text-[#5A4F42]">
+          <p className="mt-2 text-sm text-[var(--ink-soft)]">
             Ask anything about your world. Attach notes, images, ZIPs, or PDFs.
           </p>
         )}
@@ -362,7 +362,7 @@ export function HomeChat({
             <MessageBubble key={msg.id} msg={msg} />
           ))}
           {isStreaming && (
-            <div className="flex items-center gap-1.5 text-xs text-[#5A4F42]">
+            <div className="flex items-center gap-1.5 text-xs text-[var(--ink-soft)]">
               <Loader2 size={11} className="animate-spin" aria-hidden />
               Thinking…
             </div>
@@ -372,7 +372,7 @@ export function HomeChat({
 
       {/* Attachment badges */}
       {attachedFiles.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 border-t border-[#D4C7AE] px-3 pt-2 pb-1">
+        <div className="flex flex-wrap gap-1.5 border-t border-[var(--rule)] px-3 pt-2 pb-1">
           {attachedFiles.map((f) => (
             <AttachmentBadge key={f.id} file={f} onRemove={removeAttachment} />
           ))}
@@ -380,14 +380,14 @@ export function HomeChat({
       )}
 
       {/* Input footer */}
-      <footer className="flex items-center gap-1.5 border-t border-[#D4C7AE] px-3 py-2">
+      <footer className="flex items-center gap-1.5 border-t border-[var(--rule)] px-3 py-2">
         {/* Attach files */}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
           aria-label="Attach files"
           title="Attach files (text, images, ZIPs, PDFs)"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] text-[#5A4F42] transition hover:bg-[#EAE1CF] hover:text-[#2A241E] active:scale-95"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)] active:scale-95"
         >
           <Paperclip size={13} aria-hidden />
         </button>
@@ -398,7 +398,7 @@ export function HomeChat({
           onClick={() => folderInputRef.current?.click()}
           aria-label="Attach folder"
           title="Attach entire folder"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] border border-[#D4C7AE] bg-[#F4EDE0] text-[#5A4F42] transition hover:bg-[#EAE1CF] hover:text-[#2A241E] active:scale-95"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)] active:scale-95"
         >
           <FolderOpen size={13} aria-hidden />
         </button>
@@ -414,13 +414,13 @@ export function HomeChat({
               submit();
             }
           }}
-          className="flex-1 rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] px-3 py-1.5 text-sm text-[#2A241E] outline-none focus:border-[#D4A85A]"
+          className="flex-1 rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-1.5 text-sm text-[var(--ink)] outline-none focus:border-[var(--candlelight)]"
         />
         <button
           type="button"
           onClick={submit}
           disabled={isStreaming || anyLoading || (!input.trim() && attachedFiles.length === 0)}
-          className="rounded-[8px] bg-[#2A241E] p-2 text-[#F4EDE0] transition hover:bg-[#3A342E] disabled:opacity-50"
+          className="rounded-[8px] bg-[var(--ink)] p-2 text-[var(--parchment)] transition hover:bg-[var(--vellum)] disabled:opacity-50"
           aria-label="Send"
         >
           {anyLoading
@@ -443,7 +443,7 @@ export function HomeChat({
 
 // Each quick action fills the button with a muted earth-tone drawn
 // from the app's parchment palette; the icon sits on top in cream
-// (#F4EDE0), the same light text colour used on every dark control in
+// (var(--parchment)), the same light text colour used on every dark control in
 // the app (Send button, user chat bubbles). On hover the fill darkens
 // one step — no lifts or drop-shadows, to stay in the design system's
 // "calm, borders-first" register.
@@ -458,7 +458,7 @@ const QUICK_ACTIONS: ReadonlyArray<{
   { key: 'session',   icon: CalendarDays, label: 'New session',   prompt: 'Start a new session.',             tone: 'bg-[#B88832] hover:bg-[#9C6F22]' }, // muted gold ink
   { key: 'character', icon: Sword,        label: 'New character', prompt: 'Create a new player character.',  tone: 'bg-[#5B6B8A] hover:bg-[#495775]' }, // dusty steel
   { key: 'person',    icon: UserRound,    label: 'New person',    prompt: 'Create a new person (NPC).',       tone: 'bg-[#7A6249] hover:bg-[#624E38]' }, // walnut
-  { key: 'enemy',     icon: Skull,        label: 'New enemy',     prompt: 'Create a new enemy.',              tone: 'bg-[#8B4A52] hover:bg-[#743C43]' }, // app burgundy
+  { key: 'enemy',     icon: Skull,        label: 'New enemy',     prompt: 'Create a new enemy.',              tone: 'bg-[var(--wine)] hover:bg-[#743C43]' }, // app burgundy
   { key: 'item',      icon: Package,      label: 'New item',      prompt: 'Create a new item.',               tone: 'bg-[#9C7A2E] hover:bg-[#836520]' }, // tarnished bronze
   { key: 'creature',  icon: Ghost,        label: 'New creature',  prompt: 'Create a new creature.',           tone: 'bg-[#6B5B7A] hover:bg-[#574866]' }, // dusk violet
 ];
@@ -479,12 +479,12 @@ function QuickActionsRow({
           onClick={() => onPick(prompt)}
           disabled={disabled}
           aria-label={label}
-          className={`group relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#F4EDE0] transition-colors duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 ${tone}`}
+          className={`group relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--parchment)] transition-colors duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 ${tone}`}
         >
           <Icon size={18} aria-hidden />
           <span
             role="tooltip"
-            className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-[6px] bg-[#2A241E] px-2 py-1 text-[11px] font-medium text-[#F4EDE0] opacity-0 shadow-lg group-hover:opacity-100 group-focus-visible:opacity-100"
+            className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-[6px] bg-[var(--ink)] px-2 py-1 text-[11px] font-medium text-[var(--parchment)] opacity-0 shadow-lg group-hover:opacity-100 group-focus-visible:opacity-100"
           >
             {label}
           </span>
@@ -507,8 +507,8 @@ function AttachmentBadge({
     <div
       className={`flex max-w-[160px] items-center gap-1 rounded-[6px] px-2 py-0.5 text-[11px] ${
         file.error
-          ? 'bg-[#8B4A52]/15 text-[#8B4A52]'
-          : 'bg-[#D4C7AE]/50 text-[#5A4F42]'
+          ? 'bg-[var(--wine)]/15 text-[var(--wine)]'
+          : 'bg-[var(--rule)]/50 text-[var(--ink-soft)]'
       }`}
     >
       {file.loading && <Loader2 size={9} className="shrink-0 animate-spin" aria-hidden />}
@@ -557,12 +557,12 @@ function MessageBubble({
             <UserFilePart key={i} part={p} />
           ))}
           {displayText && (
-            <div className="break-words rounded-[10px] bg-[#2A241E] px-3 py-1.5 text-sm text-[#F4EDE0]">
+            <div className="break-words rounded-[10px] bg-[var(--ink)] px-3 py-1.5 text-sm text-[var(--parchment)]">
               {displayText}
             </div>
           )}
           {!displayText && fileParts.length > 0 && (
-            <div className="rounded-[10px] bg-[#2A241E] px-3 py-1.5 text-sm text-[#F4EDE0] opacity-70">
+            <div className="rounded-[10px] bg-[var(--ink)] px-3 py-1.5 text-sm text-[var(--parchment)] opacity-70">
               {fileParts.length === 1 ? '1 file attached' : `${fileParts.length} files attached`}
             </div>
           )}
@@ -592,7 +592,7 @@ function UserFilePart({ part }: { part: FileUIPart }): ReactElement {
     );
   }
   return (
-    <div className="rounded-[6px] bg-[#D4C7AE]/40 px-2 py-1 text-[11px] text-[#5A4F42]">
+    <div className="rounded-[6px] bg-[var(--rule)]/40 px-2 py-1 text-[11px] text-[var(--ink-soft)]">
       📎 file attached
     </div>
   );
@@ -610,7 +610,7 @@ function AssistantPart({
   if (isTextUIPart(part)) {
     if (!part.text) return null;
     return (
-      <div className="max-w-[min(92%,100%)] min-w-0 overflow-hidden rounded-[10px] bg-[#F4EDE0] px-3 py-2 text-[#2A241E]">
+      <div className="max-w-[min(92%,100%)] min-w-0 overflow-hidden rounded-[10px] bg-[var(--parchment)] px-3 py-2 text-[var(--ink)]">
         <ChatMarkdown content={part.text} />
       </div>
     );
@@ -627,14 +627,14 @@ function AssistantPart({
       if (output?.ok && output.path) {
         const title = baseName(output.path);
         return (
-          <div className="flex max-w-[min(92%,100%)] min-w-0 flex-col gap-1.5 rounded-[10px] bg-[#F4EDE0] px-3 py-2 text-[#2A241E]">
-            <div className="flex items-center gap-1.5 text-[11px] text-[#5A4F42]">
+          <div className="flex max-w-[min(92%,100%)] min-w-0 flex-col gap-1.5 rounded-[10px] bg-[var(--parchment)] px-3 py-2 text-[var(--ink)]">
+            <div className="flex items-center gap-1.5 text-[11px] text-[var(--ink-soft)]">
               <span className="shrink-0 font-medium">Created</span>
-              <span className="truncate text-[#5A4F42]/80">· {title}</span>
+              <span className="truncate text-[var(--ink-soft)]/80">· {title}</span>
             </div>
             <Link
               href={noteEditorHref(output.path)}
-              className="text-sm font-medium text-[#8B4A52] underline decoration-[rgba(139,74,82,0.45)] underline-offset-2 hover:text-[#6B2F38]"
+              className="text-sm font-medium text-[var(--wine)] underline decoration-[rgb(var(--wine-rgb) / 0.45)] underline-offset-2 hover:text-[#6B2F38]"
             >
               Open note →
             </Link>
@@ -656,14 +656,14 @@ function AssistantPart({
       if (output?.ok && output.path) {
         const title = baseName(output.path);
         return (
-          <div className="flex max-w-[min(92%,100%)] min-w-0 flex-col gap-1.5 rounded-[10px] bg-[#F4EDE0] px-3 py-2 text-[#2A241E]">
-            <div className="flex items-center gap-1.5 text-[11px] text-[#5A4F42]">
+          <div className="flex max-w-[min(92%,100%)] min-w-0 flex-col gap-1.5 rounded-[10px] bg-[var(--parchment)] px-3 py-2 text-[var(--ink)]">
+            <div className="flex items-center gap-1.5 text-[11px] text-[var(--ink-soft)]">
               <span className="shrink-0 font-medium">Moved</span>
-              <span className="truncate text-[#5A4F42]/80">· {title}</span>
+              <span className="truncate text-[var(--ink-soft)]/80">· {title}</span>
             </div>
             <Link
               href={noteEditorHref(output.path)}
-              className="text-sm font-medium text-[#8B4A52] underline decoration-[rgba(139,74,82,0.45)] underline-offset-2 hover:text-[#6B2F38]"
+              className="text-sm font-medium text-[var(--wine)] underline decoration-[rgb(var(--wine-rgb) / 0.45)] underline-offset-2 hover:text-[#6B2F38]"
             >
               Open note →
             </Link>
@@ -674,7 +674,7 @@ function AssistantPart({
 
     if (state !== 'input-available' && state !== 'output-available') return null;
     return (
-      <div className="flex items-center gap-1.5 rounded-[6px] bg-[#D4C7AE]/40 px-2 py-1 text-[11px] text-[#5A4F42]">
+      <div className="flex items-center gap-1.5 rounded-[6px] bg-[var(--rule)]/40 px-2 py-1 text-[11px] text-[var(--ink-soft)]">
         <span className="shrink-0">{toolName}</span>
       </div>
     );

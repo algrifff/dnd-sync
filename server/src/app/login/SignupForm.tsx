@@ -20,7 +20,7 @@ export function SignupForm() {
       {state.status === 'error' && (
         <p
           role="alert"
-          className="auth-fade rounded-[8px] border border-[#8B4A52]/40 bg-[#8B4A52]/10 px-3 py-2 text-sm text-[#8B4A52]"
+          className="auth-fade rounded-[8px] border border-[var(--wine)]/40 bg-[var(--wine)]/10 px-3 py-2 text-sm text-[var(--wine)]"
         >
           {state.error}
         </p>
@@ -54,7 +54,7 @@ export function SignupForm() {
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-[10px] bg-[#2A241E] px-5 py-3 font-medium text-[#F4EDE0] transition hover:scale-[1.015] hover:bg-[#3A342E] disabled:opacity-60 disabled:hover:scale-100"
+        className="w-full rounded-[10px] bg-[var(--ink)] px-5 py-3 font-medium text-[var(--parchment)] transition hover:scale-[1.015] hover:bg-[var(--vellum)] disabled:opacity-60 disabled:hover:scale-100"
       >
         {pending ? 'Forging your scroll…' : 'Begin your adventure'}
       </button>

@@ -5,7 +5,11 @@
 
 import { z } from 'zod';
 import type { NextRequest } from 'next/server';
-import { requireSession } from '@/lib/session';
+import {
+  requireSession,
+  buildThemeCookie,
+  serialiseCookie,
+} from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { updateUserProfile } from '@/lib/users';
 
@@ -29,13 +33,15 @@ const Body = z
     // exists so an admin can pre-set a character the user will
     // create in a future session.
     activeCharacterPath: z.string().min(1).max(512).nullable().optional(),
+    theme: z.enum(['day', 'night']).optional(),
   })
   .refine(
     (o) =>
       o.displayName !== undefined ||
       o.accentColor !== undefined ||
       o.cursorMode !== undefined ||
-      o.activeCharacterPath !== undefined,
+      o.activeCharacterPath !== undefined ||
+      o.theme !== undefined,
     { message: 'nothing to update' },
   );
 
@@ -55,7 +61,16 @@ export async function PATCH(req: NextRequest): Promise<Response> {
 
   updateUserProfile(session.userId, parsed);
 
-  return json({ ok: true });
+  const headers: HeadersInit = { 'Content-Type': 'application/json' };
+  if (parsed.theme) {
+    // Mirror to the readable cookie so the root layout can render
+    // <html data-theme> without a session roundtrip on the next request.
+    (headers as Record<string, string>)['Set-Cookie'] = serialiseCookie(
+      buildThemeCookie(parsed.theme),
+      { httpOnly: false },
+    );
+  }
+  return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
 }
 
 function json(body: unknown, status = 200): Response {

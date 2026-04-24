@@ -13,9 +13,9 @@ export default function ContentLoading(): React.JSX.Element {
       role="status"
       aria-label="Loading page"
     >
-      <div className="relative h-0.5 w-full overflow-hidden bg-[#EAE1CF]">
+      <div className="relative h-0.5 w-full overflow-hidden bg-[var(--parchment-sunk)]">
         <span
-          className="absolute inset-y-0 left-0 w-1/3 animate-[contentload_1.1s_ease-in-out_infinite] bg-[#D4A85A]"
+          className="absolute inset-y-0 left-0 w-1/3 animate-[contentload_1.1s_ease-in-out_infinite] bg-[var(--candlelight)]"
           style={{
             animationName: 'contentload',
           }}

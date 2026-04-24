@@ -27,7 +27,7 @@ export function DeleteUserButton({
           if (!res.ok) alert(res.error ?? 'delete failed');
         });
       }}
-      className="rounded-[6px] border border-[#8B4A52]/40 px-2 py-1 text-xs text-[#8B4A52] hover:bg-[#8B4A52]/10 disabled:opacity-60"
+      className="rounded-[6px] border border-[var(--wine)]/40 px-2 py-1 text-xs text-[var(--wine)] hover:bg-[var(--wine)]/10 disabled:opacity-60"
     >
       {pending ? 'Deleting…' : 'Delete + content'}
     </button>

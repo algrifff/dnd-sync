@@ -42,5 +42,5 @@ export default async function JoinPage({
   }
 
   // Full reload so the app picks up the new current_group_id.
-  redirect('/');
+  redirect('/home');
 }

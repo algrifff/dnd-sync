@@ -105,10 +105,10 @@ export function PortraitPicker({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[720px] rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-xl"
+        className="w-full max-w-[720px] rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex items-center justify-between gap-3 border-b border-[#D4C7AE] px-5 py-3">
+        <header className="flex items-center justify-between gap-3 border-b border-[var(--rule)] px-5 py-3">
           <div className="flex items-center gap-1">
             <TabButton active={tab === 'upload'} onClick={() => setTab('upload')} icon={<Upload size={14} />}>
               Upload
@@ -121,7 +121,7 @@ export function PortraitPicker({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded p-1 text-[#5A4F42] hover:bg-[#EAE1CF]"
+            className="rounded p-1 text-[var(--ink-soft)] hover:bg-[var(--parchment-sunk)]"
           >
             <X size={16} />
           </button>
@@ -179,8 +179,8 @@ function TabButton({
       onClick={onClick}
       className={`inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-sm ${
         active
-          ? 'bg-[#2A241E] text-[#FBF5E8]'
-          : 'text-[#2A241E] hover:bg-[#EAE1CF]'
+          ? 'bg-[var(--ink)] text-[var(--vellum)]'
+          : 'text-[var(--ink)] hover:bg-[var(--parchment-sunk)]'
       }`}
     >
       {icon}
@@ -208,13 +208,13 @@ function UploadPane({
           <img
             src={currentUrl}
             alt=""
-            className="h-16 w-16 rounded-full border border-[#D4C7AE] object-cover"
+            className="h-16 w-16 rounded-full border border-[var(--rule)] object-cover"
           />
-          <div className="flex-1 text-sm text-[#5A4F42]">Current portrait</div>
+          <div className="flex-1 text-sm text-[var(--ink-soft)]">Current portrait</div>
           <button
             type="button"
             onClick={onClear}
-            className="rounded border border-[#B46353] bg-[#FBF5E8] px-3 py-1 text-sm text-[#B46353] hover:bg-[#F4DAD2]"
+            className="rounded border border-[#B46353] bg-[var(--vellum)] px-3 py-1 text-sm text-[#B46353] hover:bg-[#F4DAD2]"
           >
             Clear
           </button>
@@ -235,15 +235,15 @@ function UploadPane({
         }}
         className={`flex min-h-[180px] cursor-pointer flex-col items-center justify-center rounded-[12px] border-2 border-dashed px-6 py-10 text-center transition-colors ${
           dragging
-            ? 'border-[#2A241E] bg-[#F4EDE0]'
-            : 'border-[#D4C7AE] bg-[#FBF5E8] hover:bg-[#F4EDE0]'
+            ? 'border-[var(--ink)] bg-[var(--parchment)]'
+            : 'border-[var(--rule)] bg-[var(--vellum)] hover:bg-[var(--parchment)]'
         }`}
       >
-        <Upload size={28} className="mb-2 text-[#5A4F42]" />
-        <span className="text-sm font-semibold text-[#2A241E]">
+        <Upload size={28} className="mb-2 text-[var(--ink-soft)]" />
+        <span className="text-sm font-semibold text-[var(--ink)]">
           {loading ? 'Uploading…' : 'Drop an image here, or click to pick a file'}
         </span>
-        <span className="mt-1 text-xs text-[#5A4F42]">PNG, JPEG, WebP, GIF or SVG</span>
+        <span className="mt-1 text-xs text-[var(--ink-soft)]">PNG, JPEG, WebP, GIF or SVG</span>
         <input
           type="file"
           accept="image/*"
@@ -279,11 +279,11 @@ function PickPane({
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="Search by name, path, or tag…"
-        className="w-full rounded border border-[#D4C7AE] bg-white px-3 py-1.5 text-sm outline-none focus:border-[#2A241E]"
+        className="w-full rounded border border-[var(--rule)] bg-white px-3 py-1.5 text-sm outline-none focus:border-[var(--ink)]"
       />
-      {loading && <p className="text-sm text-[#5A4F42]">Loading…</p>}
+      {loading && <p className="text-sm text-[var(--ink-soft)]">Loading…</p>}
       {!loading && assets.length === 0 && (
-        <p className="text-sm italic text-[#8A7E6B]">
+        <p className="text-sm italic text-[var(--ink-muted)]">
           No images match. Upload one in the other tab.
         </p>
       )}
@@ -294,7 +294,7 @@ function PickPane({
             type="button"
             onClick={() => onPick(a.id)}
             title={a.originalPath}
-            className="group relative overflow-hidden rounded-[8px] border border-[#D4C7AE] bg-[#F4EDE0] hover:border-[#2A241E]"
+            className="group relative overflow-hidden rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)] hover:border-[var(--ink)]"
           >
             <img
               src={`/api/assets/${a.id}`}

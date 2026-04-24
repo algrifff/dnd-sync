@@ -21,12 +21,15 @@ export const ACCENT_PALETTE = [
   '#6A5D8B', // wisteria
 ] as const;
 
+export type Theme = 'day' | 'night';
+
 export type User = {
   id: string;
   username: string;
   email: string | null;
   displayName: string;
   accentColor: string;
+  theme: Theme;
   createdAt: number;
   lastLoginAt: number | null;
   emailVerifiedAt: number | null;
@@ -53,6 +56,7 @@ type UserRow = {
   password_hash: string;
   display_name: string;
   accent_color: string;
+  theme: Theme;
   created_at: number;
   last_login_at: number | null;
   email_verified_at: number | null;
@@ -67,6 +71,7 @@ function rowToUser(r: UserRow): User {
     email: r.email,
     displayName: r.display_name,
     accentColor: r.accent_color,
+    theme: r.theme === 'night' ? 'night' : 'day',
     createdAt: r.created_at,
     lastLoginAt: r.last_login_at,
     emailVerifiedAt: r.email_verified_at,
@@ -83,7 +88,7 @@ export function findUserByUsername(username: string): (User & { passwordHash: st
   const row = getDb()
     .query<UserRow, [string]>(
       `SELECT id, username, email, password_hash, display_name, accent_color,
-              created_at, last_login_at, email_verified_at
+              theme, created_at, last_login_at, email_verified_at
          FROM users WHERE username = ? COLLATE NOCASE`,
     )
     .get(username);
@@ -95,7 +100,7 @@ export function listUsersInGroup(groupId: string): UserWithRole[] {
   return getDb()
     .query<UserJoinRow, [string]>(
       `SELECT u.id, u.username, u.email, u.password_hash, u.display_name,
-              u.accent_color, u.created_at, u.last_login_at,
+              u.accent_color, u.theme, u.created_at, u.last_login_at,
               u.email_verified_at, gm.role AS role
          FROM users u
          JOIN group_members gm ON gm.user_id = u.id
@@ -273,6 +278,7 @@ export async function createUser(input: CreateUserInput): Promise<User> {
     email: input.email ?? null,
     displayName: input.displayName,
     accentColor,
+    theme: 'day',
     createdAt: now,
     lastLoginAt: null,
     emailVerifiedAt: now,
@@ -289,6 +295,7 @@ export function updateUserProfile(
     accentColor?: string | undefined;
     cursorMode?: 'color' | 'image' | undefined;
     activeCharacterPath?: string | null | undefined;
+    theme?: Theme | undefined;
   },
 ): void {
   const sets: string[] = [];
@@ -308,6 +315,10 @@ export function updateUserProfile(
   if (patch.activeCharacterPath !== undefined) {
     sets.push('active_character_path = ?');
     values.push(patch.activeCharacterPath);
+  }
+  if (patch.theme === 'day' || patch.theme === 'night') {
+    sets.push('theme = ?');
+    values.push(patch.theme);
   }
   if (sets.length === 0) return;
   values.push(userId);
@@ -409,7 +420,7 @@ export function findUserByEmail(email: string): User | null {
   const row = getDb()
     .query<UserRow, [string]>(
       `SELECT id, username, email, password_hash, display_name, accent_color,
-              created_at, last_login_at, email_verified_at
+              theme, created_at, last_login_at, email_verified_at
          FROM users WHERE email = ? COLLATE NOCASE`,
     )
     .get(email.trim());
@@ -477,6 +488,7 @@ export async function signupUser(input: SignupUserInput): Promise<User> {
     email,
     displayName: username,
     accentColor,
+    theme: 'day',
     createdAt: now,
     lastLoginAt: null,
     emailVerifiedAt: null,

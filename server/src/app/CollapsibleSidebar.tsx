@@ -43,7 +43,7 @@ export function CollapsibleSidebar({
           toggle tab so the tab is never clipped. */}
       <div className="absolute inset-0 overflow-hidden">
         <div
-          className="absolute inset-y-0 left-0 flex h-full flex-col bg-[#EAE1CF]/60"
+          className="absolute inset-y-0 left-0 flex h-full flex-col bg-[var(--parchment-sunk)]/60"
           style={{
             width: WIDTH,
             transform: open ? 'translateX(0)' : `translateX(-${WIDTH}px)`,
@@ -60,7 +60,7 @@ export function CollapsibleSidebar({
         onClick={toggle}
         title={open ? 'Collapse sidebar' : 'Expand sidebar'}
         aria-label={open ? 'Collapse sidebar' : 'Expand sidebar'}
-        className="absolute right-0 top-[72px] z-20 flex h-8 w-3 translate-x-full items-center justify-center rounded-r-[4px] border border-l-0 border-[#D4C7AE] bg-[#EAE1CF] text-[#8A7E6B] transition hover:bg-[#D4C7AE] hover:text-[#2A241E]"
+        className="absolute right-0 top-[72px] z-20 flex h-8 w-3 translate-x-full items-center justify-center rounded-r-[4px] border border-l-0 border-[var(--rule)] bg-[var(--parchment-sunk)] text-[var(--ink-muted)] transition hover:bg-[var(--rule)] hover:text-[var(--ink)]"
       >
         {open ? <ChevronLeft size={10} /> : <ChevronRight size={10} />}
       </button>

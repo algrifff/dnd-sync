@@ -111,8 +111,8 @@ export function CreatureHeader({
               <InlineText
                 value={name}
                 readOnly={!canEdit}
-                className={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
-                inputClassName={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[#2A241E]`}
+                className={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[var(--ink)]`}
+                inputClassName={`font-serif ${titleSizeClass(name, 'hero')} font-semibold leading-tight text-[var(--ink)]`}
                 onCommit={(next) => {
                   const trimmed = next.trim();
                   if (trimmed) patchSheet({ name: trimmed });
@@ -122,7 +122,7 @@ export function CreatureHeader({
               <SaveIndicator saving={saving} error={error} />
             </div>
 
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[#5A4F42]">
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--ink-soft)]">
               <ChipSelect
                 value={size}
                 options={SIZES}
@@ -139,8 +139,8 @@ export function CreatureHeader({
                 placeholder="Type"
                 ariaLabel="Type"
               />
-              <span className="text-[#5A4F42]">·</span>
-              <span className="text-[#5A4F42]">CR</span>
+              <span className="text-[var(--ink-soft)]">·</span>
+              <span className="text-[var(--ink-soft)]">CR</span>
               <InlineNumber
                 value={cr}
                 readOnly={!canEdit}
@@ -161,24 +161,24 @@ export function CreatureHeader({
                   value={hp.current}
                   onCommit={(n) => setHp(n, hp.max)}
                   readOnly={!canEdit}
-                  className="font-serif text-lg font-semibold text-[#2A241E]"
-                  inputClassName="font-serif text-lg font-semibold w-12 text-[#2A241E]"
+                  className="font-serif text-lg font-semibold text-[var(--ink)]"
+                  inputClassName="font-serif text-lg font-semibold w-12 text-[var(--ink)]"
                   ariaLabel="HP current"
                 />
-                <span className="text-xs text-[#5A4F42]">/</span>
+                <span className="text-xs text-[var(--ink-soft)]">/</span>
                 <InlineNumber
                   value={hp.max}
                   onCommit={(n) => setHp(hp.current, n)}
                   readOnly={!canEdit}
-                  className="font-serif text-lg font-semibold text-[#2A241E]"
-                  inputClassName="font-serif text-lg font-semibold w-12 text-[#2A241E]"
+                  className="font-serif text-lg font-semibold text-[var(--ink)]"
+                  inputClassName="font-serif text-lg font-semibold w-12 text-[var(--ink)]"
                   ariaLabel="HP max"
                 />
               </StatTile>
               <StatTile label="Speed" value={speed} suffix="ft" />
             </div>
 
-            <div className="mt-3 border-t border-[#D4C7AE] pt-3">
+            <div className="mt-3 border-t border-[var(--rule)] pt-3">
               <AbilityScoreStrip
                 scores={scores}
                 readOnly={!canEdit}
@@ -213,17 +213,17 @@ function CreaturePortrait({
     // object-contain — never clip the art
     <img src={url} alt="" className="h-full w-full object-contain" />
   ) : (
-    <span className="text-sm text-[#8A7E6B]">No image</span>
+    <span className="text-sm text-[var(--ink-muted)]">No image</span>
   );
   const cls =
-    'flex h-52 w-52 shrink-0 items-center justify-center overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#EAE1CF]';
+    'flex h-52 w-52 shrink-0 items-center justify-center overflow-hidden rounded-[12px] border border-[var(--rule)] bg-[var(--parchment-sunk)]';
   if (!canEdit) return <div className={cls}>{inner}</div>;
   return (
     <button
       type="button"
       onClick={onOpen}
       aria-label={url ? 'Change image' : 'Add image'}
-      className={`${cls} hover:border-[#2A241E]`}
+      className={`${cls} hover:border-[var(--ink)]`}
     >
       {inner}
     </button>

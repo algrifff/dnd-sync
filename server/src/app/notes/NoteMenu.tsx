@@ -128,7 +128,7 @@ export function NoteMenu({
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={pending}
-        className="rounded-[6px] border border-[#D4C7AE] bg-[#FBF5E8] p-1.5 text-[#5A4F42] transition hover:scale-[1.03] hover:bg-[#EAE1CF] disabled:opacity-60"
+        className="rounded-[6px] border border-[var(--rule)] bg-[var(--vellum)] p-1.5 text-[var(--ink-soft)] transition hover:scale-[1.03] hover:bg-[var(--parchment-sunk)] disabled:opacity-60"
         aria-label="Note actions"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -138,7 +138,7 @@ export function NoteMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden rounded-[10px] border border-[#D4C7AE] bg-[#FBF5E8] shadow-[0_8px_24px_rgba(42,36,30,0.12)]"
+          className="absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] shadow-[0_8px_24px_rgb(var(--ink-rgb) / 0.12)]"
         >
           <MenuItem onClick={duplicate} icon={<Copy size={14} aria-hidden />}>
             Duplicate
@@ -155,7 +155,7 @@ export function NoteMenu({
           >
             {dmState ? 'Unmark DM-only' : 'Mark DM-only'}
           </MenuItem>
-          <div className="h-px bg-[#D4C7AE]" />
+          <div className="h-px bg-[var(--rule)]" />
           <MenuItem
             onClick={destroy}
             icon={<Trash2 size={14} aria-hidden />}
@@ -183,8 +183,8 @@ function MenuItem({
   const base = 'flex w-full items-center gap-2 px-3 py-2 text-sm text-left transition';
   const colour =
     tone === 'danger'
-      ? 'text-[#8B4A52] hover:bg-[#8B4A52]/10'
-      : 'text-[#2A241E] hover:bg-[#D4A85A]/15';
+      ? 'text-[var(--wine)] hover:bg-[var(--wine)]/10'
+      : 'text-[var(--ink)] hover:bg-[var(--candlelight)]/15';
   return (
     <button type="button" role="menuitem" onClick={onClick} className={`${base} ${colour}`}>
       {icon}

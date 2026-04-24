@@ -21,7 +21,7 @@ export default async function WorldMembersPage(): Promise<ReactElement> {
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-[#5A4F42]">
+      <p className="text-sm text-[var(--ink-soft)]">
         Everyone who belongs to this world, and their role within it. New members join via the
         invite link under the World tab. Demote a member to <em>viewer</em> to make them
         read-only; promote back to <em>editor</em> to restore editing.
@@ -48,9 +48,9 @@ function MemberTable({
   csrfToken: string;
 }): ReactElement {
   return (
-    <section className="overflow-hidden rounded-[12px] border border-[#D4C7AE] bg-[#FBF5E8]">
+    <section className="overflow-hidden rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)]">
       <table className="w-full text-left text-sm">
-        <thead className="bg-[#EAE1CF] text-xs uppercase tracking-wide text-[#5A4F42]">
+        <thead className="bg-[var(--parchment-sunk)] text-xs uppercase tracking-wide text-[var(--ink-soft)]">
           <tr>
             <th className="px-4 py-3">Member</th>
             <th className="px-4 py-3">Role</th>
@@ -61,13 +61,13 @@ function MemberTable({
         <tbody>
           {members.length === 0 && (
             <tr>
-              <td colSpan={4} className="px-4 py-6 text-center text-[#5A4F42]">
+              <td colSpan={4} className="px-4 py-6 text-center text-[var(--ink-soft)]">
                 No members in this world yet.
               </td>
             </tr>
           )}
           {members.map((m) => (
-            <tr key={m.id} className="border-t border-[#D4C7AE]/50">
+            <tr key={m.id} className="border-t border-[var(--rule)]/50">
               <td className="px-4 py-3">
                 <div className="flex items-center gap-2">
                   <span
@@ -76,8 +76,8 @@ function MemberTable({
                     style={{ backgroundColor: m.accentColor }}
                   />
                   <span className="font-medium">{m.displayName}</span>
-                  <span className="text-[#5A4F42]">({m.username})</span>
-                  {m.id === currentUserId && <span className="text-xs text-[#5A4F42]">· you</span>}
+                  <span className="text-[var(--ink-soft)]">({m.username})</span>
+                  {m.id === currentUserId && <span className="text-xs text-[var(--ink-soft)]">· you</span>}
                 </div>
               </td>
               <td className="px-4 py-3">
@@ -91,10 +91,10 @@ function MemberTable({
                     : {})}
                 />
               </td>
-              <td className="px-4 py-3 text-[#5A4F42]">
+              <td className="px-4 py-3 text-[var(--ink-soft)]">
                 {new Date(m.createdAt).toISOString().slice(0, 10)}
               </td>
-              <td className="px-4 py-3 text-[#5A4F42]">
+              <td className="px-4 py-3 text-[var(--ink-soft)]">
                 {m.lastLoginAt ? new Date(m.lastLoginAt).toISOString().slice(0, 10) : '—'}
               </td>
             </tr>
