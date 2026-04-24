@@ -25,6 +25,7 @@ const SESSION_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const PUBLIC_PATTERNS: readonly RegExp[] = [
   /^\/login(\/|$)/,
   /^\/signup(\/|$)/,
+  /^\/welcome(\/|$)/,
   /^\/admin\/login(\/|$)/,
   /^\/api\//,
   /^\/_next\//,
@@ -34,6 +35,8 @@ const PUBLIC_PATTERNS: readonly RegExp[] = [
   /^\/favicon\.ico$/,
   /^\/icon\.png$/,
   /^\/og-image\.png$/,
+  /^\/landing.*\.png$/,
+  /^\/foot\.png$/,
   /^\/robots\.txt$/,
   /^\/sitemap\.xml$/,
 ];
@@ -70,9 +73,15 @@ export function middleware(req: NextRequest): NextResponse {
   if (!isPublic(pathname)) {
     if (!sidCookie) {
       const url = req.nextUrl.clone();
-      url.pathname = '/login';
-      url.search = '';
-      url.searchParams.set('next', req.nextUrl.pathname + req.nextUrl.search);
+      // Root visit without a session → show the landing page.
+      if (pathname === '/') {
+        url.pathname = '/welcome';
+        url.search = '';
+      } else {
+        url.pathname = '/login';
+        url.search = '';
+        url.searchParams.set('next', req.nextUrl.pathname + req.nextUrl.search);
+      }
       const res = NextResponse.redirect(url);
       for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
       return res;
