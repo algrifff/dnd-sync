@@ -75,7 +75,11 @@ function fibSphere(i: number, n: number): THREE.Vector3 {
 }
 
 function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluster[] } {
-  // Group by cluster key
+  // Two-level grouping. Campaigns (top-level path segment) are placed on
+  // an outer Fibonacci sphere; sub-clusters (clusterKey, first 3 segments)
+  // are placed on a smaller sphere around their campaign center. Result:
+  // every note in the same campaign sits near every other note in that
+  // campaign, even when they live in different sub-folders.
   const buckets = new Map<string, GraphPayload['nodes']>();
   for (const n of payload.nodes) {
     const key = clusterKey(n.id);
@@ -84,38 +88,62 @@ function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluste
     else buckets.set(key, [n]);
   }
 
-  const entries = [...buckets.entries()];
-  const C = entries.length;
-  const galaxyRadius = C <= 1 ? 0 : 18 * Math.cbrt(C);
+  // Group cluster keys by their campaign (top-level segment).
+  const campaigns = new Map<string, string[]>();
+  for (const key of buckets.keys()) {
+    const top = (key.split('/')[0] || key).trim() || '__root__';
+    const arr = campaigns.get(top);
+    if (arr) arr.push(key);
+    else campaigns.set(top, [key]);
+  }
+
+  const campEntries = [...campaigns.entries()];
+  const K = campEntries.length;
+  // Outer radius scales with campaign count, not cluster count, so a world
+  // with 5 campaigns × 4 sub-clusters each doesn't get spread as wide as
+  // one with 20 unrelated clusters.
+  const galaxyRadius = K <= 1 ? 0 : 22 * Math.cbrt(K);
 
   const clusters: Cluster[] = [];
   const placed: Placed[] = [];
 
-  entries.forEach(([key, ids], ci) => {
-    const dir = fibSphere(ci, C);
-    const center = dir.clone().multiplyScalar(galaxyRadius);
-    const segs = key.split('/');
-    const label = segs[segs.length - 1] || key;
-    clusters.push({ key, label, center });
+  campEntries.forEach(([campaign, keys], ki) => {
+    const campaignCenter = fibSphere(ki, K).multiplyScalar(galaxyRadius);
+    const M = keys.length;
+    // Sub-cluster shell radius — small enough that a campaign reads as one
+    // tight system, big enough that sub-clusters don't crash into each
+    // other before relaxation.
+    const subRadius = M <= 1 ? 0 : 4 + 2.2 * Math.cbrt(M);
 
-    const size = ids.length;
-    // Scale local radius with both the count AND the typical star size so
-    // dense clusters don't collapse onto themselves before relaxation.
-    const avgScale = ids.reduce((s, n) => s + Math.max(1.2, radiusForDegree(n.degree) / 4), 0) / Math.max(size, 1);
-    const localRadius = Math.max(2 + 1.4 * Math.cbrt(size), avgScale * (1.2 + Math.sqrt(size)));
-    ids.forEach((n, i) => {
-      const local = fibSphere(i, Math.max(size, 1)).multiplyScalar(localRadius);
-      const pos = center.clone().add(local);
-      const r = radiusForDegree(n.degree) / 4;
-      placed.push({
-        id: n.id,
-        title: n.title,
-        degree: n.degree,
-        cluster: key,
-        pos,
-        scale: Math.max(1.2, r),
+    keys.forEach((key, sj) => {
+      const ids = buckets.get(key) ?? [];
+      const subDir = M <= 1 ? new THREE.Vector3(0, 0, 0) : fibSphere(sj, M);
+      const center = campaignCenter.clone().add(subDir.multiplyScalar(subRadius));
+      const segs = key.split('/');
+      const label = segs[segs.length - 1] || key;
+      clusters.push({ key, label, center });
+
+      const size = ids.length;
+      const avgScale = ids.reduce((s, n) => s + Math.max(1.2, radiusForDegree(n.degree) / 4), 0) / Math.max(size, 1);
+      const localRadius = Math.max(2 + 1.4 * Math.cbrt(size), avgScale * (1.2 + Math.sqrt(size)));
+      ids.forEach((n, i) => {
+        const local = fibSphere(i, Math.max(size, 1)).multiplyScalar(localRadius);
+        const pos = center.clone().add(local);
+        const r = radiusForDegree(n.degree) / 4;
+        placed.push({
+          id: n.id,
+          title: n.title,
+          degree: n.degree,
+          cluster: key,
+          pos,
+          scale: Math.max(1.2, r),
+        });
       });
     });
+    // Track campaign as a degenerate "cluster" record for completeness;
+    // not currently rendered but useful if a future label layer wants the
+    // campaign centroid.
+    void campaign;
   });
 
   // Relaxation: separate any overlapping spheres. Keeps a small visible
