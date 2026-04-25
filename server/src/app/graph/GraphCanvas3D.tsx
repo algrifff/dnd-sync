@@ -172,6 +172,23 @@ function relaxOverlaps(placed: Placed[]): void {
 }
 
 // One InstancedMesh for all stars. emissive=star color; bloom does the glow work.
+// Per-frame scratch — declared once at module scope so the Stars hot loop
+// doesn't allocate. Avoids GC pressure for ~hundreds of stars × 60fps.
+const SCRATCH_NDC = new THREE.Vector3();
+const SCRATCH_MOUSE_WORLD = new THREE.Vector3();
+
+// Magnetic pull radius in NDC (screen) units. Cursor must be within this
+// proximity in screen-space for a star to feel the tug.
+const MAGNET_RADIUS_NDC = 0.18;
+// Maximum fractional pull toward the cursor at the very centre. Stars
+// only travel up to MAGNET_STRENGTH × (cursor-world − star-world).
+const MAGNET_STRENGTH = 0.18;
+// Breathing — every star independently sin-wobbles its scale on this
+// frequency, with a per-instance phase offset so the field doesn't pulse
+// in unison.
+const BREATH_FREQ = 0.55;
+const BREATH_AMP = 0.05;
+
 function Stars({
   placed,
   hoverIdx,
@@ -191,38 +208,96 @@ function Stars({
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const instColor = useMemo(() => new THREE.Color(), []);
   const baseColor = useMemo(() => new THREE.Color(starColor), [starColor]);
+  // Stable per-instance phase so two stars at the same position still
+  // breathe out of sync. Indexed alongside `placed`.
+  const phases = useMemo(() => placed.map((_, i) => i * 0.917), [placed]);
+  // Track the last hovered idx written so we don't repaint colors on
+  // every frame when nothing has changed.
+  const prevHover = useRef<number | null>(null);
 
+  useFrame((state) => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const { camera, pointer, clock } = state;
+    const t = clock.getElapsedTime();
+
+    for (let i = 0; i < placed.length; i++) {
+      const p = placed[i];
+      if (!p) continue;
+      const phase = phases[i] ?? 0;
+
+      // Magnetic pull. Project the star to NDC; if the pointer is close
+      // to that NDC point, unproject the pointer at the star's depth to
+      // get a world-space target and ease toward it.
+      let pullX = 0, pullY = 0, pullZ = 0;
+      SCRATCH_NDC.copy(p.pos).project(camera);
+      // Skip stars behind the camera (z > 1 in clip space after project).
+      if (SCRATCH_NDC.z < 1) {
+        const dx = pointer.x - SCRATCH_NDC.x;
+        const dy = pointer.y - SCRATCH_NDC.y;
+        const screenDist = Math.sqrt(dx * dx + dy * dy);
+        if (screenDist < MAGNET_RADIUS_NDC) {
+          // Smooth falloff so the tug eases off at the rim.
+          const k = 1 - screenDist / MAGNET_RADIUS_NDC;
+          const strength = k * k * MAGNET_STRENGTH;
+          SCRATCH_MOUSE_WORLD.set(pointer.x, pointer.y, SCRATCH_NDC.z).unproject(camera);
+          pullX = (SCRATCH_MOUSE_WORLD.x - p.pos.x) * strength;
+          pullY = (SCRATCH_MOUSE_WORLD.y - p.pos.y) * strength;
+          pullZ = (SCRATCH_MOUSE_WORLD.z - p.pos.z) * strength;
+        }
+      }
+
+      // Breathing — scale wobble, plus a vanishingly small position drift
+      // so the motion reads as alive rather than mechanical.
+      const breath = 1 + Math.sin(t * BREATH_FREQ + phase) * BREATH_AMP;
+      const driftPhase = phase * 1.31;
+      const drift = Math.sin(t * 0.27 + driftPhase) * 0.08;
+
+      dummy.position.set(
+        p.pos.x + pullX + drift,
+        p.pos.y + pullY + drift * 0.7,
+        p.pos.z + pullZ,
+      );
+      dummy.scale.setScalar(p.scale * breath);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+
+    // Color repaint only when hover changes. Touches at most two
+    // instances (old + new) so it's nearly free.
+    if (prevHover.current !== hoverIdx) {
+      const repaint = (idx: number | null) => {
+        if (idx == null) return;
+        const p = placed[idx];
+        if (!p) return;
+        if (idx === hoverIdx) {
+          instColor.copy(candlelight).multiplyScalar(1.6);
+        } else {
+          const intensity = 0.85 + Math.min(0.6, p.degree * 0.04);
+          instColor.copy(baseColor).multiplyScalar(intensity);
+        }
+        mesh.setColorAt(idx, instColor);
+      };
+      repaint(prevHover.current);
+      repaint(hoverIdx);
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      prevHover.current = hoverIdx;
+    }
+  });
+
+  // Initial color paint — runs once per dataset / star-color change.
   useEffect(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
     placed.forEach((p, i) => {
-      dummy.position.copy(p.pos);
-      dummy.scale.setScalar(p.scale);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
       const intensity = 0.85 + Math.min(0.6, p.degree * 0.04);
       instColor.copy(baseColor).multiplyScalar(intensity);
       mesh.setColorAt(i, instColor);
     });
-    mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [placed, dummy, instColor, baseColor]);
-
-  // Hover tint: re-write color for hovered idx each frame it changes.
-  useEffect(() => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
-    placed.forEach((p, i) => {
-      if (i === hoverIdx) {
-        instColor.copy(candlelight).multiplyScalar(1.6);
-      } else {
-        const intensity = 0.85 + Math.min(0.6, p.degree * 0.04);
-        instColor.copy(baseColor).multiplyScalar(intensity);
-      }
-      mesh.setColorAt(i, instColor);
-    });
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [hoverIdx, placed, instColor, baseColor, candlelight]);
+    prevHover.current = null;
+  }, [placed, instColor, baseColor]);
 
   return (
     <instancedMesh
