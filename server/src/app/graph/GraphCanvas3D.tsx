@@ -6,8 +6,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, Html } from '@react-three/drei';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { OrbitControls, Text, Billboard } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { clusterKey, radiusForDegree } from './graphStyle';
@@ -280,28 +280,111 @@ function Edges({ placed, edges, color }: { placed: Placed[]; edges: GraphPayload
   );
 }
 
-function ClusterLabels({ clusters, color }: { clusters: Cluster[]; color: string }) {
+// Per-campaign labels — grouped by the top-level path segment so each
+// campaign gets one big banner rather than the deeper-segment label that
+// used to crowd the inside of every cluster orb.
+function CampaignLabels({ placed }: { placed: Placed[] }) {
+  const groups = useMemo(() => {
+    const m = new Map<string, { center: THREE.Vector3; count: number; maxR: number }>();
+    for (const p of placed) {
+      const top = (p.cluster.split('/')[0] || p.cluster).trim();
+      if (!top) continue;
+      const e = m.get(top);
+      if (!e) {
+        m.set(top, { center: p.pos.clone(), count: 1, maxR: p.pos.length() });
+      } else {
+        e.center.add(p.pos);
+        e.count += 1;
+      }
+    }
+    return [...m.entries()].map(([key, { center, count }]) => ({
+      key,
+      label: key.replace(/[-_]/g, ' '),
+      center: center.divideScalar(count),
+    }));
+  }, [placed]);
+
   return (
     <>
-      {clusters.map((c) => (
-        <Html key={c.key} position={[c.center.x, c.center.y, c.center.z]} center distanceFactor={28} pointerEvents="none">
-          <div
-            style={{
-              color,
-              fontFamily: 'Inter, system-ui, sans-serif',
-              fontSize: 11,
-              fontWeight: 500,
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              opacity: 0.55,
-              whiteSpace: 'nowrap',
-            }}
+      {groups.map((g) => (
+        <Billboard key={g.key} position={[g.center.x, g.center.y, g.center.z]}>
+          <Text
+            fontSize={2.4}
+            color="#FFFFFF"
+            anchorX="center"
+            anchorY="middle"
+            outlineWidth={0.08}
+            outlineColor="#000000"
+            fillOpacity={0.6}
+            outlineOpacity={0.45}
+            letterSpacing={0.04}
           >
-            {c.label}
-          </div>
-        </Html>
+            {g.label.toUpperCase()}
+          </Text>
+        </Billboard>
       ))}
     </>
+  );
+}
+
+// Per-node labels — always rendered, opacity ramps from 0 (far) to 1 (near
+// or hovered). useFrame lerps each frame so the ease feels smooth instead
+// of snapping when the camera crosses a threshold.
+function NodeLabels({
+  placed,
+  hoverIdx,
+}: {
+  placed: Placed[];
+  hoverIdx: number | null;
+}) {
+  return (
+    <>
+      {placed.map((p, i) => (
+        <NodeLabel key={p.id} p={p} hover={i === hoverIdx} />
+      ))}
+    </>
+  );
+}
+
+function NodeLabel({ p, hover }: { p: Placed; hover: boolean }) {
+  // troika-three-text mesh: `fillOpacity` and `outlineOpacity` are settable
+  // properties on the mesh itself, not a material — we mutate them in-place
+  // each frame to avoid React re-renders.
+  const ref = useRef<THREE.Object3D & {
+    fillOpacity?: number;
+    outlineOpacity?: number;
+  }>(null);
+  const cur = useRef(0);
+  // Empirical fade range — node positions span tens of units so a 25..90
+  // window means labels pop in once you're inside a cluster but stay clean
+  // at the framing camera distance.
+  const NEAR = 25;
+  const FAR = 90;
+  useFrame((state) => {
+    const t = ref.current;
+    if (!t) return;
+    const dist = state.camera.position.distanceTo(p.pos);
+    const distFade = THREE.MathUtils.clamp(1 - (dist - NEAR) / (FAR - NEAR), 0, 1);
+    const target = hover ? 1 : distFade;
+    cur.current = THREE.MathUtils.lerp(cur.current, target, 0.15);
+    t.fillOpacity = cur.current;
+    t.outlineOpacity = cur.current;
+    t.visible = cur.current > 0.01;
+  });
+  return (
+    <Billboard position={[p.pos.x, p.pos.y + p.scale + 0.5, p.pos.z]}>
+      <Text
+        ref={ref}
+        fontSize={0.55}
+        color="#FFFFFF"
+        anchorX="center"
+        anchorY="bottom"
+        outlineWidth={0.05}
+        outlineColor="#000000"
+      >
+        {p.title}
+      </Text>
+    </Billboard>
   );
 }
 
@@ -320,29 +403,6 @@ function CameraFitter({ placed }: { placed: Placed[] }) {
     camera.updateProjectionMatrix();
   }, [placed, camera]);
   return null;
-}
-
-function HoverLabel({ placed, idx, color }: { placed: Placed[]; idx: number | null; color: string }) {
-  if (idx == null || !placed[idx]) return null;
-  const p = placed[idx];
-  return (
-    <Html position={[p.pos.x, p.pos.y + p.scale + 0.4, p.pos.z]} center pointerEvents="none">
-      <div
-        style={{
-          color,
-          fontFamily: 'Inter, system-ui, sans-serif',
-          fontSize: 12,
-          fontWeight: 500,
-          padding: '2px 6px',
-          background: 'rgb(0 0 0 / 0.45)',
-          borderRadius: 4,
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {p.title}
-      </div>
-    </Html>
-  );
 }
 
 type LoadPhase = 'fetching' | 'placing' | 'ready' | 'error';
@@ -435,7 +495,7 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
     };
   }, [groupId]);
 
-  const { placed, clusters } = useMemo(() => {
+  const { placed } = useMemo(() => {
     if (!data) return { placed: [] as Placed[], clusters: [] as Cluster[] };
     return placeNodes(data);
   }, [data]);
@@ -480,8 +540,8 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
               onClickIdx={onClickIdx}
             />
             <Edges placed={placed} edges={data?.edges ?? []} color={palette.edge} />
-            <ClusterLabels clusters={clusters} color={palette.inkSoft} />
-            <HoverLabel placed={placed} idx={hoverIdx} color="#FFFFFF" />
+            <NodeLabels placed={placed} hoverIdx={hoverIdx} />
+            <CampaignLabels placed={placed} />
           </>
         )}
 
