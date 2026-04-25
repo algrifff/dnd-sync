@@ -75,11 +75,7 @@ function fibSphere(i: number, n: number): THREE.Vector3 {
 }
 
 function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluster[] } {
-  // Two-level grouping. Campaigns (top-level path segment) are placed on
-  // an outer Fibonacci sphere; sub-clusters (clusterKey, first 3 segments)
-  // are placed on a smaller sphere around their campaign center. Result:
-  // every note in the same campaign sits near every other note in that
-  // campaign, even when they live in different sub-folders.
+  // Group by cluster key
   const buckets = new Map<string, GraphPayload['nodes']>();
   for (const n of payload.nodes) {
     const key = clusterKey(n.id);
@@ -88,62 +84,38 @@ function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluste
     else buckets.set(key, [n]);
   }
 
-  // Group cluster keys by their campaign (top-level segment).
-  const campaigns = new Map<string, string[]>();
-  for (const key of buckets.keys()) {
-    const top = (key.split('/')[0] || key).trim() || '__root__';
-    const arr = campaigns.get(top);
-    if (arr) arr.push(key);
-    else campaigns.set(top, [key]);
-  }
-
-  const campEntries = [...campaigns.entries()];
-  const K = campEntries.length;
-  // Outer radius scales with campaign count, not cluster count, so a world
-  // with 5 campaigns × 4 sub-clusters each doesn't get spread as wide as
-  // one with 20 unrelated clusters.
-  const galaxyRadius = K <= 1 ? 0 : 22 * Math.cbrt(K);
+  const entries = [...buckets.entries()];
+  const C = entries.length;
+  const galaxyRadius = C <= 1 ? 0 : 18 * Math.cbrt(C);
 
   const clusters: Cluster[] = [];
   const placed: Placed[] = [];
 
-  campEntries.forEach(([campaign, keys], ki) => {
-    const campaignCenter = fibSphere(ki, K).multiplyScalar(galaxyRadius);
-    const M = keys.length;
-    // Sub-cluster shell radius — small enough that a campaign reads as one
-    // tight system, big enough that sub-clusters don't crash into each
-    // other before relaxation.
-    const subRadius = M <= 1 ? 0 : 4 + 2.2 * Math.cbrt(M);
+  entries.forEach(([key, ids], ci) => {
+    const dir = fibSphere(ci, C);
+    const center = dir.clone().multiplyScalar(galaxyRadius);
+    const segs = key.split('/');
+    const label = segs[segs.length - 1] || key;
+    clusters.push({ key, label, center });
 
-    keys.forEach((key, sj) => {
-      const ids = buckets.get(key) ?? [];
-      const subDir = M <= 1 ? new THREE.Vector3(0, 0, 0) : fibSphere(sj, M);
-      const center = campaignCenter.clone().add(subDir.multiplyScalar(subRadius));
-      const segs = key.split('/');
-      const label = segs[segs.length - 1] || key;
-      clusters.push({ key, label, center });
-
-      const size = ids.length;
-      const avgScale = ids.reduce((s, n) => s + Math.max(1.2, radiusForDegree(n.degree) / 4), 0) / Math.max(size, 1);
-      const localRadius = Math.max(2 + 1.4 * Math.cbrt(size), avgScale * (1.2 + Math.sqrt(size)));
-      ids.forEach((n, i) => {
-        const local = fibSphere(i, Math.max(size, 1)).multiplyScalar(localRadius);
-        const pos = center.clone().add(local);
-        const r = radiusForDegree(n.degree) / 4;
-        placed.push({
-          id: n.id,
-          title: n.title,
-          degree: n.degree,
-          cluster: key,
-          pos,
-          scale: Math.max(1.2, r),
-        });
+    const size = ids.length;
+    // Scale local radius with both the count AND the typical star size so
+    // dense clusters don't collapse onto themselves before relaxation.
+    const avgScale = ids.reduce((s, n) => s + Math.max(1.2, radiusForDegree(n.degree) / 4), 0) / Math.max(size, 1);
+    const localRadius = Math.max(2 + 1.4 * Math.cbrt(size), avgScale * (1.2 + Math.sqrt(size)));
+    ids.forEach((n, i) => {
+      const local = fibSphere(i, Math.max(size, 1)).multiplyScalar(localRadius);
+      const pos = center.clone().add(local);
+      const r = radiusForDegree(n.degree) / 4;
+      placed.push({
+        id: n.id,
+        title: n.title,
+        degree: n.degree,
+        cluster: key,
+        pos,
+        scale: Math.max(1.2, r),
       });
     });
-    // Track campaign as a degenerate "cluster" record for completeness;
-    // not currently rendered but useful if a future label layer wants the
-    // campaign centroid.
-    void campaign;
   });
 
   // Relaxation: separate any overlapping spheres. Keeps a small visible
@@ -373,34 +345,52 @@ function CampaignLabels({ placed }: { placed: Placed[] }) {
 function NodeLabels({
   placed,
   hoverIdx,
+  fadeNearRef,
+  fadeFarRef,
 }: {
   placed: Placed[];
   hoverIdx: number | null;
+  fadeNearRef: React.RefObject<number>;
+  fadeFarRef: React.RefObject<number>;
 }) {
   return (
     <>
       {placed.map((p, i) => (
-        <NodeLabel key={p.id} p={p} hover={i === hoverIdx} />
+        <NodeLabel
+          key={p.id}
+          p={p}
+          hover={i === hoverIdx}
+          fadeNearRef={fadeNearRef}
+          fadeFarRef={fadeFarRef}
+        />
       ))}
     </>
   );
 }
 
-function NodeLabel({ p, hover }: { p: Placed; hover: boolean }) {
+function NodeLabel({
+  p,
+  hover,
+  fadeNearRef,
+  fadeFarRef,
+}: {
+  p: Placed;
+  hover: boolean;
+  fadeNearRef: React.RefObject<number>;
+  fadeFarRef: React.RefObject<number>;
+}) {
   // We mutate the inner div's opacity directly via ref so the per-frame
-  // lerp doesn't trigger React re-renders.
+  // lerp doesn't trigger React re-renders. NEAR/FAR come from refs so
+  // the panel can change them without re-mounting every label.
   const divRef = useRef<HTMLDivElement>(null);
   const cur = useRef(0);
-  // Empirical fade range — node positions span tens of units so a 25..90
-  // window means labels pop in once you're inside a cluster but stay clean
-  // at the framing camera distance.
-  const NEAR = 25;
-  const FAR = 90;
   useFrame((state) => {
     const el = divRef.current;
     if (!el) return;
     const dist = state.camera.position.distanceTo(p.pos);
-    const distFade = THREE.MathUtils.clamp(1 - (dist - NEAR) / (FAR - NEAR), 0, 1);
+    const near = fadeNearRef.current ?? DEFAULT_LABEL_NEAR;
+    const far = Math.max(fadeFarRef.current ?? DEFAULT_LABEL_FAR, near + 1);
+    const distFade = THREE.MathUtils.clamp(1 - (dist - near) / (far - near), 0, 1);
     const target = hover ? 1 : distFade;
     cur.current = THREE.MathUtils.lerp(cur.current, target, 0.15);
     el.style.opacity = String(cur.current);
@@ -481,6 +471,11 @@ const BG_PRESETS: Array<{ id: string; label: string; hex: string }> = [
 ];
 
 const STORAGE_KEY = 'graph3d:colors';
+const LABEL_STORAGE_KEY = 'graph3d:labels';
+
+// Defaults match the in-code fade window before this control existed.
+const DEFAULT_LABEL_NEAR = 25;
+const DEFAULT_LABEL_FAR = 90;
 
 export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElement {
   const router = useRouter();
@@ -491,6 +486,20 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [starColor, setStarColor] = useState<string>('#FFFFFF');
   const [bgColor, setBgColor] = useState<string>('#0A0806');
+  const [fadeNear, setFadeNear] = useState<number>(DEFAULT_LABEL_NEAR);
+  const [fadeFar, setFadeFar] = useState<number>(DEFAULT_LABEL_FAR);
+  // Mirror NEAR/FAR into refs so the per-frame lerp inside each label can
+  // read live values without each setState re-rendering hundreds of
+  // <NodeLabel> components.
+  const fadeNearRef = useRef<number>(DEFAULT_LABEL_NEAR);
+  const fadeFarRef = useRef<number>(DEFAULT_LABEL_FAR);
+  useEffect(() => {
+    fadeNearRef.current = fadeNear;
+  }, [fadeNear]);
+  useEffect(() => {
+    fadeFarRef.current = fadeFar;
+  }, [fadeFar]);
+
   useEffect(() => {
     setPalette(readPalette());
     if (typeof window !== 'undefined') {
@@ -500,6 +509,16 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
           const parsed = JSON.parse(raw) as { star?: string; bg?: string };
           if (parsed.star) setStarColor(parsed.star);
           if (parsed.bg) setBgColor(parsed.bg);
+        }
+      } catch {
+        /* ignore */
+      }
+      try {
+        const raw = window.localStorage.getItem(LABEL_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { near?: number; far?: number };
+          if (typeof parsed.near === 'number') setFadeNear(parsed.near);
+          if (typeof parsed.far === 'number') setFadeFar(parsed.far);
         }
       } catch {
         /* ignore */
@@ -518,6 +537,18 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
       /* ignore quota / private mode */
     }
   }, [starColor, bgColor]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        LABEL_STORAGE_KEY,
+        JSON.stringify({ near: fadeNear, far: fadeFar }),
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [fadeNear, fadeFar]);
 
   useEffect(() => {
     let cancelled = false;
@@ -588,7 +619,12 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
               onClickIdx={onClickIdx}
             />
             <Edges placed={placed} edges={data?.edges ?? []} color={palette.edge} />
-            <NodeLabels placed={placed} hoverIdx={hoverIdx} />
+            <NodeLabels
+              placed={placed}
+              hoverIdx={hoverIdx}
+              fadeNearRef={fadeNearRef}
+              fadeFarRef={fadeFarRef}
+            />
             <CampaignLabels placed={placed} />
           </>
         )}
@@ -600,16 +636,28 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
         </EffectComposer>
       </Canvas>
 
-      <ColorPanel
-        starColor={starColor}
-        bgColor={bgColor}
-        onStarChange={setStarColor}
-        onBgChange={setBgColor}
-        onReset={() => {
-          setStarColor('#FFFFFF');
-          setBgColor('#0A0806');
-        }}
-      />
+      <div className="absolute right-3 top-3 z-10 flex flex-col gap-2" style={{ pointerEvents: 'auto' }}>
+        <ColorPanel
+          starColor={starColor}
+          bgColor={bgColor}
+          onStarChange={setStarColor}
+          onBgChange={setBgColor}
+          onReset={() => {
+            setStarColor('#FFFFFF');
+            setBgColor('#0A0806');
+          }}
+        />
+        <LabelPanel
+          near={fadeNear}
+          far={fadeFar}
+          onNearChange={setFadeNear}
+          onFarChange={setFadeFar}
+          onReset={() => {
+            setFadeNear(DEFAULT_LABEL_NEAR);
+            setFadeFar(DEFAULT_LABEL_FAR);
+          }}
+        />
+      </div>
 
       {phase !== 'ready' && (
         <LoadingOverlay
@@ -689,55 +737,153 @@ function ColorPanel({
   const [open, setOpen] = useState<boolean>(true);
   return (
     <div
-      className="absolute right-3 top-3 z-10"
-      style={{ pointerEvents: 'auto' }}
+      className="rounded-[10px] border bg-[var(--vellum)] text-[var(--ink)] shadow-[0_6px_18px_rgb(var(--ink-rgb)/0.10)]"
+      style={{ borderColor: 'var(--rule)', minWidth: 220 }}
     >
-      <div
-        className="rounded-[10px] border bg-[var(--vellum)] text-[var(--ink)] shadow-[0_6px_18px_rgb(var(--ink-rgb)/0.10)]"
-        style={{ borderColor: 'var(--rule)', minWidth: 220 }}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+        aria-expanded={open}
+        aria-label="Toggle colour panel"
       >
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
-          aria-expanded={open}
-          aria-label="Toggle colour panel"
-        >
-          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
-            Colours
-          </span>
-          <span aria-hidden className="flex items-center gap-1.5">
-            <ColorChip color={starColor} />
-            <ColorChip color={bgColor} />
-            <span className="text-[var(--ink-muted)]">{open ? '▾' : '▸'}</span>
-          </span>
-        </button>
-        {open && (
-          <div className="space-y-3 px-3 pb-3">
-            <ColorRow
-              label="Star"
-              value={starColor}
-              presets={STAR_PRESETS}
-              onChange={onStarChange}
-            />
-            <ColorRow
-              label="Background"
-              value={bgColor}
-              presets={BG_PRESETS}
-              onChange={onBgChange}
-            />
-            <button
-              type="button"
-              onClick={onReset}
-              className="w-full rounded-[6px] border px-2 py-1 text-xs text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)]"
-              style={{ borderColor: 'var(--rule)' }}
-            >
-              Reset to defaults
-            </button>
-          </div>
-        )}
-      </div>
+        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
+          Colours
+        </span>
+        <span aria-hidden className="flex items-center gap-1.5">
+          <ColorChip color={starColor} />
+          <ColorChip color={bgColor} />
+          <span className="text-[var(--ink-muted)]">{open ? '▾' : '▸'}</span>
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-3 px-3 pb-3">
+          <ColorRow
+            label="Star"
+            value={starColor}
+            presets={STAR_PRESETS}
+            onChange={onStarChange}
+          />
+          <ColorRow
+            label="Background"
+            value={bgColor}
+            presets={BG_PRESETS}
+            onChange={onBgChange}
+          />
+          <button
+            type="button"
+            onClick={onReset}
+            className="w-full rounded-[6px] border px-2 py-1 text-xs text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)]"
+            style={{ borderColor: 'var(--rule)' }}
+          >
+            Reset to defaults
+          </button>
+        </div>
+      )}
     </div>
+  );
+}
+
+function LabelPanel({
+  near,
+  far,
+  onNearChange,
+  onFarChange,
+  onReset,
+}: {
+  near: number;
+  far: number;
+  onNearChange: (v: number) => void;
+  onFarChange: (v: number) => void;
+  onReset: () => void;
+}) {
+  const [open, setOpen] = useState<boolean>(false);
+  // Slider range — covers the camera's typical orbit distance from a
+  // small world (≈20 units) to the framing distance for a large galaxy
+  // (≈250 units).
+  const MIN = 0;
+  const MAX = 300;
+  return (
+    <div
+      className="rounded-[10px] border bg-[var(--vellum)] text-[var(--ink)] shadow-[0_6px_18px_rgb(var(--ink-rgb)/0.10)]"
+      style={{ borderColor: 'var(--rule)', minWidth: 220 }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+        aria-expanded={open}
+        aria-label="Toggle label panel"
+      >
+        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
+          Label fade
+        </span>
+        <span aria-hidden className="flex items-center gap-1.5 text-[11px] text-[var(--ink-muted)]">
+          <span>
+            {Math.round(near)} → {Math.round(far)}
+          </span>
+          <span>{open ? '▾' : '▸'}</span>
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-3 px-3 pb-3">
+          <SliderRow
+            label="Full opacity ≤"
+            value={near}
+            min={MIN}
+            max={Math.max(MIN + 1, far - 1)}
+            onChange={onNearChange}
+          />
+          <SliderRow
+            label="Fully hidden ≥"
+            value={far}
+            min={Math.min(MAX - 1, near + 1)}
+            max={MAX}
+            onChange={onFarChange}
+          />
+          <button
+            type="button"
+            onClick={onReset}
+            className="w-full rounded-[6px] border px-2 py-1 text-xs text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)]"
+            style={{ borderColor: 'var(--rule)' }}
+          >
+            Reset to defaults
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SliderRow({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1.5 text-[11px] text-[var(--ink-soft)]">
+      <div className="flex items-center justify-between">
+        <span className="uppercase tracking-wide text-[var(--ink-muted)]">{label}</span>
+        <span className="tabular-nums text-[var(--ink-soft)]">{Math.round(value)}</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-[var(--candlelight)]"
+      />
+    </label>
   );
 }
 
