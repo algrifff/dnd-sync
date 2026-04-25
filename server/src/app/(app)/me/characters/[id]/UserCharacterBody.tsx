@@ -185,9 +185,8 @@ export function UserCharacterBody({
   }, [editor, csrfToken]);
 
   return (
-    <section className="mb-6">
-      <div className="mb-2 flex items-baseline justify-between">
-        <h2 className="font-serif text-base text-[var(--ink)]">Notes</h2>
+    <section>
+      <div className="mb-2 flex justify-end">
         <span
           className={
             'text-[10px] ' +

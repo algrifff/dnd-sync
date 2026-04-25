@@ -24,6 +24,10 @@ import {
 import { uploadImageAsset } from '@/lib/image-upload';
 import type { UserCharacter } from '@/lib/userCharacters';
 import { UserCharacterBody } from './UserCharacterBody';
+import { SkillsList } from './SkillsList';
+import { ImportPdfButton } from './ImportPdfButton';
+
+type BodyTab = 'notes' | 'skills';
 
 const PATCH_DEBOUNCE_MS = 400;
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
@@ -69,6 +73,7 @@ export function UserCharacterEditor({
   const [sheet, setSheet] = useState<Record<string, unknown>>(character.sheet);
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [bodyTab, setBodyTab] = useState<BodyTab>('notes');
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPatch = useRef<Record<string, unknown>>({});
@@ -227,6 +232,7 @@ export function UserCharacterEditor({
           >
             {statusLabel}
           </span>
+          <ImportPdfButton characterId={character.id} csrfToken={csrfToken} />
           <button
             type="button"
             onClick={() => router.push('/me')}
@@ -309,11 +315,37 @@ export function UserCharacterEditor({
 
 
 
-        <UserCharacterBody
-          characterId={character.id}
-          csrfToken={csrfToken}
-          initialBody={character.bodyJson}
-        />
+        <section className="mb-6">
+          <div
+            role="tablist"
+            aria-label="Notes and skills"
+            className="mb-3 flex items-center gap-4 border-b border-[var(--rule)]"
+          >
+            <TabButton
+              active={bodyTab === 'notes'}
+              onClick={() => setBodyTab('notes')}
+            >
+              Notes
+            </TabButton>
+            <TabButton
+              active={bodyTab === 'skills'}
+              onClick={() => setBodyTab('skills')}
+            >
+              Skills
+            </TabButton>
+          </div>
+          {/* Both kept mounted so the TipTap editor preserves state. */}
+          <div className={bodyTab === 'notes' ? 'block' : 'hidden'}>
+            <UserCharacterBody
+              characterId={character.id}
+              csrfToken={csrfToken}
+              initialBody={character.bodyJson}
+            />
+          </div>
+          <div className={bodyTab === 'skills' ? 'block' : 'hidden'}>
+            <SkillsList sheet={sheet} onPatch={patchSheet} />
+          </div>
+        </section>
 
         <div className="mt-8 flex items-center justify-between border-t border-[var(--rule)] pt-6">
           <span className="text-[11px] text-[var(--ink-soft)]">
@@ -329,6 +361,35 @@ export function UserCharacterEditor({
         </div>
       </main>
     </div>
+  );
+}
+
+// ── Tab strip ──────────────────────────────────────────────────────────
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={
+        'relative -mb-px border-b-2 px-1 py-2 font-serif text-base transition ' +
+        (active
+          ? 'border-[var(--ink)] text-[var(--ink)]'
+          : 'border-transparent text-[var(--ink-soft)] hover:text-[var(--ink)]')
+      }
+    >
+      {children}
+    </button>
   );
 }
 
