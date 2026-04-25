@@ -62,6 +62,12 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 ENV DATA_DIR=/data
 
+# poppler-utils provides `pdftotext`, used by the PDF character-sheet
+# importer in src/lib/pdfImport/extractText.ts.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN mkdir -p /data
 
 COPY --from=build /app/node_modules             ./node_modules

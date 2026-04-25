@@ -25,8 +25,6 @@ import { getPmSchema } from './pm-schema';
 import { validateSheet } from './validateSheet';
 import type { UserCharacterKind } from './userCharacters';
 
-const EMPTY_DOC = { type: 'doc', content: [{ type: 'paragraph' }] };
-
 const syncingNoteIds = new Set<string>();
 const syncingUserCharacterIds = new Set<string>();
 
