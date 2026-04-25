@@ -630,8 +630,24 @@ function CameraFitter({ placed }: { placed: Placed[] }) {
     const box = new THREE.Box3();
     for (const p of placed) box.expandByPoint(p.pos);
     const sphere = box.getBoundingSphere(new THREE.Sphere());
-    const r = Math.max(sphere.radius, 10);
-    camera.position.set(sphere.center.x, sphere.center.y, sphere.center.z + r * 2.4);
+
+    // Bounding sphere is measured from node *centres*; add the largest
+    // star radius so even the outermost sphere surface stays inside the
+    // frustum, plus a small constant for the wave drift headroom.
+    const maxScale = placed.reduce((m, p) => Math.max(m, p.scale), 0);
+    const r = Math.max(sphere.radius + maxScale + DEFAULT_WAVE_AMP * 2, 10);
+
+    // Derive the fit distance from the camera's actual FOV instead of a
+    // magic multiplier so the result is always "just at the edge" regardless
+    // of world size. For a perspective camera the sphere just fills the
+    // viewport when d = r / tan(halfFov). We take the max over the vertical
+    // and horizontal half-angles and add 5 % breathing room.
+    const cam = camera as THREE.PerspectiveCamera;
+    const vHalf = THREE.MathUtils.degToRad(cam.fov) / 2;
+    const hHalf = Math.atan(Math.tan(vHalf) * cam.aspect);
+    const dist = (r / Math.min(Math.tan(vHalf), Math.tan(hHalf))) * 1.05;
+
+    camera.position.set(sphere.center.x, sphere.center.y, sphere.center.z + dist);
     camera.lookAt(sphere.center);
     camera.updateProjectionMatrix();
   }, [placed, camera]);
