@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Text, Billboard } from '@react-three/drei';
+import { OrbitControls, Html } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { clusterKey, radiusForDegree } from './graphStyle';
@@ -283,15 +283,19 @@ function Edges({ placed, edges, color }: { placed: Placed[]; edges: GraphPayload
 // Per-campaign labels — grouped by the top-level path segment so each
 // campaign gets one big banner rather than the deeper-segment label that
 // used to crowd the inside of every cluster orb.
+//
+// Implemented with drei <Html> (DOM-projected) instead of drei <Text>
+// (troika SDF) because troika spawns Web Workers that chain importScripts
+// of further blob: URLs — incompatible with our CSP.
 function CampaignLabels({ placed }: { placed: Placed[] }) {
   const groups = useMemo(() => {
-    const m = new Map<string, { center: THREE.Vector3; count: number; maxR: number }>();
+    const m = new Map<string, { center: THREE.Vector3; count: number }>();
     for (const p of placed) {
       const top = (p.cluster.split('/')[0] || p.cluster).trim();
       if (!top) continue;
       const e = m.get(top);
       if (!e) {
-        m.set(top, { center: p.pos.clone(), count: 1, maxR: p.pos.length() });
+        m.set(top, { center: p.pos.clone(), count: 1 });
       } else {
         e.center.add(p.pos);
         e.count += 1;
@@ -307,21 +311,29 @@ function CampaignLabels({ placed }: { placed: Placed[] }) {
   return (
     <>
       {groups.map((g) => (
-        <Billboard key={g.key} position={[g.center.x, g.center.y, g.center.z]}>
-          <Text
-            fontSize={2.4}
-            color="#FFFFFF"
-            anchorX="center"
-            anchorY="middle"
-            outlineWidth={0.08}
-            outlineColor="#000000"
-            fillOpacity={0.6}
-            outlineOpacity={0.45}
-            letterSpacing={0.04}
+        <Html
+          key={g.key}
+          position={[g.center.x, g.center.y, g.center.z]}
+          center
+          distanceFactor={20}
+          pointerEvents="none"
+        >
+          <div
+            style={{
+              color: '#FFFFFF',
+              fontFamily: 'Inter, system-ui, sans-serif',
+              fontSize: 18,
+              fontWeight: 600,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              opacity: 0.7,
+              textShadow: '0 0 6px rgba(0,0,0,0.85), 0 1px 2px rgba(0,0,0,0.6)',
+              whiteSpace: 'nowrap',
+            }}
           >
-            {g.label.toUpperCase()}
-          </Text>
-        </Billboard>
+            {g.label}
+          </div>
+        </Html>
       ))}
     </>
   );
@@ -347,13 +359,9 @@ function NodeLabels({
 }
 
 function NodeLabel({ p, hover }: { p: Placed; hover: boolean }) {
-  // troika-three-text mesh: `fillOpacity` and `outlineOpacity` are settable
-  // properties on the mesh itself, not a material — we mutate them in-place
-  // each frame to avoid React re-renders.
-  const ref = useRef<THREE.Object3D & {
-    fillOpacity?: number;
-    outlineOpacity?: number;
-  }>(null);
+  // We mutate the inner div's opacity directly via ref so the per-frame
+  // lerp doesn't trigger React re-renders.
+  const divRef = useRef<HTMLDivElement>(null);
   const cur = useRef(0);
   // Empirical fade range — node positions span tens of units so a 25..90
   // window means labels pop in once you're inside a cluster but stay clean
@@ -361,30 +369,42 @@ function NodeLabel({ p, hover }: { p: Placed; hover: boolean }) {
   const NEAR = 25;
   const FAR = 90;
   useFrame((state) => {
-    const t = ref.current;
-    if (!t) return;
+    const el = divRef.current;
+    if (!el) return;
     const dist = state.camera.position.distanceTo(p.pos);
     const distFade = THREE.MathUtils.clamp(1 - (dist - NEAR) / (FAR - NEAR), 0, 1);
     const target = hover ? 1 : distFade;
     cur.current = THREE.MathUtils.lerp(cur.current, target, 0.15);
-    t.fillOpacity = cur.current;
-    t.outlineOpacity = cur.current;
-    t.visible = cur.current > 0.01;
+    el.style.opacity = String(cur.current);
+    // Cull from layout entirely once invisible — keeps hundreds of
+    // off-screen labels from contributing layout cost.
+    el.style.display = cur.current > 0.01 ? 'block' : 'none';
   });
   return (
-    <Billboard position={[p.pos.x, p.pos.y + p.scale + 0.5, p.pos.z]}>
-      <Text
-        ref={ref}
-        fontSize={0.55}
-        color="#FFFFFF"
-        anchorX="center"
-        anchorY="bottom"
-        outlineWidth={0.05}
-        outlineColor="#000000"
+    <Html
+      position={[p.pos.x, p.pos.y + p.scale + 0.4, p.pos.z]}
+      center
+      pointerEvents="none"
+      zIndexRange={[10, 0]}
+    >
+      <div
+        ref={divRef}
+        style={{
+          color: '#FFFFFF',
+          fontFamily: 'Inter, system-ui, sans-serif',
+          fontSize: 12,
+          fontWeight: 500,
+          padding: '2px 6px',
+          background: 'rgb(0 0 0 / 0.45)',
+          borderRadius: 4,
+          whiteSpace: 'nowrap',
+          opacity: 0,
+          willChange: 'opacity',
+        }}
       >
         {p.title}
-      </Text>
-    </Billboard>
+      </div>
+    </Html>
   );
 }
 
