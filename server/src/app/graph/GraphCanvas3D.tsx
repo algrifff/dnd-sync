@@ -751,6 +751,12 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   }, [groupsMap]);
 
   const [groupsApply, setGroupsApply] = useState<boolean>(false);
+  // Guard so the save effects below don't overwrite localStorage with
+  // defaults during the brief window before the read effect commits its
+  // setStates. Without this, navigating away in the first ~one frame
+  // after mount would persist the defaults instead of the user's
+  // previously saved values.
+  const [hydrated, setHydrated] = useState<boolean>(false);
 
   useEffect(() => {
     setPalette(readPalette());
@@ -798,10 +804,14 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
         /* ignore */
       }
     }
+    // Mark hydration complete so the save effects below start writing.
+    // Doing this last guarantees every read setState above has been
+    // queued before any save effect can fire.
+    setHydrated(true);
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (!hydrated || typeof window === 'undefined') return;
     try {
       window.localStorage.setItem(
         STORAGE_KEY,
@@ -810,10 +820,10 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
     } catch {
       /* ignore quota / private mode */
     }
-  }, [starColor, bgColor]);
+  }, [hydrated, starColor, bgColor]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (!hydrated || typeof window === 'undefined') return;
     try {
       window.localStorage.setItem(
         LABEL_STORAGE_KEY,
@@ -822,19 +832,19 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
     } catch {
       /* ignore */
     }
-  }, [labelVis]);
+  }, [hydrated, labelVis]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (!hydrated || typeof window === 'undefined') return;
     try {
       window.localStorage.setItem(HOVER_LABELS_KEY, hoverLabels ? '1' : '0');
     } catch {
       /* ignore */
     }
-  }, [hoverLabels]);
+  }, [hydrated, hoverLabels]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (!hydrated || typeof window === 'undefined') return;
     try {
       window.localStorage.setItem(
         MOTION_STORAGE_KEY,
@@ -843,16 +853,16 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
     } catch {
       /* ignore */
     }
-  }, [waveAmp, waveFreq, waveSpeed]);
+  }, [hydrated, waveAmp, waveFreq, waveSpeed]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (!hydrated || typeof window === 'undefined') return;
     try {
       window.localStorage.setItem(GROUPS_APPLY_KEY, groupsApply ? '1' : '0');
     } catch {
       /* ignore */
     }
-  }, [groupsApply]);
+  }, [hydrated, groupsApply]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1166,6 +1176,7 @@ function PanelStack({
   paletteTags: string[];
 }) {
   const [open, setOpen] = useState<boolean>(true);
+  const [openHydrated, setOpenHydrated] = useState<boolean>(false);
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
@@ -1174,15 +1185,16 @@ function PanelStack({
     } catch {
       /* ignore */
     }
+    setOpenHydrated(true);
   }, []);
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (!openHydrated || typeof window === 'undefined') return;
     try {
       window.localStorage.setItem(PANELS_OPEN_KEY, open ? '1' : '0');
     } catch {
       /* ignore */
     }
-  }, [open]);
+  }, [openHydrated, open]);
 
   if (!open) {
     return (
