@@ -183,12 +183,15 @@ const MAGNET_RADIUS_NDC = 0.18;
 // Maximum fractional pull toward the cursor at the very centre. Stars
 // only travel up to MAGNET_STRENGTH × (cursor-world − star-world).
 const MAGNET_STRENGTH = 0.18;
-// Breathing — every star independently sin-wobbles its scale on this
-// frequency, with a per-instance phase offset so the field doesn't pulse
-// in unison.
-const BREATH_FREQ = 0.7;
-const BREATH_AMP = 0.12;
-const DRIFT_AMP = 0.18;
+// Two travelling wave fields. Each star samples both waves at its own
+// world position so neighbours move coherently (a wave passing over them)
+// but distant stars are unrelated. The two waves run on different axes
+// and speeds so the combined motion never repeats.
+const WAVE_AMP = 0.6;
+// Spatial frequency (cycles per world unit) — lower = longer wavelength.
+// Direction comes from the relative magnitudes of (kx, ky, kz).
+const WAVE_A = { kx: 0.045, ky: 0.0, kz: 0.025, omega: 0.45 };
+const WAVE_B = { kx: 0.0, ky: 0.05, kz: 0.035, omega: 0.62 };
 
 function Stars({
   placed,
@@ -209,9 +212,6 @@ function Stars({
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const instColor = useMemo(() => new THREE.Color(), []);
   const baseColor = useMemo(() => new THREE.Color(starColor), [starColor]);
-  // Stable per-instance phase so two stars at the same position still
-  // breathe out of sync. Indexed alongside `placed`.
-  const phases = useMemo(() => placed.map((_, i) => i * 0.917), [placed]);
   // Track the last hovered idx written so we don't repaint colors on
   // every frame when nothing has changed.
   const prevHover = useRef<number | null>(null);
@@ -225,7 +225,6 @@ function Stars({
     for (let i = 0; i < placed.length; i++) {
       const p = placed[i];
       if (!p) continue;
-      const phase = phases[i] ?? 0;
 
       // Magnetic pull. Project the star to NDC; if the pointer is close
       // to that NDC point, unproject the pointer at the star's depth to
@@ -252,21 +251,29 @@ function Stars({
         }
       }
 
-      // Breathing — scale wobble plus a small lateral drift on a
-      // different harmonic so the motion reads as organic rather than
-      // mechanical. Per-instance phase keeps neighbours out of sync.
-      const breath = 1 + Math.sin(t * BREATH_FREQ + phase) * BREATH_AMP;
-      const driftPhase = phase * 1.31;
-      const driftX = Math.sin(t * 0.31 + driftPhase) * DRIFT_AMP;
-      const driftY = Math.cos(t * 0.27 + driftPhase * 1.7) * DRIFT_AMP * 0.7;
-      const driftZ = Math.sin(t * 0.23 + driftPhase * 0.6) * DRIFT_AMP * 0.5;
+      // Two travelling waves sampled at the star's world position. The
+      // sample is a phase, not a free oscillator, so spatially-adjacent
+      // stars move together — exactly like a wave passing through the
+      // field. No scale wobble: motion is purely positional.
+      const phaseA =
+        WAVE_A.kx * p.pos.x + WAVE_A.ky * p.pos.y + WAVE_A.kz * p.pos.z - WAVE_A.omega * t;
+      const phaseB =
+        WAVE_B.kx * p.pos.x + WAVE_B.ky * p.pos.y + WAVE_B.kz * p.pos.z - WAVE_B.omega * t;
+      const wA = Math.sin(phaseA);
+      const wB = Math.sin(phaseB);
+      // Combine the two so each axis gets contributions from both waves
+      // in different proportions. The combined trajectory is a Lissajous
+      // figure that never closes neatly — feels organic.
+      const driftX = (wA + wB * 0.4) * WAVE_AMP;
+      const driftY = (wB - wA * 0.5) * WAVE_AMP;
+      const driftZ = (wA * 0.6 + wB * 0.7) * WAVE_AMP;
 
       dummy.position.set(
         p.pos.x + pullX + driftX,
         p.pos.y + pullY + driftY,
         p.pos.z + pullZ + driftZ,
       );
-      dummy.scale.setScalar(p.scale * breath);
+      dummy.scale.setScalar(p.scale);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
     }
@@ -690,7 +697,10 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
       >
         <color attach="background" args={[bgColor]} />
-        <fog attach="fog" args={[bgColor, 60, 320]} />
+        {/* No <fog>. Fog distances are world-space, so as the camera
+            zooms out every star drifts toward the fog colour and the
+            view appears to grow heavier. The bloom + emissive stars
+            already give enough depth without it. */}
         <ambientLight intensity={0.25} />
 
         {placed.length > 0 && (
