@@ -186,8 +186,9 @@ const MAGNET_STRENGTH = 0.18;
 // Breathing — every star independently sin-wobbles its scale on this
 // frequency, with a per-instance phase offset so the field doesn't pulse
 // in unison.
-const BREATH_FREQ = 0.55;
-const BREATH_AMP = 0.05;
+const BREATH_FREQ = 0.7;
+const BREATH_AMP = 0.12;
+const DRIFT_AMP = 0.18;
 
 function Stars({
   placed,
@@ -228,35 +229,42 @@ function Stars({
 
       // Magnetic pull. Project the star to NDC; if the pointer is close
       // to that NDC point, unproject the pointer at the star's depth to
-      // get a world-space target and ease toward it.
+      // get a world-space target and ease toward it. The hovered star is
+      // skipped — once you're on it, we don't want it running away from
+      // (or chasing) the cursor and toggling hover state.
       let pullX = 0, pullY = 0, pullZ = 0;
-      SCRATCH_NDC.copy(p.pos).project(camera);
-      // Skip stars behind the camera (z > 1 in clip space after project).
-      if (SCRATCH_NDC.z < 1) {
-        const dx = pointer.x - SCRATCH_NDC.x;
-        const dy = pointer.y - SCRATCH_NDC.y;
-        const screenDist = Math.sqrt(dx * dx + dy * dy);
-        if (screenDist < MAGNET_RADIUS_NDC) {
-          // Smooth falloff so the tug eases off at the rim.
-          const k = 1 - screenDist / MAGNET_RADIUS_NDC;
-          const strength = k * k * MAGNET_STRENGTH;
-          SCRATCH_MOUSE_WORLD.set(pointer.x, pointer.y, SCRATCH_NDC.z).unproject(camera);
-          pullX = (SCRATCH_MOUSE_WORLD.x - p.pos.x) * strength;
-          pullY = (SCRATCH_MOUSE_WORLD.y - p.pos.y) * strength;
-          pullZ = (SCRATCH_MOUSE_WORLD.z - p.pos.z) * strength;
+      if (i !== hoverIdx) {
+        SCRATCH_NDC.copy(p.pos).project(camera);
+        // Skip stars behind the camera (z > 1 in clip space after project).
+        if (SCRATCH_NDC.z < 1) {
+          const dx = pointer.x - SCRATCH_NDC.x;
+          const dy = pointer.y - SCRATCH_NDC.y;
+          const screenDist = Math.sqrt(dx * dx + dy * dy);
+          if (screenDist < MAGNET_RADIUS_NDC) {
+            // Smooth falloff so the tug eases off at the rim.
+            const k = 1 - screenDist / MAGNET_RADIUS_NDC;
+            const strength = k * k * MAGNET_STRENGTH;
+            SCRATCH_MOUSE_WORLD.set(pointer.x, pointer.y, SCRATCH_NDC.z).unproject(camera);
+            pullX = (SCRATCH_MOUSE_WORLD.x - p.pos.x) * strength;
+            pullY = (SCRATCH_MOUSE_WORLD.y - p.pos.y) * strength;
+            pullZ = (SCRATCH_MOUSE_WORLD.z - p.pos.z) * strength;
+          }
         }
       }
 
-      // Breathing — scale wobble, plus a vanishingly small position drift
-      // so the motion reads as alive rather than mechanical.
+      // Breathing — scale wobble plus a small lateral drift on a
+      // different harmonic so the motion reads as organic rather than
+      // mechanical. Per-instance phase keeps neighbours out of sync.
       const breath = 1 + Math.sin(t * BREATH_FREQ + phase) * BREATH_AMP;
       const driftPhase = phase * 1.31;
-      const drift = Math.sin(t * 0.27 + driftPhase) * 0.08;
+      const driftX = Math.sin(t * 0.31 + driftPhase) * DRIFT_AMP;
+      const driftY = Math.cos(t * 0.27 + driftPhase * 1.7) * DRIFT_AMP * 0.7;
+      const driftZ = Math.sin(t * 0.23 + driftPhase * 0.6) * DRIFT_AMP * 0.5;
 
       dummy.position.set(
-        p.pos.x + pullX + drift,
-        p.pos.y + pullY + drift * 0.7,
-        p.pos.z + pullZ,
+        p.pos.x + pullX + driftX,
+        p.pos.y + pullY + driftY,
+        p.pos.z + pullZ + driftZ,
       );
       dummy.scale.setScalar(p.scale * breath);
       dummy.updateMatrix();
@@ -404,6 +412,8 @@ function CampaignLabels({ placed }: { placed: Placed[] }) {
               opacity: 0.7,
               textShadow: '0 0 6px rgba(0,0,0,0.85), 0 1px 2px rgba(0,0,0,0.6)',
               whiteSpace: 'nowrap',
+              pointerEvents: 'none',
+              userSelect: 'none',
             }}
           >
             {g.label}
@@ -490,6 +500,13 @@ function NodeLabel({
           whiteSpace: 'nowrap',
           opacity: 0,
           willChange: 'opacity',
+          // Belt-and-braces — the parent <Html pointerEvents="none">
+          // sets it on the wrapper div, but explicitly disabling it on
+          // the inner div ensures the cursor crossing a label can't
+          // accidentally fire onPointerOut on the InstancedMesh below
+          // and pop the hovered star back to its base color.
+          pointerEvents: 'none',
+          userSelect: 'none',
         }}
       >
         {p.title}
