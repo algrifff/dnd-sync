@@ -14,6 +14,7 @@ import { getTemplate, type NoteTemplate, type TemplateKind } from '@/lib/templat
 import { getWorldHeader } from '@/lib/groups';
 import { NoteMenu } from '../../../../notes/NoteMenu';
 import { NoteWorkspace } from '../../../../notes/NoteWorkspace';
+import { ExcalidrawCanvas } from '../../../../excalidraw/ExcalidrawCanvas';
 import { TagEditor } from '../../../../notes/TagEditor';
 import { NoteSidebar, extractOutline } from '../../../../notes/NoteSidebar';
 import { ChatPane } from '../../../../ChatPane';
@@ -40,6 +41,9 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
   const note = loadNote(session.currentGroupId, path);
   if (!note) notFound();
+  // GM-only notes are admin-exclusive — same response as a missing
+  // note so we don't leak the existence of a GM path to players.
+  if (note.gm_only === 1 && session.role !== 'admin') notFound();
 
   const rightPanelOpen = jar.get('compendium_rightpanel_open')?.value !== 'false';
 
@@ -113,6 +117,25 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   }
   const outline = extractOutline(contentJson);
 
+  if (noteKind === 'excalidraw') {
+    const scene =
+      frontmatter.scene && typeof frontmatter.scene === 'object'
+        ? (frontmatter.scene as {
+            elements: readonly unknown[];
+            appState?: Record<string, unknown>;
+            files?: Record<string, unknown>;
+          })
+        : null;
+    return (
+      <ExcalidrawCanvas
+        path={path}
+        csrfToken={session.csrfToken}
+        initialScene={scene}
+        canEdit={canEdit}
+      />
+    );
+  }
+
   return (
     <>
       <div
@@ -148,6 +171,8 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                           path={path}
                           csrfToken={session.csrfToken}
                           dmOnly={note.dm_only === 1}
+                          gmOnly={note.gm_only === 1}
+                          isAdmin={session.role === 'admin'}
                         />
                       </div>
                     )}

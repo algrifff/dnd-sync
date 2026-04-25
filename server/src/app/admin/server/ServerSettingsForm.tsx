@@ -49,6 +49,7 @@ export function ServerSettingsForm({
   members,
   campaigns,
   activeCampaignSlug,
+  features,
 }: {
   worldId: string;
   worldName: string;
@@ -62,6 +63,7 @@ export function ServerSettingsForm({
   members: MemberItem[];
   campaigns: CampaignItem[];
   activeCampaignSlug: string | null;
+  features: { excalidraw: boolean };
 }): React.JSX.Element {
   return (
     <div className="space-y-8">
@@ -88,9 +90,86 @@ export function ServerSettingsForm({
         initialActiveId={activePersonalityId}
         builtin={builtinPersonality}
       />
+      <FeaturesSection
+        worldId={worldId}
+        csrfToken={csrfToken}
+        initialFeatures={features}
+      />
       <InviteSection worldId={worldId} csrfToken={csrfToken} initialToken={initialToken} />
       <DangerZone worldId={worldId} worldName={worldName} csrfToken={csrfToken} members={members} />
     </div>
+  );
+}
+
+function FeaturesSection({
+  worldId,
+  csrfToken,
+  initialFeatures,
+}: {
+  worldId: string;
+  csrfToken: string;
+  initialFeatures: { excalidraw: boolean };
+}): React.JSX.Element {
+  const router = useRouter();
+  const [excalidraw, setExcalidraw] = useState(initialFeatures.excalidraw);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggle = async (next: boolean): Promise<void> => {
+    setExcalidraw(next);
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/worlds/${encodeURIComponent(worldId)}`, {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+        body: JSON.stringify({ features: { excalidraw: next } }),
+      });
+      if (!res.ok) {
+        setExcalidraw(!next);
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? 'Could not update features.');
+        return;
+      }
+      router.refresh();
+    } catch {
+      setExcalidraw(!next);
+      setError('Network error.');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <section className="space-y-3">
+      <header>
+        <h2 className="text-lg font-semibold text-[var(--ink)]">Features</h2>
+        <p className="text-sm text-[var(--ink-soft)]">
+          Optional tools that can be turned on per world.
+        </p>
+      </header>
+      <label className="flex cursor-pointer items-start gap-3 rounded-md border border-[var(--rule)] bg-[var(--parchment)] p-3">
+        <input
+          type="checkbox"
+          checked={excalidraw}
+          disabled={pending}
+          onChange={(e) => void toggle(e.currentTarget.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="block font-medium text-[var(--ink)]">Excalidraw</span>
+          <span className="block text-xs text-[var(--ink-soft)]">
+            Adds a drawing tool tab to the sidebar. New drawings live under
+            the top-level <code>Excalidraw</code> section.
+          </span>
+        </span>
+      </label>
+      {error && <p className="text-xs text-[var(--wine)]">{error}</p>}
+    </section>
   );
 }
 

@@ -8,7 +8,7 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
-import { deleteWorld } from '@/lib/groups';
+import { deleteWorld, setWorldFeatures } from '@/lib/groups';
 import { setActivePersonality } from '@/lib/ai/personalities';
 
 export const dynamic = 'force-dynamic';
@@ -21,6 +21,11 @@ const Body = z.object({
   activePersonalityId: z.string().min(1).nullable().optional(),
   // null clears the pin; any string must be an existing campaign slug.
   activeCampaignSlug: z.string().min(1).nullable().optional(),
+  features: z
+    .object({
+      excalidraw: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -57,7 +62,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
     body.name === undefined &&
     body.headerColor === undefined &&
     body.activePersonalityId === undefined &&
-    body.activeCampaignSlug === undefined
+    body.activeCampaignSlug === undefined &&
+    body.features === undefined
   ) {
     return json({ error: 'invalid_body', detail: 'Nothing to update' }, 400);
   }
@@ -92,6 +98,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
       body.activeCampaignSlug,
       id,
     );
+  }
+
+  if (body.features !== undefined) {
+    setWorldFeatures(id, body.features);
   }
 
   logAudit({

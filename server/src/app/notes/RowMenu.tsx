@@ -8,8 +8,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MoreHorizontal, Pencil, Copy, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Pencil, Copy, Trash2, FolderInput } from 'lucide-react';
 import { broadcastTreeChange } from '@/lib/tree-sync';
+import { isDraggableSource } from '@/lib/move-policy';
+import { MoveDialog } from './MoveDialog';
 
 type Props = {
   kind: 'file' | 'folder';
@@ -28,7 +30,10 @@ export function RowMenu({
   const router = useRouter();
   const [open, setOpen] = useState<boolean>(false);
   const [dropUp, setDropUp] = useState<boolean>(false);
+  const [showMove, setShowMove] = useState<boolean>(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  const movable = isDraggableSource({ kind, path });
 
   const openMenu = (): void => {
     if (ref.current) {
@@ -159,6 +164,17 @@ export function RowMenu({
           >
             Rename
           </MenuItem>
+          {movable && (
+            <MenuItem
+              onClick={() => {
+                setOpen(false);
+                setShowMove(true);
+              }}
+              icon={<FolderInput size={13} aria-hidden />}
+            >
+              Move to…
+            </MenuItem>
+          )}
           {kind === 'file' && (
             <MenuItem onClick={duplicate} icon={<Copy size={13} aria-hidden />}>
               Duplicate
@@ -169,6 +185,23 @@ export function RowMenu({
             Delete
           </MenuItem>
         </div>
+      )}
+      {showMove && (
+        <MoveDialog
+          src={{ kind, path }}
+          csrfToken={csrfToken}
+          onClose={() => setShowMove(false)}
+          onMoved={(newPath) => {
+            setShowMove(false);
+            // If we moved the currently-open note, route there.
+            if (kind === 'file' && typeof window !== 'undefined' && window.location.pathname.startsWith('/notes/')) {
+              const here = decodeURIComponent(window.location.pathname.slice('/notes/'.length));
+              if (here === path) {
+                router.push('/notes/' + newPath.split('/').map(encodeURIComponent).join('/'));
+              }
+            }
+          }}
+        />
       )}
     </div>
   );

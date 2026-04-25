@@ -12,6 +12,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^3.0.53",
     "@compendium/shared": "workspace:*",
+    "@excalidraw/excalidraw": "^0.18.1",
     "@hocuspocus/extension-database": "^3.4.4",
     "@hocuspocus/extension-logger": "^3.4.4",
     "@hocuspocus/provider": "^3.4.4",

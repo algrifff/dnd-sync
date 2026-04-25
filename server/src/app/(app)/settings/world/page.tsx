@@ -3,7 +3,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { getDb } from '@/lib/db';
-import { getInviteToken } from '@/lib/groups';
+import { getInviteToken, getWorldFeatures } from '@/lib/groups';
 import { DEFAULT_PERSONALITY, listPersonalities } from '@/lib/ai/personalities';
 import { listUsersInGroup } from '@/lib/users';
 import { ServerSettingsForm } from '@/app/admin/server/ServerSettingsForm';
@@ -52,6 +52,8 @@ export default async function WorldSettingsPage(): Promise<ReactElement> {
     prompt: p.prompt,
   }));
 
+  const features = getWorldFeatures(session.currentGroupId);
+
   const members = listUsersInGroup(session.currentGroupId)
     .filter((m) => m.id !== session.userId)
     .map((m) => ({ id: m.id, displayName: m.displayName, username: m.username }));
@@ -74,6 +76,7 @@ export default async function WorldSettingsPage(): Promise<ReactElement> {
       members={members}
       campaigns={campaigns}
       activeCampaignSlug={group?.active_campaign_slug ?? null}
+      features={features}
     />
   );
 }
