@@ -575,8 +575,15 @@ function NodeLabel({
     // The user can disable the proximity-driven label fade-in via the
     // panel toggle, leaving only the distance-fade behaviour and the
     // glow ramp on the sphere itself.
+    //
+    // Labels respond to a much tighter window than the glow: smoothstep
+    // remaps prox so anything below LABEL_PROX_THRESHOLD reads as 0,
+    // and only the inner ~25% of the magnet radius lights up a title.
+    // Hovering a star still gives prox=1, which clamps to 1 after the
+    // remap, so direct hover always shows the label.
     const proxArr = proxRef.current;
-    const prox = (hoverLabelsRef.current ?? true) && proxArr ? (proxArr[idx] ?? 0) : 0;
+    const proxRaw = (hoverLabelsRef.current ?? true) && proxArr ? (proxArr[idx] ?? 0) : 0;
+    const prox = THREE.MathUtils.smoothstep(proxRaw, LABEL_PROX_THRESHOLD, 1);
     const target = Math.max(distFade, prox);
     cur.current = THREE.MathUtils.lerp(cur.current, target, 0.15);
     el.style.opacity = String(cur.current);
@@ -667,6 +674,11 @@ const LABEL_STORAGE_KEY = 'graph3d:labels';
 // nicely without flooding the view at galaxy distance.
 const DEFAULT_LABEL_VIS = 60;
 const LABEL_FEATHER = 15;
+// Hover labels only show when the magnet proximity is above this
+// threshold — i.e. the cursor is in the inner ~25% of the magnet radius.
+// Without it the glow's wider catchment lit up a swarm of titles every
+// time the cursor moved.
+const LABEL_PROX_THRESHOLD = 0.75;
 
 export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElement {
   const router = useRouter();
