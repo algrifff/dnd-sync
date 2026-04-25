@@ -10,7 +10,10 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
+import * as Y from 'yjs';
+import { HocuspocusProvider } from '@hocuspocus/provider';
 import { clusterKey, radiusForDegree } from './graphStyle';
+import { GroupEditor, buildCollabUrl, type Group } from './GraphCanvas';
 
 type GraphPayload = {
   nodes: Array<{ id: string; title: string; tags: string[]; degree: number }>;
@@ -200,13 +203,15 @@ const DEFAULT_WAVE_AMP = 0.6;
 const DEFAULT_WAVE_FREQ = 1.0;
 const DEFAULT_WAVE_SPEED = 1.0;
 const MOTION_STORAGE_KEY = 'graph3d:motion';
+const GROUPS_APPLY_KEY = 'graph3d:groupsApply';
+const HOVER_LABELS_KEY = 'graph3d:hoverLabels';
 
 function Stars({
   placed,
   hoverIdx,
   setHoverIdx,
   candlelight,
-  starColor,
+  baseColors,
   onClickIdx,
   offsetsRef,
   proxRef,
@@ -218,7 +223,9 @@ function Stars({
   hoverIdx: number | null;
   setHoverIdx: (i: number | null) => void;
   candlelight: THREE.Color;
-  starColor: string;
+  // Per-instance base colour. Lets group overrides slot in on top of
+  // the global starColor without touching this component's logic.
+  baseColors: THREE.Color[];
   onClickIdx: (i: number) => void;
   // Per-star magnet/proximity buffers — owned by the parent so labels
   // can read the same lerped values. Stars writes them every frame.
@@ -231,7 +238,7 @@ function Stars({
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const instColor = useMemo(() => new THREE.Color(), []);
-  const baseColor = useMemo(() => new THREE.Color(starColor), [starColor]);
+  const fallbackColor = useMemo(() => new THREE.Color('#FFFFFF'), []);
   // Stars currently rendering with a non-zero proximity tint. Diff-set
   // so a star whose tint just decayed past the threshold gets one
   // final repaint back to base.
@@ -348,7 +355,7 @@ function Stars({
       if (cp > 0) {
         newPainted.add(i);
         const intensity = 0.85 + Math.min(0.6, p.degree * 0.04);
-        instColor.copy(baseColor).multiplyScalar(intensity);
+        instColor.copy(baseColors[i] ?? fallbackColor).multiplyScalar(intensity);
         instColor.lerp(candlelight, cp);
         // At cp=1 the multiplier reaches 1.6, matching the previous
         // hard-coded hover treatment for bloom intensity.
@@ -366,7 +373,7 @@ function Stars({
       const p = placed[idx];
       if (!p) continue;
       const intensity = 0.85 + Math.min(0.6, p.degree * 0.04);
-      instColor.copy(baseColor).multiplyScalar(intensity);
+      instColor.copy(baseColors[idx] ?? fallbackColor).multiplyScalar(intensity);
       mesh.setColorAt(idx, instColor);
       colorsDirty = true;
     }
@@ -375,17 +382,18 @@ function Stars({
     if (colorsDirty && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   });
 
-  // Initial color paint — runs once per dataset / star-color change.
+  // Initial / on-change colour paint — re-runs whenever the per-instance
+  // base colours change (group toggle, group edits, global star colour).
   useEffect(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
     placed.forEach((p, i) => {
       const intensity = 0.85 + Math.min(0.6, p.degree * 0.04);
-      instColor.copy(baseColor).multiplyScalar(intensity);
+      instColor.copy(baseColors[i] ?? fallbackColor).multiplyScalar(intensity);
       mesh.setColorAt(i, instColor);
     });
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [placed, instColor, baseColor]);
+  }, [placed, instColor, baseColors, fallbackColor]);
 
   return (
     <instancedMesh
@@ -511,10 +519,12 @@ function NodeLabels({
   placed,
   visDistRef,
   proxRef,
+  hoverLabelsRef,
 }: {
   placed: Placed[];
   visDistRef: React.RefObject<number>;
   proxRef: React.RefObject<Float32Array>;
+  hoverLabelsRef: React.RefObject<boolean>;
 }) {
   return (
     <>
@@ -525,6 +535,7 @@ function NodeLabels({
           p={p}
           visDistRef={visDistRef}
           proxRef={proxRef}
+          hoverLabelsRef={hoverLabelsRef}
         />
       ))}
     </>
@@ -536,11 +547,13 @@ function NodeLabel({
   idx,
   visDistRef,
   proxRef,
+  hoverLabelsRef,
 }: {
   p: Placed;
   idx: number;
   visDistRef: React.RefObject<number>;
   proxRef: React.RefObject<Float32Array>;
+  hoverLabelsRef: React.RefObject<boolean>;
 }) {
   // We mutate the inner div's opacity directly via ref so the per-frame
   // lerp doesn't trigger React re-renders. The visibility distance comes
@@ -559,8 +572,11 @@ function NodeLabel({
     // Proximity (cursor near star, including hover) — already lerped in
     // Stars, so reading it here piggy-backs on the same easing curve.
     // Hover ends up here because Stars sets targetProx=1 for hoverIdx.
+    // The user can disable the proximity-driven label fade-in via the
+    // panel toggle, leaving only the distance-fade behaviour and the
+    // glow ramp on the sphere itself.
     const proxArr = proxRef.current;
-    const prox = proxArr ? (proxArr[idx] ?? 0) : 0;
+    const prox = (hoverLabelsRef.current ?? true) && proxArr ? (proxArr[idx] ?? 0) : 0;
     const target = Math.max(distFade, prox);
     cur.current = THREE.MathUtils.lerp(cur.current, target, 0.15);
     el.style.opacity = String(cur.current);
@@ -662,12 +678,17 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   const [starColor, setStarColor] = useState<string>('#FFFFFF');
   const [bgColor, setBgColor] = useState<string>('#0A0806');
   const [labelVis, setLabelVis] = useState<number>(DEFAULT_LABEL_VIS);
+  const [hoverLabels, setHoverLabels] = useState<boolean>(true);
   const [waveAmp, setWaveAmp] = useState<number>(DEFAULT_WAVE_AMP);
   const [waveFreq, setWaveFreq] = useState<number>(DEFAULT_WAVE_FREQ);
   const [waveSpeed, setWaveSpeed] = useState<number>(DEFAULT_WAVE_SPEED);
   // Mirror tunables into refs so the per-frame inner loops read live
   // values without each setState re-rendering Stars / NodeLabels.
   const visDistRef = useRef<number>(DEFAULT_LABEL_VIS);
+  // Mirror the hover-labels toggle into a ref so the per-frame label
+  // opacity loop reads the live value without re-rendering each label.
+  const hoverLabelsRef = useRef<boolean>(true);
+  useEffect(() => { hoverLabelsRef.current = hoverLabels; }, [hoverLabels]);
   const waveAmpRef = useRef<number>(DEFAULT_WAVE_AMP);
   const waveFreqRef = useRef<number>(DEFAULT_WAVE_FREQ);
   const waveSpeedRef = useRef<number>(DEFAULT_WAVE_SPEED);
@@ -681,6 +702,43 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   // is computed.
   const offsetsRef = useRef<Float32Array>(new Float32Array(0));
   const proxRef = useRef<Float32Array>(new Float32Array(0));
+
+  // ── Groups (shared with the 2D view via Yjs) ──────────────────────
+  // Same doc name as GraphCanvas.tsx (`graph-groups:<groupId>`) so any
+  // edit here propagates to the 2D view and to peers, and vice-versa.
+  const groupsYdoc = useMemo(() => new Y.Doc(), [groupId]);
+  const groupsProvider = useMemo(
+    () =>
+      new HocuspocusProvider({
+        url: buildCollabUrl(),
+        name: `graph-groups:${groupId}`,
+        document: groupsYdoc,
+      }),
+    [groupsYdoc, groupId],
+  );
+  const groupsMap = useMemo(() => groupsYdoc.getMap<Group>('groups'), [groupsYdoc]);
+  useEffect(() => {
+    return () => {
+      groupsProvider.destroy();
+      groupsYdoc.destroy();
+    };
+  }, [groupsProvider, groupsYdoc]);
+
+  const [groupsState, setGroupsState] = useState<Group[]>([]);
+  useEffect(() => {
+    const apply = (): void => {
+      const arr: Group[] = [];
+      groupsMap.forEach((value) => {
+        if (value && typeof value === 'object') arr.push(value);
+      });
+      setGroupsState(arr);
+    };
+    apply();
+    groupsMap.observe(apply);
+    return () => groupsMap.unobserve(apply);
+  }, [groupsMap]);
+
+  const [groupsApply, setGroupsApply] = useState<boolean>(false);
 
   useEffect(() => {
     setPalette(readPalette());
@@ -705,6 +763,12 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
         /* ignore */
       }
       try {
+        const raw = window.localStorage.getItem(HOVER_LABELS_KEY);
+        if (raw === '0') setHoverLabels(false);
+      } catch {
+        /* ignore */
+      }
+      try {
         const raw = window.localStorage.getItem(MOTION_STORAGE_KEY);
         if (raw) {
           const parsed = JSON.parse(raw) as { amp?: number; freq?: number; speed?: number };
@@ -712,6 +776,12 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
           if (typeof parsed.freq === 'number') setWaveFreq(parsed.freq);
           if (typeof parsed.speed === 'number') setWaveSpeed(parsed.speed);
         }
+      } catch {
+        /* ignore */
+      }
+      try {
+        const raw = window.localStorage.getItem(GROUPS_APPLY_KEY);
+        if (raw === '1') setGroupsApply(true);
       } catch {
         /* ignore */
       }
@@ -745,6 +815,15 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
+      window.localStorage.setItem(HOVER_LABELS_KEY, hoverLabels ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [hoverLabels]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
       window.localStorage.setItem(
         MOTION_STORAGE_KEY,
         JSON.stringify({ amp: waveAmp, freq: waveFreq, speed: waveSpeed }),
@@ -753,6 +832,15 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
       /* ignore */
     }
   }, [waveAmp, waveFreq, waveSpeed]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(GROUPS_APPLY_KEY, groupsApply ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [groupsApply]);
 
   useEffect(() => {
     let cancelled = false;
@@ -787,6 +875,44 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
     offsetsRef.current = new Float32Array(placed.length * 3);
     proxRef.current = new Float32Array(placed.length);
   }, [placed.length]);
+
+  // Tags currently in use across all nodes — fed into GroupEditor's
+  // tag-picker dropdown.
+  const paletteTags = useMemo(() => {
+    const set = new Set<string>();
+    if (data) {
+      for (const n of data.nodes) {
+        for (const t of n.tags ?? []) set.add(t.toLowerCase());
+      }
+    }
+    return [...set].sort();
+  }, [data]);
+
+  // Per-node-id → group lookup (only when groupsApply is on). A node's
+  // group is the first group whose `notes` includes it OR whose `tags`
+  // overlap any of the node's tags. Mirrors the 2D resolution order.
+  const nodeGroupMap = useMemo(() => {
+    const m = new Map<string, Group>();
+    if (!groupsApply || !data) return m;
+    for (const g of groupsState) {
+      const tagSet = new Set(g.tags.map((t) => t.toLowerCase()));
+      for (const path of g.notes) if (!m.has(path)) m.set(path, g);
+      for (const n of data.nodes) {
+        if (m.has(n.id)) continue;
+        if (n.tags?.some((t) => tagSet.has(t.toLowerCase()))) m.set(n.id, g);
+      }
+    }
+    return m;
+  }, [data, groupsState, groupsApply]);
+
+  // Per-instance base colour. Default = global star colour; group
+  // override applies when one matches and the toggle is on.
+  const baseColors = useMemo(() => {
+    return placed.map((p) => {
+      const g = nodeGroupMap.get(p.id);
+      return new THREE.Color(g ? g.color : starColor);
+    });
+  }, [placed, nodeGroupMap, starColor]);
 
   useEffect(() => {
     if (phase === 'placing' && placed.length > 0) setPhase('ready');
@@ -834,7 +960,7 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
               hoverIdx={hoverIdx}
               setHoverIdx={setHoverIdx}
               candlelight={palette.candlelight}
-              starColor={starColor}
+              baseColors={baseColors}
               onClickIdx={onClickIdx}
               offsetsRef={offsetsRef}
               proxRef={proxRef}
@@ -847,6 +973,7 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
               placed={placed}
               visDistRef={visDistRef}
               proxRef={proxRef}
+              hoverLabelsRef={hoverLabelsRef}
             />
             <CampaignLabels placed={placed} />
           </>
@@ -870,6 +997,8 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
         }}
         labelVis={labelVis}
         onLabelVisChange={setLabelVis}
+        hoverLabels={hoverLabels}
+        onHoverLabelsChange={setHoverLabels}
         onLabelReset={() => setLabelVis(DEFAULT_LABEL_VIS)}
         waveAmp={waveAmp}
         waveFreq={waveFreq}
@@ -882,6 +1011,28 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
           setWaveFreq(DEFAULT_WAVE_FREQ);
           setWaveSpeed(DEFAULT_WAVE_SPEED);
         }}
+        groups={groupsState}
+        groupsApply={groupsApply}
+        onGroupsApplyChange={setGroupsApply}
+        onGroupCreate={() => {
+          const id =
+            typeof crypto !== 'undefined' && 'randomUUID' in crypto
+              ? crypto.randomUUID()
+              : `g_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+          const palette = ['#D4A85A', '#7B8A5F', '#8B4A52', '#6B7F8E', '#B5572A', '#6A5D8B'];
+          const color = palette[groupsState.length % palette.length] ?? '#D4A85A';
+          const g: Group = {
+            id,
+            name: `Group ${groupsState.length + 1}`,
+            color,
+            tags: [],
+            notes: [],
+          };
+          groupsMap.set(id, g);
+        }}
+        onGroupUpdate={(g) => groupsMap.set(g.id, g)}
+        onGroupDelete={(id) => groupsMap.delete(id)}
+        paletteTags={paletteTags}
       />
 
       {phase !== 'ready' && (
@@ -959,6 +1110,8 @@ function PanelStack({
   onColorReset,
   labelVis,
   onLabelVisChange,
+  hoverLabels,
+  onHoverLabelsChange,
   onLabelReset,
   waveAmp,
   waveFreq,
@@ -967,6 +1120,13 @@ function PanelStack({
   onWaveFreqChange,
   onWaveSpeedChange,
   onMotionReset,
+  groups,
+  groupsApply,
+  onGroupsApplyChange,
+  onGroupCreate,
+  onGroupUpdate,
+  onGroupDelete,
+  paletteTags,
 }: {
   starColor: string;
   bgColor: string;
@@ -975,6 +1135,8 @@ function PanelStack({
   onColorReset: () => void;
   labelVis: number;
   onLabelVisChange: (v: number) => void;
+  hoverLabels: boolean;
+  onHoverLabelsChange: (v: boolean) => void;
   onLabelReset: () => void;
   waveAmp: number;
   waveFreq: number;
@@ -983,6 +1145,13 @@ function PanelStack({
   onWaveFreqChange: (v: number) => void;
   onWaveSpeedChange: (v: number) => void;
   onMotionReset: () => void;
+  groups: Group[];
+  groupsApply: boolean;
+  onGroupsApplyChange: (v: boolean) => void;
+  onGroupCreate: () => void;
+  onGroupUpdate: (g: Group) => void;
+  onGroupDelete: (id: string) => void;
+  paletteTags: string[];
 }) {
   const [open, setOpen] = useState<boolean>(true);
   useEffect(() => {
@@ -1055,6 +1224,8 @@ function PanelStack({
       <LabelPanel
         visDist={labelVis}
         onVisDistChange={onLabelVisChange}
+        hoverLabels={hoverLabels}
+        onHoverLabelsChange={onHoverLabelsChange}
         onReset={onLabelReset}
       />
       <MotionPanel
@@ -1066,6 +1237,99 @@ function PanelStack({
         onSpeedChange={onWaveSpeedChange}
         onReset={onMotionReset}
       />
+      <GroupsPanel
+        groups={groups}
+        apply={groupsApply}
+        onApplyChange={onGroupsApplyChange}
+        onCreate={onGroupCreate}
+        onUpdate={onGroupUpdate}
+        onDelete={onGroupDelete}
+        paletteTags={paletteTags}
+      />
+    </div>
+  );
+}
+
+function GroupsPanel({
+  groups,
+  apply,
+  onApplyChange,
+  onCreate,
+  onUpdate,
+  onDelete,
+  paletteTags,
+}: {
+  groups: Group[];
+  apply: boolean;
+  onApplyChange: (v: boolean) => void;
+  onCreate: () => void;
+  onUpdate: (g: Group) => void;
+  onDelete: (id: string) => void;
+  paletteTags: string[];
+}) {
+  const [open, setOpen] = useState<boolean>(false);
+  return (
+    <div
+      className="rounded-[10px] border bg-[var(--vellum)] text-[var(--ink)] shadow-[0_6px_18px_rgb(var(--ink-rgb)/0.10)]"
+      style={{ borderColor: 'var(--rule)', width: 240 }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+        aria-expanded={open}
+        aria-label="Toggle groups panel"
+      >
+        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
+          Groups
+        </span>
+        <span aria-hidden className="flex items-center gap-1.5 text-[11px] text-[var(--ink-muted)]">
+          <span>{groups.length}</span>
+          <span>{open ? '▾' : '▸'}</span>
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-2 px-3 pb-3">
+          <label className="flex items-center justify-between gap-2 text-[11px] text-[var(--ink-soft)]">
+            <span className="uppercase tracking-wide text-[var(--ink-muted)]">
+              Apply group colours
+            </span>
+            <input
+              type="checkbox"
+              checked={apply}
+              onChange={(e) => onApplyChange(e.target.checked)}
+              className="h-3.5 w-3.5 accent-[var(--candlelight)]"
+            />
+          </label>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] text-[var(--ink-muted)]">
+              Synced with the 2D view.
+            </span>
+            <button
+              type="button"
+              onClick={onCreate}
+              className="shrink-0 rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-2 py-0.5 text-xs text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)]"
+            >
+              + New
+            </button>
+          </div>
+          {groups.length === 0 ? (
+            <div className="text-xs text-[var(--ink-muted)]">No groups yet.</div>
+          ) : (
+            <ul className="max-h-72 space-y-2 overflow-y-auto">
+              {groups.map((g) => (
+                <GroupEditor
+                  key={g.id}
+                  group={g}
+                  paletteTags={paletteTags}
+                  onUpdate={(next) => onUpdate(next)}
+                  onDelete={() => onDelete(g.id)}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1245,10 +1509,14 @@ function ColorPanel({
 function LabelPanel({
   visDist,
   onVisDistChange,
+  hoverLabels,
+  onHoverLabelsChange,
   onReset,
 }: {
   visDist: number;
   onVisDistChange: (v: number) => void;
+  hoverLabels: boolean;
+  onHoverLabelsChange: (v: boolean) => void;
   onReset: () => void;
 }) {
   const [open, setOpen] = useState<boolean>(false);
@@ -1286,6 +1554,17 @@ function LabelPanel({
             max={MAX}
             onChange={onVisDistChange}
           />
+          <label className="flex items-center justify-between gap-2 text-[11px] text-[var(--ink-soft)]">
+            <span className="uppercase tracking-wide text-[var(--ink-muted)]">
+              Hover labels
+            </span>
+            <input
+              type="checkbox"
+              checked={hoverLabels}
+              onChange={(e) => onHoverLabelsChange(e.target.checked)}
+              className="h-3.5 w-3.5 accent-[var(--candlelight)]"
+            />
+          </label>
           <button
             type="button"
             onClick={onReset}

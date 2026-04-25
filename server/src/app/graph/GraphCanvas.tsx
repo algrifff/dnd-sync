@@ -81,7 +81,10 @@ type LabelMode = 'none' | 'some' | 'all';
  *  so you can narrow a big palette down to collective buckets
  *  ("factions", "party", etc.). Stored as-is in a Y.Map on the
  *  shared graph state — every peer sees the same groups live. */
-type Group = {
+// Exported so the 3D graph view can reuse the same shape and Yjs map
+// (`graph-groups:<groupId>`). Editing in either view updates the shared
+// CRDT and broadcasts to peers.
+export type Group = {
   id: string;
   name: string;
   color: string;
@@ -1570,7 +1573,8 @@ function MenuSection({
   );
 }
 
-function GroupEditor({
+// Exported so the 3D graph view can reuse the exact same row UI.
+export function GroupEditor({
   group,
   paletteTags,
   onUpdate,
@@ -1951,7 +1955,7 @@ function GraphSpinner({ size = 20 }: { size?: number }): React.JSX.Element {
   );
 }
 
-function buildCollabUrl(): string {
+export function buildCollabUrl(): string {
   if (typeof window === 'undefined') return 'ws://localhost/collab';
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${scheme}//${location.host}/collab`;
