@@ -8,10 +8,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MoreHorizontal, Pencil, Copy, Trash2, FolderInput } from 'lucide-react';
+import { MoreHorizontal, Pencil, Copy, Trash2, FolderInput, UserPlus } from 'lucide-react';
 import { broadcastTreeChange } from '@/lib/tree-sync';
 import { isDraggableSource } from '@/lib/move-policy';
 import { MoveDialog } from './MoveDialog';
+import { TransferCharacterDialog } from './TransferCharacterDialog';
 
 type Props = {
   kind: 'file' | 'folder';
@@ -19,6 +20,12 @@ type Props = {
   csrfToken: string;
   onStartRename: () => void;
   onCreateInside?: (sub: 'page' | 'folder') => void;
+  /** kind from the character index — 'pc' gates the Transfer to… item */
+  noteKind?: string;
+  /** True when the current user is the world admin (GM). */
+  isWorldOwner?: boolean;
+  /** Needed to fetch the member list in the transfer dialog. */
+  groupId?: string;
 };
 
 export function RowMenu({
@@ -26,11 +33,15 @@ export function RowMenu({
   path,
   csrfToken,
   onStartRename,
+  noteKind,
+  isWorldOwner,
+  groupId,
 }: Props): React.JSX.Element {
   const router = useRouter();
   const [open, setOpen] = useState<boolean>(false);
   const [dropUp, setDropUp] = useState<boolean>(false);
   const [showMove, setShowMove] = useState<boolean>(false);
+  const [showTransfer, setShowTransfer] = useState<boolean>(false);
   const ref = useRef<HTMLDivElement>(null);
 
   const movable = isDraggableSource({ kind, path });
@@ -175,6 +186,17 @@ export function RowMenu({
               Move to…
             </MenuItem>
           )}
+          {kind === 'file' && noteKind === 'pc' && isWorldOwner && groupId && (
+            <MenuItem
+              onClick={() => {
+                setOpen(false);
+                setShowTransfer(true);
+              }}
+              icon={<UserPlus size={13} aria-hidden />}
+            >
+              Transfer to…
+            </MenuItem>
+          )}
           {kind === 'file' && (
             <MenuItem onClick={duplicate} icon={<Copy size={13} aria-hidden />}>
               Duplicate
@@ -200,6 +222,19 @@ export function RowMenu({
                 router.push('/notes/' + newPath.split('/').map(encodeURIComponent).join('/'));
               }
             }
+          }}
+        />
+      )}
+      {showTransfer && groupId && (
+        <TransferCharacterDialog
+          notePath={path}
+          groupId={groupId}
+          csrfToken={csrfToken}
+          onClose={() => setShowTransfer(false)}
+          onTransferred={() => {
+            setShowTransfer(false);
+            router.refresh();
+            broadcastTreeChange();
           }}
         />
       )}

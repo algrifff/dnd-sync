@@ -19,6 +19,7 @@ import {
   ChevronRight,
   Heart,
   Shield,
+  UserPlus,
   UserRound,
 } from 'lucide-react';
 import {
@@ -30,6 +31,7 @@ import {
   readSpeed,
 } from './sheet-header/util';
 import type { CharacterListRow } from '@/lib/characters';
+import { TransferCharacterDialog } from './TransferCharacterDialog';
 
 const OPEN_STORAGE_KEY = 'compendium.party.open';
 
@@ -94,10 +96,12 @@ export function ActivePartySection({
   groupId,
   activeCampaignSlug,
   csrfToken,
+  isWorldOwner,
 }: {
   groupId: string;
   activeCampaignSlug: string | null;
   csrfToken: string;
+  isWorldOwner?: boolean;
 }): React.JSX.Element {
   const pathname = usePathname() ?? '';
   // Active row highlight tracks the current note URL — derived here so
@@ -158,6 +162,9 @@ export function ActivePartySection({
       .finally(() => setLoading(false));
     return () => controller.abort();
   }, [activeCampaignSlug]);
+
+  // notePath of the character whose transfer dialog is open, or null.
+  const [transferringPath, setTransferringPath] = useState<string | null>(null);
 
   // Optimistic HP + temp HP overrides keyed by notePath.
   const [hpOverride, setHpOverride] = useState<
@@ -349,6 +356,7 @@ export function ActivePartySection({
                   onApplyHp={(patch) => void applyHp(c, patch)}
                   sheetCache={sheetCache[c.notePath]}
                   onHoverStart={() => ensureSheet(c.notePath)}
+                  {...(isWorldOwner ? { onTransfer: () => setTransferringPath(c.notePath) } : {})}
                 />
               ))}
             </ul>
@@ -364,6 +372,19 @@ export function ActivePartySection({
             />
           )}
         </div>
+      )}
+      {transferringPath && (
+        <TransferCharacterDialog
+          notePath={transferringPath}
+          groupId={groupId}
+          csrfToken={csrfToken}
+          onClose={() => setTransferringPath(null)}
+          onTransferred={() => {
+            setTransferringPath(null);
+            // Refresh character list so the assigned player name updates.
+            setCharacters([]);
+          }}
+        />
       )}
     </section>
   );
@@ -524,12 +545,15 @@ function PartyRow({
   onApplyHp,
   sheetCache,
   onHoverStart,
+  onTransfer,
 }: {
   character: CharacterListRow;
   isActive: boolean;
   onApplyHp: (patch: HpPatch) => void;
   sheetCache: SheetCacheValue | undefined;
   onHoverStart: () => void;
+  /** When set, shows a transfer button (GM-only). */
+  onTransfer?: () => void;
 }): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(
@@ -701,6 +725,16 @@ function PartyRow({
             <Shield className="h-2.5 w-2.5" aria-hidden />
             {tempHp}
           </span>
+        )}
+        {onTransfer && (
+          <button
+            type="button"
+            aria-label="Transfer character to player"
+            onClick={(e) => { e.stopPropagation(); onTransfer(); }}
+            className="hidden shrink-0 rounded-[4px] p-1 text-[var(--ink-soft)] transition hover:bg-[var(--candlelight)]/20 hover:text-[var(--ink)] group-hover:flex"
+          >
+            <UserPlus size={12} aria-hidden />
+          </button>
         )}
         <button
           ref={pillRef}

@@ -746,6 +746,7 @@ export function FileTree({
             canCreate={canCreate}
             isWorldOwner={isWorldOwner}
             csrfToken={csrfToken}
+            groupId={groupId}
             activeCampaignSlug={activeCampaignSlug}
             onToggleActiveCampaign={toggleActiveCampaign}
             isRenaming={renamingPath === item.path}
@@ -913,6 +914,7 @@ function TreeRow({
   canCreate,
   isWorldOwner,
   csrfToken,
+  groupId,
   isRenaming,
   renameDisabled,
   renameError,
@@ -938,6 +940,7 @@ function TreeRow({
   canCreate: boolean;
   isWorldOwner: boolean;
   csrfToken: string;
+  groupId: string;
   isRenaming: boolean;
   renameDisabled: boolean;
   renameError: string | null;
@@ -958,6 +961,7 @@ function TreeRow({
   onSubmitRename: (name: string) => void;
   children?: React.ReactNode;
 }): React.JSX.Element {
+  const kindMap = useContext(KindMapContext);
   const isSystem = item.kind === 'dir' && item.system;
 
   // Source policy: locked entities (PCs, campaign roots, canonical
@@ -1242,6 +1246,9 @@ function TreeRow({
               path={item.path}
               csrfToken={csrfToken}
               onStartRename={onStartRename}
+              isWorldOwner={isWorldOwner}
+              groupId={groupId}
+              {...(kindMap[item.path] !== undefined ? { noteKind: kindMap[item.path] } : {})}
             />
           </div>
         )}

@@ -99,6 +99,7 @@ export default async function ContentLayout({
               groupId={session.currentGroupId}
               activeCampaignSlug={activeCampaignSlug}
               csrfToken={session.csrfToken}
+              isWorldOwner={session.role === 'admin'}
             />
           </div>
           {gmTree && (

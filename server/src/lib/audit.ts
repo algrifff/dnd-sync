@@ -41,7 +41,8 @@ export type AuditAction =
   | 'world.icon.upload'
   | 'world.icon.clear'
   | 'user.deleteWithContent'
-  | 'db.wipe';
+  | 'db.wipe'
+  | 'character.assign_player';
 
 export type AuditEntry = {
   action: AuditAction;
