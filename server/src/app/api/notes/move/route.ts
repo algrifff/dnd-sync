@@ -14,6 +14,7 @@ import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
 import { assertMoveAllowed } from '@/lib/move-policy';
 import { rewriteWikilinksForRenames } from '@/lib/move-rewrite';
+import { deriveCampaignIndexesFor } from '@/lib/campaign-index';
 
 export const dynamic = 'force-dynamic';
 
@@ -174,6 +175,11 @@ export async function POST(req: NextRequest): Promise<Response> {
   } catch (err) {
     console.error('[notes/move] wikilink rewrite failed:', err);
   }
+
+  // Refresh the auto-managed index pages of both campaigns the note
+  // touched (source and destination — they may be the same campaign,
+  // a different campaign, or non-campaign paths).
+  await deriveCampaignIndexesFor(session.currentGroupId, [from, to]);
 
   logAudit({
     action: 'note.rename',

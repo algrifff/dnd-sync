@@ -12,6 +12,7 @@ import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { ensureCampaignForPath } from '@/lib/characters';
 import { ensureIndexNote } from '@/lib/index-notes';
+import { deriveCampaignIndex } from '@/lib/campaign-index';
 import { isAllowedPath } from '@/lib/notes';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
@@ -119,11 +120,26 @@ export async function POST(req: NextRequest): Promise<Response> {
     } catch (err) {
       console.error('[folders/create] ensureIndexNote failed:', err);
     }
+    // Seed the empty managed-index callout so the page reads as
+    // "auto-managed" from the very first visit, even before any
+    // notes land in the campaign.
+    void deriveCampaignIndex(session.currentGroupId, path).catch((err) => {
+      console.error('[folders/create] campaign index seed failed:', err);
+    });
   } else if (path === 'World Lore') {
     try {
       ensureIndexNote(session.currentGroupId, session.userId, 'World Lore', 'World Lore');
     } catch (err) {
       console.error('[folders/create] ensureIndexNote failed:', err);
+    }
+  } else {
+    // Subfolder created inside an existing campaign — give the index
+    // a chance to add a fresh "no notes yet" table for the new bucket.
+    const m = /^(Campaigns\/[^/]+)\//.exec(path + '/');
+    if (m) {
+      void deriveCampaignIndex(session.currentGroupId, m[1]!).catch((err) => {
+        console.error('[folders/create] campaign index refresh failed:', err);
+      });
     }
   }
 

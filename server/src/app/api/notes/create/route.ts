@@ -13,6 +13,7 @@ import { getDb } from '@/lib/db';
 import { getPmSchema } from '@/lib/pm-schema';
 import { logAudit } from '@/lib/audit';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
+import { deriveCampaignIndex, campaignFolderOfPath } from '@/lib/campaign-index';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
 import { isAllowedPath } from '@/lib/notes';
 import { GM_MODE_COOKIE, isGmModeOn } from '@/lib/gm-mode';
@@ -149,6 +150,15 @@ export async function POST(req: NextRequest): Promise<Response> {
     });
   } catch (err) {
     console.error('[notes/create] derive failed:', err);
+  }
+
+  // Refresh the owning campaign's auto-managed index page so the new
+  // note appears in its subfolder table.
+  const campaign = campaignFolderOfPath(path);
+  if (campaign) {
+    void deriveCampaignIndex(session.currentGroupId, campaign).catch((err) => {
+      console.error('[notes/create] campaign index refresh failed:', err);
+    });
   }
 
   logAudit({

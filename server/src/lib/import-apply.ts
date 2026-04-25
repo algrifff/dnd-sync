@@ -39,6 +39,7 @@ import {
 } from './imports';
 import type { ImportPlan, ParsedAsset } from './import-parse';
 import { deriveAllIndexes } from './derive-indexes';
+import { deriveCampaignIndexesFor } from './campaign-index';
 import { getPmSchema } from './pm-schema';
 import { ingestMarkdown, type IngestContext, type NoteIngest } from './md-to-pm';
 import { pmToMarkdown } from './pm-to-md';
@@ -171,6 +172,18 @@ export async function applyImportJob(jobId: string): Promise<ApplySummary> {
     rawZipPath: null,
     stats: mergeStats(job, summary),
   });
+
+  // Refresh the auto-managed callout in every campaign index touched
+  // by this import. One pass at the end of the apply loop so we don't
+  // rebuild the same index N times for an N-note campaign.
+  try {
+    await deriveCampaignIndexesFor(
+      job.groupId,
+      planned.map((p) => pickTargetPath(p, p.classification ?? null)),
+    );
+  } catch (err) {
+    console.error('[import.apply] campaign index refresh failed:', err);
+  }
 
   return summary;
 }

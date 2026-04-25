@@ -9,6 +9,7 @@ import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
+import { deriveCampaignIndexesFor } from '@/lib/campaign-index';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,6 +68,14 @@ export async function POST(req: NextRequest): Promise<Response> {
   for (const n of notes) {
     await closeDocumentConnections(n.path);
   }
+
+  // Refresh auto-managed campaign indexes. If the deleted folder IS
+  // a campaign root the index was deleted with it (no-op). If it's a
+  // subfolder of a campaign, the surviving index is regenerated.
+  await deriveCampaignIndexesFor(
+    groupId,
+    notes.map((n) => n.path),
+  );
 
   logAudit({
     action: 'folder.destroy',

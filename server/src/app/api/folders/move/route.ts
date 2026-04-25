@@ -11,6 +11,7 @@ import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
 import { assertMoveAllowed } from '@/lib/move-policy';
+import { deriveCampaignIndexesFor } from '@/lib/campaign-index';
 
 export const dynamic = 'force-dynamic';
 
@@ -222,6 +223,15 @@ export async function POST(req: NextRequest): Promise<Response> {
   for (const m of moved) {
     await closeDocumentConnections(m.from);
   }
+
+  // Refresh auto-managed campaign indexes for every campaign touched
+  // by the move — both the source(s) (notes leaving) and destination(s)
+  // (notes arriving). Distinct so each is recomputed at most once.
+  const touchedPaths: string[] = [];
+  for (const m of moved) {
+    touchedPaths.push(m.from, m.to);
+  }
+  await deriveCampaignIndexesFor(groupId, touchedPaths);
 
   logAudit({
     action: 'folder.rename',

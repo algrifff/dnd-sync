@@ -8,6 +8,7 @@ import { getDb } from '@/lib/db';
 import { decodePath, loadNote, loadTags } from '@/lib/notes';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
+import { deriveCampaignIndex, campaignFolderOfPath } from '@/lib/campaign-index';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,6 +81,17 @@ export async function DELETE(req: NextRequest, ctx: RouteCtx): Promise<Response>
   // Kick any live editors so they disconnect instead of trying to
   // persist updates against a row that no longer exists.
   await closeDocumentConnections(path);
+
+  // Refresh the owning campaign's auto-managed index so the deleted
+  // note drops out of its table.
+  const campaign = campaignFolderOfPath(path);
+  if (campaign) {
+    try {
+      await deriveCampaignIndex(session.currentGroupId, campaign);
+    } catch (err) {
+      console.error('[notes/delete] campaign index refresh failed:', err);
+    }
+  }
 
   logAudit({
     action: 'note.destroy',

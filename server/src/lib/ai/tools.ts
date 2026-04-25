@@ -21,6 +21,11 @@ import { getCampaignBySlug, listCampaigns } from '@/lib/characters';
 import { canonicalFolder, nameToSlug, type EntityKind } from '@/lib/ai/paths';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
+import {
+  deriveCampaignIndex,
+  deriveCampaignIndexesFor,
+  campaignFolderOfPath,
+} from '@/lib/campaign-index';
 import { validateSheet } from '@/lib/validateSheet';
 
 // ── Context ────────────────────────────────────────────────────────────
@@ -489,6 +494,13 @@ function entityCreate(ctx: ToolContext) {
         console.error('[ai/tools] derive failed after entity_create:', err);
       }
 
+      const campaignFolder = campaignFolderOfPath(path);
+      if (campaignFolder) {
+        void deriveCampaignIndex(ctx.groupId, campaignFolder).catch((err) => {
+          console.error('[ai/tools] campaign index refresh failed:', err);
+        });
+      }
+
       void captureServer({
         userId: ctx.userId,
         groupId: ctx.groupId,
@@ -639,6 +651,10 @@ function entityMove(ctx: ToolContext) {
         }
         db.query(`UPDATE note_links SET to_path=? WHERE group_id=? AND to_path=?`).run(to, ctx.groupId, from);
       })();
+
+      void deriveCampaignIndexesFor(ctx.groupId, [from, to]).catch((err) => {
+        console.error('[ai/tools] campaign index refresh failed:', err);
+      });
 
       return { ok: true as const, path: to };
     },

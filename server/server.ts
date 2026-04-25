@@ -14,6 +14,7 @@ import { ensureDefaultAdmin, printAdminBanner, DEFAULT_GROUP_ID } from '@/lib/us
 import { ensureDefaultTemplates } from '@/lib/templates';
 import { ensureDefaultFolders } from '@/lib/tree';
 import { backfillIndexNotes } from '@/lib/index-notes';
+import { backfillCampaignIndexes } from '@/lib/campaign-index';
 import { handleCollabConnection, collabServer } from '@/collab/server';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
@@ -38,6 +39,10 @@ ensureConfig();
   ensureDefaultTemplates();
   ensureDefaultFolders(DEFAULT_GROUP_ID);
   backfillIndexNotes();
+  // Seed / refresh the auto-managed callout in every campaign's
+  // index.md so existing worlds catch up without waiting for the next
+  // create / move / delete event.
+  await backfillCampaignIndexes();
   const removed = cleanupExpiredSessions();
   if (removed > 0) console.log(`[compendium-server] pruned ${removed} expired session(s)`);
 }
