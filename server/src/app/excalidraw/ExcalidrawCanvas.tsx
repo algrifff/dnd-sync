@@ -17,7 +17,7 @@
 // for v1; element-level CRDT can come later if it matters.
 
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import * as Y from 'yjs';
+import type * as Y from 'yjs';
 import type { HocuspocusProvider } from '@hocuspocus/provider';
 import { acquireProvider, releaseProvider } from '../notes/provider-cache';
 import '@excalidraw/excalidraw/index.css';
@@ -128,7 +128,6 @@ export function ExcalidrawCanvas({
       releaseProvider(path);
     };
     // initialScene is a one-shot seed — don't re-trigger on identity changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
   const flushLocal = (): void => {
