@@ -99,7 +99,10 @@ function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluste
     clusters.push({ key, label, center });
 
     const size = ids.length;
-    const localRadius = 2 + 1.4 * Math.cbrt(size);
+    // Scale local radius with both the count AND the typical star size so
+    // dense clusters don't collapse onto themselves before relaxation.
+    const avgScale = ids.reduce((s, n) => s + Math.max(1.2, radiusForDegree(n.degree) / 4), 0) / Math.max(size, 1);
+    const localRadius = Math.max(2 + 1.4 * Math.cbrt(size), avgScale * (1.2 + Math.sqrt(size)));
     ids.forEach((n, i) => {
       const local = fibSphere(i, Math.max(size, 1)).multiplyScalar(localRadius);
       const pos = center.clone().add(local);
@@ -115,7 +118,57 @@ function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluste
     });
   });
 
+  // Relaxation: separate any overlapping spheres. Keeps a small visible
+  // gap between every pair so dense clusters don't render as one blob.
+  relaxOverlaps(placed);
+
   return { placed, clusters };
+}
+
+// Iterative pairwise repulsion. O(N²) per pass but runs once on data load
+// — fine up to a few thousand nodes. Stops early when no pair moves.
+function relaxOverlaps(placed: Placed[]): void {
+  const GAP = 0.6;
+  const MAX_ITERS = 40;
+  const N = placed.length;
+  for (let iter = 0; iter < MAX_ITERS; iter++) {
+    let moved = false;
+    for (let i = 0; i < N; i++) {
+      const a = placed[i];
+      if (!a) continue;
+      for (let j = i + 1; j < N; j++) {
+        const b = placed[j];
+        if (!b) continue;
+        const minDist = a.scale + b.scale + GAP;
+        const dx = b.pos.x - a.pos.x;
+        const dy = b.pos.y - a.pos.y;
+        const dz = b.pos.z - a.pos.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 >= minDist * minDist) continue;
+        const d = Math.sqrt(d2);
+        if (d < 1e-4) {
+          // Coincident — nudge along a deterministic axis so the next
+          // iteration has a direction to push along.
+          a.pos.x -= 0.05;
+          b.pos.x += 0.05;
+          moved = true;
+          continue;
+        }
+        const push = (minDist - d) / 2;
+        const ux = dx / d;
+        const uy = dy / d;
+        const uz = dz / d;
+        a.pos.x -= ux * push;
+        a.pos.y -= uy * push;
+        a.pos.z -= uz * push;
+        b.pos.x += ux * push;
+        b.pos.y += uy * push;
+        b.pos.z += uz * push;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
 }
 
 // One InstancedMesh for all stars. emissive=white; bloom does the glow work.
