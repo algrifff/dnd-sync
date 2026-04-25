@@ -629,23 +629,19 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
         </EffectComposer>
       </Canvas>
 
-      <div className="absolute right-3 top-3 z-10 flex flex-col gap-2" style={{ pointerEvents: 'auto' }}>
-        <ColorPanel
-          starColor={starColor}
-          bgColor={bgColor}
-          onStarChange={setStarColor}
-          onBgChange={setBgColor}
-          onReset={() => {
-            setStarColor('#FFFFFF');
-            setBgColor('#0A0806');
-          }}
-        />
-        <LabelPanel
-          visDist={labelVis}
-          onVisDistChange={setLabelVis}
-          onReset={() => setLabelVis(DEFAULT_LABEL_VIS)}
-        />
-      </div>
+      <PanelStack
+        starColor={starColor}
+        bgColor={bgColor}
+        onStarChange={setStarColor}
+        onBgChange={setBgColor}
+        onColorReset={() => {
+          setStarColor('#FFFFFF');
+          setBgColor('#0A0806');
+        }}
+        labelVis={labelVis}
+        onLabelVisChange={setLabelVis}
+        onLabelReset={() => setLabelVis(DEFAULT_LABEL_VIS)}
+      />
 
       {phase !== 'ready' && (
         <LoadingOverlay
@@ -709,6 +705,107 @@ function LoadingOverlay({
   );
 }
 
+// Master show/hide for the right-edge panels. Persists alongside the
+// individual panel state under the same key so it round-trips with the
+// page. Collapsed state shows only a tiny pill so the canvas reads clean.
+const PANELS_OPEN_KEY = 'graph3d:panelsOpen';
+
+function PanelStack({
+  starColor,
+  bgColor,
+  onStarChange,
+  onBgChange,
+  onColorReset,
+  labelVis,
+  onLabelVisChange,
+  onLabelReset,
+}: {
+  starColor: string;
+  bgColor: string;
+  onStarChange: (hex: string) => void;
+  onBgChange: (hex: string) => void;
+  onColorReset: () => void;
+  labelVis: number;
+  onLabelVisChange: (v: number) => void;
+  onLabelReset: () => void;
+}) {
+  const [open, setOpen] = useState<boolean>(true);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(PANELS_OPEN_KEY);
+      if (raw === '0') setOpen(false);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(PANELS_OPEN_KEY, open ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [open]);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title="Show controls"
+        aria-label="Show controls"
+        className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-full border bg-[var(--vellum)] text-[var(--ink-soft)] shadow-[0_6px_18px_rgb(var(--ink-rgb)/0.10)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)]"
+        style={{ borderColor: 'var(--rule)', pointerEvents: 'auto' }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <line x1="4" y1="6" x2="20" y2="6" />
+          <line x1="4" y1="12" x2="20" y2="12" />
+          <line x1="4" y1="18" x2="20" y2="18" />
+          <circle cx="9" cy="6" r="1.5" fill="currentColor" />
+          <circle cx="15" cy="12" r="1.5" fill="currentColor" />
+          <circle cx="7" cy="18" r="1.5" fill="currentColor" />
+        </svg>
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className="absolute right-3 top-3 z-10 flex flex-col gap-2"
+      style={{ pointerEvents: 'auto' }}
+    >
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          title="Hide controls"
+          aria-label="Hide controls"
+          className="flex h-6 w-6 items-center justify-center rounded-full border bg-[var(--vellum)] text-[var(--ink-soft)] shadow-[0_3px_10px_rgb(var(--ink-rgb)/0.08)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)]"
+          style={{ borderColor: 'var(--rule)' }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+            <line x1="6" y1="6" x2="18" y2="18" />
+            <line x1="18" y1="6" x2="6" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <ColorPanel
+        starColor={starColor}
+        bgColor={bgColor}
+        onStarChange={onStarChange}
+        onBgChange={onBgChange}
+        onReset={onColorReset}
+      />
+      <LabelPanel
+        visDist={labelVis}
+        onVisDistChange={onLabelVisChange}
+        onReset={onLabelReset}
+      />
+    </div>
+  );
+}
+
 function ColorPanel({
   starColor,
   bgColor,
@@ -726,7 +823,7 @@ function ColorPanel({
   return (
     <div
       className="rounded-[10px] border bg-[var(--vellum)] text-[var(--ink)] shadow-[0_6px_18px_rgb(var(--ink-rgb)/0.10)]"
-      style={{ borderColor: 'var(--rule)', minWidth: 220 }}
+      style={{ borderColor: 'var(--rule)', width: 200 }}
     >
       <button
         type="button"
@@ -790,7 +887,7 @@ function LabelPanel({
   return (
     <div
       className="rounded-[10px] border bg-[var(--vellum)] text-[var(--ink)] shadow-[0_6px_18px_rgb(var(--ink-rgb)/0.10)]"
-      style={{ borderColor: 'var(--rule)', minWidth: 220 }}
+      style={{ borderColor: 'var(--rule)', width: 200 }}
     >
       <button
         type="button"
@@ -808,7 +905,7 @@ function LabelPanel({
         </span>
       </button>
       {open && (
-        <div className="space-y-3 px-3 pb-3">
+        <div className="space-y-2 px-3 pb-3">
           <SliderRow
             label="Show within"
             value={visDist}
@@ -816,16 +913,13 @@ function LabelPanel({
             max={MAX}
             onChange={onVisDistChange}
           />
-          <div className="text-[11px] text-[var(--ink-muted)]">
-            Labels are visible for stars within this distance of the camera, with a soft fade on the edge. Drag right to see more titles at once.
-          </div>
           <button
             type="button"
             onClick={onReset}
             className="w-full rounded-[6px] border px-2 py-1 text-xs text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)]"
             style={{ borderColor: 'var(--rule)' }}
           >
-            Reset to default
+            Reset
           </button>
         </div>
       )}
