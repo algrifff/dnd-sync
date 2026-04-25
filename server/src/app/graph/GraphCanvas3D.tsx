@@ -180,7 +180,7 @@ const SCRATCH_MOUSE_WORLD = new THREE.Vector3();
 // Magnetic pull radius in NDC (screen) units. Cursor must be within this
 // proximity in screen-space for a star to feel the tug. The same radius
 // also drives a colour ramp toward candlelight — closer = warmer.
-const MAGNET_RADIUS_NDC = 0.36;
+const MAGNET_RADIUS_NDC = 0.25;
 // Maximum fractional pull toward the cursor at the very centre. Stars
 // only travel up to MAGNET_STRENGTH × (cursor-world − star-world).
 const MAGNET_STRENGTH = 0.18;
@@ -213,61 +213,98 @@ function Stars({
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const instColor = useMemo(() => new THREE.Color(), []);
   const baseColor = useMemo(() => new THREE.Color(starColor), [starColor]);
-  // Track the last hovered idx written so we don't repaint colors on
-  // every frame when nothing has changed.
-  const prevHover = useRef<number | null>(null);
-  // Stars currently inside the magnet radius (and therefore being
-  // colour-lerped toward candlelight). When a star leaves the set we
-  // need to repaint it back to its base colour exactly once — this
-  // tracks the previous frame's set so we can do that diff.
-  const prevAttracted = useRef<Set<number>>(new Set());
+  // Per-star current magnet offset and proximity. Each frame we ease
+  // these toward their target (the instantaneous magnet result) so a
+  // star that loses cursor proximity decays back smoothly instead of
+  // snapping to its base position/colour. This is the fix for the
+  // "popping" when the cursor crosses a label or leaves the radius.
+  const offsetsRef = useRef<Float32Array>(new Float32Array(0));
+  const proxRef = useRef<Float32Array>(new Float32Array(0));
+  // Stars currently rendering with a non-zero proximity tint. Diff-set
+  // so a star whose tint just decayed past the threshold gets one
+  // final repaint back to base.
+  const paintedSet = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    offsetsRef.current = new Float32Array(placed.length * 3);
+    proxRef.current = new Float32Array(placed.length);
+    paintedSet.current = new Set();
+  }, [placed.length]);
 
   useFrame((state) => {
     const mesh = meshRef.current;
     if (!mesh) return;
     const { camera, pointer, clock } = state;
     const t = clock.getElapsedTime();
+    const offsets = offsetsRef.current;
+    const prox = proxRef.current;
+    if (offsets.length !== placed.length * 3 || prox.length !== placed.length) return;
 
-    const newAttracted = new Set<number>();
+    // Ease factor for the offset/proximity lerps. Lower = slower, smoother
+    // settle. 0.12 reads as "magnetic" without overshoot.
+    const EASE = 0.12;
+    // Snap-to-zero threshold so we eventually reach exactly 0 and can
+    // mark a star "done painting" instead of approaching forever.
+    const EPS = 0.002;
+
+    const newPainted = new Set<number>();
     let colorsDirty = false;
 
     for (let i = 0; i < placed.length; i++) {
       const p = placed[i];
       if (!p) continue;
 
-      // Magnetic proximity — single screen-space distance read, used for
-      // both the position pull and the candlelight colour ramp. The
-      // hovered star is excluded from the magnet (so it doesn't slide
-      // under the cursor) but still gets full candlelight via the hover
-      // branch below.
-      let pullX = 0, pullY = 0, pullZ = 0;
-      let proximity = 0; // 0..1, 1 at cursor centre, 0 at/outside rim
-      if (i !== hoverIdx) {
+      // Compute target offset/proximity for this frame.
+      // Hovered star: target proximity = 1 (full candlelight), no
+      //   position pull (so it doesn't slide under the cursor).
+      // Unhovered, in-radius: proximity by screen distance; pull by k².
+      // Else: target = 0 (decays back).
+      let targetX = 0, targetY = 0, targetZ = 0;
+      let targetProx = 0;
+      if (i === hoverIdx) {
+        targetProx = 1;
+      } else {
         SCRATCH_NDC.copy(p.pos).project(camera);
-        // Skip stars behind the camera (z > 1 in clip space after project).
         if (SCRATCH_NDC.z < 1) {
           const dx = pointer.x - SCRATCH_NDC.x;
           const dy = pointer.y - SCRATCH_NDC.y;
           const screenDist = Math.sqrt(dx * dx + dy * dy);
           if (screenDist < MAGNET_RADIUS_NDC) {
-            const k = 1 - screenDist / MAGNET_RADIUS_NDC; // 1 at centre
-            // Position pull: quadratic falloff so the rim is gentle.
+            const k = 1 - screenDist / MAGNET_RADIUS_NDC;
             const strength = k * k * MAGNET_STRENGTH;
             SCRATCH_MOUSE_WORLD.set(pointer.x, pointer.y, SCRATCH_NDC.z).unproject(camera);
-            pullX = (SCRATCH_MOUSE_WORLD.x - p.pos.x) * strength;
-            pullY = (SCRATCH_MOUSE_WORLD.y - p.pos.y) * strength;
-            pullZ = (SCRATCH_MOUSE_WORLD.z - p.pos.z) * strength;
-            // Colour ramp: linear in `k` so the warm tint reaches you
-            // a bit before the position tug becomes obvious.
-            proximity = k;
+            targetX = (SCRATCH_MOUSE_WORLD.x - p.pos.x) * strength;
+            targetY = (SCRATCH_MOUSE_WORLD.y - p.pos.y) * strength;
+            targetZ = (SCRATCH_MOUSE_WORLD.z - p.pos.z) * strength;
+            targetProx = k;
           }
         }
       }
 
-      // Two travelling waves sampled at the star's world position. The
-      // sample is a phase, not a free oscillator, so spatially-adjacent
-      // stars move together — exactly like a wave passing through the
-      // field. No scale wobble: motion is purely positional.
+      // Ease current offset/proximity toward target. When the cursor
+      // moves away (or onto a label), target → 0 and the star drifts
+      // back over a few frames instead of snapping. This is the popping
+      // fix.
+      const i3 = i * 3;
+      let cx = offsets[i3] ?? 0;
+      let cy = offsets[i3 + 1] ?? 0;
+      let cz = offsets[i3 + 2] ?? 0;
+      cx += (targetX - cx) * EASE;
+      cy += (targetY - cy) * EASE;
+      cz += (targetZ - cz) * EASE;
+      if (Math.abs(cx) < EPS) cx = 0;
+      if (Math.abs(cy) < EPS) cy = 0;
+      if (Math.abs(cz) < EPS) cz = 0;
+      offsets[i3] = cx;
+      offsets[i3 + 1] = cy;
+      offsets[i3 + 2] = cz;
+
+      let cp = prox[i] ?? 0;
+      cp += (targetProx - cp) * EASE;
+      if (cp < EPS) cp = 0;
+      prox[i] = cp;
+
+      // Two travelling waves sampled at the star's world position.
       const phaseA =
         WAVE_A.kx * p.pos.x + WAVE_A.ky * p.pos.y + WAVE_A.kz * p.pos.z - WAVE_A.omega * t;
       const phaseB =
@@ -279,34 +316,35 @@ function Stars({
       const driftZ = (wA * 0.6 + wB * 0.7) * WAVE_AMP;
 
       dummy.position.set(
-        p.pos.x + pullX + driftX,
-        p.pos.y + pullY + driftY,
-        p.pos.z + pullZ + driftZ,
+        p.pos.x + cx + driftX,
+        p.pos.y + cy + driftY,
+        p.pos.z + cz + driftZ,
       );
       dummy.scale.setScalar(p.scale);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
 
-      // Per-frame colour write — only for stars currently inside the
-      // magnet radius. Lerps from base toward candlelight by proximity.
-      if (proximity > 0) {
-        newAttracted.add(i);
+      // Colour write — paint while the eased proximity is non-zero.
+      // Covers both the magnet ramp AND hover (target=1 for hover), so
+      // hover-in/out lerps as smoothly as the magnet does.
+      if (cp > 0) {
+        newPainted.add(i);
         const intensity = 0.85 + Math.min(0.6, p.degree * 0.04);
-        // Set scratch to base colour, then lerp toward candlelight.
         instColor.copy(baseColor).multiplyScalar(intensity);
-        instColor.lerp(candlelight, proximity);
-        // Push slightly past 1.0 near the centre so the bloom catches
-        // the warm tint, mirroring the hover treatment.
-        instColor.multiplyScalar(1 + proximity * 0.4);
+        instColor.lerp(candlelight, cp);
+        // At cp=1 the multiplier reaches 1.6, matching the previous
+        // hard-coded hover treatment for bloom intensity.
+        instColor.multiplyScalar(1 + cp * 0.6);
         mesh.setColorAt(i, instColor);
         colorsDirty = true;
       }
     }
     mesh.instanceMatrix.needsUpdate = true;
 
-    // Reset stars that were attracted last frame but aren't this frame.
-    for (const idx of prevAttracted.current) {
-      if (newAttracted.has(idx) || idx === hoverIdx) continue;
+    // Final repaint to base for stars whose tint just decayed below EPS
+    // this frame. Without this they'd be stuck on the last lerped colour.
+    for (const idx of paintedSet.current) {
+      if (newPainted.has(idx)) continue;
       const p = placed[idx];
       if (!p) continue;
       const intensity = 0.85 + Math.min(0.6, p.degree * 0.04);
@@ -314,29 +352,7 @@ function Stars({
       mesh.setColorAt(idx, instColor);
       colorsDirty = true;
     }
-    prevAttracted.current = newAttracted;
-
-    // Hover transition — runs in addition to the proximity ramp so that
-    // the moment the cursor lands on a star it locks at full candlelight
-    // intensity (matches the previous behaviour).
-    if (prevHover.current !== hoverIdx) {
-      const repaint = (idx: number | null) => {
-        if (idx == null) return;
-        const p = placed[idx];
-        if (!p) return;
-        if (idx === hoverIdx) {
-          instColor.copy(candlelight).multiplyScalar(1.6);
-        } else {
-          const intensity = 0.85 + Math.min(0.6, p.degree * 0.04);
-          instColor.copy(baseColor).multiplyScalar(intensity);
-        }
-        mesh.setColorAt(idx, instColor);
-      };
-      repaint(prevHover.current);
-      repaint(hoverIdx);
-      colorsDirty = true;
-      prevHover.current = hoverIdx;
-    }
+    paintedSet.current = newPainted;
 
     if (colorsDirty && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   });
@@ -351,7 +367,6 @@ function Stars({
       mesh.setColorAt(i, instColor);
     });
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    prevHover.current = null;
   }, [placed, instColor, baseColor]);
 
   return (
