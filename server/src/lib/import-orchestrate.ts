@@ -44,6 +44,7 @@ import { canonicalPath, type EntityKind } from './ai/paths';
 import { listCampaigns, ensureCampaignForPath } from './characters';
 import { ensureIndexNote } from './index-notes';
 import { deriveAllIndexes } from './derive-indexes';
+import { deriveCampaignIndex } from './campaign-index';
 
 // Canonical subfolders created for every new campaign — mirrors CampaignCreateDialog.
 const CAMPAIGN_SUBFOLDERS = [
@@ -245,6 +246,23 @@ async function doOrchestrate(jobId: string, signal: AbortSignal): Promise<void> 
     if (signal.aborted) return;
     orch.phaseLog.push({ phase: 'quality', completedAt: Date.now() });
     orch.phase = 'done';
+  }
+
+  // Refresh the auto-managed callout in every campaign index touched
+  // by this import. Runs once per campaign (not once per note) so a
+  // 200-note vault doesn't pay for 200 rebuilds. Errors are logged
+  // and swallowed — the import is already complete at this point.
+  for (const a of orch.campaignAssignments ?? []) {
+    if (!a.root) continue;
+    try {
+      await deriveCampaignIndex(job.groupId, a.root);
+    } catch (err) {
+      console.error(
+        '[orchestrate] campaign index refresh failed for',
+        a.root,
+        err,
+      );
+    }
   }
 
   deleteJobZip(job);
