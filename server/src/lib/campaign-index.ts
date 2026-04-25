@@ -111,10 +111,25 @@ export async function deriveCampaignIndex(
 
   // Round-trip through yjs to refresh the persisted CRDT state. The
   // title sidecar is restored from the existing row so the title
-  // editor doesn't see an empty Y.Text on reconnect.
-  const ydoc = prosemirrorJSONToYDoc(getPmSchema(), next, 'default');
-  if (indexRow.title) ydoc.getText('title').insert(0, indexRow.title);
-  const yjsState = Y.encodeStateAsUpdate(ydoc);
+  // editor doesn't see an empty Y.Text on reconnect. If the produced
+  // JSON fails schema validation we abort the write entirely — better
+  // to leave the index untouched than write a malformed yjs_state
+  // that loads as an empty doc on next open.
+  let yjsState: Uint8Array;
+  try {
+    const schema = getPmSchema();
+    schema.nodeFromJSON(next); // throws on invalid shape
+    const ydoc = prosemirrorJSONToYDoc(schema, next, 'default');
+    if (indexRow.title) ydoc.getText('title').insert(0, indexRow.title);
+    yjsState = Y.encodeStateAsUpdate(ydoc);
+  } catch (err) {
+    console.error(
+      '[campaign-index] schema validation failed for',
+      indexPath,
+      err,
+    );
+    return;
+  }
 
   db.query(
     `UPDATE notes
@@ -305,9 +320,12 @@ function buildSectionTable(entries: IndexEntry[]): PmNode {
 }
 
 function tableHeader(text: string): PmNode {
+  // Match the shape md-to-pm emits — omit attrs so the Tiptap Table
+  // extension fills its own colspan/rowspan/colwidth defaults. Setting
+  // them explicitly with mismatched types fails schema validation in
+  // prosemirrorJSONToYDoc and leaves us with an empty Y.Doc.
   return {
     type: 'tableHeader',
-    attrs: { colspan: 1, rowspan: 1, colwidth: null },
     content: [paragraph(text)],
   };
 }
@@ -315,7 +333,6 @@ function tableHeader(text: string): PmNode {
 function tableCell(content: PmNode[]): PmNode {
   return {
     type: 'tableCell',
-    attrs: { colspan: 1, rowspan: 1, colwidth: null },
     content,
   };
 }
