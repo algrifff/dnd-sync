@@ -186,13 +186,20 @@ const MAGNET_RADIUS_NDC = 0.25;
 const MAGNET_STRENGTH = 0.18;
 // Two travelling wave fields. Each star samples both waves at its own
 // world position so neighbours move coherently (a wave passing over them)
-// but distant stars are unrelated. The two waves run on different axes
-// and speeds so the combined motion never repeats.
-const WAVE_AMP = 0.6;
-// Spatial frequency (cycles per world unit) — lower = longer wavelength.
-// Direction comes from the relative magnitudes of (kx, ky, kz).
-const WAVE_A = { kx: 0.045, ky: 0.0, kz: 0.025, omega: 0.45 };
-const WAVE_B = { kx: 0.0, ky: 0.05, kz: 0.035, omega: 0.62 };
+// but distant stars are unrelated. Direction shape is fixed; amplitude /
+// spatial-frequency / temporal-speed are runtime controls so the user
+// can tune the motion live.
+//
+// (kx, ky, kz) is the wave-vector direction; multiplying by the user's
+// frequency value scales how short the wavelength is. omega is the base
+// temporal frequency, scaled by the user's speed value.
+const WAVE_A_DIR = { kx: 0.045, ky: 0.0, kz: 0.025, omega: 0.45 };
+const WAVE_B_DIR = { kx: 0.0, ky: 0.05, kz: 0.035, omega: 0.62 };
+
+const DEFAULT_WAVE_AMP = 0.6;
+const DEFAULT_WAVE_FREQ = 1.0;
+const DEFAULT_WAVE_SPEED = 1.0;
+const MOTION_STORAGE_KEY = 'graph3d:motion';
 
 function Stars({
   placed,
@@ -201,6 +208,11 @@ function Stars({
   candlelight,
   starColor,
   onClickIdx,
+  offsetsRef,
+  proxRef,
+  waveAmpRef,
+  waveFreqRef,
+  waveSpeedRef,
 }: {
   placed: Placed[];
   hoverIdx: number | null;
@@ -208,26 +220,24 @@ function Stars({
   candlelight: THREE.Color;
   starColor: string;
   onClickIdx: (i: number) => void;
+  // Per-star magnet/proximity buffers — owned by the parent so labels
+  // can read the same lerped values. Stars writes them every frame.
+  offsetsRef: React.RefObject<Float32Array>;
+  proxRef: React.RefObject<Float32Array>;
+  waveAmpRef: React.RefObject<number>;
+  waveFreqRef: React.RefObject<number>;
+  waveSpeedRef: React.RefObject<number>;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const instColor = useMemo(() => new THREE.Color(), []);
   const baseColor = useMemo(() => new THREE.Color(starColor), [starColor]);
-  // Per-star current magnet offset and proximity. Each frame we ease
-  // these toward their target (the instantaneous magnet result) so a
-  // star that loses cursor proximity decays back smoothly instead of
-  // snapping to its base position/colour. This is the fix for the
-  // "popping" when the cursor crosses a label or leaves the radius.
-  const offsetsRef = useRef<Float32Array>(new Float32Array(0));
-  const proxRef = useRef<Float32Array>(new Float32Array(0));
   // Stars currently rendering with a non-zero proximity tint. Diff-set
   // so a star whose tint just decayed past the threshold gets one
   // final repaint back to base.
   const paintedSet = useRef<Set<number>>(new Set());
 
   useEffect(() => {
-    offsetsRef.current = new Float32Array(placed.length * 3);
-    proxRef.current = new Float32Array(placed.length);
     paintedSet.current = new Set();
   }, [placed.length]);
 
@@ -238,7 +248,11 @@ function Stars({
     const t = clock.getElapsedTime();
     const offsets = offsetsRef.current;
     const prox = proxRef.current;
+    if (!offsets || !prox) return;
     if (offsets.length !== placed.length * 3 || prox.length !== placed.length) return;
+    const waveAmp = waveAmpRef.current ?? DEFAULT_WAVE_AMP;
+    const waveFreq = waveFreqRef.current ?? DEFAULT_WAVE_FREQ;
+    const waveSpeed = waveSpeedRef.current ?? DEFAULT_WAVE_SPEED;
 
     // Ease factor for the offset/proximity lerps. Lower = slower, smoother
     // settle. 0.12 reads as "magnetic" without overshoot.
@@ -305,15 +319,19 @@ function Stars({
       prox[i] = cp;
 
       // Two travelling waves sampled at the star's world position.
+      // freq scales the spatial wavevector (shorter wavelength = more
+      // ripples visible across the field). speed scales omega.
       const phaseA =
-        WAVE_A.kx * p.pos.x + WAVE_A.ky * p.pos.y + WAVE_A.kz * p.pos.z - WAVE_A.omega * t;
+        (WAVE_A_DIR.kx * p.pos.x + WAVE_A_DIR.ky * p.pos.y + WAVE_A_DIR.kz * p.pos.z) * waveFreq -
+        WAVE_A_DIR.omega * waveSpeed * t;
       const phaseB =
-        WAVE_B.kx * p.pos.x + WAVE_B.ky * p.pos.y + WAVE_B.kz * p.pos.z - WAVE_B.omega * t;
+        (WAVE_B_DIR.kx * p.pos.x + WAVE_B_DIR.ky * p.pos.y + WAVE_B_DIR.kz * p.pos.z) * waveFreq -
+        WAVE_B_DIR.omega * waveSpeed * t;
       const wA = Math.sin(phaseA);
       const wB = Math.sin(phaseB);
-      const driftX = (wA + wB * 0.4) * WAVE_AMP;
-      const driftY = (wB - wA * 0.5) * WAVE_AMP;
-      const driftZ = (wA * 0.6 + wB * 0.7) * WAVE_AMP;
+      const driftX = (wA + wB * 0.4) * waveAmp;
+      const driftY = (wB - wA * 0.5) * waveAmp;
+      const driftZ = (wA * 0.6 + wB * 0.7) * waveAmp;
 
       dummy.position.set(
         p.pos.x + cx + driftX,
@@ -491,21 +509,22 @@ function CampaignLabels({ placed }: { placed: Placed[] }) {
 // of snapping when the camera crosses a threshold.
 function NodeLabels({
   placed,
-  hoverIdx,
   visDistRef,
+  proxRef,
 }: {
   placed: Placed[];
-  hoverIdx: number | null;
   visDistRef: React.RefObject<number>;
+  proxRef: React.RefObject<Float32Array>;
 }) {
   return (
     <>
       {placed.map((p, i) => (
         <NodeLabel
           key={p.id}
+          idx={i}
           p={p}
-          hover={i === hoverIdx}
           visDistRef={visDistRef}
+          proxRef={proxRef}
         />
       ))}
     </>
@@ -514,12 +533,14 @@ function NodeLabels({
 
 function NodeLabel({
   p,
-  hover,
+  idx,
   visDistRef,
+  proxRef,
 }: {
   p: Placed;
-  hover: boolean;
+  idx: number;
   visDistRef: React.RefObject<number>;
+  proxRef: React.RefObject<Float32Array>;
 }) {
   // We mutate the inner div's opacity directly via ref so the per-frame
   // lerp doesn't trigger React re-renders. The visibility distance comes
@@ -535,7 +556,12 @@ function NodeLabel({
     // 1 inside `vis` and ramp down to 0 over a fixed feather window.
     const distFade =
       1 - THREE.MathUtils.smoothstep(dist, vis - LABEL_FEATHER, vis + LABEL_FEATHER);
-    const target = hover ? 1 : distFade;
+    // Proximity (cursor near star, including hover) — already lerped in
+    // Stars, so reading it here piggy-backs on the same easing curve.
+    // Hover ends up here because Stars sets targetProx=1 for hoverIdx.
+    const proxArr = proxRef.current;
+    const prox = proxArr ? (proxArr[idx] ?? 0) : 0;
+    const target = Math.max(distFade, prox);
     cur.current = THREE.MathUtils.lerp(cur.current, target, 0.15);
     el.style.opacity = String(cur.current);
     // Cull from layout entirely once invisible — keeps hundreds of
@@ -641,13 +667,25 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   const [starColor, setStarColor] = useState<string>('#FFFFFF');
   const [bgColor, setBgColor] = useState<string>('#0A0806');
   const [labelVis, setLabelVis] = useState<number>(DEFAULT_LABEL_VIS);
-  // Mirror visibility distance into a ref so the per-frame lerp inside
-  // each label can read live values without each setState re-rendering
-  // hundreds of <NodeLabel> components.
+  const [waveAmp, setWaveAmp] = useState<number>(DEFAULT_WAVE_AMP);
+  const [waveFreq, setWaveFreq] = useState<number>(DEFAULT_WAVE_FREQ);
+  const [waveSpeed, setWaveSpeed] = useState<number>(DEFAULT_WAVE_SPEED);
+  // Mirror tunables into refs so the per-frame inner loops read live
+  // values without each setState re-rendering Stars / NodeLabels.
   const visDistRef = useRef<number>(DEFAULT_LABEL_VIS);
-  useEffect(() => {
-    visDistRef.current = labelVis;
-  }, [labelVis]);
+  const waveAmpRef = useRef<number>(DEFAULT_WAVE_AMP);
+  const waveFreqRef = useRef<number>(DEFAULT_WAVE_FREQ);
+  const waveSpeedRef = useRef<number>(DEFAULT_WAVE_SPEED);
+  useEffect(() => { visDistRef.current = labelVis; }, [labelVis]);
+  useEffect(() => { waveAmpRef.current = waveAmp; }, [waveAmp]);
+  useEffect(() => { waveFreqRef.current = waveFreq; }, [waveFreq]);
+  useEffect(() => { waveSpeedRef.current = waveSpeed; }, [waveSpeed]);
+
+  // Per-star magnet/proximity buffers, owned here so both Stars and
+  // NodeLabels read the same lerped values. Resized below once `placed`
+  // is computed.
+  const offsetsRef = useRef<Float32Array>(new Float32Array(0));
+  const proxRef = useRef<Float32Array>(new Float32Array(0));
 
   useEffect(() => {
     setPalette(readPalette());
@@ -667,6 +705,17 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
         if (raw) {
           const parsed = JSON.parse(raw) as { vis?: number };
           if (typeof parsed.vis === 'number') setLabelVis(parsed.vis);
+        }
+      } catch {
+        /* ignore */
+      }
+      try {
+        const raw = window.localStorage.getItem(MOTION_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { amp?: number; freq?: number; speed?: number };
+          if (typeof parsed.amp === 'number') setWaveAmp(parsed.amp);
+          if (typeof parsed.freq === 'number') setWaveFreq(parsed.freq);
+          if (typeof parsed.speed === 'number') setWaveSpeed(parsed.speed);
         }
       } catch {
         /* ignore */
@@ -699,6 +748,18 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   }, [labelVis]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        MOTION_STORAGE_KEY,
+        JSON.stringify({ amp: waveAmp, freq: waveFreq, speed: waveSpeed }),
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [waveAmp, waveFreq, waveSpeed]);
+
+  useEffect(() => {
     let cancelled = false;
     setPhase('fetching');
     void fetch('/api/graph?scope=all&phase=full', { credentials: 'same-origin' })
@@ -726,6 +787,11 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
     if (!data) return { placed: [] as Placed[], clusters: [] as Cluster[] };
     return placeNodes(data);
   }, [data]);
+
+  useEffect(() => {
+    offsetsRef.current = new Float32Array(placed.length * 3);
+    proxRef.current = new Float32Array(placed.length);
+  }, [placed.length]);
 
   useEffect(() => {
     if (phase === 'placing' && placed.length > 0) setPhase('ready');
@@ -768,12 +834,17 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
               candlelight={palette.candlelight}
               starColor={starColor}
               onClickIdx={onClickIdx}
+              offsetsRef={offsetsRef}
+              proxRef={proxRef}
+              waveAmpRef={waveAmpRef}
+              waveFreqRef={waveFreqRef}
+              waveSpeedRef={waveSpeedRef}
             />
             <Edges placed={placed} edges={data?.edges ?? []} color={palette.edge} />
             <NodeLabels
               placed={placed}
-              hoverIdx={hoverIdx}
               visDistRef={visDistRef}
+              proxRef={proxRef}
             />
             <CampaignLabels placed={placed} />
           </>
@@ -798,6 +869,17 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
         labelVis={labelVis}
         onLabelVisChange={setLabelVis}
         onLabelReset={() => setLabelVis(DEFAULT_LABEL_VIS)}
+        waveAmp={waveAmp}
+        waveFreq={waveFreq}
+        waveSpeed={waveSpeed}
+        onWaveAmpChange={setWaveAmp}
+        onWaveFreqChange={setWaveFreq}
+        onWaveSpeedChange={setWaveSpeed}
+        onMotionReset={() => {
+          setWaveAmp(DEFAULT_WAVE_AMP);
+          setWaveFreq(DEFAULT_WAVE_FREQ);
+          setWaveSpeed(DEFAULT_WAVE_SPEED);
+        }}
       />
 
       {phase !== 'ready' && (
@@ -876,6 +958,13 @@ function PanelStack({
   labelVis,
   onLabelVisChange,
   onLabelReset,
+  waveAmp,
+  waveFreq,
+  waveSpeed,
+  onWaveAmpChange,
+  onWaveFreqChange,
+  onWaveSpeedChange,
+  onMotionReset,
 }: {
   starColor: string;
   bgColor: string;
@@ -885,6 +974,13 @@ function PanelStack({
   labelVis: number;
   onLabelVisChange: (v: number) => void;
   onLabelReset: () => void;
+  waveAmp: number;
+  waveFreq: number;
+  waveSpeed: number;
+  onWaveAmpChange: (v: number) => void;
+  onWaveFreqChange: (v: number) => void;
+  onWaveSpeedChange: (v: number) => void;
+  onMotionReset: () => void;
 }) {
   const [open, setOpen] = useState<boolean>(true);
   useEffect(() => {
@@ -959,7 +1055,125 @@ function PanelStack({
         onVisDistChange={onLabelVisChange}
         onReset={onLabelReset}
       />
+      <MotionPanel
+        amp={waveAmp}
+        freq={waveFreq}
+        speed={waveSpeed}
+        onAmpChange={onWaveAmpChange}
+        onFreqChange={onWaveFreqChange}
+        onSpeedChange={onWaveSpeedChange}
+        onReset={onMotionReset}
+      />
     </div>
+  );
+}
+
+function MotionPanel({
+  amp,
+  freq,
+  speed,
+  onAmpChange,
+  onFreqChange,
+  onSpeedChange,
+  onReset,
+}: {
+  amp: number;
+  freq: number;
+  speed: number;
+  onAmpChange: (v: number) => void;
+  onFreqChange: (v: number) => void;
+  onSpeedChange: (v: number) => void;
+  onReset: () => void;
+}) {
+  const [open, setOpen] = useState<boolean>(false);
+  return (
+    <div
+      className="rounded-[10px] border bg-[var(--vellum)] text-[var(--ink)] shadow-[0_6px_18px_rgb(var(--ink-rgb)/0.10)]"
+      style={{ borderColor: 'var(--rule)', width: 200 }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+        aria-expanded={open}
+        aria-label="Toggle motion panel"
+      >
+        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
+          Motion
+        </span>
+        <span aria-hidden className="text-[var(--ink-muted)]">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div className="space-y-2 px-3 pb-3">
+          <FloatSliderRow
+            label="Amplitude"
+            value={amp}
+            min={0}
+            max={4}
+            step={0.05}
+            onChange={onAmpChange}
+          />
+          <FloatSliderRow
+            label="Frequency"
+            value={freq}
+            min={0}
+            max={4}
+            step={0.05}
+            onChange={onFreqChange}
+          />
+          <FloatSliderRow
+            label="Speed"
+            value={speed}
+            min={0}
+            max={4}
+            step={0.05}
+            onChange={onSpeedChange}
+          />
+          <button
+            type="button"
+            onClick={onReset}
+            className="w-full rounded-[6px] border px-2 py-1 text-xs text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)]"
+            style={{ borderColor: 'var(--rule)' }}
+          >
+            Reset
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FloatSliderRow({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1.5 text-[11px] text-[var(--ink-soft)]">
+      <div className="flex items-center justify-between">
+        <span className="uppercase tracking-wide text-[var(--ink-muted)]">{label}</span>
+        <span className="tabular-nums text-[var(--ink-soft)]">{value.toFixed(2)}</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-[var(--candlelight)]"
+      />
+    </label>
   );
 }
 
