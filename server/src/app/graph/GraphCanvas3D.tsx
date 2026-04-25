@@ -347,11 +347,15 @@ function NodeLabels({
   hoverIdx,
   fadeNearRef,
   fadeFarRef,
+  zoomBoostStartRef,
+  zoomBoostFullRef,
 }: {
   placed: Placed[];
   hoverIdx: number | null;
   fadeNearRef: React.RefObject<number>;
   fadeFarRef: React.RefObject<number>;
+  zoomBoostStartRef: React.RefObject<number>;
+  zoomBoostFullRef: React.RefObject<number>;
 }) {
   return (
     <>
@@ -362,6 +366,8 @@ function NodeLabels({
           hover={i === hoverIdx}
           fadeNearRef={fadeNearRef}
           fadeFarRef={fadeFarRef}
+          zoomBoostStartRef={zoomBoostStartRef}
+          zoomBoostFullRef={zoomBoostFullRef}
         />
       ))}
     </>
@@ -373,15 +379,19 @@ function NodeLabel({
   hover,
   fadeNearRef,
   fadeFarRef,
+  zoomBoostStartRef,
+  zoomBoostFullRef,
 }: {
   p: Placed;
   hover: boolean;
   fadeNearRef: React.RefObject<number>;
   fadeFarRef: React.RefObject<number>;
+  zoomBoostStartRef: React.RefObject<number>;
+  zoomBoostFullRef: React.RefObject<number>;
 }) {
   // We mutate the inner div's opacity directly via ref so the per-frame
-  // lerp doesn't trigger React re-renders. NEAR/FAR come from refs so
-  // the panel can change them without re-mounting every label.
+  // lerp doesn't trigger React re-renders. All thresholds come from refs
+  // so the panel can change them without re-mounting every label.
   const divRef = useRef<HTMLDivElement>(null);
   const cur = useRef(0);
   useFrame((state) => {
@@ -391,8 +401,22 @@ function NodeLabel({
     const near = fadeNearRef.current ?? DEFAULT_LABEL_NEAR;
     const far = Math.max(fadeFarRef.current ?? DEFAULT_LABEL_FAR, near + 1);
     const distFade = THREE.MathUtils.clamp(1 - (dist - near) / (far - near), 0, 1);
-    const target = hover ? 1 : distFade;
-    cur.current = THREE.MathUtils.lerp(cur.current, target, 0.15);
+
+    // Zoom boost — distance from camera to its look-at target (orbit
+    // distance). When the user zooms out past zoomBoostStart, labels
+    // fade back in regardless of per-node distance, reaching full
+    // opacity at zoomBoostFull. Falls back to camera.position.length()
+    // when OrbitControls aren't yet wired (first frame).
+    const controls = state.controls as { target?: THREE.Vector3 } | null;
+    const target = controls?.target ?? TARGET_FALLBACK;
+    const orbitDist = state.camera.position.distanceTo(target);
+    const zStart = zoomBoostStartRef.current ?? DEFAULT_ZOOM_BOOST_START;
+    const zFull = Math.max(zoomBoostFullRef.current ?? DEFAULT_ZOOM_BOOST_FULL, zStart + 1);
+    const zoomBoost = THREE.MathUtils.clamp((orbitDist - zStart) / (zFull - zStart), 0, 1);
+
+    const computed = Math.max(distFade, zoomBoost);
+    const final = hover ? 1 : computed;
+    cur.current = THREE.MathUtils.lerp(cur.current, final, 0.15);
     el.style.opacity = String(cur.current);
     // Cull from layout entirely once invisible — keeps hundreds of
     // off-screen labels from contributing layout cost.
@@ -476,6 +500,14 @@ const LABEL_STORAGE_KEY = 'graph3d:labels';
 // Defaults match the in-code fade window before this control existed.
 const DEFAULT_LABEL_NEAR = 25;
 const DEFAULT_LABEL_FAR = 90;
+// Zoom-out boost — when the orbit distance (camera → look-at target)
+// exceeds these, every label is forced visible regardless of per-node
+// distance. Lets the user see all titles when scanning the whole galaxy.
+const DEFAULT_ZOOM_BOOST_START = 120;
+const DEFAULT_ZOOM_BOOST_FULL = 200;
+
+// Reusable scratch vec3 so the per-frame lerp doesn't allocate.
+const TARGET_FALLBACK = new THREE.Vector3();
 
 export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElement {
   const router = useRouter();
@@ -488,17 +520,27 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   const [bgColor, setBgColor] = useState<string>('#0A0806');
   const [fadeNear, setFadeNear] = useState<number>(DEFAULT_LABEL_NEAR);
   const [fadeFar, setFadeFar] = useState<number>(DEFAULT_LABEL_FAR);
-  // Mirror NEAR/FAR into refs so the per-frame lerp inside each label can
-  // read live values without each setState re-rendering hundreds of
+  const [zoomBoostStart, setZoomBoostStart] = useState<number>(DEFAULT_ZOOM_BOOST_START);
+  const [zoomBoostFull, setZoomBoostFull] = useState<number>(DEFAULT_ZOOM_BOOST_FULL);
+  // Mirror thresholds into refs so the per-frame lerp inside each label
+  // can read live values without each setState re-rendering hundreds of
   // <NodeLabel> components.
   const fadeNearRef = useRef<number>(DEFAULT_LABEL_NEAR);
   const fadeFarRef = useRef<number>(DEFAULT_LABEL_FAR);
+  const zoomBoostStartRef = useRef<number>(DEFAULT_ZOOM_BOOST_START);
+  const zoomBoostFullRef = useRef<number>(DEFAULT_ZOOM_BOOST_FULL);
   useEffect(() => {
     fadeNearRef.current = fadeNear;
   }, [fadeNear]);
   useEffect(() => {
     fadeFarRef.current = fadeFar;
   }, [fadeFar]);
+  useEffect(() => {
+    zoomBoostStartRef.current = zoomBoostStart;
+  }, [zoomBoostStart]);
+  useEffect(() => {
+    zoomBoostFullRef.current = zoomBoostFull;
+  }, [zoomBoostFull]);
 
   useEffect(() => {
     setPalette(readPalette());
@@ -516,9 +558,16 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
       try {
         const raw = window.localStorage.getItem(LABEL_STORAGE_KEY);
         if (raw) {
-          const parsed = JSON.parse(raw) as { near?: number; far?: number };
+          const parsed = JSON.parse(raw) as {
+            near?: number;
+            far?: number;
+            zoomStart?: number;
+            zoomFull?: number;
+          };
           if (typeof parsed.near === 'number') setFadeNear(parsed.near);
           if (typeof parsed.far === 'number') setFadeFar(parsed.far);
+          if (typeof parsed.zoomStart === 'number') setZoomBoostStart(parsed.zoomStart);
+          if (typeof parsed.zoomFull === 'number') setZoomBoostFull(parsed.zoomFull);
         }
       } catch {
         /* ignore */
@@ -543,12 +592,17 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
     try {
       window.localStorage.setItem(
         LABEL_STORAGE_KEY,
-        JSON.stringify({ near: fadeNear, far: fadeFar }),
+        JSON.stringify({
+          near: fadeNear,
+          far: fadeFar,
+          zoomStart: zoomBoostStart,
+          zoomFull: zoomBoostFull,
+        }),
       );
     } catch {
       /* ignore */
     }
-  }, [fadeNear, fadeFar]);
+  }, [fadeNear, fadeFar, zoomBoostStart, zoomBoostFull]);
 
   useEffect(() => {
     let cancelled = false;
@@ -624,12 +678,14 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
               hoverIdx={hoverIdx}
               fadeNearRef={fadeNearRef}
               fadeFarRef={fadeFarRef}
+              zoomBoostStartRef={zoomBoostStartRef}
+              zoomBoostFullRef={zoomBoostFullRef}
             />
             <CampaignLabels placed={placed} />
           </>
         )}
 
-        <OrbitControls enablePan enableZoom enableRotate enableDamping dampingFactor={0.08} />
+        <OrbitControls makeDefault enablePan enableZoom enableRotate enableDamping dampingFactor={0.08} />
 
         <EffectComposer>
           <Bloom luminanceThreshold={0.2} luminanceSmoothing={0.3} intensity={1.6} mipmapBlur />
@@ -650,11 +706,17 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
         <LabelPanel
           near={fadeNear}
           far={fadeFar}
+          zoomStart={zoomBoostStart}
+          zoomFull={zoomBoostFull}
           onNearChange={setFadeNear}
           onFarChange={setFadeFar}
+          onZoomStartChange={setZoomBoostStart}
+          onZoomFullChange={setZoomBoostFull}
           onReset={() => {
             setFadeNear(DEFAULT_LABEL_NEAR);
             setFadeFar(DEFAULT_LABEL_FAR);
+            setZoomBoostStart(DEFAULT_ZOOM_BOOST_START);
+            setZoomBoostFull(DEFAULT_ZOOM_BOOST_FULL);
           }}
         />
       </div>
@@ -787,22 +849,33 @@ function ColorPanel({
 function LabelPanel({
   near,
   far,
+  zoomStart,
+  zoomFull,
   onNearChange,
   onFarChange,
+  onZoomStartChange,
+  onZoomFullChange,
   onReset,
 }: {
   near: number;
   far: number;
+  zoomStart: number;
+  zoomFull: number;
   onNearChange: (v: number) => void;
   onFarChange: (v: number) => void;
+  onZoomStartChange: (v: number) => void;
+  onZoomFullChange: (v: number) => void;
   onReset: () => void;
 }) {
   const [open, setOpen] = useState<boolean>(false);
-  // Slider range — covers the camera's typical orbit distance from a
-  // small world (≈20 units) to the framing distance for a large galaxy
-  // (≈250 units).
-  const MIN = 0;
-  const MAX = 300;
+  // Per-node distance range — covers typical orbit distance from a small
+  // world (≈20) to the framing distance for a large galaxy (≈300).
+  const NEAR_MIN = 0;
+  const NEAR_MAX = 300;
+  // Zoom-out boost range — needs more headroom because the camera can
+  // pull back well past the per-node FAR threshold while panning.
+  const ZOOM_MIN = 0;
+  const ZOOM_MAX = 600;
   return (
     <div
       className="rounded-[10px] border bg-[var(--vellum)] text-[var(--ink)] shadow-[0_6px_18px_rgb(var(--ink-rgb)/0.10)]"
@@ -827,20 +900,44 @@ function LabelPanel({
       </button>
       {open && (
         <div className="space-y-3 px-3 pb-3">
-          <SliderRow
-            label="Full opacity ≤"
-            value={near}
-            min={MIN}
-            max={Math.max(MIN + 1, far - 1)}
-            onChange={onNearChange}
-          />
-          <SliderRow
-            label="Fully hidden ≥"
-            value={far}
-            min={Math.min(MAX - 1, near + 1)}
-            max={MAX}
-            onChange={onFarChange}
-          />
+          <div className="space-y-2">
+            <div className="text-[10px] uppercase tracking-wide text-[var(--ink-muted)]">
+              Per-node distance
+            </div>
+            <SliderRow
+              label="Full opacity ≤"
+              value={near}
+              min={NEAR_MIN}
+              max={Math.max(NEAR_MIN + 1, far - 1)}
+              onChange={onNearChange}
+            />
+            <SliderRow
+              label="Fully hidden ≥"
+              value={far}
+              min={Math.min(NEAR_MAX - 1, near + 1)}
+              max={NEAR_MAX}
+              onChange={onFarChange}
+            />
+          </div>
+          <div className="space-y-2">
+            <div className="text-[10px] uppercase tracking-wide text-[var(--ink-muted)]">
+              Zoom-out boost (orbit distance)
+            </div>
+            <SliderRow
+              label="Start fade-in ≥"
+              value={zoomStart}
+              min={ZOOM_MIN}
+              max={Math.max(ZOOM_MIN + 1, zoomFull - 1)}
+              onChange={onZoomStartChange}
+            />
+            <SliderRow
+              label="Fully visible ≥"
+              value={zoomFull}
+              min={Math.min(ZOOM_MAX - 1, zoomStart + 1)}
+              max={ZOOM_MAX}
+              onChange={onZoomFullChange}
+            />
+          </div>
           <button
             type="button"
             onClick={onReset}
