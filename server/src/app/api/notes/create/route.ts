@@ -15,6 +15,7 @@ import { logAudit } from '@/lib/audit';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
 import { isAllowedPath } from '@/lib/notes';
+import { GM_MODE_COOKIE, isGmModeOn } from '@/lib/gm-mode';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 
@@ -31,7 +32,7 @@ const Body = z.object({
    *  the matching template so the sheet UI has defaults to render.
    *  "page" (or omitted) creates a plain note with no kind. */
   kind: z
-    .enum(['page', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'monster'])
+    .enum(['page', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'monster', 'excalidraw'])
     .optional(),
 });
 
@@ -51,6 +52,11 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   const requestedKind = parsed.kind ?? 'page';
+
+  // GM mode is admin-only. When the cookie is set on an admin's
+  // request, the new note lands in the GM namespace (gm_only=1) and
+  // is invisible to players until promoted via /api/notes/promote.
+  const gmOnly = isGmModeOn(req.cookies.get(GM_MODE_COOKIE)?.value, session.role);
 
   // Viewers can create plain pages (their own creator-owned notes)
   // and their own PCs; everything else is an admin/editor action.
@@ -113,8 +119,8 @@ export async function POST(req: NextRequest): Promise<Response> {
   db.query(
     `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
                         content_md, yjs_state, frontmatter_json, byte_size,
-                        updated_at, updated_by, created_at, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        updated_at, updated_by, created_at, created_by, gm_only)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     session.currentGroupId,
@@ -130,6 +136,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     session.userId,
     now,
     session.userId,
+    gmOnly ? 1 : 0,
   );
 
   // Run the derive pipeline so the characters / campaigns index
@@ -168,11 +175,14 @@ export async function POST(req: NextRequest): Promise<Response> {
 }
 
 function buildFrontmatter(
-  kind: 'page' | TemplateKind | 'pc' | 'npc' | 'ally' | 'villain' | 'item' | 'location' | 'session' | 'monster',
+  kind: 'page' | TemplateKind | 'pc' | 'npc' | 'ally' | 'villain' | 'item' | 'location' | 'session' | 'monster' | 'excalidraw',
   name: string,
   username: string,
 ): Record<string, unknown> {
   if (kind === 'page') return {};
+  if (kind === 'excalidraw') {
+    return { kind: 'excalidraw', sheet: { name } };
+  }
 
   const template = getTemplate(kind as TemplateKind);
   const sheet: Record<string, unknown> = { name };

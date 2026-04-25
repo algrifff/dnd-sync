@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { Settings2 } from 'lucide-react';
 import { PresenceClient, type Me } from './PresenceClient';
 import { WorldSearchBar } from './WorldSearchBar';
+import { GmModeToggle } from './GmModeToggle';
 import { getWorldHeader } from '@/lib/groups';
 import { logoutAction } from './login/actions';
 
@@ -18,9 +19,10 @@ export function AppHeader({
   role,
   me,
   user,
-  csrfToken: _csrfToken,
+  csrfToken,
   canCreate: _canCreate,
   groupId,
+  gmMode = false,
 }: {
   role: 'admin' | 'editor' | 'viewer';
   me: Me;
@@ -28,6 +30,8 @@ export function AppHeader({
   csrfToken?: string;
   canCreate?: boolean;
   groupId?: string;
+  /** True when the GM-mode cookie is set on this admin's session. */
+  gmMode?: boolean;
 }): ReactElement {
   const worldHeader = groupId ? getWorldHeader(groupId) : null;
   const worldName = worldHeader?.name ?? '';
@@ -72,8 +76,11 @@ export function AppHeader({
       {/* ── Centre: search (dead-centred by the grid) ── */}
       <WorldSearchBar />
 
-      {/* ── Right: user chip on sidebar-less pages, else empty ── */}
+      {/* ── Right: GM-mode pill (admin only), then user chip ── */}
       <div className="flex min-w-0 items-center justify-end gap-2">
+        {role === 'admin' && csrfToken && (
+          <GmModeToggle initialOn={gmMode} csrfToken={csrfToken} />
+        )}
         {user && (
           <>
             <span

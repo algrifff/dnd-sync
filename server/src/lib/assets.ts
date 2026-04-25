@@ -22,7 +22,10 @@ export type AssetRow = {
   original_name: string;
   uploaded_by: string | null;
   uploaded_at: number;
+  gm_only?: number;
 };
+
+export type AssetMode = 'player' | 'gm';
 
 const SUPPORTED_MIMES = new Set<string>([
   'image/png',
@@ -155,6 +158,7 @@ export function storeAssetFromBuffer(
   originalName: string,
   groupId: string,
   uploadedBy: string | null,
+  opts: { gmOnly?: boolean } = {},
 ): StoredAsset {
   const mime = sniffMime(buf, originalName);
   if (!isSupportedMime(mime)) {
@@ -165,6 +169,8 @@ export function storeAssetFromBuffer(
   hasher.update(buf);
   const hash = hasher.digest('hex');
 
+  const gmOnly = opts.gmOnly ? 1 : 0;
+
   // Dedup.
   const existing = getDb()
     .query<AssetRow, [string, string]>(
@@ -172,6 +178,13 @@ export function storeAssetFromBuffer(
     )
     .get(groupId, hash);
   if (existing) {
+    // If a player-side upload matches a GM-only asset, downgrade it —
+    // the same bytes are now demonstrably visible to a player.
+    if (!opts.gmOnly && existing.gm_only) {
+      getDb()
+        .query('UPDATE assets SET gm_only = 0 WHERE id = ?')
+        .run(existing.id);
+    }
     return {
       id: existing.id,
       hash: existing.hash,
@@ -189,10 +202,10 @@ export function storeAssetFromBuffer(
   const now = Date.now();
   getDb()
     .query(
-      `INSERT INTO assets (id, group_id, hash, mime, size, original_name, uploaded_by, uploaded_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO assets (id, group_id, hash, mime, size, original_name, uploaded_by, uploaded_at, gm_only)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(id, groupId, hash, mime, buf.byteLength, originalName, uploadedBy, now);
+    .run(id, groupId, hash, mime, buf.byteLength, originalName, uploadedBy, now, gmOnly);
 
   return {
     id,
@@ -214,12 +227,15 @@ export function storeAssetFromTempFile(
   size: number,
   groupId: string,
   uploadedBy: string | null,
+  opts: { gmOnly?: boolean } = {},
 ): StoredAsset {
   const mime = sniffMime(sniffBuffer, originalName);
   if (!isSupportedMime(mime)) {
     safelyRemove(tempPath);
     throw new Error(`rejected asset ${originalName}: unsupported mime ${mime}`);
   }
+
+  const gmOnly = opts.gmOnly ? 1 : 0;
 
   const existing = getDb()
     .query<AssetRow, [string, string]>(
@@ -228,6 +244,11 @@ export function storeAssetFromTempFile(
     .get(groupId, hash);
   if (existing) {
     safelyRemove(tempPath);
+    if (!opts.gmOnly && existing.gm_only) {
+      getDb()
+        .query('UPDATE assets SET gm_only = 0 WHERE id = ?')
+        .run(existing.id);
+    }
     return {
       id: existing.id,
       hash: existing.hash,
@@ -246,10 +267,10 @@ export function storeAssetFromTempFile(
   const now = Date.now();
   getDb()
     .query(
-      `INSERT INTO assets (id, group_id, hash, mime, size, original_name, uploaded_by, uploaded_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO assets (id, group_id, hash, mime, size, original_name, uploaded_by, uploaded_at, gm_only)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(id, groupId, hash, mime, size, originalName, uploadedBy, now);
+    .run(id, groupId, hash, mime, size, originalName, uploadedBy, now, gmOnly);
 
   return { id, hash, mime, size, originalName, reused: false };
 }
@@ -282,15 +303,19 @@ type AssetListDbRow = {
 };
 
 /** All assets in a group, for the /assets gallery. */
-export function listGroupAssets(groupId: string): AssetListEntry[] {
+export function listGroupAssets(
+  groupId: string,
+  opts: { mode?: AssetMode } = {},
+): AssetListEntry[] {
+  const gmFlag = opts.mode === 'gm' ? 1 : 0;
   return getDb()
-    .query<AssetListDbRow, [string]>(
+    .query<AssetListDbRow, [string, number]>(
       `SELECT id, mime, size, original_name, original_path, uploaded_at
          FROM assets
-        WHERE group_id = ?
+        WHERE group_id = ? AND gm_only = ?
         ORDER BY original_path COLLATE NOCASE`,
     )
-    .all(groupId)
+    .all(groupId, gmFlag)
     .map((r) => ({
       id: r.id,
       mime: r.mime,
@@ -304,8 +329,11 @@ export function listGroupAssets(groupId: string): AssetListEntry[] {
 export type AssetListEntryWithTags = AssetListEntry & { tags: string[] };
 
 /** All assets in a group with their tags, for the /assets gallery. */
-export function listGroupAssetsWithTags(groupId: string): AssetListEntryWithTags[] {
-  const assets = listGroupAssets(groupId);
+export function listGroupAssetsWithTags(
+  groupId: string,
+  opts: { mode?: AssetMode } = {},
+): AssetListEntryWithTags[] {
+  const assets = listGroupAssets(groupId, opts);
 
   const tagRows = getDb()
     .query<{ asset_id: string; tag: string }, [string]>(

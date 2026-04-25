@@ -23,6 +23,11 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
 
   const note = loadNote(session.currentGroupId, path);
   if (!note) return json({ error: 'not_found' }, 404);
+  // GM-only notes: only admins can read. 404 instead of 403 so the
+  // existence of a GM path isn't disclosed to players.
+  if (note.gm_only === 1 && session.role !== 'admin') {
+    return json({ error: 'not_found' }, 404);
+  }
 
   const tags = loadTags(session.currentGroupId, path);
 

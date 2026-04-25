@@ -26,6 +26,55 @@ export type WorldHeader = {
   iconVersion: number;
 };
 
+export type WorldFeatures = {
+  excalidraw: boolean;
+};
+
+export type WorldFeaturesPatch = {
+  excalidraw?: boolean | undefined;
+};
+
+const DEFAULT_FEATURES: WorldFeatures = { excalidraw: false };
+
+export function getWorldFeatures(groupId: string): WorldFeatures {
+  const row = getDb()
+    .query<{ features_json: string | null }, [string]>(
+      'SELECT features_json FROM groups WHERE id = ?',
+    )
+    .get(groupId);
+  if (!row?.features_json) return { ...DEFAULT_FEATURES };
+  try {
+    const parsed = JSON.parse(row.features_json) as Partial<WorldFeatures>;
+    return { ...DEFAULT_FEATURES, ...parsed };
+  } catch {
+    return { ...DEFAULT_FEATURES };
+  }
+}
+
+export function setWorldFeatures(
+  groupId: string,
+  patch: WorldFeaturesPatch,
+): WorldFeatures {
+  const db = getDb();
+  const current = getWorldFeatures(groupId);
+  const next: WorldFeatures = {
+    excalidraw: patch.excalidraw ?? current.excalidraw,
+  };
+  db.query('UPDATE groups SET features_json = ? WHERE id = ?').run(
+    JSON.stringify(next),
+    groupId,
+  );
+  // Seed the top-level "Excalidraw" folder marker the first time the
+  // feature flips on so the file tree has somewhere to anchor drawings.
+  if (next.excalidraw && !current.excalidraw) {
+    db.query(
+      `INSERT OR IGNORE INTO folder_markers (group_id, path, created_at)
+       VALUES (?, 'Excalidraw', ?)`,
+    ).run(groupId, Date.now());
+  }
+  return next;
+}
+
 export function getWorldHeader(groupId: string): WorldHeader {
   const row = getDb()
     .query<

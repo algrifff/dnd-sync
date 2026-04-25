@@ -25,6 +25,9 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
 
   const asset = getAssetById(id, session.currentGroupId);
   if (!asset) return new Response('not_found', { status: 404 });
+  if (asset.gm_only && session.role !== 'admin') {
+    return new Response('not_found', { status: 404 });
+  }
 
   const filePath = assetPath(asset.hash, asset.mime);
   if (!existsSync(filePath)) {

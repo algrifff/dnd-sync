@@ -14,8 +14,10 @@
 // trims the wire payload and unblocks the UI sooner.
 
 import type { NextRequest } from 'next/server';
+import { cookies } from 'next/headers';
 import { requireSession } from '@/lib/session';
 import { buildGraph, parseScope } from '@/lib/graph';
+import { GM_MODE_COOKIE, treeModeFor } from '@/lib/gm-mode';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +34,9 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   const scope = parseScope(req.nextUrl.searchParams.get('scope'));
   const phase = parsePhase(req.nextUrl.searchParams.get('phase'));
-  const payload = buildGraph(session.currentGroupId, scope);
+  const jar = await cookies();
+  const mode = treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role);
+  const payload = buildGraph(session.currentGroupId, scope, { mode });
 
   // Phase-scoped ETag so the nodes-only and edges-only responses
   // don't collide in the browser's HTTP cache (304s would mix the

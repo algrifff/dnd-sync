@@ -13,7 +13,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   ChevronDown,
   ChevronRight,
@@ -94,13 +94,17 @@ export function ActivePartySection({
   groupId,
   activeCampaignSlug,
   csrfToken,
-  activePath,
 }: {
   groupId: string;
   activeCampaignSlug: string | null;
   csrfToken: string;
-  activePath: string;
 }): React.JSX.Element {
+  const pathname = usePathname() ?? '';
+  // Active row highlight tracks the current note URL — derived here so
+  // the widget can live anywhere in the sidebar without prop drilling.
+  const activePath = pathname.startsWith('/notes/')
+    ? decodeURIComponent(pathname.slice('/notes/'.length))
+    : '';
   const [open, setOpen] = useState<boolean>(true);
   const [characters, setCharacters] = useState<CharacterListRow[]>([]);
   const [loading, setLoading] = useState(false);

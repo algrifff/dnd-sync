@@ -86,6 +86,15 @@ function isNoteDmOnly(groupId: string, documentName: string): boolean {
   return !!row && row.dm_only === 1;
 }
 
+function isNoteGmOnly(groupId: string, documentName: string): boolean {
+  const row = getDb()
+    .query<{ gm_only: number }, [string, string]>(
+      'SELECT gm_only FROM notes WHERE group_id = ? AND path = ?',
+    )
+    .get(groupId, documentName);
+  return !!row && row.gm_only === 1;
+}
+
 function canEditDoc(documentName: string, session: Session): boolean {
   if (session.role === 'admin' || session.role === 'editor') return true;
 
@@ -142,6 +151,24 @@ export const collabServer = new Hocuspocus({
         groupId: session.currentGroupId,
         event: EVENTS.COLLAB_AUTH_REJECTED,
         properties: { reason: 'dm_only_blocked', documentName: data.documentName },
+      });
+      throw new Error('Unauthorized');
+    }
+
+    // GM-only gate: GM-namespace notes are visible only to admins.
+    // Editors and viewers are rejected at the protocol layer so no
+    // live state ever ships to a player session.
+    if (
+      session.role !== 'admin' &&
+      !data.documentName.startsWith('.') &&
+      !data.documentName.startsWith('graph-groups:') &&
+      isNoteGmOnly(session.currentGroupId, data.documentName)
+    ) {
+      void captureServer({
+        userId: session.userId,
+        groupId: session.currentGroupId,
+        event: EVENTS.COLLAB_AUTH_REJECTED,
+        properties: { reason: 'gm_only_blocked', documentName: data.documentName },
       });
       throw new Error('Unauthorized');
     }

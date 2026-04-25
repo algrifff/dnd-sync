@@ -5,6 +5,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { getDb } from '@/lib/db';
 import { toFtsQuery } from '@/lib/search';
+import { GM_MODE_COOKIE, isGmModeOn } from '@/lib/gm-mode';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,10 +27,15 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   const db = getDb();
   const fts = toFtsQuery(q);
+  // GM-mode searches only the GM namespace; everything else searches
+  // the player namespace. Non-admins never see gm_only rows even if
+  // they fake the cookie because isGmModeOn requires role=admin.
+  const gmMode = isGmModeOn(req.cookies.get(GM_MODE_COOKIE)?.value, session.role);
+  const gmOnlyValue = gmMode ? 1 : 0;
 
   const noteRows = fts
     ? db
-        .query<{ path: string; title: string; snippet: string }, [string, string, string, number]>(
+        .query<{ path: string; title: string; snippet: string }, [string, string, string, number, number]>(
           // group_id lives directly on notes_fts (migration #33), so
           // MATCH is scoped per world inside the FTS index instead of
           // post-filtering via the JOIN. Cuts work on multi-world
@@ -43,10 +49,17 @@ export async function GET(req: NextRequest): Promise<Response> {
             WHERE notes_fts MATCH ?
               AND notes_fts.group_id = ?
               AND (n.dm_only = 0 OR ? = 1)
+              AND n.gm_only = ?
             ORDER BY notes_fts.rank
             LIMIT ${LIMIT}`,
         )
-        .all(fts, session.currentGroupId, session.currentGroupId, session.role !== 'viewer' ? 1 : 0)
+        .all(
+          fts,
+          session.currentGroupId,
+          session.currentGroupId,
+          session.role !== 'viewer' ? 1 : 0,
+          gmOnlyValue,
+        )
     : [];
 
   const assetRows = db

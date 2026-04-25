@@ -795,6 +795,29 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE user_characters ADD COLUMN body_md TEXT;
     `,
   },
+  {
+    version: 42,
+    description: 'notes.gm_only: parallel hidden namespace for the world owner',
+    sql: `
+      ALTER TABLE notes ADD COLUMN gm_only INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX notes_gm_only ON notes(group_id, gm_only);
+    `,
+  },
+  {
+    version: 43,
+    description: 'groups.features_json: per-world optional feature flags (Excalidraw etc.)',
+    sql: `
+      ALTER TABLE groups ADD COLUMN features_json TEXT NOT NULL DEFAULT '{}';
+    `,
+  },
+  {
+    version: 44,
+    description: 'assets.gm_only: hide GM-uploaded assets from players',
+    sql: `
+      ALTER TABLE assets ADD COLUMN gm_only INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX assets_gm_only ON assets(group_id, gm_only);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

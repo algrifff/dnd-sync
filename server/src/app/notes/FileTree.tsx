@@ -32,6 +32,7 @@ import {
   Map as MapIcon,
   MapPin,
   Package,
+  PenTool,
   Plus,
   ScrollText,
   Shield,
@@ -46,7 +47,6 @@ import { broadcastTreeChange } from '@/lib/tree-sync';
 import { canDropOn, isDraggableSource } from '@/lib/move-policy';
 import { RowMenu } from './RowMenu';
 import { PeerStack } from './PeerStack';
-import { ActivePartySection } from './ActivePartySection';
 
 export type FileTreeKind = 'pc' | 'npc' | 'ally' | 'villain' | 'session';
 type KindMap = Record<string, FileTreeKind>;
@@ -68,7 +68,8 @@ type CreateKind =
   | 'location'
   | 'session'
   | 'monster'
-  | 'quest';
+  | 'quest'
+  | 'excalidraw';
 
 const NEW_ENTRY_OPTIONS: Array<{
   kind: CreateKind;
@@ -89,6 +90,7 @@ const NEW_ENTRY_OPTIONS: Array<{
   { kind: 'campaign', label: 'New campaign', icon: Shield, placeholder: 'Campaign name' },
   { kind: 'pc', label: 'Player character', icon: Sword, placeholder: 'New PC' },
   { kind: 'ally', label: 'Ally', icon: UserRound, placeholder: 'New ally' },
+  { kind: 'excalidraw', label: 'Drawing', icon: PenTool, placeholder: 'New drawing' },
 ];
 
 /** Returns the subset of CreateKinds appropriate for a given folder path,
@@ -132,6 +134,11 @@ function getContextualOptions(folderPath: string | undefined, isWorldOwner: bool
   if (/^Campaigns\/[^/]+\/Creatures(\/|$)/.test(folderPath))     return { kinds: ['monster', 'folder'], isUpload: false, labelOverrides: {} };
   if (/^Campaigns\/[^/]+\/Quests(\/|$)/.test(folderPath))        return { kinds: ['quest', 'folder'],   isUpload: false, labelOverrides: {} };
 
+  // Excalidraw section — drawings + sub-folders
+  if (folderPath === 'Excalidraw' || folderPath.startsWith('Excalidraw/')) {
+    return { kinds: ['excalidraw', 'folder'], isUpload: false, labelOverrides: {} };
+  }
+
   // World Lore section
   if (folderPath === 'World Lore') {
     return { kinds: ['page', 'folder'], isUpload: false, labelOverrides: {} };
@@ -149,6 +156,7 @@ type FolderIconDef = { Icon: LucideIcon; color: string };
 
 function getFolderIcon(path: string): FolderIconDef | null {
   if (path === 'Assets') return { Icon: MapIcon, color: '#8B7355' };
+  if (path === 'Excalidraw') return { Icon: PenTool, color: '#6A7A8B' };
   if (path === 'Campaigns') return { Icon: Shield, color: '#5A7A6A' };
   if (path === 'World Lore') return { Icon: BookOpen, color: '#7B5A8B' };
   if (path === 'World Lore/World Info') return { Icon: Globe, color: '#4A7A8B' };
@@ -175,6 +183,8 @@ export function FileTree({
   isWorldOwner,
   kindMap,
   activeCampaignSlug: activeCampaignSlugProp,
+  sectionTone,
+  storageNamespace,
 }: {
   tree: Tree;
   /** Optional override. When omitted, the active path is derived from
@@ -193,6 +203,12 @@ export function FileTree({
   kindMap?: KindMap;
   /** Slug of the campaign pinned as the default for new sessions. */
   activeCampaignSlug?: string | null;
+  /** Header chip + accent style. 'gm' = wine, 'players' = neutral.
+   *  Omit when only one tree is visible (no chip). */
+  sectionTone?: 'gm' | 'players';
+  /** Suffix appended to localStorage open-state key so two trees
+   *  visible at once don't share an open-set. */
+  storageNamespace?: string;
 }): React.JSX.Element {
   const router = useRouter();
   const pathname = usePathname() ?? '';
@@ -201,7 +217,7 @@ export function FileTree({
   // with the current route even though the tree lives in a layout
   // that never unmounts across navigations.
   const activePath = activePathProp ?? decodeActiveNotePath(pathname);
-  const storageKey = `${STORAGE_KEY}.${groupId}`;
+  const storageKey = `${STORAGE_KEY}.${groupId}${storageNamespace ? '.' + storageNamespace : ''}`;
 
   // Optimistic local state for the pinned campaign — updated immediately
   // on crown click, synced to the server in the background.
@@ -653,7 +669,31 @@ export function FileTree({
 
   return (
     <KindMapContext.Provider value={kindMap ?? EMPTY_KIND_MAP}>
-    <div className="flex min-h-0 flex-1 flex-col border-r border-[var(--rule)]">
+    <div
+      className={`flex min-h-0 flex-1 flex-col border-r border-[var(--rule)]${
+        sectionTone === 'gm' ? ' border-l-2 border-l-[rgb(var(--wine-rgb)/0.4)]' : ''
+      }`}
+    >
+      {sectionTone === 'gm' && (
+        <div className="shrink-0 border-b border-[var(--rule)] bg-[rgb(var(--wine-rgb)/0.06)] px-3 py-2">
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full border border-[var(--wine)] bg-[rgb(var(--wine-rgb)/0.12)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--wine)]"
+            title="GM-only notes — not visible to players until promoted"
+          >
+            <Lock size={10} aria-hidden /> GM Notes
+          </span>
+        </div>
+      )}
+      {sectionTone === 'players' && (
+        <div className="shrink-0 border-b border-[var(--rule)] bg-[var(--parchment-sunk)]/40 px-3 py-2">
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full border border-[var(--rule)] bg-[var(--vellum)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]"
+            title="Player-visible notes"
+          >
+            <Globe size={10} aria-hidden /> Players
+          </span>
+        </div>
+      )}
       {showCampaignDialog && (
         <CampaignCreateDialog
           csrfToken={csrfToken}
@@ -666,14 +706,6 @@ export function FileTree({
           }}
         />
       )}
-      <div className="shrink-0 pt-3">
-        <ActivePartySection
-          groupId={groupId}
-          activeCampaignSlug={activeCampaignSlug}
-          csrfToken={csrfToken}
-          activePath={activePath}
-        />
-      </div>
     <nav
       aria-label="Note tree"
       className="min-h-0 flex-1 overflow-y-auto pb-3 text-sm"

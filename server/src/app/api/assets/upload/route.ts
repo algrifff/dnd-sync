@@ -8,11 +8,13 @@
 // can switch to streaming once the editor UX is stable.
 
 import type { NextRequest } from 'next/server';
+import { cookies } from 'next/headers';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { assetUploadLimiter } from '@/lib/ratelimit';
 import { storeAssetFromBuffer } from '@/lib/assets';
 import { logAudit } from '@/lib/audit';
+import { GM_MODE_COOKIE, isGmModeOn } from '@/lib/gm-mode';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,11 +60,14 @@ export async function POST(req: NextRequest): Promise<Response> {
   const buf = new Uint8Array(await file.arrayBuffer());
 
   try {
+    const jar = await cookies();
+    const gmOnly = isGmModeOn(jar.get(GM_MODE_COOKIE)?.value, session.role);
     const stored = storeAssetFromBuffer(
       buf,
       name,
       session.currentGroupId,
       session.userId,
+      { gmOnly },
     );
     assetUploadLimiter.recordSuccess(session.userId);
     logAudit({

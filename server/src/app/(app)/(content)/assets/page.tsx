@@ -5,6 +5,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { listGroupAssetsWithTags } from '@/lib/assets';
+import { GM_MODE_COOKIE, treeModeFor } from '@/lib/gm-mode';
 import { AssetsGallery } from '../../../assets/AssetsGallery';
 
 export const dynamic = 'force-dynamic';
@@ -18,7 +19,8 @@ export default async function AssetsPage(): Promise<ReactElement> {
   const session = readSession(cookieHeader);
   if (!session) redirect('/login?next=/assets');
 
-  const assets = listGroupAssetsWithTags(session.currentGroupId);
+  const mode = treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role);
+  const assets = listGroupAssetsWithTags(session.currentGroupId, { mode });
 
   return (
     <div className="flex-1 overflow-y-auto px-6 py-8">

@@ -23,6 +23,9 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   const asset = getAssetByVaultPath(path, session.currentGroupId);
   if (!asset) return new Response('not_found', { status: 404 });
+  if (asset.gm_only && session.role !== 'admin') {
+    return new Response('not_found', { status: 404 });
+  }
 
   // 302 so the browser re-requests against the canonical cached URL.
   // Relative Location keeps the redirect on the same origin whatever

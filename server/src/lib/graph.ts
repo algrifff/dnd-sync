@@ -52,36 +52,43 @@ export function parseScope(raw: string | null): GraphScope {
   return { kind: 'all' };
 }
 
-export function buildGraph(groupId: string, scope: GraphScope): GraphPayload {
+export type GraphMode = 'player' | 'gm';
+
+export function buildGraph(
+  groupId: string,
+  scope: GraphScope,
+  opts: { mode?: GraphMode } = {},
+): GraphPayload {
   const db = getDb();
+  const gmFlag = opts.mode === 'gm' ? 1 : 0;
 
   // Fetch the scoped note set first; everything else joins off these.
   type NoteRow = { path: string; title: string; updatedAt: number };
   let noteRows: NoteRow[] = [];
   if (scope.kind === 'all') {
     noteRows = db
-      .query<NoteRow, [string]>(
+      .query<NoteRow, [string, number]>(
         `SELECT path, title, updated_at AS updatedAt
-           FROM notes WHERE group_id = ?`,
+           FROM notes WHERE group_id = ? AND gm_only = ?`,
       )
-      .all(groupId);
+      .all(groupId, gmFlag);
   } else if (scope.kind === 'folder') {
     noteRows = db
-      .query<NoteRow, [string, string, string]>(
+      .query<NoteRow, [string, number, string, string]>(
         `SELECT path, title, updated_at AS updatedAt
            FROM notes
-          WHERE group_id = ? AND (path = ? OR path LIKE ? || '/%')`,
+          WHERE group_id = ? AND gm_only = ? AND (path = ? OR path LIKE ? || '/%')`,
       )
-      .all(groupId, scope.path, scope.path);
+      .all(groupId, gmFlag, scope.path, scope.path);
   } else {
     noteRows = db
-      .query<NoteRow, [string, string]>(
+      .query<NoteRow, [string, number, string]>(
         `SELECT n.path AS path, n.title AS title, n.updated_at AS updatedAt
            FROM notes n
            JOIN tags t ON t.group_id = n.group_id AND t.path = n.path
-          WHERE n.group_id = ? AND t.tag = ?`,
+          WHERE n.group_id = ? AND n.gm_only = ? AND t.tag = ?`,
       )
-      .all(groupId, scope.tag);
+      .all(groupId, gmFlag, scope.tag);
   }
 
   const pathSet = new Set<string>(noteRows.map((r) => r.path));
@@ -132,7 +139,7 @@ export function buildGraph(groupId: string, scope: GraphScope): GraphPayload {
     nodes,
     edges,
     updatedAt: maxUpdatedAt,
-    etag: `"graph-${scope.kind}-${noteRows.length}-${maxUpdatedAt}-${sha1Short(scopeKey(scope))}"`,
+    etag: `"graph-${opts.mode ?? 'player'}-${scope.kind}-${noteRows.length}-${maxUpdatedAt}-${sha1Short(scopeKey(scope))}"`,
   };
 }
 
@@ -143,17 +150,19 @@ export function buildNeighborhood(
   groupId: string,
   path: string,
   depth = 1,
+  opts: { mode?: GraphMode } = {},
 ): GraphPayload | null {
   if (depth < 1) depth = 1;
   if (depth > 2) depth = 2;
   const db = getDb();
+  const gmFlag = opts.mode === 'gm' ? 1 : 0;
 
   const root = db
-    .query<{ path: string; title: string; updatedAt: number }, [string, string]>(
+    .query<{ path: string; title: string; updatedAt: number }, [string, number, string]>(
       `SELECT path, title, updated_at AS updatedAt
-         FROM notes WHERE group_id = ? AND path = ?`,
+         FROM notes WHERE group_id = ? AND gm_only = ? AND path = ?`,
     )
-    .get(groupId, path);
+    .get(groupId, gmFlag, path);
   if (!root) return null;
 
   const neighbours = new Set<string>([root.path]);
@@ -192,12 +201,12 @@ export function buildNeighborhood(
   // restricted node set. Simpler than duplicating queries.
   const placeholders = [...neighbours].map(() => '?').join(',');
   const noteRows = db
-    .query<{ path: string; title: string; updatedAt: number }, [string, ...string[]]>(
+    .query<{ path: string; title: string; updatedAt: number }, [string, number, ...string[]]>(
       `SELECT path, title, updated_at AS updatedAt
          FROM notes
-        WHERE group_id = ? AND path IN (${placeholders})`,
+        WHERE group_id = ? AND gm_only = ? AND path IN (${placeholders})`,
     )
-    .all(groupId, ...neighbours);
+    .all(groupId, gmFlag, ...neighbours);
 
   const pathSet = new Set<string>(noteRows.map((r) => r.path));
   const maxUpdatedAt = noteRows.reduce((m, r) => (r.updatedAt > m ? r.updatedAt : m), 0);
@@ -243,7 +252,7 @@ export function buildNeighborhood(
     nodes,
     edges,
     updatedAt: maxUpdatedAt,
-    etag: `"nbhd-${depth}-${nodes.length}-${maxUpdatedAt}-${sha1Short(path)}"`,
+    etag: `"nbhd-${opts.mode ?? 'player'}-${depth}-${nodes.length}-${maxUpdatedAt}-${sha1Short(path)}"`,
   };
 }
 

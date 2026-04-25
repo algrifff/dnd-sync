@@ -23,7 +23,7 @@ const DEFAULT_FOLDERS: readonly string[] = [
  *   - Per-campaign canonical sub-folders
  */
 export function isSystemFolder(path: string): boolean {
-  if (path === 'Campaigns' || path === 'World Lore' || path === 'Assets') return true;
+  if (path === 'Campaigns' || path === 'World Lore' || path === 'Assets' || path === 'Excalidraw') return true;
   if (/^Campaigns\/[^/]+$/.test(path)) return true;
   if (/^Campaigns\/[^/]+\/(Characters|People|Enemies|Loot|Adventure Log|Places|Creatures|Quests)$/.test(path)) return true;
   return /^World Lore\/World Info$/.test(path);
@@ -94,7 +94,13 @@ type CacheEntry = { tree: Tree; snapshotKey: string };
 const treeCache = new Map<string, CacheEntry>();
 const TREE_CACHE_MAX = 20;
 
-function snapshotKey(groupId: string, hideDmOnly: boolean): string {
+export type TreeMode = 'player' | 'gm';
+
+function snapshotKey(
+  groupId: string,
+  hideDmOnly: boolean,
+  mode: TreeMode,
+): string {
   // Single round-trip: max(updated_at) + count over notes + count
   // over folder_markers. Captures every input that buildTree's two
   // SELECTs read. ~1ms even on large worlds.
@@ -112,20 +118,25 @@ function snapshotKey(groupId: string, hideDmOnly: boolean): string {
   const u = row?.u ?? 0;
   const n = row?.n ?? 0;
   const m = row?.m ?? 0;
-  return `${u}:${n}:${m}:${hideDmOnly ? 1 : 0}`;
+  return `${u}:${n}:${m}:${hideDmOnly ? 1 : 0}:${mode}`;
 }
 
-function cacheKey(groupId: string, hideDmOnly: boolean): string {
-  return `${groupId}:${hideDmOnly ? 1 : 0}`;
+function cacheKey(
+  groupId: string,
+  hideDmOnly: boolean,
+  mode: TreeMode,
+): string {
+  return `${groupId}:${hideDmOnly ? 1 : 0}:${mode}`;
 }
 
 export function buildTree(
   groupId: string,
-  opts?: { hideDmOnly?: boolean },
+  opts?: { hideDmOnly?: boolean; mode?: TreeMode },
 ): Tree {
   const hideDmOnly = !!opts?.hideDmOnly;
-  const key = cacheKey(groupId, hideDmOnly);
-  const snap = snapshotKey(groupId, hideDmOnly);
+  const mode: TreeMode = opts?.mode ?? 'player';
+  const key = cacheKey(groupId, hideDmOnly, mode);
+  const snap = snapshotKey(groupId, hideDmOnly, mode);
   const cached = treeCache.get(key);
   if (cached && cached.snapshotKey === snap) {
     // Re-insert to keep the LRU-ish ordering — Map.set on an
@@ -134,9 +145,12 @@ export function buildTree(
     treeCache.set(key, cached);
     return cached.tree;
   }
+  // GM mode: only gm_only=1 rows. Player mode: only gm_only=0 rows
+  // (and additionally hide dm_only when requested).
+  const gmClause = mode === 'gm' ? 'gm_only = 1' : 'gm_only = 0';
   const where = hideDmOnly
-    ? 'WHERE group_id = ? AND dm_only = 0'
-    : 'WHERE group_id = ?';
+    ? `WHERE group_id = ? AND dm_only = 0 AND ${gmClause}`
+    : `WHERE group_id = ? AND ${gmClause}`;
   const rows = getDb()
     .query<
       { path: string; title: string; updated_at: number },

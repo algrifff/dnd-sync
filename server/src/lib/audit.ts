@@ -24,6 +24,7 @@ export type AuditAction =
   | 'note.create'
   | 'note.destroy'
   | 'note.rename'
+  | 'note.move'
   | 'folder.create'
   | 'folder.rename'
   | 'folder.destroy'

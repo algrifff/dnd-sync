@@ -3,8 +3,10 @@
 // filtered to image mime types, most recent first.
 
 import type { NextRequest } from 'next/server';
+import { cookies } from 'next/headers';
 import { requireSession } from '@/lib/session';
 import { listGroupAssetsWithTags } from '@/lib/assets';
+import { GM_MODE_COOKIE, treeModeFor } from '@/lib/gm-mode';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +18,9 @@ export async function GET(req: NextRequest): Promise<Response> {
   const limit = clamp(parseInt(url.searchParams.get('limit') ?? '50', 10), 1, 200);
   const q = (url.searchParams.get('q') ?? '').trim().toLowerCase();
 
-  const all = listGroupAssetsWithTags(session.currentGroupId)
+  const jar = await cookies();
+  const mode = treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role);
+  const all = listGroupAssetsWithTags(session.currentGroupId, { mode })
     .filter((a) => a.mime.startsWith('image/'));
 
   const filtered = q

@@ -10,6 +10,7 @@ export const TOP_LEVEL_ALLOWED: ReadonlySet<string> = new Set([
   'Campaigns',
   'World Lore',
   'Assets',
+  'Excalidraw',
 ]);
 
 /** Validate a folder or note path against the two invariants the UI
@@ -58,6 +59,7 @@ export type NoteRow = {
   created_at: number;
   created_by: string | null;
   dm_only: number;
+  gm_only: number;
 };
 
 export type NoteAuthor = {
@@ -95,7 +97,7 @@ export function loadNote(groupId: string, path: string): NoteRow | null {
       .query<NoteRow, [string, string]>(
         `SELECT id, path, title, content_json, content_md, content_text,
                 frontmatter_json, byte_size, updated_at, updated_by,
-                created_at, created_by, dm_only
+                created_at, created_by, dm_only, gm_only
            FROM notes WHERE group_id = ? AND path = ?`,
       )
       .get(groupId, path) ?? null

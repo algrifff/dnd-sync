@@ -7,17 +7,23 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { MoreHorizontal, Copy, Trash2, EyeOff, Eye } from 'lucide-react';
+import { MoreHorizontal, Copy, Trash2, EyeOff, Eye, Send } from 'lucide-react';
 import { broadcastTreeChange } from '@/lib/tree-sync';
 
 export function NoteMenu({
   path,
   csrfToken,
   dmOnly,
+  gmOnly = false,
+  isAdmin = false,
 }: {
   path: string;
   csrfToken: string;
   dmOnly: boolean;
+  /** True when the source note is in the GM namespace. */
+  gmOnly?: boolean;
+  /** True when the caller is the world owner — gates the Promote action. */
+  isAdmin?: boolean;
 }): React.JSX.Element {
   const router = useRouter();
   const [open, setOpen] = useState<boolean>(false);
@@ -96,6 +102,46 @@ export function NoteMenu({
     });
   }, [csrfToken, path, router, dmState]);
 
+  const promote = useCallback(
+    (mode: 'copy' | 'move') => {
+      setOpen(false);
+      const dest = prompt(
+        `Promote this note to players. Destination path:`,
+        path,
+      );
+      if (!dest) return;
+      const trimmed = dest.trim();
+      if (!trimmed) return;
+      startTransition(async () => {
+        try {
+          const res = await fetch('/api/notes/promote', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': csrfToken,
+            },
+            body: JSON.stringify({ fromPath: path, toPath: trimmed, mode }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok || !body.ok) {
+            alert(body.error ?? `Promote failed (HTTP ${res.status})`);
+            return;
+          }
+          if (mode === 'move') {
+            // The current note is no longer in the GM namespace —
+            // navigate to wherever it landed (player view).
+            router.push('/notes/' + body.path.split('/').map(encodeURIComponent).join('/'));
+          }
+          router.refresh();
+          broadcastTreeChange();
+        } catch (err) {
+          alert(err instanceof Error ? err.message : 'network error');
+        }
+      });
+    },
+    [csrfToken, path, router],
+  );
+
   const destroy = useCallback(() => {
     setOpen(false);
     if (!confirm(`Delete "${path}"? This can't be undone.`)) return;
@@ -143,6 +189,22 @@ export function NoteMenu({
           <MenuItem onClick={duplicate} icon={<Copy size={14} aria-hidden />}>
             Duplicate
           </MenuItem>
+          {isAdmin && gmOnly && (
+            <>
+              <MenuItem
+                onClick={() => promote('copy')}
+                icon={<Send size={14} aria-hidden />}
+              >
+                Promote (copy to players)
+              </MenuItem>
+              <MenuItem
+                onClick={() => promote('move')}
+                icon={<Send size={14} aria-hidden />}
+              >
+                Promote (move to players)
+              </MenuItem>
+            </>
+          )}
           <MenuItem
             onClick={toggleDm}
             icon={

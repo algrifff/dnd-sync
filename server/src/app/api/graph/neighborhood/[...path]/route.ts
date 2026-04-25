@@ -5,9 +5,11 @@
 // full vault graph and re-queryable cheaply as the user navigates.
 
 import type { NextRequest } from 'next/server';
+import { cookies } from 'next/headers';
 import { requireSession } from '@/lib/session';
 import { decodePath } from '@/lib/notes';
 import { buildNeighborhood } from '@/lib/graph';
+import { GM_MODE_COOKIE, treeModeFor } from '@/lib/gm-mode';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +26,9 @@ export async function GET(req: NextRequest, ctx: Ctx): Promise<Response> {
   const depthRaw = Number(req.nextUrl.searchParams.get('depth') ?? '1');
   const depth = Number.isFinite(depthRaw) ? Math.max(1, Math.min(2, Math.floor(depthRaw))) : 1;
 
-  const payload = buildNeighborhood(session.currentGroupId, path, depth);
+  const jar = await cookies();
+  const mode = treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role);
+  const payload = buildNeighborhood(session.currentGroupId, path, depth, { mode });
   if (!payload) return json({ error: 'not_found' }, 404);
 
   if (req.headers.get('if-none-match') === payload.etag) {

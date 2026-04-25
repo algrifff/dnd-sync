@@ -3,7 +3,9 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { buildTree } from '@/lib/tree';
+import { GM_MODE_COOKIE, treeModeFor } from '@/lib/gm-mode';
 import { listNoteKinds } from '@/lib/characters';
+import { getWorldFeatures } from '@/lib/groups';
 import { AppHeader } from '../../AppHeader';
 import { NoteTabBar } from '../../NoteTabBar';
 import { SidebarHeader } from '../../SidebarHeader';
@@ -27,8 +29,11 @@ export default async function SettingsLayout({
   const session = readSession(cookieHeader);
   if (!session) redirect('/login?next=/settings');
 
-  const tree = buildTree(session.currentGroupId);
+  const gmMode = treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role) === 'gm';
+  const playerTree = buildTree(session.currentGroupId, { mode: 'player' });
+  const gmTree = gmMode ? buildTree(session.currentGroupId, { mode: 'gm' }) : null;
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
+  const features = getWorldFeatures(session.currentGroupId);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -44,18 +49,33 @@ export default async function SettingsLayout({
         csrfToken={session.csrfToken}
         canCreate={session.role !== 'viewer'}
         groupId={session.currentGroupId}
+        gmMode={gmMode}
       />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <aside className="hidden h-full w-[260px] shrink-0 flex-col bg-[var(--parchment-sunk)]/60 md:flex">
-          <SidebarHeader role={session.role} />
+          <SidebarHeader role={session.role} features={features} />
+          {gmTree && (
+            <FileTree
+              tree={gmTree}
+              activePath=""
+              groupId={session.currentGroupId}
+              csrfToken={session.csrfToken}
+              canCreate={session.role !== 'viewer'}
+              isWorldOwner={session.role === 'admin'}
+              kindMap={kindMap}
+              sectionTone="gm"
+              storageNamespace="gm"
+            />
+          )}
           <FileTree
-            tree={tree}
+            tree={playerTree}
             activePath=""
             groupId={session.currentGroupId}
             csrfToken={session.csrfToken}
             canCreate={session.role !== 'viewer'}
             isWorldOwner={session.role === 'admin'}
             kindMap={kindMap}
+            {...(gmMode ? { sectionTone: 'players' as const, storageNamespace: 'player' } : {})}
           />
           <SidebarFooter username={session.username} />
         </aside>

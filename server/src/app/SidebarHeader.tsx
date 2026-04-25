@@ -10,12 +10,15 @@ import {
   Tag,
   Share2,
   Image as ImageIcon,
+  PenTool,
 } from 'lucide-react';
 
 export function SidebarHeader({
   role: _role,
+  features,
 }: {
   role: 'admin' | 'editor' | 'viewer';
+  features?: { excalidraw?: boolean };
 }): ReactElement {
   return (
     <div className="flex shrink-0 items-center justify-center gap-0.5 border-b border-r border-[var(--rule)] px-2 py-1.5">
@@ -23,6 +26,9 @@ export function SidebarHeader({
       <IconLink href="/tags" label="Tags" icon={<Tag size={16} aria-hidden />} />
       <IconLink href="/graph" label="Graph" icon={<Share2 size={16} aria-hidden />} />
       <IconLink href="/assets" label="Assets" icon={<ImageIcon size={16} aria-hidden />} />
+      {features?.excalidraw && (
+        <IconLink href="/excalidraw" label="Excalidraw" icon={<PenTool size={16} aria-hidden />} />
+      )}
     </div>
   );
 }
