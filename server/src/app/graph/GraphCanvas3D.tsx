@@ -480,8 +480,10 @@ function CampaignLabels({ placed }: { placed: Placed[] }) {
           center
           distanceFactor={20}
           pointerEvents="none"
+          className="g3d-label-wrap"
         >
           <div
+            className="g3d-label"
             style={{
               color: '#FFFFFF',
               fontFamily: 'Inter, system-ui, sans-serif',
@@ -492,8 +494,6 @@ function CampaignLabels({ placed }: { placed: Placed[] }) {
               opacity: 0.7,
               textShadow: '0 0 6px rgba(0,0,0,0.85), 0 1px 2px rgba(0,0,0,0.6)',
               whiteSpace: 'nowrap',
-              pointerEvents: 'none',
-              userSelect: 'none',
             }}
           >
             {g.label}
@@ -574,9 +574,11 @@ function NodeLabel({
       center
       pointerEvents="none"
       zIndexRange={[10, 0]}
+      className="g3d-label-wrap"
     >
       <div
         ref={divRef}
+        className="g3d-label"
         style={{
           color: '#FFFFFF',
           fontFamily: 'Inter, system-ui, sans-serif',
@@ -588,13 +590,6 @@ function NodeLabel({
           whiteSpace: 'nowrap',
           opacity: 0,
           willChange: 'opacity',
-          // Belt-and-braces — the parent <Html pointerEvents="none">
-          // sets it on the wrapper div, but explicitly disabling it on
-          // the inner div ensures the cursor crossing a label can't
-          // accidentally fire onPointerOut on the InstancedMesh below
-          // and pop the hovered star back to its base color.
-          pointerEvents: 'none',
-          userSelect: 'none',
         }}
       >
         {p.title}
@@ -812,6 +807,13 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
       className="relative flex-1"
       style={{ background: bgColor, minHeight: 0, minWidth: 0 }}
     >
+      {/* Lock the entire <Html> label subtree out of the pointer event
+          path. drei's <Html pointerEvents="none"> only sets the
+          outermost wrapper; an internal transform layer keeps default
+          'auto' which was absorbing clicks meant for the spheres
+          underneath. The subtree selector with !important nukes that
+          completely so cursor and clicks pass through to the canvas. */}
+      <style>{`.g3d-label-wrap, .g3d-label-wrap *, .g3d-label, .g3d-label * { pointer-events: none !important; user-select: none !important; }`}</style>
       <Canvas
         camera={{ position: [0, 0, 60], fov: 55, near: 0.1, far: 2000 }}
         dpr={[1, 2]}
