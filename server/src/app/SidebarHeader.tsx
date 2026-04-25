@@ -9,6 +9,7 @@ import {
   Home,
   Tag,
   Share2,
+  Boxes,
   Image as ImageIcon,
   PenTool,
 } from 'lucide-react';
@@ -25,6 +26,7 @@ export function SidebarHeader({
       <IconLink href="/home" label="Home" icon={<Home size={16} aria-hidden />} />
       <IconLink href="/tags" label="Tags" icon={<Tag size={16} aria-hidden />} />
       <IconLink href="/graph" label="Graph" icon={<Share2 size={16} aria-hidden />} />
+      <IconLink href="/graph-3d" label="Graph (3D)" icon={<Boxes size={16} aria-hidden />} />
       <IconLink href="/assets" label="Assets" icon={<ImageIcon size={16} aria-hidden />} />
       {features?.excalidraw && (
         <IconLink href="/excalidraw" label="Excalidraw" icon={<PenTool size={16} aria-hidden />} />
