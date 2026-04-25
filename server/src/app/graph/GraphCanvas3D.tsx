@@ -171,24 +171,26 @@ function relaxOverlaps(placed: Placed[]): void {
   }
 }
 
-// One InstancedMesh for all stars. emissive=white; bloom does the glow work.
+// One InstancedMesh for all stars. emissive=star color; bloom does the glow work.
 function Stars({
   placed,
   hoverIdx,
   setHoverIdx,
   candlelight,
+  starColor,
   onClickIdx,
 }: {
   placed: Placed[];
   hoverIdx: number | null;
   setHoverIdx: (i: number | null) => void;
   candlelight: THREE.Color;
+  starColor: string;
   onClickIdx: (i: number) => void;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const instColor = useMemo(() => new THREE.Color(), []);
-  const white = useMemo(() => new THREE.Color('#FFFFFF'), []);
+  const baseColor = useMemo(() => new THREE.Color(starColor), [starColor]);
 
   useEffect(() => {
     const mesh = meshRef.current;
@@ -198,16 +200,13 @@ function Stars({
       dummy.scale.setScalar(p.scale);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
-      // emissive baked into instance color via MeshBasicMaterial-equivalent;
-      // we use MeshStandardMaterial below with emissive=white and modulate
-      // via per-instance color (acts as a multiplier on emissive).
       const intensity = 0.85 + Math.min(0.6, p.degree * 0.04);
-      instColor.copy(white).multiplyScalar(intensity);
+      instColor.copy(baseColor).multiplyScalar(intensity);
       mesh.setColorAt(i, instColor);
     });
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [placed, dummy, instColor, white]);
+  }, [placed, dummy, instColor, baseColor]);
 
   // Hover tint: re-write color for hovered idx each frame it changes.
   useEffect(() => {
@@ -218,12 +217,12 @@ function Stars({
         instColor.copy(candlelight).multiplyScalar(1.6);
       } else {
         const intensity = 0.85 + Math.min(0.6, p.degree * 0.04);
-        instColor.copy(white).multiplyScalar(intensity);
+        instColor.copy(baseColor).multiplyScalar(intensity);
       }
       mesh.setColorAt(i, instColor);
     });
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [hoverIdx, placed, instColor, white, candlelight]);
+  }, [hoverIdx, placed, instColor, baseColor, candlelight]);
 
   return (
     <instancedMesh
@@ -348,6 +347,33 @@ function HoverLabel({ placed, idx, color }: { placed: Placed[]; idx: number | nu
 
 type LoadPhase = 'fetching' | 'placing' | 'ready' | 'error';
 
+// Preset palettes pulled from DESIGN.md and ACCENT_PALETTE in lib/users.ts.
+// We keep hex literals here because three.js materials need real colour
+// values, not CSS variables — this is the same exception that lets the
+// rest of this file use #FFFFFF.
+const STAR_PRESETS: Array<{ id: string; label: string; hex: string }> = [
+  { id: 'white', label: 'Starlight', hex: '#FFFFFF' },
+  { id: 'candlelight', label: 'Candlelight', hex: '#D4A85A' },
+  { id: 'moss', label: 'Moss', hex: '#7B8A5F' },
+  { id: 'sage', label: 'Sage', hex: '#6B7F8E' },
+  { id: 'wine', label: 'Wine', hex: '#8B4A52' },
+  { id: 'embers', label: 'Embers', hex: '#B5572A' },
+  { id: 'wisteria', label: 'Wisteria', hex: '#6A5D8B' },
+  { id: 'ink', label: 'Ink', hex: '#2A241E' },
+];
+
+const BG_PRESETS: Array<{ id: string; label: string; hex: string }> = [
+  { id: 'shadow', label: 'Shadow', hex: '#0A0806' },
+  { id: 'ink', label: 'Ink', hex: '#1E1A15' },
+  { id: 'vellum-night', label: 'Vellum (night)', hex: '#3A342E' },
+  { id: 'parchment', label: 'Parchment', hex: '#F4EDE0' },
+  { id: 'parchment-sunk', label: 'Parchment sunk', hex: '#EAE1CF' },
+  { id: 'wine', label: 'Wine', hex: '#3B1F22' },
+  { id: 'sage', label: 'Sage', hex: '#1F2B33' },
+];
+
+const STORAGE_KEY = 'graph3d:colors';
+
 export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElement {
   const router = useRouter();
   const [data, setData] = useState<GraphPayload | null>(null);
@@ -355,9 +381,35 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   const [palette, setPalette] = useState<Palette | null>(null);
   const [phase, setPhase] = useState<LoadPhase>('fetching');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [starColor, setStarColor] = useState<string>('#FFFFFF');
+  const [bgColor, setBgColor] = useState<string>('#0A0806');
   useEffect(() => {
     setPalette(readPalette());
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { star?: string; bg?: string };
+          if (parsed.star) setStarColor(parsed.star);
+          if (parsed.bg) setBgColor(parsed.bg);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ star: starColor, bg: bgColor }),
+      );
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }, [starColor, bgColor]);
 
   useEffect(() => {
     let cancelled = false;
@@ -405,15 +457,15 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   return (
     <div
       className="relative flex-1"
-      style={{ background: `#${palette.background.getHexString()}`, minHeight: 0, minWidth: 0 }}
+      style={{ background: bgColor, minHeight: 0, minWidth: 0 }}
     >
       <Canvas
         camera={{ position: [0, 0, 60], fov: 55, near: 0.1, far: 2000 }}
         dpr={[1, 2]}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
       >
-        <color attach="background" args={[`#${palette.background.getHexString()}`]} />
-        <fog attach="fog" args={[`#${palette.background.getHexString()}`, 60, 320]} />
+        <color attach="background" args={[bgColor]} />
+        <fog attach="fog" args={[bgColor, 60, 320]} />
         <ambientLight intensity={0.25} />
 
         {placed.length > 0 && (
@@ -424,6 +476,7 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
               hoverIdx={hoverIdx}
               setHoverIdx={setHoverIdx}
               candlelight={palette.candlelight}
+              starColor={starColor}
               onClickIdx={onClickIdx}
             />
             <Edges placed={placed} edges={data?.edges ?? []} color={palette.edge} />
@@ -438,6 +491,17 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
           <Bloom luminanceThreshold={0.2} luminanceSmoothing={0.3} intensity={1.6} mipmapBlur />
         </EffectComposer>
       </Canvas>
+
+      <ColorPanel
+        starColor={starColor}
+        bgColor={bgColor}
+        onStarChange={setStarColor}
+        onBgChange={setBgColor}
+        onReset={() => {
+          setStarColor('#FFFFFF');
+          setBgColor('#0A0806');
+        }}
+      />
 
       {phase !== 'ready' && (
         <LoadingOverlay
@@ -498,6 +562,142 @@ function LoadingOverlay({
         {status}
       </div>
     </div>
+  );
+}
+
+function ColorPanel({
+  starColor,
+  bgColor,
+  onStarChange,
+  onBgChange,
+  onReset,
+}: {
+  starColor: string;
+  bgColor: string;
+  onStarChange: (hex: string) => void;
+  onBgChange: (hex: string) => void;
+  onReset: () => void;
+}) {
+  const [open, setOpen] = useState<boolean>(true);
+  return (
+    <div
+      className="absolute right-3 top-3 z-10"
+      style={{ pointerEvents: 'auto' }}
+    >
+      <div
+        className="rounded-[10px] border bg-[var(--vellum)] text-[var(--ink)] shadow-[0_6px_18px_rgb(var(--ink-rgb)/0.10)]"
+        style={{ borderColor: 'var(--rule)', minWidth: 220 }}
+      >
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+          aria-expanded={open}
+          aria-label="Toggle colour panel"
+        >
+          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
+            Colours
+          </span>
+          <span aria-hidden className="flex items-center gap-1.5">
+            <ColorChip color={starColor} />
+            <ColorChip color={bgColor} />
+            <span className="text-[var(--ink-muted)]">{open ? '▾' : '▸'}</span>
+          </span>
+        </button>
+        {open && (
+          <div className="space-y-3 px-3 pb-3">
+            <ColorRow
+              label="Star"
+              value={starColor}
+              presets={STAR_PRESETS}
+              onChange={onStarChange}
+            />
+            <ColorRow
+              label="Background"
+              value={bgColor}
+              presets={BG_PRESETS}
+              onChange={onBgChange}
+            />
+            <button
+              type="button"
+              onClick={onReset}
+              className="w-full rounded-[6px] border px-2 py-1 text-xs text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)]"
+              style={{ borderColor: 'var(--rule)' }}
+            >
+              Reset to defaults
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ColorRow({
+  label,
+  value,
+  presets,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  presets: Array<{ id: string; label: string; hex: string }>;
+  onChange: (hex: string) => void;
+}) {
+  const normalized = value.toLowerCase();
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] uppercase tracking-wide text-[var(--ink-muted)]">
+          {label}
+        </span>
+        <label
+          className="flex items-center gap-1.5 text-[11px] text-[var(--ink-soft)] cursor-pointer"
+          title="Custom colour"
+        >
+          <span>Custom</span>
+          <input
+            type="color"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="h-5 w-7 cursor-pointer rounded-[4px] border bg-transparent p-0"
+            style={{ borderColor: 'var(--rule)' }}
+          />
+        </label>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {presets.map((p) => {
+          const selected = p.hex.toLowerCase() === normalized;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => onChange(p.hex)}
+              title={`${p.label} (${p.hex})`}
+              aria-label={p.label}
+              aria-pressed={selected}
+              className="h-6 w-6 rounded-full transition hover:scale-110"
+              style={{
+                background: p.hex,
+                boxShadow: selected
+                  ? '0 0 0 2px var(--candlelight)'
+                  : '0 0 0 1px var(--rule)',
+              }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ColorChip({ color }: { color: string }) {
+  return (
+    <span
+      aria-hidden
+      className="inline-block h-3 w-3 rounded-full"
+      style={{ background: color, boxShadow: '0 0 0 1px var(--rule)' }}
+    />
   );
 }
 
