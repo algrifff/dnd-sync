@@ -36,6 +36,11 @@ export function securityHeaders(): Record<string, string> {
     "font-src 'self' data:",
     "connect-src 'self' ws: wss:",
     "frame-src 'self'",
+    // troika-three-text (used by drei <Text> in /graph-3d) spawns its
+    // SDF generator in a Web Worker created from a blob: URL. Without an
+    // explicit worker-src, browsers fall back to script-src and block
+    // the blob: scheme even with 'unsafe-inline'.
+    "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
