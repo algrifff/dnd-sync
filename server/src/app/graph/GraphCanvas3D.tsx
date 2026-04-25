@@ -178,8 +178,9 @@ const SCRATCH_NDC = new THREE.Vector3();
 const SCRATCH_MOUSE_WORLD = new THREE.Vector3();
 
 // Magnetic pull radius in NDC (screen) units. Cursor must be within this
-// proximity in screen-space for a star to feel the tug.
-const MAGNET_RADIUS_NDC = 0.18;
+// proximity in screen-space for a star to feel the tug. The same radius
+// also drives a colour ramp toward candlelight — closer = warmer.
+const MAGNET_RADIUS_NDC = 0.36;
 // Maximum fractional pull toward the cursor at the very centre. Stars
 // only travel up to MAGNET_STRENGTH × (cursor-world − star-world).
 const MAGNET_STRENGTH = 0.18;
@@ -215,6 +216,11 @@ function Stars({
   // Track the last hovered idx written so we don't repaint colors on
   // every frame when nothing has changed.
   const prevHover = useRef<number | null>(null);
+  // Stars currently inside the magnet radius (and therefore being
+  // colour-lerped toward candlelight). When a star leaves the set we
+  // need to repaint it back to its base colour exactly once — this
+  // tracks the previous frame's set so we can do that diff.
+  const prevAttracted = useRef<Set<number>>(new Set());
 
   useFrame((state) => {
     const mesh = meshRef.current;
@@ -222,16 +228,20 @@ function Stars({
     const { camera, pointer, clock } = state;
     const t = clock.getElapsedTime();
 
+    const newAttracted = new Set<number>();
+    let colorsDirty = false;
+
     for (let i = 0; i < placed.length; i++) {
       const p = placed[i];
       if (!p) continue;
 
-      // Magnetic pull. Project the star to NDC; if the pointer is close
-      // to that NDC point, unproject the pointer at the star's depth to
-      // get a world-space target and ease toward it. The hovered star is
-      // skipped — once you're on it, we don't want it running away from
-      // (or chasing) the cursor and toggling hover state.
+      // Magnetic proximity — single screen-space distance read, used for
+      // both the position pull and the candlelight colour ramp. The
+      // hovered star is excluded from the magnet (so it doesn't slide
+      // under the cursor) but still gets full candlelight via the hover
+      // branch below.
       let pullX = 0, pullY = 0, pullZ = 0;
+      let proximity = 0; // 0..1, 1 at cursor centre, 0 at/outside rim
       if (i !== hoverIdx) {
         SCRATCH_NDC.copy(p.pos).project(camera);
         // Skip stars behind the camera (z > 1 in clip space after project).
@@ -240,13 +250,16 @@ function Stars({
           const dy = pointer.y - SCRATCH_NDC.y;
           const screenDist = Math.sqrt(dx * dx + dy * dy);
           if (screenDist < MAGNET_RADIUS_NDC) {
-            // Smooth falloff so the tug eases off at the rim.
-            const k = 1 - screenDist / MAGNET_RADIUS_NDC;
+            const k = 1 - screenDist / MAGNET_RADIUS_NDC; // 1 at centre
+            // Position pull: quadratic falloff so the rim is gentle.
             const strength = k * k * MAGNET_STRENGTH;
             SCRATCH_MOUSE_WORLD.set(pointer.x, pointer.y, SCRATCH_NDC.z).unproject(camera);
             pullX = (SCRATCH_MOUSE_WORLD.x - p.pos.x) * strength;
             pullY = (SCRATCH_MOUSE_WORLD.y - p.pos.y) * strength;
             pullZ = (SCRATCH_MOUSE_WORLD.z - p.pos.z) * strength;
+            // Colour ramp: linear in `k` so the warm tint reaches you
+            // a bit before the position tug becomes obvious.
+            proximity = k;
           }
         }
       }
@@ -261,9 +274,6 @@ function Stars({
         WAVE_B.kx * p.pos.x + WAVE_B.ky * p.pos.y + WAVE_B.kz * p.pos.z - WAVE_B.omega * t;
       const wA = Math.sin(phaseA);
       const wB = Math.sin(phaseB);
-      // Combine the two so each axis gets contributions from both waves
-      // in different proportions. The combined trajectory is a Lissajous
-      // figure that never closes neatly — feels organic.
       const driftX = (wA + wB * 0.4) * WAVE_AMP;
       const driftY = (wB - wA * 0.5) * WAVE_AMP;
       const driftZ = (wA * 0.6 + wB * 0.7) * WAVE_AMP;
@@ -276,11 +286,39 @@ function Stars({
       dummy.scale.setScalar(p.scale);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
+
+      // Per-frame colour write — only for stars currently inside the
+      // magnet radius. Lerps from base toward candlelight by proximity.
+      if (proximity > 0) {
+        newAttracted.add(i);
+        const intensity = 0.85 + Math.min(0.6, p.degree * 0.04);
+        // Set scratch to base colour, then lerp toward candlelight.
+        instColor.copy(baseColor).multiplyScalar(intensity);
+        instColor.lerp(candlelight, proximity);
+        // Push slightly past 1.0 near the centre so the bloom catches
+        // the warm tint, mirroring the hover treatment.
+        instColor.multiplyScalar(1 + proximity * 0.4);
+        mesh.setColorAt(i, instColor);
+        colorsDirty = true;
+      }
     }
     mesh.instanceMatrix.needsUpdate = true;
 
-    // Color repaint only when hover changes. Touches at most two
-    // instances (old + new) so it's nearly free.
+    // Reset stars that were attracted last frame but aren't this frame.
+    for (const idx of prevAttracted.current) {
+      if (newAttracted.has(idx) || idx === hoverIdx) continue;
+      const p = placed[idx];
+      if (!p) continue;
+      const intensity = 0.85 + Math.min(0.6, p.degree * 0.04);
+      instColor.copy(baseColor).multiplyScalar(intensity);
+      mesh.setColorAt(idx, instColor);
+      colorsDirty = true;
+    }
+    prevAttracted.current = newAttracted;
+
+    // Hover transition — runs in addition to the proximity ramp so that
+    // the moment the cursor lands on a star it locks at full candlelight
+    // intensity (matches the previous behaviour).
     if (prevHover.current !== hoverIdx) {
       const repaint = (idx: number | null) => {
         if (idx == null) return;
@@ -296,9 +334,11 @@ function Stars({
       };
       repaint(prevHover.current);
       repaint(hoverIdx);
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      colorsDirty = true;
       prevHover.current = hoverIdx;
     }
+
+    if (colorsDirty && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   });
 
   // Initial color paint — runs once per dataset / star-color change.
