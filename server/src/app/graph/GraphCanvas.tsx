@@ -1154,6 +1154,13 @@ export function GraphCanvas({
         style={linkMode ? { cursor: 'crosshair' } : undefined}
       />
 
+      <GraphLoadingOverlay
+        status={status}
+        error={error}
+        counts={counts}
+        edgeProgress={edgeProgress}
+      />
+
       {/* Peer cursors in graph space. Each peer broadcasts their
           mouse in sigma's internal graph coordinates; we convert
           back to viewport pixels every frame, so a peer's cursor
@@ -1840,6 +1847,109 @@ function GraphCursors({
   );
 }
 
+
+function GraphLoadingOverlay({
+  status,
+  error,
+  counts,
+  edgeProgress,
+}: {
+  status: 'idle' | 'loading' | 'error' | 'ready';
+  error: string | null;
+  counts: { nodes: number; edges: number };
+  edgeProgress: { loaded: number; total: number };
+}): React.JSX.Element | null {
+  const buildingEdges =
+    status === 'ready' &&
+    edgeProgress.total > 0 &&
+    edgeProgress.loaded < edgeProgress.total;
+  const visible = status === 'idle' || status === 'loading' || status === 'error' || buildingEdges;
+  if (!visible) return null;
+
+  let title = 'Loading mind-map…';
+  let detail: string | null = null;
+  if (status === 'idle') title = 'Preparing mind-map…';
+  if (status === 'loading') {
+    title = 'Loading mind-map…';
+    detail = 'Fetching nodes from the vault.';
+  }
+  if (buildingEdges) {
+    title = 'Weaving links…';
+    detail = `${edgeProgress.loaded} / ${edgeProgress.total} edges · ${counts.nodes} nodes placed`;
+  }
+  if (status === 'error') {
+    title = 'Failed to load';
+    detail = error ?? 'Unknown error';
+  }
+
+  // Edge-build phase only shows a slim top-bar; initial load shows centered card.
+  if (buildingEdges) {
+    const pct = Math.round((edgeProgress.loaded / edgeProgress.total) * 100);
+    return (
+      <div
+        aria-live="polite"
+        className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full border border-[var(--rule)] bg-[var(--vellum)] px-3 py-1.5 text-xs text-[var(--ink-soft)] shadow-[0_6px_18px_rgb(var(--ink-rgb)/0.08)]"
+      >
+        <span className="inline-flex items-center gap-2">
+          <GraphSpinner size={12} />
+          <span>{title}</span>
+          <span className="text-[var(--ink-muted)]">{detail}</span>
+          <span
+            aria-hidden
+            className="inline-block h-1.5 w-24 overflow-hidden rounded-full bg-[var(--rule)]"
+          >
+            <span
+              className="block h-full bg-[var(--candlelight)] transition-[width] duration-150 ease-linear"
+              style={{ width: `${pct}%` }}
+            />
+          </span>
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      aria-live="polite"
+      role="status"
+      className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center"
+    >
+      <div className="pointer-events-auto flex flex-col items-center gap-3 rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] px-6 py-5 shadow-[0_10px_30px_rgb(var(--ink-rgb)/0.10)]">
+        {status !== 'error' && <GraphSpinner size={24} />}
+        <div className="text-sm font-medium text-[var(--ink)]">{title}</div>
+        {detail && (
+          <div
+            className={`text-xs ${
+              status === 'error' ? 'text-[var(--wine)]' : 'text-[var(--ink-soft)]'
+            }`}
+          >
+            {detail}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GraphSpinner({ size = 20 }: { size?: number }): React.JSX.Element {
+  return (
+    <>
+      <span
+        aria-hidden
+        style={{
+          width: size,
+          height: size,
+          border: '2px solid var(--rule)',
+          borderTopColor: 'var(--candlelight)',
+          borderRadius: '50%',
+          display: 'inline-block',
+          animation: 'graph2d-spin 0.9s linear infinite',
+        }}
+      />
+      <style>{`@keyframes graph2d-spin { to { transform: rotate(360deg); } }`}</style>
+    </>
+  );
+}
 
 function buildCollabUrl(): string {
   if (typeof window === 'undefined') return 'ws://localhost/collab';
