@@ -745,6 +745,7 @@ export function FileTree({
             activePath={activePath}
             canCreate={canCreate}
             isWorldOwner={isWorldOwner}
+            {...(sectionTone !== undefined ? { sectionTone } : {})}
             csrfToken={csrfToken}
             groupId={groupId}
             activeCampaignSlug={activeCampaignSlug}
@@ -913,6 +914,7 @@ function TreeRow({
   activePath,
   canCreate,
   isWorldOwner,
+  sectionTone,
   csrfToken,
   groupId,
   isRenaming,
@@ -939,6 +941,7 @@ function TreeRow({
   activePath: string;
   canCreate: boolean;
   isWorldOwner: boolean;
+  sectionTone?: 'gm' | 'players';
   csrfToken: string;
   groupId: string;
   isRenaming: boolean;
@@ -1128,8 +1131,7 @@ function TreeRow({
             </span>
           )}
           {(() => {
-            const isCampaignRoot = /^Campaigns\/[^/]+$/.test(item.path);
-            if (!isCampaignRoot) return null;
+            if (!/^Campaigns\/[^/]+$/.test(item.path)) return null;
             const slug = item.path.slice('Campaigns/'.length);
             const isActive = activeCampaignSlug === slug;
             if (isWorldOwner) {
@@ -1176,12 +1178,25 @@ function TreeRow({
                 >
                   <Lock size={11} aria-hidden />
                 </span>
+              ) : /^Campaigns\/[^/]+$/.test(item.path) ? (
+                isWorldOwner && sectionTone === 'gm' && (
+                  <RowMenu
+                    kind="folder"
+                    path={item.path}
+                    csrfToken={csrfToken}
+                    onStartRename={onStartRename}
+                    activePath={activePath}
+                    isWorldOwner={isWorldOwner}
+                    groupId={groupId}
+                  />
+                )
               ) : (
                 <RowMenu
                   kind="folder"
                   path={item.path}
                   csrfToken={csrfToken}
                   onStartRename={onStartRename}
+                  activePath={activePath}
                 />
               )}
             </div>
@@ -1248,6 +1263,7 @@ function TreeRow({
               onStartRename={onStartRename}
               isWorldOwner={isWorldOwner}
               groupId={groupId}
+              activePath={activePath}
               {...(kindMap[item.path] !== undefined ? { noteKind: kindMap[item.path] } : {})}
             />
           </div>

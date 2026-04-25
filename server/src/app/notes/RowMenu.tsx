@@ -26,6 +26,9 @@ type Props = {
   isWorldOwner?: boolean;
   /** Needed to fetch the member list in the transfer dialog. */
   groupId?: string;
+  /** Currently-open note path. When the deleted item is (or contains) this
+   *  path the user is redirected to the world home to avoid a 404. */
+  activePath?: string;
 };
 
 export function RowMenu({
@@ -36,6 +39,7 @@ export function RowMenu({
   noteKind,
   isWorldOwner,
   groupId,
+  activePath,
 }: Props): React.JSX.Element {
   const router = useRouter();
   const [open, setOpen] = useState<boolean>(false);
@@ -95,6 +99,14 @@ export function RowMenu({
 
   const destroy = useCallback(async () => {
     setOpen(false);
+
+    // After deletion, if the user is viewing the deleted note (or a note
+    // inside the deleted folder), redirect them to the world home to avoid a 404.
+    const activeIsAffected =
+      activePath != null &&
+      (activePath === path || activePath.startsWith(path + '/'));
+    const worldHome = '/notes/' + encodeURIComponent(path.split('/')[0] ?? '');
+
     if (kind === 'file') {
       if (!confirm(`Delete "${path}"? This can't be undone.`)) return;
       try {
@@ -110,8 +122,12 @@ export function RowMenu({
           alert(body.error ?? `Delete failed (HTTP ${res.status})`);
           return;
         }
-        router.refresh();
         broadcastTreeChange();
+        if (activeIsAffected) {
+          router.push(worldHome);
+        } else {
+          router.refresh();
+        }
       } catch (err) {
         alert(err instanceof Error ? err.message : 'network error');
       }
@@ -137,13 +153,17 @@ export function RowMenu({
           alert(body.error ?? `Delete failed (HTTP ${res.status})`);
           return;
         }
-        router.refresh();
         broadcastTreeChange();
+        if (activeIsAffected) {
+          router.push(worldHome);
+        } else {
+          router.refresh();
+        }
       } catch (err) {
         alert(err instanceof Error ? err.message : 'network error');
       }
     }
-  }, [csrfToken, kind, path, router]);
+  }, [activePath, csrfToken, kind, path, router]);
 
   return (
     <div ref={ref} className="relative">
