@@ -7,7 +7,7 @@ import Link from 'next/link';
 import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
 import { MiniGraph } from './MiniGraph';
 import { BacklinksPanel } from './BacklinksPanel';
-import { AddOutgoingLink } from './AddOutgoingLink';
+import { OutgoingLinksPanel } from './OutgoingLinksPanel';
 
 export type OutlineItem = { level: number; text: string };
 
@@ -34,27 +34,11 @@ export function NoteSidebar({
         csrfToken={csrfToken}
       />
 
-      <Section
-        title="Links to"
-        empty="No outgoing links."
-        actions={<AddOutgoingLink currentPath={path} csrfToken={csrfToken} />}
-      >
-        {outgoingLinks.length > 0 && (
-          <ul className="flex flex-wrap gap-1.5">
-            {outgoingLinks.map((l) => (
-              <li key={l.to_path}>
-                <Link
-                  href={'/notes/' + encodePath(l.to_path)}
-                  title={l.to_path}
-                  className="inline-block max-w-full truncate rounded-full border border-[var(--rule)] bg-[var(--vellum)] px-2.5 py-0.5 text-xs text-[var(--ink)] transition hover:-translate-y-px hover:border-[var(--candlelight)] hover:bg-[var(--parchment)]"
-                >
-                  {l.title || baseName(l.to_path)}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+      <OutgoingLinksPanel
+        initialOutgoingLinks={outgoingLinks}
+        currentPath={path}
+        csrfToken={csrfToken}
+      />
 
       <Section title="Tags" empty="No tags.">
         {tags.length > 0 && (
@@ -124,15 +108,6 @@ function Section({
       {children ?? (empty ? <p className="text-xs text-[var(--ink-soft)]/80">{empty}</p> : null)}
     </section>
   );
-}
-
-function baseName(p: string): string {
-  const last = p.split('/').pop() ?? p;
-  return last.replace(/\.(md|canvas)$/i, '');
-}
-
-function encodePath(p: string): string {
-  return p.split('/').map(encodeURIComponent).join('/');
 }
 
 // Extract H1/H2/H3 outline from a stored ProseMirror JSON tree.

@@ -84,6 +84,8 @@ export type BacklinkRow = {
 export type OutgoingLinkRow = {
   to_path: string;
   title: string;
+  /** 1 = created via sidebar/graph UI; 0 = derived from [[wikilink]] in body */
+  is_manual: number;
 };
 
 export type TagRow = {
@@ -155,7 +157,9 @@ export function loadOutgoingLinks(groupId: string, fromPath: string): OutgoingLi
       // note_links when the target doesn't exist yet) are omitted because the
       // graph can't draw an edge to a non-existent node either, and the ugly
       // "__orphan__:..." path string is meaningless to the reader.
-      `SELECT nl.to_path AS to_path, COALESCE(n.title, nl.to_path) AS title
+      `SELECT nl.to_path AS to_path,
+              COALESCE(n.title, nl.to_path) AS title,
+              nl.is_manual AS is_manual
          FROM note_links nl
          JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.to_path
         WHERE nl.group_id = ? AND nl.from_path = ?

@@ -26,7 +26,11 @@ export function AddBacklink({
   const open = useCallback((): void => {
     const rect = btnRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setPicker({ left: rect.right + 6, top: rect.top });
+    // Sidebar lives on the right edge — anchor the popover so it grows
+    // down-and-left into the main content area (not rightward, off-screen).
+    // NotePicker still clamps to viewport as a final safety net.
+    const POPOVER_W = 320;
+    setPicker({ left: rect.right - POPOVER_W, top: rect.bottom + 6 });
   }, []);
 
   const close = useCallback((): void => setPicker(null), []);

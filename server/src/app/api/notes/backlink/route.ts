@@ -75,12 +75,14 @@ export async function DELETE(req: NextRequest): Promise<Response> {
 
   const { fromPath, toPath } = body;
 
-  // Only delete manual links — body-derived links (is_manual=0) are
-  // managed by derive.ts and must not be removed here.
+  // Removes both manual and body-derived links. Body-derived links will
+  // be re-created on the next save of the source note if the [[wikilink]]
+  // still exists in the body — the user is expected to also remove the
+  // wikilink for a permanent unlink.
   getDb()
     .query(
       `DELETE FROM note_links
-        WHERE group_id = ? AND from_path = ? AND to_path = ? AND is_manual = 1`,
+        WHERE group_id = ? AND from_path = ? AND to_path = ?`,
     )
     .run(session.currentGroupId, fromPath, toPath);
 

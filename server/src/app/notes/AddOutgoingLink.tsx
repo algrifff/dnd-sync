@@ -26,7 +26,8 @@ export function AddOutgoingLink({
   const open = useCallback((): void => {
     const rect = btnRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setPicker({ left: rect.right + 6, top: rect.top });
+    const POPOVER_W = 320;
+    setPicker({ left: rect.right - POPOVER_W, top: rect.bottom + 6 });
   }, []);
 
   const close = useCallback((): void => setPicker(null), []);

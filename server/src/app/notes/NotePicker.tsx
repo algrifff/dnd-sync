@@ -12,6 +12,7 @@
 // so callers can either insert a wikilink or record an association.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 type Entry = { path: string; title: string };
 
@@ -135,10 +136,13 @@ export function NotePicker({
   const left = Math.max(8, Math.min(anchor.left, vw - POPOVER_W - 8));
   const top = Math.max(8, Math.min(anchor.top, vh - POPOVER_H_EST - 8));
 
-  return (
+  // Portal to document.body so any ancestor `transform` / `filter` /
+  // `contain` can't capture our `position: fixed` and break clamping.
+  if (typeof document === 'undefined') return <></>;
+  return createPortal(
     <div
       ref={popoverRef}
-      className="fixed z-40 w-80 overflow-hidden rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] shadow-[0_12px_32px_rgb(var(--ink-rgb) / 0.18)]"
+      className="fixed z-50 w-80 overflow-hidden rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] shadow-[0_12px_32px_rgb(var(--ink-rgb) / 0.18)]"
       style={{ left, top }}
     >
       <div className="border-b border-[var(--rule)] p-2">
@@ -187,7 +191,8 @@ export function NotePicker({
           ))}
         </ul>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
