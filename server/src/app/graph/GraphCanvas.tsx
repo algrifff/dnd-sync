@@ -41,15 +41,61 @@ import { clusterSeedPositions, colorForTags, radiusForDegree } from './graphStyl
 import { NotePicker } from '../notes/NotePicker';
 
 // Sigma's WebGL renderer can't read CSS variables, so we snapshot the
-// `--ink-rgb` triplet at render time and rebuild `rgba()` strings from it.
-// In SSR contexts (where `document` is undefined) fall back to the day value.
-function inkRgba(alpha: number): string {
-  if (typeof document === 'undefined') return `rgba(42, 36, 30, ${alpha})`;
-  const raw = getComputedStyle(document.documentElement)
-    .getPropertyValue('--ink-rgb')
-    .trim();
-  const [r, g, b] = raw ? raw.split(/\s+/).map(Number) : [42, 36, 30];
+// matching `--<name>-rgb` triplet at render time and rebuild `rgba()`
+// strings from it. SSR (no `document`) returns the day value.
+const PALETTE_FALLBACKS: Record<string, [number, number, number]> = {
+  ink: [42, 36, 30],
+  'ink-soft': [90, 79, 66],
+  parchment: [244, 237, 224],
+  wine: [139, 74, 82],
+  candlelight: [212, 168, 90],
+  moss: [123, 138, 95],
+  sage: [107, 127, 142],
+  embers: [181, 87, 42],
+  rule: [212, 199, 174],
+};
+function paletteRgba(name: keyof typeof PALETTE_FALLBACKS, alpha = 1): string {
+  const fallback = PALETTE_FALLBACKS[name] ?? [42, 36, 30];
+  let triplet: [number, number, number] = fallback;
+  if (typeof document !== 'undefined') {
+    const raw = getComputedStyle(document.documentElement)
+      .getPropertyValue(`--${name}-rgb`)
+      .trim();
+    const parts = raw ? raw.split(/\s+/).map(Number) : [];
+    if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+      triplet = [parts[0]!, parts[1]!, parts[2]!];
+    }
+  }
+  const [r, g, b] = triplet;
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+function inkRgba(alpha: number): string {
+  return paletteRgba('ink', alpha);
+}
+
+// Resolve any colour token Sigma might receive into something its WebGL
+// parser actually understands (rgba/hex). Accepts: bare palette names
+// (`'wine'`), `var(--name)` strings, `rgb(var(--name-rgb) / 0.1)` strings,
+// and pass-through hex/rgba.
+function resolveSigmaColor(token: string): string {
+  const t = token.trim();
+  if (t.startsWith('#') || t.startsWith('rgba(') || (t.startsWith('rgb(') && !t.includes('var('))) {
+    return t;
+  }
+  const varMatch = t.match(/^var\(--([a-z-]+?)(?:-rgb)?\)$/);
+  if (varMatch?.[1] && varMatch[1] in PALETTE_FALLBACKS) {
+    return paletteRgba(varMatch[1] as keyof typeof PALETTE_FALLBACKS);
+  }
+  // `rgb(var(--name-rgb) / 0.1)` — resolve to the named palette at the
+  // given alpha.
+  const tintMatch = t.match(/^rgba?\(\s*var\(--([a-z-]+?)-rgb\)\s*\/\s*([0-9.]+)\s*\)$/);
+  if (tintMatch?.[1] && tintMatch[2] && tintMatch[1] in PALETTE_FALLBACKS) {
+    return paletteRgba(tintMatch[1] as keyof typeof PALETTE_FALLBACKS, Number(tintMatch[2]));
+  }
+  if (t in PALETTE_FALLBACKS) {
+    return paletteRgba(t as keyof typeof PALETTE_FALLBACKS);
+  }
+  return t;
 }
 
 type RemoteGraphCursor = {
@@ -285,7 +331,7 @@ export function GraphCanvas({
         if (!g.hasEdge(key)) {
           g.addEdgeWithKey(key, e.source, e.target, {
             size: 1,
-            color: inkRgba(edgeOpacityRef.current),
+            color: paletteRgba('ink-soft', edgeOpacityRef.current),
           });
           affectedNodes.add(e.source);
           affectedNodes.add(e.target);
@@ -352,16 +398,16 @@ export function GraphCanvas({
     (nodeId: string, tags: readonly string[]): string => {
       const lower = tags.map((t) => t.toLowerCase());
       for (const g of groups) {
-        if (g.notes.includes(nodeId)) return g.color;
+        if (g.notes.includes(nodeId)) return resolveSigmaColor(g.color);
         for (const t of g.tags) {
-          if (lower.includes(t.toLowerCase())) return g.color;
+          if (lower.includes(t.toLowerCase())) return resolveSigmaColor(g.color);
         }
       }
       for (const t of tags) {
         const override = tagColors[t.toLowerCase()];
-        if (override) return override;
+        if (override) return resolveSigmaColor(override);
       }
-      return colorForTags(tags);
+      return resolveSigmaColor(colorForTags(tags));
     },
     [groups, tagColors],
   );
@@ -555,8 +601,8 @@ export function GraphCanvas({
 
         const labelSettings = labelModeToSigmaSettings(labelMode);
         const renderer = new Sigma(g, container, {
-          defaultNodeColor: 'var(--ink-soft)',
-          defaultEdgeColor: inkRgba(edgeOpacityRef.current),
+          defaultNodeColor: paletteRgba('ink-soft'),
+          defaultEdgeColor: paletteRgba('ink-soft', edgeOpacityRef.current),
           labelColor: { attribute: 'labelColor' },
           labelWeight: '500',
           labelFont: 'Inter, system-ui, sans-serif',
@@ -607,7 +653,7 @@ export function GraphCanvas({
                 if (g.hasEdge(key)) continue;
                 g.addEdgeWithKey(key, e.source, e.target, {
                   size: 1,
-                  color: inkRgba(edgeOpacityRef.current),
+                  color: paletteRgba('ink-soft', edgeOpacityRef.current),
                 });
                 touched.add(e.source);
                 touched.add(e.target);
@@ -838,8 +884,8 @@ export function GraphCanvas({
           if (linkModeRef.current) {
             renderer.setSetting('nodeReducer', (n, data) => {
               if (n === linkSourceRef.current)
-                return { ...data, color: 'var(--candlelight)', highlighted: true };
-              if (n === node) return { ...data, color: 'var(--wine)' };
+                return { ...data, color: paletteRgba('candlelight'), highlighted: true };
+              if (n === node) return { ...data, color: paletteRgba('wine') };
               return data;
             });
             return;
@@ -847,15 +893,15 @@ export function GraphCanvas({
           const neighbours = new Set<string>(g.neighbors(node));
           neighbours.add(node);
           renderer.setSetting('nodeReducer', (n, data) => {
-            if (!neighbours.has(n)) return { ...data, color: 'var(--rule)', label: '' };
+            if (!neighbours.has(n)) return { ...data, color: paletteRgba('rule'), label: '' };
             return data;
           });
           renderer.setSetting('edgeReducer', (_e, data) => {
             const [s, t] = g.extremities(_e);
             if (!neighbours.has(s) || !neighbours.has(t)) {
-              return { ...data, color: 'rgb(var(--ink-rgb) / 0.1)' };
+              return { ...data, color: paletteRgba('ink', 0.1) };
             }
-            return { ...data, color: 'var(--candlelight)' };
+            return { ...data, color: paletteRgba('candlelight') };
           });
         });
         renderer.on('leaveNode', () => {
@@ -939,7 +985,7 @@ export function GraphCanvas({
               if (g.hasNode(source) && g.hasNode(target) && !g.hasEdge(key)) {
                 g.addEdgeWithKey(key, source, target, {
                   size: 1,
-                  color: inkRgba(edgeOpacityRef.current),
+                  color: paletteRgba('ink-soft', edgeOpacityRef.current),
                 });
                 for (const id of [source, target]) {
                   const d = g.degree(id);
@@ -1101,7 +1147,7 @@ export function GraphCanvas({
     edgeOpacityRef.current = edgeOpacity;
     const g = graphRef.current;
     if (!g) return;
-    const color = inkRgba(edgeOpacity);
+    const color = paletteRgba('ink-soft', edgeOpacity);
     g.forEachEdge((edge) => g.setEdgeAttribute(edge, 'color', color));
   }, [edgeOpacity]);
 
@@ -1131,7 +1177,7 @@ export function GraphCanvas({
     const group: Group = {
       id,
       name: `Group ${groups.length + 1}`,
-      color: 'var(--wine)',
+      color: paletteRgba('wine'),
       tags: [],
       notes: [],
     };

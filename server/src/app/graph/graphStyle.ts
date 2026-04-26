@@ -23,14 +23,14 @@ export type TagStyle = {
 };
 
 const PRIORITY: TagStyle[] = [
-  { tag: 'villain', color: 'var(--wine)' },
-  { tag: 'location', color: 'var(--moss)' },
-  { tag: 'ally', color: 'var(--sage)' },
-  { tag: 'official', color: 'var(--sage)' },
-  { tag: 'session', color: 'var(--embers)' },
+  { tag: 'villain', color: 'wine' },
+  { tag: 'location', color: 'moss' },
+  { tag: 'ally', color: 'sage' },
+  { tag: 'official', color: 'sage' },
+  { tag: 'session', color: 'embers' },
 ];
 
-const DEFAULT_COLOR = 'var(--ink-soft)';
+const DEFAULT_COLOR = 'ink-soft';
 
 /** Pick the colour for a node given its tag list. */
 export function colorForTags(tags: readonly string[]): string {
