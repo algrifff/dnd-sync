@@ -350,7 +350,7 @@ export function FileTree({
   );
 
   const startCreate = useCallback(
-    (parent: string, kind: CreateKind) => {
+    async (parent: string, kind: CreateKind) => {
       if (kind === 'campaign') {
         setShowCampaignDialog(true);
         return;
@@ -364,8 +364,38 @@ export function FileTree({
         quest: 'Quests',
       };
       let resolvedParent = parent;
+      let autoSubfolder: string | null = null;
       if (/^Campaigns\/[^/]+$/.test(parent) && kind in KIND_SUBFOLDER) {
-        resolvedParent = `${parent}/${KIND_SUBFOLDER[kind as keyof typeof KIND_SUBFOLDER]}`;
+        autoSubfolder = KIND_SUBFOLDER[kind as keyof typeof KIND_SUBFOLDER]!;
+        resolvedParent = `${parent}/${autoSubfolder}`;
+      }
+      // The canonical subfolder may not have been seeded during campaign
+      // creation (the dialog only creates ticked ones). Ensure it exists
+      // before we anchor the inline row to it — otherwise the tree has
+      // no node for it and the click silently no-ops.
+      if (autoSubfolder) {
+        try {
+          const res = await fetch('/api/folders/create', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': csrfToken,
+            },
+            body: JSON.stringify({ parent, name: autoSubfolder }),
+          });
+          if (!res.ok && res.status !== 409) {
+            const body = (await res.json().catch(() => ({}))) as { error?: string };
+            setError(body.error ?? `HTTP ${res.status}`);
+            return;
+          }
+          if (res.status === 201) {
+            router.refresh();
+            broadcastTreeChange();
+          }
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'network error');
+          return;
+        }
       }
       setCreatingIn({ parent: resolvedParent, kind });
       // Ensure the target folder is expanded so the inline row is visible.
@@ -381,7 +411,7 @@ export function FileTree({
         });
       }
     },
-    [],
+    [csrfToken, router],
   );
 
   const cancelCreate = useCallback(() => {
