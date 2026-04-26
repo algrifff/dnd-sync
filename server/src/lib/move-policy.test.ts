@@ -261,7 +261,10 @@ describe('move-policy', () => {
 
     it('isDraggableSource gates locked sources', () => {
       expect(isDraggableSource({ kind: 'folder', path: 'Campaigns' })).toBe(false);
-      expect(isDraggableSource({ kind: 'folder', path: 'Campaigns/X' })).toBe(false);
+      // Campaign roots are draggable for sibling-reorder. They still
+      // fail canDropOn for any folder destination so they cannot be
+      // nested — the only legal drop is a between-rows reorder gap.
+      expect(isDraggableSource({ kind: 'folder', path: 'Campaigns/X' })).toBe(true);
       expect(isDraggableSource({ kind: 'folder', path: 'Campaigns/X/Enemies' })).toBe(false);
       expect(isDraggableSource({ kind: 'file', path: 'Campaigns/X/Characters/Bob.md' })).toBe(false);
       expect(isDraggableSource({ kind: 'file', path: 'Campaigns/X/People/Bob.md' })).toBe(true);

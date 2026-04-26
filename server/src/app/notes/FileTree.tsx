@@ -44,8 +44,9 @@ import {
 } from 'lucide-react';
 import type { Tree, TreeDir } from '@/lib/tree';
 import { broadcastTreeChange } from '@/lib/tree-sync';
-import { canDropOn, isDraggableSource } from '@/lib/move-policy';
+import { canDropOn, isDraggableSource, isCampaignRoot, campaignRootSlug } from '@/lib/move-policy';
 import { RowMenu } from './RowMenu';
+import { CampaignRowMenu } from './CampaignRowMenu';
 import { PeerStack } from './PeerStack';
 
 export type FileTreeKind = 'pc' | 'npc' | 'ally' | 'villain' | 'session';
@@ -264,6 +265,10 @@ export function FileTree({
     { kind: 'file' | 'folder'; path: string } | null
   >(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
+  // Active reorder drop-gap. '' = trailing gap (drop at end), or the
+  // slug whose row sits immediately *below* the gap. Only populated
+  // while a campaign-root drag is in flight.
+  const [dragOverGap, setDragOverGap] = useState<string | null>(null);
   // The path currently in flight from /api/notes/move or /api/folders/move.
   // Folder moves can take a couple of seconds when the subtree is large
   // (every nested note's path gets rewritten + the FTS row rebuilt) — show
@@ -588,6 +593,31 @@ export function FileTree({
     [activePath, csrfToken, router, tree.updatedAt],
   );
 
+  const reorderCampaign = useCallback(
+    async (slug: string, beforeSlug: string | null): Promise<void> => {
+      try {
+        const res = await fetch('/api/campaigns/reorder', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
+          },
+          body: JSON.stringify({ slug, beforeSlug }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !body.ok) {
+          alert(body.error ?? `Reorder failed (HTTP ${res.status})`);
+          return;
+        }
+        router.refresh();
+        broadcastTreeChange();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'network error');
+      }
+    },
+    [csrfToken, router],
+  );
+
   // Clear the spinner once the refreshed tree (with the moved row at
   // its new path) actually lands. tree.updatedAt is bumped by both
   // /api/notes/move and /api/folders/move on every moved note, so a
@@ -735,10 +765,65 @@ export function FileTree({
           // Only clear when leaving the ul entirely.
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
             setDragOver(null);
+            setDragOverGap(null);
           }
         }}
       >
-        {items.map((item) => (
+        {items.map((item) => {
+          if (item.kind === 'gap') {
+            const isCampaignDrag =
+              !!dragging && dragging.kind === 'folder' && isCampaignRoot(dragging.path);
+            const gapKey = item.beforeSlug ?? '';
+            const isActive = isCampaignDrag && dragOverGap === gapKey;
+            // Suppress the gap above/below the dragged campaign — those
+            // positions are no-ops and the indicator there is misleading.
+            const ownSlug = isCampaignDrag ? campaignRootSlug(dragging!.path) : null;
+            const allItems = items;
+            const idx = allItems.indexOf(item);
+            const next = allItems[idx + 1];
+            const prev = allItems[idx - 1];
+            const isOwnEdge =
+              isCampaignDrag &&
+              ownSlug !== null &&
+              ((next?.kind === 'dir' && next.path === `Campaigns/${ownSlug}`) ||
+                (prev?.kind === 'dir' && prev.path === `Campaigns/${ownSlug}`));
+            const accept = isCampaignDrag && !isOwnEdge;
+            return (
+              <li
+                key={item.key}
+                role="presentation"
+                className="list-none"
+                style={{ paddingLeft: 8 + item.depth * 14 }}
+                onDragOver={(e) => {
+                  if (!accept) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (dragOverGap !== gapKey) setDragOverGap(gapKey);
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                    setDragOverGap((g) => (g === gapKey ? null : g));
+                  }
+                }}
+                onDrop={(e) => {
+                  if (!accept || !dragging || ownSlug === null) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void reorderCampaign(ownSlug, item.beforeSlug);
+                  setDragging(null);
+                  setDragOver(null);
+                  setDragOverGap(null);
+                }}
+              >
+                <div className={isCampaignDrag ? 'h-[10px] -my-[3px] relative' : 'h-0'}>
+                  {isActive && (
+                    <div className="pointer-events-none absolute inset-x-2 top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-[var(--wine)]" />
+                  )}
+                </div>
+              </li>
+            );
+          }
+          return (
           <TreeRow
             key={item.key}
             item={item}
@@ -760,6 +845,7 @@ export function FileTree({
             onDragEndRow={() => {
               setDragging(null);
               setDragOver(null);
+              setDragOverGap(null);
             }}
             onDragOverDir={(dirPath) => setDragOver(dirPath)}
             onDropDir={(dirPath) => {
@@ -800,7 +886,8 @@ export function FileTree({
               />
             ) : null}
           </TreeRow>
-        ))}
+          );
+        })}
       </ul>
     </nav>
     </div>
@@ -840,12 +927,25 @@ const KIND_META: Record<
 
 type FlatRow =
   | { kind: 'dir'; key: string; name: string; path: string; depth: number; open: boolean; hasChildren: boolean; system: boolean; indexPath: string | null }
-  | { kind: 'file'; key: string; name: string; path: string; title: string; depth: number };
+  | { kind: 'file'; key: string; name: string; path: string; title: string; depth: number }
+  // Sibling-reorder drop zone, rendered between (and after) campaign
+  // roots inside the always-open Campaigns section. beforeSlug = the
+  // slug this gap is *above* (null = the trailing gap, drop = end).
+  | { kind: 'gap'; key: string; beforeSlug: string | null; depth: number };
 
 function flatten(dir: TreeDir, openSet: Set<string>, depth: number): FlatRow[] {
   const out: FlatRow[] = [];
+  const isCampaignsRoot = dir.path === 'Campaigns';
   for (const child of dir.children) {
     if (child.kind === 'dir' && (child.path === 'Assets' || child.path.startsWith('Assets/'))) continue;
+    if (isCampaignsRoot && child.kind === 'dir') {
+      out.push({
+        kind: 'gap',
+        key: 'gap:before:' + child.path,
+        beforeSlug: child.name,
+        depth,
+      });
+    }
     if (child.kind === 'dir') {
       const isOpen = openSet.has(child.path);
       // Find a child index.md — it's the folder's "page" in Notion-style
@@ -882,6 +982,10 @@ function flatten(dir: TreeDir, openSet: Set<string>, depth: number): FlatRow[] {
         depth,
       });
     }
+  }
+  if (isCampaignsRoot) {
+    // Trailing gap so users can drop a campaign at the end of the list.
+    out.push({ kind: 'gap', key: 'gap:end:Campaigns', beforeSlug: null, depth });
   }
   return out;
 }
@@ -937,7 +1041,7 @@ function TreeRow({
   onSubmitRename,
   children,
 }: {
-  item: FlatRow;
+  item: Exclude<FlatRow, { kind: 'gap' }>;
   activePath: string;
   canCreate: boolean;
   isWorldOwner: boolean;
@@ -1171,25 +1275,32 @@ function TreeRow({
                 folderPath={item.path}
                 isWorldOwner={isWorldOwner}
               />
-              {isSystem ? (
+              {/^Campaigns\/[^/]+$/.test(item.path) ? (
+                // Campaign roots are system folders, but world owners
+                // need a way to delete a whole campaign — render a
+                // dedicated menu that drives the are-you-sure dialog.
+                isWorldOwner && sectionTone !== 'players' ? (
+                  <CampaignRowMenu
+                    slug={item.path.slice('Campaigns/'.length)}
+                    name={item.name}
+                    csrfToken={csrfToken}
+                    activePath={activePath}
+                  />
+                ) : (
+                  <span
+                    className="p-1 text-[var(--ink-soft)]/35"
+                    title="System folder — cannot be deleted or renamed"
+                  >
+                    <Lock size={11} aria-hidden />
+                  </span>
+                )
+              ) : isSystem ? (
                 <span
                   className="p-1 text-[var(--ink-soft)]/35"
                   title="System folder — cannot be deleted or renamed"
                 >
                   <Lock size={11} aria-hidden />
                 </span>
-              ) : /^Campaigns\/[^/]+$/.test(item.path) ? (
-                isWorldOwner && sectionTone === 'gm' && (
-                  <RowMenu
-                    kind="folder"
-                    path={item.path}
-                    csrfToken={csrfToken}
-                    onStartRename={onStartRename}
-                    activePath={activePath}
-                    isWorldOwner={isWorldOwner}
-                    groupId={groupId}
-                  />
-                )
               ) : (
                 <RowMenu
                   kind="folder"

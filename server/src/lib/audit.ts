@@ -42,7 +42,9 @@ export type AuditAction =
   | 'world.icon.clear'
   | 'user.deleteWithContent'
   | 'db.wipe'
-  | 'character.assign_player';
+  | 'character.assign_player'
+  | 'campaign.reorder'
+  | 'campaign.destroy';
 
 export type AuditEntry = {
   action: AuditAction;

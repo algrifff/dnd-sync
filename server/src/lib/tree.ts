@@ -102,23 +102,27 @@ function snapshotKey(
   mode: TreeMode,
 ): string {
   // Single round-trip: max(updated_at) + count over notes + count
-  // over folder_markers. Captures every input that buildTree's two
-  // SELECTs read. ~1ms even on large worlds.
+  // over folder_markers + sum of campaign sort_order. Captures every
+  // input that buildTree's SELECTs read. ~1ms even on large worlds.
+  // sort_order is summed so a reorder bumps the key without anyone
+  // having to touch updated_at on a note.
   const row = getDb()
     .query<
-      { u: number | null; n: number; m: number },
-      [string, string, string]
+      { u: number | null; n: number; m: number; s: number | null },
+      [string, string, string, string]
     >(
       `SELECT
          (SELECT COALESCE(MAX(updated_at), 0) FROM notes WHERE group_id = ?) AS u,
          (SELECT COUNT(*) FROM notes WHERE group_id = ?) AS n,
-         (SELECT COUNT(*) FROM folder_markers WHERE group_id = ?) AS m`,
+         (SELECT COUNT(*) FROM folder_markers WHERE group_id = ?) AS m,
+         (SELECT COALESCE(SUM(sort_order), 0) FROM campaigns WHERE group_id = ?) AS s`,
     )
-    .get(groupId, groupId, groupId);
+    .get(groupId, groupId, groupId, groupId);
   const u = row?.u ?? 0;
   const n = row?.n ?? 0;
   const m = row?.m ?? 0;
-  return `${u}:${n}:${m}:${hideDmOnly ? 1 : 0}:${mode}`;
+  const s = row?.s ?? 0;
+  return `${u}:${n}:${m}:${s}:${hideDmOnly ? 1 : 0}:${mode}`;
 }
 
 function cacheKey(
@@ -169,6 +173,18 @@ export function buildTree(
     )
     .all(groupId);
 
+  // Per-campaign ordinal — only the children of the top-level
+  // `Campaigns` directory consult this map. All other folders keep
+  // alpha ordering.
+  const campaignOrder = new Map<string, number>();
+  for (const c of getDb()
+    .query<{ slug: string; sort_order: number }, [string]>(
+      `SELECT slug, sort_order FROM campaigns WHERE group_id = ?`,
+    )
+    .all(groupId)) {
+    campaignOrder.set(c.slug, c.sort_order);
+  }
+
   const root: TreeDir = { kind: 'dir', name: '', path: '', system: false, children: [] };
   let maxUpdated = 0;
 
@@ -180,7 +196,7 @@ export function buildTree(
     ensureFolder(root, path);
   }
 
-  sortTree(root);
+  sortTree(root, campaignOrder);
   const tree: Tree = { root, updatedAt: maxUpdated };
   // Bound the cache so an admin in many worlds doesn't grow it
   // forever. FIFO eviction by Map insertion order.
@@ -242,10 +258,25 @@ function insert(dir: TreeDir, segments: string[], fullPath: string, title: strin
   insert(child, segments.slice(1), fullPath, title);
 }
 
-function sortTree(dir: TreeDir): void {
+function sortTree(dir: TreeDir, campaignOrder: Map<string, number>): void {
+  const isCampaignsRoot = dir.path === 'Campaigns';
   dir.children.sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1;
+    if (isCampaignsRoot && a.kind === 'dir' && b.kind === 'dir') {
+      // Campaign roots are sorted by user-defined ordinal. Missing
+      // entries (defensive — backfill should have covered them) sink
+      // below ordered ones, then break ties alphabetically.
+      const av = campaignOrder.get(a.name);
+      const bv = campaignOrder.get(b.name);
+      if (av !== undefined && bv !== undefined) {
+        if (av !== bv) return av - bv;
+      } else if (av !== undefined) {
+        return -1;
+      } else if (bv !== undefined) {
+        return 1;
+      }
+    }
     return a.name.localeCompare(b.name);
   });
-  for (const c of dir.children) if (c.kind === 'dir') sortTree(c);
+  for (const c of dir.children) if (c.kind === 'dir') sortTree(c, campaignOrder);
 }

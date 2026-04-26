@@ -830,6 +830,28 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE note_links ADD COLUMN is_index INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 46,
+    description: 'campaigns: sort_order for sidebar drag-to-reorder',
+    sql: `
+      -- Per-group ordinal so users can drag campaign folders in the
+      -- sidebar into a custom order. Backfill in alpha order, spaced
+      -- ×100 so most reorders rewrite a single row instead of
+      -- repacking the whole group.
+      ALTER TABLE campaigns ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+      WITH ranked AS (
+        SELECT group_id, slug,
+               ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY name) AS rn
+        FROM campaigns
+      )
+      UPDATE campaigns SET sort_order = (
+        SELECT rn * 100 FROM ranked
+        WHERE ranked.group_id = campaigns.group_id
+          AND ranked.slug = campaigns.slug
+      );
+      CREATE INDEX campaigns_sort ON campaigns(group_id, sort_order);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

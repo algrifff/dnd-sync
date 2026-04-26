@@ -51,11 +51,18 @@ function isUnderAdventureLog(path: string): boolean {
   return /^Campaigns\/[^/]+\/Adventure Log(\/|$)/.test(path);
 }
 
-function isCampaignRoot(path: string): boolean {
+export function isCampaignRoot(path: string): boolean {
   return /^Campaigns\/[^/]+$/.test(path);
 }
 
-function isCanonicalSubfolder(path: string): boolean {
+/** Pull the slug out of a `Campaigns/<slug>` path; null if not a
+ *  campaign root. */
+export function campaignRootSlug(path: string): string | null {
+  const m = /^Campaigns\/([^/]+)$/.exec(path);
+  return m ? (m[1] ?? null) : null;
+}
+
+export function isCanonicalSubfolder(path: string): boolean {
   return (
     /^Campaigns\/[^/]+\/(Characters|People|Enemies|Loot|Adventure Log|Places|Creatures|Quests)$/.test(path) ||
     path === 'World Lore/World Info'
@@ -181,7 +188,9 @@ export function canDropOn(
 export function isDraggableSource(src: { kind: MoveKind; path: string }): boolean {
   if (TOP_LEVEL.has(src.path)) return false;
   if (isAssets(src.path)) return false;
-  if (src.kind === 'folder' && isCampaignRoot(src.path)) return false;
+  // Campaign roots are draggable for sibling-reorder. They still fail
+  // canDropOn for any folder destination so they can't be nested —
+  // the only legal drop target is a between-rows reorder gap.
   if (src.kind === 'folder' && isCanonicalSubfolder(src.path)) return false;
   if (isUnderCharacters(src.path)) return false;
   return true;
