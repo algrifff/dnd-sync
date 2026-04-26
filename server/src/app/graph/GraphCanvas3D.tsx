@@ -78,7 +78,7 @@ function fibSphere(i: number, n: number): THREE.Vector3 {
 }
 
 function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluster[] } {
-  // Group by cluster key
+  // Group by cluster key (up to 3 path segments)
   const buckets = new Map<string, GraphPayload['nodes']>();
   for (const n of payload.nodes) {
     const key = clusterKey(n.id);
@@ -89,8 +89,29 @@ function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluste
 
   const entries = [...buckets.entries()];
   const C = entries.length;
-  const galaxyRadius = C <= 1 ? 0 : 18 * Math.cbrt(C);
 
+  // ── Step 1: Compute each cluster's packed radius via sphere-packing ──
+  // Treat the cluster as a random sphere-pack with packing efficiency ~0.64.
+  // Volume conservation: Σ(r_i³) / PACKING_EFF = R³ → R = cbrt(Σ r_i³ / EFF).
+  // HEADROOM adds 20 % breathing room so nodes aren't jammed at the edge.
+  const PACKING_EFF = 0.64;
+  const HEADROOM = 1.2;
+  const clusterRadii = entries.map(([, ids]) => {
+    const sumCubes = ids.reduce((s, n) => {
+      const r = Math.max(1.2, radiusForDegree(n.degree) / 4);
+      return s + r * r * r;
+    }, 0);
+    return Math.max(5, HEADROOM * Math.cbrt(sumCubes / PACKING_EFF));
+  });
+
+  // ── Step 2: Galaxy radius — clusters must never bleed into each other ─
+  // Place cluster centres on a Fibonacci sphere at a radius that ensures
+  // the nearest-neighbour gap between cluster *surfaces* is positive.
+  // Factor 2.8 * cbrt(C) gives comfortable visual breathing room.
+  const maxClusterR = Math.max(...clusterRadii, 5);
+  const galaxyRadius = C <= 1 ? 0 : maxClusterR * 2.8 * Math.cbrt(C);
+
+  // ── Step 3: Place cluster centres then their nodes ────────────────────
   const clusters: Cluster[] = [];
   const placed: Placed[] = [];
 
@@ -101,38 +122,44 @@ function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluste
     const label = segs[segs.length - 1] || key;
     clusters.push({ key, label, center });
 
+    const localRadius = clusterRadii[ci]!;
     const size = ids.length;
-    // Scale local radius with both the count AND the typical star size so
-    // dense clusters don't collapse onto themselves before relaxation.
-    const avgScale = ids.reduce((s, n) => s + Math.max(1.2, radiusForDegree(n.degree) / 4), 0) / Math.max(size, 1);
-    const localRadius = Math.max(2 + 1.4 * Math.cbrt(size), avgScale * (1.2 + Math.sqrt(size)));
-    ids.forEach((n, i) => {
-      const local = fibSphere(i, Math.max(size, 1)).multiplyScalar(localRadius);
-      const pos = center.clone().add(local);
+
+    // Sort descending by degree so hub nodes (large scale) get inner slots.
+    // Visually this means the most-connected star anchors the cluster centre
+    // and leaf nodes spread to the outer shell — mirrors real network topology.
+    const sorted = [...ids].sort(
+      (a, b) => radiusForDegree(b.degree) - radiusForDegree(a.degree),
+    );
+
+    sorted.forEach((n, i) => {
       const r = radiusForDegree(n.degree) / 4;
-      placed.push({
-        id: n.id,
-        title: n.title,
-        degree: n.degree,
-        cluster: key,
-        pos,
-        scale: Math.max(1.2, r),
-      });
+      const scale = Math.max(1.2, r);
+      // sqrt ramp gives uniform volume density: inner nodes are denser,
+      // outer shell more sparse — avoids the "solid ball" look.
+      const rFrac = size <= 1 ? 0 : Math.sqrt(i / (size - 1));
+      const local = fibSphere(i, Math.max(size, 1)).multiplyScalar(localRadius * rFrac);
+      const pos = center.clone().add(local);
+      placed.push({ id: n.id, title: n.title, degree: n.degree, cluster: key, pos, scale });
     });
   });
 
-  // Relaxation: separate any overlapping spheres. Keeps a small visible
-  // gap between every pair so dense clusters don't render as one blob.
+  // ── Step 4: Relax overlaps with hub-aware extra separation ────────────
   relaxOverlaps(placed);
 
   return { placed, clusters };
 }
 
-// Iterative pairwise repulsion. O(N²) per pass but runs once on data load
-// — fine up to a few thousand nodes. Stops early when no pair moves.
+// Iterative pairwise repulsion. O(N²) per pass but runs once on data load.
+// Hub nodes (large scale) get an extra separation bonus so they never pack
+// tightly against each other even when geometrically they'd just barely fit.
 function relaxOverlaps(placed: Placed[]): void {
-  const GAP = 0.6;
-  const MAX_ITERS = 40;
+  const BASE_GAP = 0.8;
+  // When both spheres are "large" (above this scale), add a fraction of
+  // the smaller one's radius as extra clearance. Keeps hub nodes airy.
+  const HUB_THRESHOLD = 4.0;
+  const HUB_EXTRA_FRAC = 0.45;
+  const MAX_ITERS = 60;
   const N = placed.length;
   for (let iter = 0; iter < MAX_ITERS; iter++) {
     let moved = false;
@@ -142,7 +169,11 @@ function relaxOverlaps(placed: Placed[]): void {
       for (let j = i + 1; j < N; j++) {
         const b = placed[j];
         if (!b) continue;
-        const minDist = a.scale + b.scale + GAP;
+        const hubExtra =
+          a.scale > HUB_THRESHOLD && b.scale > HUB_THRESHOLD
+            ? Math.min(a.scale, b.scale) * HUB_EXTRA_FRAC
+            : 0;
+        const minDist = a.scale + b.scale + BASE_GAP + hubExtra;
         const dx = b.pos.x - a.pos.x;
         const dy = b.pos.y - a.pos.y;
         const dz = b.pos.z - a.pos.z;
@@ -150,8 +181,8 @@ function relaxOverlaps(placed: Placed[]): void {
         if (d2 >= minDist * minDist) continue;
         const d = Math.sqrt(d2);
         if (d < 1e-4) {
-          // Coincident — nudge along a deterministic axis so the next
-          // iteration has a direction to push along.
+          // Coincident — nudge deterministically so next iteration has a
+          // direction to push along.
           a.pos.x -= 0.05;
           b.pos.x += 0.05;
           moved = true;
