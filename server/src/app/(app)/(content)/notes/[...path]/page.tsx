@@ -212,7 +212,6 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
                   <NoteWorkspace
                     path={path}
-                    initialContent={contentJson as { type: string } & Record<string, unknown>}
                     user={{
                       userId: session.userId,
                       displayName: session.displayName,

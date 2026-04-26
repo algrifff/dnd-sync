@@ -37,7 +37,6 @@ export type CharacterProp = {
 
 export function NoteWorkspace({
   path,
-  initialContent,
   user,
   canEdit,
   csrfToken,
@@ -45,7 +44,6 @@ export function NoteWorkspace({
   accentColor,
 }: {
   path: string;
-  initialContent: { type: string } & Record<string, unknown>;
   user: SurfaceUser;
   canEdit: boolean;
   csrfToken: string;
@@ -142,7 +140,6 @@ export function NoteWorkspace({
         path={path}
         ydoc={ydoc}
         provider={provider}
-        initialContent={initialContent}
         user={user}
         canEdit={canEdit}
         csrfToken={csrfToken}

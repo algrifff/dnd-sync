@@ -60,7 +60,6 @@ export function NoteSurface({
   path,
   ydoc,
   provider,
-  initialContent,
   user,
   canEdit = true,
   csrfToken,
@@ -68,7 +67,6 @@ export function NoteSurface({
   path: string;
   ydoc: Y.Doc;
   provider: HocuspocusProvider;
-  initialContent: { type: string } & Record<string, unknown>;
   user: SurfaceUser;
   canEdit?: boolean;
   csrfToken: string;
@@ -98,10 +96,16 @@ export function NoteSurface({
     return exts;
   }, [ydoc, provider, canEdit, user.displayName, user.accentColor]);
 
+  // Intentionally no `content` here — the Collaboration extension binds
+  // the editor to the shared Y.Doc, which is the single source of truth.
+  // Passing `content` on top of a non-empty Y.Doc (cached across tab
+  // switches in provider-cache.ts) causes Tiptap to re-seed the doc each
+  // mount, duplicating images and text. Notes are always seeded with
+  // `yjs_state` server-side at creation (prosemirrorJSONToYDoc) so the
+  // doc is authoritative from the first connect.
   const editor = useEditor(
     {
       extensions,
-      content: initialContent as object,
       editable: canEdit,
       immediatelyRender: false,
     },
