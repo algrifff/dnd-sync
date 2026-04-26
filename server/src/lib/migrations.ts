@@ -818,6 +818,18 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX assets_gm_only ON assets(group_id, gm_only);
     `,
   },
+  {
+    version: 45,
+    description: 'note_links: is_index flag for auto-managed folder-index reverse edges',
+    sql: `
+      -- Marks the reverse edges written by deriveFolderIndex
+      -- (child → parent-index). Unlike body-derived (is_manual=0) links
+      -- these must survive a normal collab-save derive so the
+      -- hierarchy stays visible in the graph even when users edit
+      -- child notes without touching the parent index.
+      ALTER TABLE note_links ADD COLUMN is_index INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

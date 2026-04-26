@@ -274,20 +274,41 @@ export async function deriveFolderIndex(
     'INSERT INTO notes_fts(path, group_id, title, content) VALUES (?, ?, ?, ?)',
   ).run(indexPath, groupId, indexRow.title, newText);
 
-  // Re-seed body-derived note_links so the graph reflects the new
-  // wikilinks immediately. is_manual=0 only — sidebar-pinned manual
-  // links survive.
+  // Re-seed links in both directions so the graph shows a fully connected
+  // hierarchy. Two categories:
+  //
+  //   Forward  (is_manual=0, is_index=0): index → child
+  //     Derived from the wikilinks in the managed callout body. Collab
+  //     derive also writes these on every edit, so this is idempotent.
+  //
+  //   Reverse  (is_index=1): child → index
+  //     Not present in any note body — purely structural. They survive
+  //     normal note-save derive (derive.ts excludes is_index=1 from its
+  //     DELETE) so the hierarchy stays visible in the graph even while
+  //     users are editing child notes.
   db.query(
-    'DELETE FROM note_links WHERE group_id = ? AND from_path = ? AND is_manual = 0',
+    'DELETE FROM note_links WHERE group_id = ? AND from_path = ? AND is_manual = 0 AND is_index = 0',
   ).run(groupId, indexPath);
-  const insertLink = db.query(
+  // Wipe old reverse edges TO this index before re-inserting the current
+  // child set. This handles children that have moved away since last derive.
+  db.query(
+    'DELETE FROM note_links WHERE group_id = ? AND to_path = ? AND is_index = 1',
+  ).run(groupId, indexPath);
+
+  const insertForward = db.query(
     'INSERT OR IGNORE INTO note_links (group_id, from_path, to_path) VALUES (?, ?, ?)',
   );
+  const insertReverse = db.query(
+    'INSERT OR IGNORE INTO note_links (group_id, from_path, to_path, is_index) VALUES (?, ?, ?, 1)',
+  );
   for (const f of folders) {
-    insertLink.run(groupId, indexPath, f.indexPath);
+    insertForward.run(groupId, indexPath, f.indexPath);
+    insertReverse.run(groupId, f.indexPath, indexPath);
   }
   for (const n of notes) {
-    if (n.path !== indexPath) insertLink.run(groupId, indexPath, n.path);
+    if (n.path === indexPath) continue;
+    insertForward.run(groupId, indexPath, n.path);
+    insertReverse.run(groupId, n.path, indexPath);
   }
 
   await closeDocumentConnections(indexPath);
