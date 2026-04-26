@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MoreHorizontal, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { CampaignDeleteDialog } from './CampaignDeleteDialog';
 
 export function CampaignRowMenu({
@@ -14,11 +14,16 @@ export function CampaignRowMenu({
   name,
   csrfToken,
   activePath,
+  onStartRename,
 }: {
   slug: string;
   name: string;
   csrfToken: string;
   activePath?: string;
+  /** Triggers the inline rename input on the campaign row in
+   *  FileTree, which then routes through
+   *  /api/notes/rename-folder-from-index on submit. */
+  onStartRename?: () => void;
 }): React.JSX.Element {
   const router = useRouter();
   const [open, setOpen] = useState<boolean>(false);
@@ -76,6 +81,21 @@ export function CampaignRowMenu({
           role="menu"
           className={`absolute right-0 z-30 w-48 overflow-hidden rounded-[8px] border border-[var(--rule)] bg-[var(--vellum)] shadow-[0_8px_24px_rgb(var(--ink-rgb)/0.18)] ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
         >
+          {onStartRename && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onStartRename();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--ink)] transition hover:bg-[var(--candlelight)]/15"
+            >
+              <Pencil size={13} aria-hidden />
+              <span>Rename campaign</span>
+            </button>
+          )}
+          {onStartRename && <div className="h-px bg-[var(--rule)]" />}
           <button
             type="button"
             role="menuitem"

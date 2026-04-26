@@ -18,6 +18,25 @@ import { extractPlaintext, type PmNode } from './md-to-pm';
 
 export type Rename = { from: string; to: string };
 
+/** Discover the set of linker notes that point at any of the
+ *  to-be-renamed paths. Must be called BEFORE the move transaction
+ *  rewrites note_links — once the transaction has flipped to_path to
+ *  the new value, the IN-clause query here finds nothing. */
+export function findWikilinkLinkers(
+  groupId: string,
+  fromPaths: string[],
+): string[] {
+  if (fromPaths.length === 0) return [];
+  const placeholders = fromPaths.map(() => '?').join(',');
+  const rows = getDb()
+    .query<{ from_path: string }, string[]>(
+      `SELECT DISTINCT from_path FROM note_links
+        WHERE group_id = ? AND to_path IN (${placeholders})`,
+    )
+    .all(groupId, ...fromPaths);
+  return rows.map((r) => r.from_path);
+}
+
 /** Rewrite every linker note that points at any of the renamed paths.
  *  Returns the set of linker paths that were touched, so the caller
  *  can closeDocumentConnections() on each. */
@@ -26,26 +45,33 @@ export function rewriteWikilinksForRenames(
   renames: Rename[],
 ): string[] {
   if (renames.length === 0) return [];
+  const linkers = findWikilinkLinkers(
+    groupId,
+    renames.map((r) => r.from),
+  );
+  return rewriteWikilinksForLinkers(groupId, linkers, renames);
+}
+
+/** Walk a pre-computed linker set and rewrite their wikilink targets
+ *  per the rename map. Used by the folder-move flow where the linker
+ *  discovery has to happen before the transaction (to_path edges get
+ *  rewritten in-place by the move) but the body rewrite must run
+ *  after, so the new paths are reachable. */
+export function rewriteWikilinksForLinkers(
+  groupId: string,
+  linkers: string[],
+  renames: Rename[],
+): string[] {
+  if (linkers.length === 0 || renames.length === 0) return [];
 
   const map = new Map<string, string>();
   for (const r of renames) map.set(r.from, r.to);
 
   const db = getDb();
-  // Find every note that links to any moved path. note_links is the
-  // derived edge table — accurate without scanning every body.
-  const placeholders = renames.map(() => '?').join(',');
-  const linkerRows = db
-    .query<{ from_path: string }, string[]>(
-      `SELECT DISTINCT from_path FROM note_links
-        WHERE group_id = ? AND to_path IN (${placeholders})`,
-    )
-    .all(groupId, ...renames.map((r) => r.from));
-
-  if (linkerRows.length === 0) return [];
-
   const touched: string[] = [];
   const now = Date.now();
-  for (const { from_path: linker } of linkerRows) {
+  for (const linker of linkers) {
+    if (!linker) continue;
     const row = db
       .query<
         { content_json: string; yjs_state: Uint8Array | null; title: string },

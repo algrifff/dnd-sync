@@ -42,6 +42,8 @@ export function NoteWorkspace({
   csrfToken,
   character,
   accentColor,
+  initialTitle = '',
+  lockedTitle,
 }: {
   path: string;
   user: SurfaceUser;
@@ -51,6 +53,13 @@ export function NoteWorkspace({
   /** Per-world accent colour (groups.header_color); falls back to a
    *  parchment-friendly default in the sheet header. */
   accentColor: string | null;
+  /** Initial title from the DB. Used to seed TitleEditor so it doesn't
+   *  flash empty during Hocuspocus sync. */
+  initialTitle?: string;
+  /** When set, the title input is read-only and shows this fixed
+   *  string. Used for folder index notes (canonical subfolders +
+   *  campaign roots) — those are renamed from the sidebar menu. */
+  lockedTitle?: string;
 }): React.JSX.Element {
   // Provider + Y.Doc come from the shared module cache. They live as
   // long as the tab is open (or the idle grace window after release),
@@ -117,7 +126,11 @@ export function NoteWorkspace({
         />
       ) : (
         <div className="mb-4">
-          <TitleEditor ydoc={ydoc} />
+          <TitleEditor
+            ydoc={ydoc}
+            initialTitle={initialTitle}
+            {...(lockedTitle !== undefined ? { lockedTitle } : {})}
+          />
         </div>
       )}
 

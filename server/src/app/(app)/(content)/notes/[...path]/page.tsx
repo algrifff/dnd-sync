@@ -12,6 +12,7 @@ import {
 } from '@/lib/notes';
 import { getTemplate, type NoteTemplate, type TemplateKind } from '@/lib/templates';
 import { getWorldHeader } from '@/lib/groups';
+import { lockedFolderTitleFor } from '@/lib/folder-rename';
 import { NoteMenu } from '../../../../notes/NoteMenu';
 import { NoteWorkspace } from '../../../../notes/NoteWorkspace';
 import { ExcalidrawCanvas } from '../../../../excalidraw/ExcalidrawCanvas';
@@ -228,6 +229,15 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                     csrfToken={session.csrfToken}
                     character={character}
                     accentColor={accentColor}
+                    initialTitle={note.title}
+                    {...(() => {
+                      // Both canonical subfolders and campaign roots
+                      // are locked at the page level — campaign-root
+                      // renames go through the sidebar "..." menu so
+                      // the URL doesn't yank under the user mid-edit.
+                      const locked = lockedFolderTitleFor(path);
+                      return locked ? { lockedTitle: locked } : {};
+                    })()}
                   />
                 </div>
               </div>

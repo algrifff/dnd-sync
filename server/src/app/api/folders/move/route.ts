@@ -1,17 +1,16 @@
 // POST /api/folders/move — rename or reparent a folder (and everything
-// in it). Every path at or under `from` is rewritten to sit at the
-// equivalent position under `to`. That includes notes, note_links,
-// tags, aliases, the folder_markers table itself, and the FTS mirror.
+// in it). Thin wrapper around the shared moveFolder() lib in
+// server/src/lib/move-folder.ts; this route enforces the drag-and-drop
+// move policy (canonical subfolders / campaign roots / PCs are locked)
+// and delegates the actual data move + wikilink rewrite to the lib.
 
 import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
-import { closeDocumentConnections } from '@/collab/server';
 import { assertMoveAllowed } from '@/lib/move-policy';
-import { deriveFolderIndexesFor } from '@/lib/campaign-index';
+import { moveFolder } from '@/lib/move-folder';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,220 +39,29 @@ export async function POST(req: NextRequest): Promise<Response> {
   const to = normalizePath(parsed.to);
   if (!from || !to) return json({ error: 'invalid_path' }, 400);
   if (from === to) return json({ ok: true, path: to });
-  if ((to + '/').startsWith(from + '/')) {
-    return json({ error: 'cannot_move_into_self' }, 400);
-  }
 
   const policy = assertMoveAllowed({ kind: 'folder', from, to });
   if (!policy.ok) return json({ error: policy.error, reason: policy.reason }, 403);
 
-  const db = getDb();
-  const groupId = session.currentGroupId;
-
-  // Every note that lives at or under the folder. We'll need their
-  // post-move paths for FTS reseed + collision checking.
-  const affected = db
-    .query<
-      { path: string; title: string; content_text: string },
-      [string, string, string]
-    >(
-      `SELECT path, title, content_text
-         FROM notes
-        WHERE group_id = ? AND (path = ? OR path LIKE ? || '/%')`,
-    )
-    .all(groupId, from, from);
-
-  if (affected.length === 0) {
-    // Folder may be empty but have a marker; still fine.
-    const marker = db
-      .query<{ n: number }, [string, string]>(
-        'SELECT COUNT(*) AS n FROM folder_markers WHERE group_id = ? AND path = ?',
-      )
-      .get(groupId, from);
-    if ((marker?.n ?? 0) === 0) return json({ error: 'not_found' }, 404);
-  }
-
-  // Reject if any destination path is already taken.
-  const moved = affected.map((r) => ({
-    from: r.path,
-    to: to + r.path.slice(from.length),
-    title: r.title,
-    content: r.content_text,
-  }));
-  for (const m of moved) {
-    const clash = db
-      .query<{ n: number }, [string, string]>(
-        'SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path = ?',
-      )
-      .get(groupId, m.to);
-    if ((clash?.n ?? 0) > 0) return json({ error: 'exists', path: m.to }, 409);
-  }
-
-  db.transaction(() => {
-    // Derived-index tables hold FKs on notes(group_id, path) with
-    // ON DELETE CASCADE but no ON UPDATE CASCADE. Defer FK checks until
-    // COMMIT so the in-flight UPDATEs don't trip SQLITE_CONSTRAINT_FOREIGNKEY.
-    db.exec('PRAGMA defer_foreign_keys = 1');
-    // One bumped timestamp for every moved row so the tree cache + ETag
-    // rotate. Folder moves can move many notes — they all share the same
-    // moment so the snapshot is internally consistent.
-    const movedAt = Date.now();
-    for (const m of moved) {
-      db.query('UPDATE notes SET path = ?, updated_at = ? WHERE group_id = ? AND path = ?').run(
-        m.to,
-        movedAt,
-        groupId,
-        m.from,
-      );
-      db.query(
-        'UPDATE note_links SET from_path = ? WHERE group_id = ? AND from_path = ?',
-      ).run(m.to, groupId, m.from);
-      db.query(
-        'UPDATE note_links SET to_path = ? WHERE group_id = ? AND to_path = ?',
-      ).run(m.to, groupId, m.from);
-      db.query('UPDATE tags SET path = ? WHERE group_id = ? AND path = ?').run(
-        m.to,
-        groupId,
-        m.from,
-      );
-      db.query('UPDATE aliases SET path = ? WHERE group_id = ? AND path = ?').run(
-        m.to,
-        groupId,
-        m.from,
-      );
-      // Every derived-index table that FKs notes(group_id, path) must
-      // be rewritten before COMMIT — defer_foreign_keys lets us update
-      // them in any order, but skipping one will trip the check.
-      db.query(
-        'UPDATE characters SET note_path = ? WHERE group_id = ? AND note_path = ?',
-      ).run(m.to, groupId, m.from);
-      db.query(
-        'UPDATE character_campaigns SET note_path = ? WHERE group_id = ? AND note_path = ?',
-      ).run(m.to, groupId, m.from);
-      db.query(
-        'UPDATE session_notes SET note_path = ? WHERE group_id = ? AND note_path = ?',
-      ).run(m.to, groupId, m.from);
-      db.query(
-        'UPDATE items SET note_path = ? WHERE group_id = ? AND note_path = ?',
-      ).run(m.to, groupId, m.from);
-      db.query(
-        'UPDATE locations SET note_path = ? WHERE group_id = ? AND note_path = ?',
-      ).run(m.to, groupId, m.from);
-      db.query(
-        'UPDATE creatures SET note_path = ? WHERE group_id = ? AND note_path = ?',
-      ).run(m.to, groupId, m.from);
-      db.query(
-        'UPDATE locations SET parent_path = ? WHERE group_id = ? AND parent_path = ?',
-      ).run(m.to, groupId, m.from);
-      // users.active_character_path is a soft (no-FK) reference. Bring
-      // it along so a moved PC's pin doesn't end up orphaned.
-      db.query(
-        'UPDATE users SET active_character_path = ? WHERE active_character_path = ?',
-      ).run(m.to, m.from);
-      db.query('DELETE FROM notes_fts WHERE path = ? AND group_id = ?').run(
-        m.from,
-        groupId,
-      );
-      db.query(
-        'INSERT INTO notes_fts(path, group_id, title, content) VALUES (?, ?, ?, ?)',
-      ).run(m.to, groupId, m.title, m.content);
-    }
-
-    // Folder markers: rewrite the folder itself plus any nested markers.
-    const markers = db
-      .query<{ path: string }, [string, string, string]>(
-        `SELECT path FROM folder_markers
-          WHERE group_id = ? AND (path = ? OR path LIKE ? || '/%')`,
-      )
-      .all(groupId, from, from);
-    for (const mk of markers) {
-      const next = to + mk.path.slice(from.length);
-      // Avoid PK collision if the destination already has that marker
-      // (unlikely given the collision scan above, but cheap to guard).
-      db.query(
-        'DELETE FROM folder_markers WHERE group_id = ? AND path = ?',
-      ).run(groupId, next);
-      db.query(
-        'UPDATE folder_markers SET path = ? WHERE group_id = ? AND path = ?',
-      ).run(next, groupId, mk.path);
-    }
-
-    // Campaign folders: when a Campaigns/<slug> folder is the thing
-    // being moved / renamed, the campaigns row needs to follow so
-    // the /sessions + /characters dropdowns keep pointing at the
-    // right place.
-    const campaigns = db
-      .query<
-        { slug: string; folder_path: string; name: string },
-        [string, string, string]
-      >(
-        `SELECT slug, folder_path, name FROM campaigns
-          WHERE group_id = ? AND (folder_path = ? OR folder_path LIKE ? || '/%')`,
-      )
-      .all(groupId, from, from);
-    for (const c of campaigns) {
-      const nextPath = to + c.folder_path.slice(from.length);
-      const nextSlug = slugify(nextPath.split('/').pop() ?? c.slug);
-      // Drop any row that would collide at the destination.
-      db.query(
-        'DELETE FROM campaigns WHERE group_id = ? AND slug = ? AND slug != ?',
-      ).run(groupId, nextSlug, c.slug);
-      db.query(
-        `UPDATE campaigns
-            SET folder_path = ?,
-                slug = ?
-          WHERE group_id = ? AND slug = ?`,
-      ).run(nextPath, nextSlug, groupId, c.slug);
-      // Re-home the character_campaigns rows that referenced the
-      // old slug. (name stays as the user chose; display-name isn't
-      // derived from folder.)
-      if (nextSlug !== c.slug) {
-        db.query(
-          'UPDATE character_campaigns SET campaign_slug = ? WHERE group_id = ? AND campaign_slug = ?',
-        ).run(nextSlug, groupId, c.slug);
-        db.query(
-          'UPDATE session_notes SET campaign_slug = ? WHERE group_id = ? AND campaign_slug = ?',
-        ).run(nextSlug, groupId, c.slug);
-      }
-    }
-  })();
-
-  // Kick live editors for every moved note so they reconnect at the
-  // new document name.
-  for (const m of moved) {
-    await closeDocumentConnections(m.from);
-  }
-
-  // Refresh auto-managed indexes for every folder touched by the
-  // move. Each path's parent (when under a campaign) is deduplicated
-  // and derived once. Include the move endpoints themselves so the
-  // CONTAINER folders on either side (the parent of `from` and the
-  // parent of `to`) also pick up that the moved folder appeared /
-  // disappeared from their child list.
-  const touchedPaths: string[] = [from, to];
-  for (const m of moved) {
-    touchedPaths.push(m.from, m.to);
-  }
-  await deriveFolderIndexesFor(groupId, touchedPaths, {
+  const result = await moveFolder({
+    groupId: session.currentGroupId,
     userId: session.userId,
+    from,
+    to,
   });
+  if (!result.ok) {
+    const status = result.error === 'not_found' ? 404 : result.error === 'exists' ? 409 : 400;
+    return json({ error: result.error, ...(result.path ? { path: result.path } : {}) }, status);
+  }
 
   logAudit({
     action: 'folder.rename',
     actorId: session.userId,
-    groupId,
+    groupId: session.currentGroupId,
     target: `${from} -> ${to}`,
   });
 
-  return json({ ok: true, path: to, moved: moved.length });
-}
-
-function slugify(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  return json({ ok: true, path: to, moved: result.movedCount });
 }
 
 function normalizePath(p: string): string {

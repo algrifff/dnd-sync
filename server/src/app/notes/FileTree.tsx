@@ -225,6 +225,15 @@ export function FileTree({
   const [activeCampaignSlug, setActiveCampaignSlug] = useState<string | null>(
     activeCampaignSlugProp ?? null,
   );
+  // Re-sync local optimistic state when the server-rendered prop
+  // changes (e.g. another tab pinned a different campaign, or this
+  // tab just renamed the active campaign and the slug rotated). The
+  // useState seed only runs on mount so without this, the Crown
+  // button appears unlit on the renamed-campaign row even though the
+  // server has it pinned, and clicking it silently no-ops to itself.
+  useEffect(() => {
+    setActiveCampaignSlug(activeCampaignSlugProp ?? null);
+  }, [activeCampaignSlugProp]);
 
   const toggleActiveCampaign = useCallback(
     async (slug: string): Promise<void> => {
@@ -491,14 +500,26 @@ export function FileTree({
       setRenaming(true);
       setError(null);
       try {
-        const url = kind === 'file' ? '/api/notes/move' : '/api/folders/move';
+        // Campaign roots are locked by the standard folder-move
+        // policy. Route their renames through the index endpoint
+        // which knows how to follow the slug + active-campaign pin.
+        const isCampaignRootRename =
+          kind === 'folder' && isCampaignRoot(from);
+        const url = isCampaignRootRename
+          ? '/api/notes/rename-folder-from-index'
+          : kind === 'file'
+            ? '/api/notes/move'
+            : '/api/folders/move';
+        const payload = isCampaignRootRename
+          ? { indexPath: `${from}/index.md`, newTitle: clean }
+          : { from, to };
         const res = await fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'X-CSRF-Token': csrfToken,
           },
-          body: JSON.stringify({ from, to }),
+          body: JSON.stringify(payload),
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok || !body.ok) {
@@ -513,6 +534,13 @@ export function FileTree({
         // If the rename targeted the currently-open note, route there.
         if (kind === 'file' && activePath === from) {
           router.push('/notes/' + to.split('/').map(encodeURIComponent).join('/'));
+        } else if (isCampaignRootRename && activePath?.startsWith(from + '/')) {
+          // Active note lives under the renamed campaign; rewrite
+          // its prefix and navigate so the page doesn't 404.
+          const next =
+            (typeof body.toFolder === 'string' ? body.toFolder : to) +
+            activePath.slice(from.length);
+          router.push('/notes/' + next.split('/').map(encodeURIComponent).join('/'));
         }
         router.refresh();
         broadcastTreeChange();
@@ -1285,6 +1313,7 @@ function TreeRow({
                     name={item.name}
                     csrfToken={csrfToken}
                     activePath={activePath}
+                    onStartRename={onStartRename}
                   />
                 ) : (
                   <span
