@@ -115,14 +115,16 @@ function fibSphere(i: number, n: number): THREE.Vector3 {
 // plain-note spheres get a lighter bump so the canvas isn't overwhelmed.
 // Both values live behind refs so the user can tweak via slider without
 // re-positioning the layout.
-const DEFAULT_CAMPAIGN_BOOST = 2.0;
-const DEFAULT_CANONICAL_BOOST = 1.5;
-const DEFAULT_OTHER_BOOST = 1.25;
-// Within-cluster spacing multiplier. 1.0 = packed tight, 1.48 pushes the
-// files in each canonical folder back by 48 % so the cluster reads as a
-// loose huddle rather than a clump. Re-runs the layout when changed
-// (positions depend on it).
-const DEFAULT_SUB_SPREAD = 1.48;
+// Defaults dialled in by the user — the previous values blew the
+// hierarchy out of proportion with their actual world. Keep these
+// conservative; users can crank up via the Scale panel.
+const DEFAULT_CAMPAIGN_BOOST = 0.65;
+const DEFAULT_CANONICAL_BOOST = 0.55;
+const DEFAULT_OTHER_BOOST = 0.65;
+// Within-cluster spacing multiplier. 1.0 = packed tight; values < 1
+// pull files closer together inside their canonical folder. Re-runs
+// the layout when changed (positions depend on it).
+const DEFAULT_SUB_SPREAD = 0.9;
 const SCALE_STORAGE_KEY = 'graph3d:scale';
 
 // Top-level grouping key — first two path segments. Each parent (campaign,
@@ -919,15 +921,17 @@ function CameraFitter({
     );
     const r = Math.max(sphere.radius + maxScale + DEFAULT_WAVE_AMP * 2, 10);
 
-    // Derive the fit distance from the camera's actual FOV instead of a
-    // magic multiplier so the result is always "just at the edge" regardless
-    // of world size. For a perspective camera the sphere just fills the
-    // viewport when d = r / tan(halfFov). We take the max over the vertical
-    // and horizontal half-angles and add 5 % breathing room.
+    // Derive the fit distance from the camera's actual FOV. For a
+    // perspective camera the bounding sphere just fills the viewport
+    // when d = r / tan(halfFov). The 0.6 factor pulls the camera 40 %
+    // *inside* that tight fit — outer edges of the galaxy clip into the
+    // corners but the bulk of the cluster fills the screen, which is
+    // what reads on first load. The user wanted "significantly closer"
+    // and a tight crop is preferable to a starfield-from-orbit.
     const cam = camera as THREE.PerspectiveCamera;
     const vHalf = THREE.MathUtils.degToRad(cam.fov) / 2;
     const hHalf = Math.atan(Math.tan(vHalf) * cam.aspect);
-    const dist = (r / Math.min(Math.tan(vHalf), Math.tan(hHalf))) * 1.05;
+    const dist = (r / Math.min(Math.tan(vHalf), Math.tan(hHalf))) * 0.6;
 
     camera.position.set(sphere.center.x, sphere.center.y, sphere.center.z + dist);
     camera.lookAt(sphere.center);
