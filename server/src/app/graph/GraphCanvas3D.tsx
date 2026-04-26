@@ -125,22 +125,29 @@ function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluste
     Math.max(3, HEADROOM * Math.cbrt(sumCubes(nodes) / PACKING_EFF));
 
   // ── Layout sizes ──────────────────────────────────────────────────────
+  // Fibonacci-shell chord geometry: for N points on a unit sphere the
+  // minimum nearest-neighbour chord is ≈ 3.09 / √N. So to keep N spheres
+  // of radius r clear of each other on a shell, shellR ≈ r · √N · 0.65.
+  // This is the correct √N scaling — using cbrt(N) over-spaces drastically.
+  const SHELL_FACTOR = 0.65;
+
   const parentList = [...parents.values()];
   const P = parentList.length;
 
-  // Each parent reserves enough local volume to fit its subs on a small
-  // Fibonacci shell with breathing room.
-  const parentLocalR = parentList.map((parent) => {
+  // Each parent's outer bounding radius = shell radius + outer-sub radius.
+  // Parents are spaced apart on the galaxy shell using their bounding radii.
+  const parentBoundR = parentList.map((parent) => {
     const subRs = [...parent.subs.values()].map(packedRadius);
     if (subRs.length === 0) return 5;
     if (subRs.length === 1) return subRs[0]!;
     const maxSubR = Math.max(...subRs);
-    return maxSubR * 2.0 * Math.cbrt(subRs.length);
+    const shellR = maxSubR * SHELL_FACTOR * Math.sqrt(subRs.length);
+    return shellR + maxSubR;
   });
 
-  // Galaxy radius: parents never overlap, with comfortable spacing.
-  const maxParentR = Math.max(...parentLocalR, 5);
-  const galaxyRadius = P <= 1 ? 0 : maxParentR * 2.4 * Math.cbrt(P);
+  // Galaxy radius — same chord formula at the parent level.
+  const maxParentR = Math.max(...parentBoundR, 5);
+  const galaxyRadius = P <= 1 ? 0 : maxParentR * SHELL_FACTOR * Math.sqrt(P);
 
   const clusters: Cluster[] = [];
   const placed: Placed[] = [];
@@ -153,12 +160,10 @@ function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluste
     const subEntries = [...parent.subs.entries()];
     const S = subEntries.length;
 
-    // Sub-centres sit on a small Fibonacci shell around the parent. Shell
-    // radius is tuned so subs stay clearly separated from each other and
-    // from siblings under other parents.
+    // Sub-centres sit on a small Fibonacci shell around the parent.
     const subRs = subEntries.map(([, nodes]) => packedRadius(nodes));
     const maxSubR = subRs.length ? Math.max(...subRs) : 0;
-    const shellR = S <= 1 ? 0 : Math.max(maxSubR * 1.6, parentLocalR[pi]! * 0.4);
+    const shellR = S <= 1 ? 0 : maxSubR * SHELL_FACTOR * Math.sqrt(S);
 
     subEntries.forEach(([subKey, nodes], si) => {
       const subDir = S <= 1 ? new THREE.Vector3() : fibSphere(si, S);
@@ -204,8 +209,10 @@ function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluste
 // holds even when a node has many cross-links.
 function applyCrossLinkPull(placed: Placed[], edges: GraphPayload['edges']): void {
   if (placed.length === 0) return;
-  const PULL = 0.18;     // fraction of mean cross-link vector to apply
-  const MAX_DISP = 14;   // hard cap on per-node displacement (world units)
+  const PULL = 0.15;     // fraction of mean cross-link vector to apply
+  const MAX_DISP = 6;    // hard cap on per-node displacement (world units).
+                         // Scaled to the tighter galaxy geometry so a heavy
+                         // bridge-file can't fly out of its parent shell.
 
   const idToIdx = new Map<string, number>();
   placed.forEach((p, i) => idToIdx.set(p.id, i));
