@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import type { NextRequest } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
@@ -98,6 +99,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
       body.activeCampaignSlug,
       id,
     );
+    // The sidebar reads active_campaign_slug from the (app)/(content) layout,
+    // a different segment from /settings/world. router.refresh() on the client
+    // only revalidates the current route, so the parent layout's cached RSC
+    // payload kept the stale slug in production. Invalidate the whole layout
+    // tree so any segment that reads this value re-renders on next navigation.
+    revalidatePath('/', 'layout');
   }
 
   if (body.features !== undefined) {
