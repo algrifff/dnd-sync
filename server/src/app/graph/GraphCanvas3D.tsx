@@ -12,7 +12,12 @@ import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import * as Y from 'yjs';
 import { HocuspocusProvider } from '@hocuspocus/provider';
-import { clusterKey, radiusForDegree } from './graphStyle';
+import {
+  clusterKey,
+  isAnchorPath,
+  nodeRenderRadius,
+  radiusForDegree,
+} from './graphStyle';
 import { GroupEditor, buildCollabUrl, type Group } from './GraphCanvas';
 
 type GraphPayload = {
@@ -36,12 +41,19 @@ type Placed = {
 // Pick the live render boost for a node based on its cluster path. Both
 // values come in as refs so slider drags don't force a re-render of every
 // star — the per-frame loop reads .current each frame.
+//
+// Case-insensitive on the prefix because the import pipeline emits
+// `Campaigns/<slug>/...` (capital C) while older imports / hand-edits may
+// use lowercase. The user's bug report — campaign indexes not responding
+// to the campaign slider — was caused by this mismatch.
 function pickBoost(
   cluster: string,
   campaignBoost: number,
   defaultBoost: number,
 ): number {
-  return cluster.startsWith('campaigns/') ? campaignBoost : defaultBoost;
+  return cluster.toLowerCase().startsWith('campaigns/')
+    ? campaignBoost
+    : defaultBoost;
 }
 
 type Cluster = {
@@ -222,11 +234,19 @@ function placeNodes(
       const N = sorted.length;
 
       sorted.forEach((n, i) => {
-        const r = radiusForDegree(n.degree) / 4;
+        // nodeRenderRadius applies the anchor boost: an `index.md` at a
+        // campaign root reads as the dominant sphere in that cluster
+        // even when its degree is 0. Divide by 4 to land in the same
+        // world-unit range as the original `radiusForDegree(d)/4`.
+        const r = nodeRenderRadius(n.id, n.degree) / 4;
         const scale = Math.max(1.2, r);
-        const rFrac = N <= 1 ? 0 : Math.sqrt(i / (N - 1));
+        // Anchors sit at the parent centre; everything else fans out.
+        const isAnchor = isAnchorPath(n.id);
+        const rFrac = isAnchor || N <= 1 ? 0 : Math.sqrt(i / (N - 1));
         const local = fibSphere(i, Math.max(N, 1)).multiplyScalar(subR * rFrac);
-        const pos = subCenter.clone().add(local);
+        const pos = isAnchor
+          ? parentCenter.clone()
+          : subCenter.clone().add(local);
         placed.push({
           id: n.id,
           title: n.title,

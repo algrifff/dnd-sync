@@ -37,7 +37,7 @@ import { HocuspocusProvider } from '@hocuspocus/provider';
 import Graph from 'graphology';
 import Sigma from 'sigma';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
-import { clusterSeedPositions, colorForTags, radiusForDegree } from './graphStyle';
+import { clusterSeedPositions, colorForTags, nodeRenderRadius } from './graphStyle';
 import { NotePicker } from '../notes/NotePicker';
 
 // Sigma's WebGL renderer can't read CSS variables, so we snapshot the
@@ -342,7 +342,10 @@ export function GraphCanvas({
         for (const id of affectedNodes) {
           const d = g.degree(id);
           g.setNodeAttribute(id, 'degree', d);
-          g.setNodeAttribute(id, 'size', radiusForDegree(d) * nodeScaleRef.current);
+          // nodeRenderRadius applies the campaign-anchor boost so an
+          // index.md with degree 0 still renders as the biggest node
+          // in its cluster.
+          g.setNodeAttribute(id, 'size', nodeRenderRadius(id, d) * nodeScaleRef.current);
         }
         setCounts({ nodes: g.order, edges: g.size });
       }
@@ -572,7 +575,7 @@ export function GraphCanvas({
           const seed = seedPositions.get(n.id) ?? { x: 0, y: 0 };
           g.addNode(n.id, {
             label: n.title,
-            size: radiusForDegree(n.degree) * nodeScaleRef.current,
+            size: nodeRenderRadius(n.id, n.degree) * nodeScaleRef.current,
             color: (colorForRef.current ?? colorFor)(n.id, n.tags),
             labelColor: inkRgba(labelOpacityRef.current),
             x: pin?.x ?? seed.x,
@@ -666,7 +669,7 @@ export function GraphCanvas({
                 g.setNodeAttribute(
                   id,
                   'size',
-                  radiusForDegree(d) * nodeScaleRef.current,
+                  nodeRenderRadius(id, d) * nodeScaleRef.current,
                 );
               }
               setEdgeProgress({ loaded: i, total: valid.length });
@@ -990,7 +993,7 @@ export function GraphCanvas({
                 for (const id of [source, target]) {
                   const d = g.degree(id);
                   g.setNodeAttribute(id, 'degree', d);
-                  g.setNodeAttribute(id, 'size', radiusForDegree(d) * nodeScaleRef.current);
+                  g.setNodeAttribute(id, 'size', nodeRenderRadius(id, d) * nodeScaleRef.current);
                 }
                 setCounts({ nodes: g.order, edges: g.size });
               }
@@ -1125,7 +1128,7 @@ export function GraphCanvas({
     const g = graphRef.current;
     if (!g) return;
     g.forEachNode((node) => {
-      g.setNodeAttribute(node, 'size', radiusForDegree(g.degree(node)) * nodeScale);
+      g.setNodeAttribute(node, 'size', nodeRenderRadius(node, g.degree(node)) * nodeScale);
     });
   }, [nodeScale]);
 
