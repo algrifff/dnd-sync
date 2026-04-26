@@ -26,7 +26,14 @@ type Placed = {
   degree: number;
   cluster: string;
   pos: THREE.Vector3;
+  // Layout/collision radius — used by packing math and relax. Drives
+  // inter-sphere spacing.
   scale: number;
+  // Visual render radius — what the sphere geometry actually draws at,
+  // and what label offset / camera fitter padding uses. Decoupled from
+  // `scale` so we can render bigger than we pack: the layout stays tight
+  // while spheres read at the size the user actually wants on screen.
+  renderScale: number;
 };
 
 type Cluster = {
@@ -76,6 +83,15 @@ function fibSphere(i: number, n: number): THREE.Vector3 {
     Math.cos(phi),
   );
 }
+
+// Render-only size boost. Decoupled from layout/collision so spheres can
+// read bigger on screen without the packing math expanding the cluster
+// (which would force the camera to pull back and cancel the boost).
+// Campaign nodes get a heftier boost — they're the gameplay-critical
+// notes and benefit from being instantly recognisable; world-lore /
+// plain-note spheres get a lighter bump so the canvas isn't overwhelmed.
+const DEFAULT_RENDER_BOOST = 1.25;
+const CAMPAIGN_RENDER_BOOST = 2.0;
 
 // Top-level grouping key — first two path segments. Each parent (campaign,
 // world-lore section) gets its own slot on the galaxy-wide Fibonacci shell.
@@ -174,6 +190,14 @@ function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluste
       const label = segs[segs.length - 1] || subKey;
       clusters.push({ key: subKey, label, center: subCenter });
 
+      // Render boost: spheres in `campaigns/*` get 2× visual size, everything
+      // else (world-lore, plain notes) gets 1.25×. Boost is render-only —
+      // the packing/relax math uses the unboosted `scale`, so the layout
+      // stays tight while spheres read bigger on screen.
+      const renderBoost = subKey.startsWith('campaigns/')
+        ? CAMPAIGN_RENDER_BOOST
+        : DEFAULT_RENDER_BOOST;
+
       // Hubs first — anchor at the centre, leaves spread outward.
       const sorted = [...nodes].sort(
         (a, b) => radiusForDegree(b.degree) - radiusForDegree(a.degree),
@@ -186,7 +210,15 @@ function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluste
         const rFrac = N <= 1 ? 0 : Math.sqrt(i / (N - 1));
         const local = fibSphere(i, Math.max(N, 1)).multiplyScalar(subR * rFrac);
         const pos = subCenter.clone().add(local);
-        placed.push({ id: n.id, title: n.title, degree: n.degree, cluster: subKey, pos, scale });
+        placed.push({
+          id: n.id,
+          title: n.title,
+          degree: n.degree,
+          cluster: subKey,
+          pos,
+          scale,
+          renderScale: scale * renderBoost,
+        });
       });
     });
   });
@@ -492,7 +524,9 @@ function Stars({
         p.pos.y + cy + driftY,
         p.pos.z + cz + driftZ,
       );
-      dummy.scale.setScalar(p.scale);
+      // Render at the boosted size; layout still uses the unboosted `scale`
+      // for spacing/collision so the cluster doesn't expand to compensate.
+      dummy.scale.setScalar(p.renderScale);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
 
@@ -740,7 +774,7 @@ function NodeLabel({
   });
   return (
     <Html
-      position={[p.pos.x, p.pos.y + p.scale + 0.4, p.pos.z]}
+      position={[p.pos.x, p.pos.y + p.renderScale + 0.4, p.pos.z]}
       center
       pointerEvents="none"
       zIndexRange={[10, 0]}
@@ -779,9 +813,9 @@ function CameraFitter({ placed }: { placed: Placed[] }) {
     const sphere = box.getBoundingSphere(new THREE.Sphere());
 
     // Bounding sphere is measured from node *centres*; add the largest
-    // star radius so even the outermost sphere surface stays inside the
-    // frustum, plus a small constant for the wave drift headroom.
-    const maxScale = placed.reduce((m, p) => Math.max(m, p.scale), 0);
+    // *rendered* radius (post-boost) so even the outermost sphere surface
+    // stays inside the frustum, plus a small constant for wave drift.
+    const maxScale = placed.reduce((m, p) => Math.max(m, p.renderScale), 0);
     const r = Math.max(sphere.radius + maxScale + DEFAULT_WAVE_AMP * 2, 10);
 
     // Derive the fit distance from the camera's actual FOV instead of a
