@@ -77,77 +77,186 @@ function fibSphere(i: number, n: number): THREE.Vector3 {
   );
 }
 
+// Top-level grouping key — first two path segments. Each parent (campaign,
+// world-lore section) gets its own slot on the galaxy-wide Fibonacci shell.
+// Canonical subfolders (loot, characters, sessions, …) that repeat under
+// multiple campaigns stay nested *under* their campaign rather than flying
+// off as standalone clusters elsewhere in space.
+function parentKey(path: string): string {
+  const parts = path.split('/').filter(Boolean);
+  if (parts.length >= 2) return `${parts[0]}/${parts[1]}`;
+  return parts[0] || '__root__';
+}
+
 function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluster[] } {
-  // Group by cluster key (up to 3 path segments)
-  const buckets = new Map<string, GraphPayload['nodes']>();
+  // ── Hierarchy: parent → sub → file ────────────────────────────────────
+  // Parent: first 2 segments (the campaign / world-lore-section).
+  // Sub:    first 3 segments (the canonical folder inside that parent).
+  // File:   the actual note path.
+  type ParentInfo = {
+    key: string;
+    subs: Map<string, GraphPayload['nodes']>;
+  };
+
+  const parents = new Map<string, ParentInfo>();
   for (const n of payload.nodes) {
-    const key = clusterKey(n.id);
-    const arr = buckets.get(key);
-    if (arr) arr.push(n);
-    else buckets.set(key, [n]);
+    const pk = parentKey(n.id);
+    const sk = clusterKey(n.id);
+    let p = parents.get(pk);
+    if (!p) {
+      p = { key: pk, subs: new Map() };
+      parents.set(pk, p);
+    }
+    const bucket = p.subs.get(sk);
+    if (bucket) bucket.push(n);
+    else p.subs.set(sk, [n]);
   }
 
-  const entries = [...buckets.entries()];
-  const C = entries.length;
-
-  // ── Step 1: Compute each cluster's packed radius via sphere-packing ──
-  // Treat the cluster as a random sphere-pack with packing efficiency ~0.64.
-  // Volume conservation: Σ(r_i³) / PACKING_EFF = R³ → R = cbrt(Σ r_i³ / EFF).
-  // HEADROOM adds 20 % breathing room so nodes aren't jammed at the edge.
+  // ── Packing helpers ───────────────────────────────────────────────────
+  // Volume-based packed radius: R = HEADROOM × ∛(Σr³ / 0.64).
   const PACKING_EFF = 0.64;
   const HEADROOM = 1.2;
-  const clusterRadii = entries.map(([, ids]) => {
-    const sumCubes = ids.reduce((s, n) => {
+  const sumCubes = (nodes: GraphPayload['nodes']): number =>
+    nodes.reduce((s, n) => {
       const r = Math.max(1.2, radiusForDegree(n.degree) / 4);
       return s + r * r * r;
     }, 0);
-    return Math.max(5, HEADROOM * Math.cbrt(sumCubes / PACKING_EFF));
+  const packedRadius = (nodes: GraphPayload['nodes']): number =>
+    Math.max(3, HEADROOM * Math.cbrt(sumCubes(nodes) / PACKING_EFF));
+
+  // ── Layout sizes ──────────────────────────────────────────────────────
+  const parentList = [...parents.values()];
+  const P = parentList.length;
+
+  // Each parent reserves enough local volume to fit its subs on a small
+  // Fibonacci shell with breathing room.
+  const parentLocalR = parentList.map((parent) => {
+    const subRs = [...parent.subs.values()].map(packedRadius);
+    if (subRs.length === 0) return 5;
+    if (subRs.length === 1) return subRs[0]!;
+    const maxSubR = Math.max(...subRs);
+    return maxSubR * 2.0 * Math.cbrt(subRs.length);
   });
 
-  // ── Step 2: Galaxy radius — clusters must never bleed into each other ─
-  // Place cluster centres on a Fibonacci sphere at a radius that ensures
-  // the nearest-neighbour gap between cluster *surfaces* is positive.
-  // Factor 2.8 * cbrt(C) gives comfortable visual breathing room.
-  const maxClusterR = Math.max(...clusterRadii, 5);
-  const galaxyRadius = C <= 1 ? 0 : maxClusterR * 2.8 * Math.cbrt(C);
+  // Galaxy radius: parents never overlap, with comfortable spacing.
+  const maxParentR = Math.max(...parentLocalR, 5);
+  const galaxyRadius = P <= 1 ? 0 : maxParentR * 2.4 * Math.cbrt(P);
 
-  // ── Step 3: Place cluster centres then their nodes ────────────────────
   const clusters: Cluster[] = [];
   const placed: Placed[] = [];
 
-  entries.forEach(([key, ids], ci) => {
-    const dir = fibSphere(ci, C);
-    const center = dir.clone().multiplyScalar(galaxyRadius);
-    const segs = key.split('/');
-    const label = segs[segs.length - 1] || key;
-    clusters.push({ key, label, center });
+  parentList.forEach((parent, pi) => {
+    // Parent centre on the galaxy shell.
+    const parentDir = P <= 1 ? new THREE.Vector3() : fibSphere(pi, P);
+    const parentCenter = parentDir.clone().multiplyScalar(galaxyRadius);
 
-    const localRadius = clusterRadii[ci]!;
-    const size = ids.length;
+    const subEntries = [...parent.subs.entries()];
+    const S = subEntries.length;
 
-    // Sort descending by degree so hub nodes (large scale) get inner slots.
-    // Visually this means the most-connected star anchors the cluster centre
-    // and leaf nodes spread to the outer shell — mirrors real network topology.
-    const sorted = [...ids].sort(
-      (a, b) => radiusForDegree(b.degree) - radiusForDegree(a.degree),
-    );
+    // Sub-centres sit on a small Fibonacci shell around the parent. Shell
+    // radius is tuned so subs stay clearly separated from each other and
+    // from siblings under other parents.
+    const subRs = subEntries.map(([, nodes]) => packedRadius(nodes));
+    const maxSubR = subRs.length ? Math.max(...subRs) : 0;
+    const shellR = S <= 1 ? 0 : Math.max(maxSubR * 1.6, parentLocalR[pi]! * 0.4);
 
-    sorted.forEach((n, i) => {
-      const r = radiusForDegree(n.degree) / 4;
-      const scale = Math.max(1.2, r);
-      // sqrt ramp gives uniform volume density: inner nodes are denser,
-      // outer shell more sparse — avoids the "solid ball" look.
-      const rFrac = size <= 1 ? 0 : Math.sqrt(i / (size - 1));
-      const local = fibSphere(i, Math.max(size, 1)).multiplyScalar(localRadius * rFrac);
-      const pos = center.clone().add(local);
-      placed.push({ id: n.id, title: n.title, degree: n.degree, cluster: key, pos, scale });
+    subEntries.forEach(([subKey, nodes], si) => {
+      const subDir = S <= 1 ? new THREE.Vector3() : fibSphere(si, S);
+      const subCenter = parentCenter.clone().add(subDir.multiplyScalar(shellR));
+      const subR = subRs[si]!;
+
+      const segs = subKey.split('/');
+      const label = segs[segs.length - 1] || subKey;
+      clusters.push({ key: subKey, label, center: subCenter });
+
+      // Hubs first — anchor at the centre, leaves spread outward.
+      const sorted = [...nodes].sort(
+        (a, b) => radiusForDegree(b.degree) - radiusForDegree(a.degree),
+      );
+      const N = sorted.length;
+
+      sorted.forEach((n, i) => {
+        const r = radiusForDegree(n.degree) / 4;
+        const scale = Math.max(1.2, r);
+        const rFrac = N <= 1 ? 0 : Math.sqrt(i / (N - 1));
+        const local = fibSphere(i, Math.max(N, 1)).multiplyScalar(subR * rFrac);
+        const pos = subCenter.clone().add(local);
+        placed.push({ id: n.id, title: n.title, degree: n.degree, cluster: subKey, pos, scale });
+      });
     });
   });
 
-  // ── Step 4: Relax overlaps with hub-aware extra separation ────────────
+  // ── Cross-parent link pull ────────────────────────────────────────────
+  // Files with edges crossing parent boundaries drift toward their
+  // counterparts. Subtle so cluster structure stays intact, capped so a
+  // single highly-cross-linked node can't fly across the galaxy.
+  applyCrossLinkPull(placed, payload.edges);
+
+  // ── Relax overlaps with hub-aware extra separation ────────────────────
   relaxOverlaps(placed);
 
   return { placed, clusters };
+}
+
+// One-pass averaged pull along cross-parent edges. Each node accumulates
+// the mean direction of its cross-parent connections, then moves a fraction
+// of that vector — capped in absolute world units so the cluster shape
+// holds even when a node has many cross-links.
+function applyCrossLinkPull(placed: Placed[], edges: GraphPayload['edges']): void {
+  if (placed.length === 0) return;
+  const PULL = 0.18;     // fraction of mean cross-link vector to apply
+  const MAX_DISP = 14;   // hard cap on per-node displacement (world units)
+
+  const idToIdx = new Map<string, number>();
+  placed.forEach((p, i) => idToIdx.set(p.id, i));
+
+  const off = new Float32Array(placed.length * 3);
+  const cnt = new Int32Array(placed.length);
+
+  for (const e of edges) {
+    const ai = idToIdx.get(e.source);
+    const bi = idToIdx.get(e.target);
+    if (ai === undefined || bi === undefined) continue;
+    const a = placed[ai];
+    const b = placed[bi];
+    if (!a || !b) continue;
+    if (parentKey(a.id) === parentKey(b.id)) continue;
+
+    const dx = b.pos.x - a.pos.x;
+    const dy = b.pos.y - a.pos.y;
+    const dz = b.pos.z - a.pos.z;
+
+    const ai3 = ai * 3;
+    const bi3 = bi * 3;
+    off[ai3] = (off[ai3] ?? 0) + dx;
+    off[ai3 + 1] = (off[ai3 + 1] ?? 0) + dy;
+    off[ai3 + 2] = (off[ai3 + 2] ?? 0) + dz;
+    cnt[ai] = (cnt[ai] ?? 0) + 1;
+
+    off[bi3] = (off[bi3] ?? 0) - dx;
+    off[bi3 + 1] = (off[bi3 + 1] ?? 0) - dy;
+    off[bi3 + 2] = (off[bi3 + 2] ?? 0) - dz;
+    cnt[bi] = (cnt[bi] ?? 0) + 1;
+  }
+
+  for (let i = 0; i < placed.length; i++) {
+    const c = cnt[i] ?? 0;
+    if (c === 0) continue;
+    const p = placed[i];
+    if (!p) continue;
+    const inv = 1 / c;
+    let dx = (off[i * 3] ?? 0) * inv * PULL;
+    let dy = (off[i * 3 + 1] ?? 0) * inv * PULL;
+    let dz = (off[i * 3 + 2] ?? 0) * inv * PULL;
+    const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (len > MAX_DISP) {
+      const s = MAX_DISP / len;
+      dx *= s; dy *= s; dz *= s;
+    }
+    p.pos.x += dx;
+    p.pos.y += dy;
+    p.pos.z += dz;
+  }
 }
 
 // Iterative pairwise repulsion. O(N²) per pass but runs once on data load.
