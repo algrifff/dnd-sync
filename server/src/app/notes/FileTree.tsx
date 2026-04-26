@@ -1182,6 +1182,7 @@ function TreeRow({
     })();
     const nameLabel = (
       <span
+        title={item.name}
         className={`truncate ${
           isPromoted
             ? `font-medium text-[13.5px] ${isActiveCampaign ? 'text-[var(--wine)]' : 'text-[var(--ink-soft)]'}`
@@ -1229,7 +1230,7 @@ function TreeRow({
             <Link
               href={indexHref}
               onClick={() => { if (!item.open) onToggle(item.path); }}
-              className="folder-row-link flex flex-1 items-center gap-1 py-1 pr-2 text-left text-[var(--ink-soft)] hover:text-[var(--ink)]"
+              className="folder-row-link flex min-w-0 flex-1 items-center gap-1 py-1 pr-2 text-left text-[var(--ink-soft)] hover:text-[var(--ink)]"
               style={isTopLevel ? { paddingLeft: padding } : undefined}
             >
               {folderIcon}
@@ -1237,7 +1238,7 @@ function TreeRow({
             </Link>
           ) : isTopLevel ? (
             <div
-              className="flex flex-1 cursor-default items-center gap-1 py-1 pr-2 text-[var(--ink-soft)]"
+              className="flex min-w-0 flex-1 cursor-default items-center gap-1 py-1 pr-2 text-[var(--ink-soft)]"
               style={{ paddingLeft: padding }}
             >
               {folderIcon}
@@ -1247,7 +1248,7 @@ function TreeRow({
             <button
               type="button"
               onClick={() => onToggle(item.path)}
-              className="flex flex-1 items-center gap-1 py-1 pr-2 text-left text-[var(--ink-soft)]"
+              className="flex min-w-0 flex-1 items-center gap-1 py-1 pr-2 text-left text-[var(--ink-soft)]"
             >
               {folderIcon}
               {nameLabel}
@@ -1382,7 +1383,7 @@ function TreeRow({
           style={{ paddingLeft: padding + 14 }}
         >
           <KindIcon path={item.path} />
-          <span className="truncate">{item.title || item.name}</span>
+          <span className="truncate" title={item.title || item.name}>{item.title || item.name}</span>
           <PeerStack notePath={item.path} />
         </Link>
         {isMoving && (
