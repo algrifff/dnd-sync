@@ -66,22 +66,48 @@ export function isAnchorPath(path: string): boolean {
   );
 }
 
-/** Anchor sizing — campaign roots should always read as the biggest
- *  sphere in their cluster regardless of degree. We achieve this with:
- *   - a multiplier on the degree-derived radius (so an anchor with high
- *     degree still scales up further), and
- *   - an absolute floor (so a degree-0 anchor still dwarfs leaf nodes). */
-export const ANCHOR_RADIUS_BOOST = 4.0;
-export const ANCHOR_RADIUS_FLOOR = 60; // pixels in 2D; mirrored in 3D as /4 → 15 world units
+/** Three-tier anchor sizing:
+ *   - tier 1 ("campaign"): top-level section roots — `Campaigns/<slug>/
+ *     index.md`, `World Lore/index.md`, `World Lore/<section>/index.md`.
+ *     Path depth ≤ 3 segments.
+ *   - tier 2 ("canonical"): canonical sub-folder roots inside a
+ *     section — `Campaigns/<slug>/Characters/index.md`,
+ *     `Campaigns/<slug>/Adventure Log/index.md`, etc. Path depth ≥ 4.
+ *   - null: not an anchor.
+ *
+ *  Each tier carries its own multiplier + absolute floor so the
+ *  visual hierarchy holds even when none of the nodes have many
+ *  links — a degree-0 campaign root still dwarfs a degree-0
+ *  canonical root, which still dwarfs leaf entities. */
+export type AnchorTier = 'campaign' | 'canonical' | null;
+
+export function anchorTier(path: string): AnchorTier {
+  if (!isAnchorPath(path)) return null;
+  // /<root>/<index>.md is 2 segments → campaign tier (top-level lore root).
+  // /<root>/<parent>/<index>.md is 3 segments → also campaign tier
+  // (campaign root or sub-section root).
+  // /<root>/<parent>/<sub>/<index>.md is 4 segments → canonical tier
+  // (canonical sub-folder root: Characters / Loot / Adventure Log / …).
+  const parts = path.split('/').filter(Boolean);
+  return parts.length <= 3 ? 'campaign' : 'canonical';
+}
+
+const TIER_BOOSTS = { campaign: 4.0, canonical: 3.0 } as const;
+const TIER_FLOORS = { campaign: 60, canonical: 40 } as const;
+
+// Kept for any older consumer; reflects the campaign tier.
+export const ANCHOR_RADIUS_BOOST = TIER_BOOSTS.campaign;
+export const ANCHOR_RADIUS_FLOOR = TIER_FLOORS.campaign;
 
 /** Final render radius for a graph node, including the anchor boost.
  *  Use this everywhere instead of bare `radiusForDegree` so anchor
- *  notes stay visible even with degree 0 *and* always read as the
- *  biggest sphere in their cluster. */
+ *  notes stay visible even with degree 0 and the tier ordering is
+ *  preserved (campaign root > canonical root > leaf). */
 export function nodeRenderRadius(path: string, degree: number): number {
   const base = radiusForDegree(degree);
-  if (!isAnchorPath(path)) return base;
-  return Math.max(ANCHOR_RADIUS_FLOOR, base * ANCHOR_RADIUS_BOOST);
+  const tier = anchorTier(path);
+  if (!tier) return base;
+  return Math.max(TIER_FLOORS[tier], base * TIER_BOOSTS[tier]);
 }
 
 /** Extract a stable cluster identifier from a note path using up to 3 segments,

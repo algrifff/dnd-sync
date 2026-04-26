@@ -13,8 +13,8 @@ import * as THREE from 'three';
 import * as Y from 'yjs';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import {
+  anchorTier,
   clusterKey,
-  isAnchorPath,
   nodeRenderRadius,
   radiusForDegree,
 } from './graphStyle';
@@ -38,22 +38,25 @@ type Placed = {
   scale: number;
 };
 
-// Pick the live render boost for a node based on its cluster path. Both
-// values come in as refs so slider drags don't force a re-render of every
-// star — the per-frame loop reads .current each frame.
+// Pick the live render boost for a node based on its tier:
+//   - campaign-root index (Campaigns/<slug>/index.md, World Lore/index.md, …)
+//     → campaignBoost slider.
+//   - canonical sub index (Campaigns/<slug>/Characters/index.md, …)
+//     → canonicalBoost slider.
+//   - everything else → otherBoost slider.
 //
-// Case-insensitive on the prefix because the import pipeline emits
-// `Campaigns/<slug>/...` (capital C) while older imports / hand-edits may
-// use lowercase. The user's bug report — campaign indexes not responding
-// to the campaign slider — was caused by this mismatch.
+// All three values come in via refs so slider drags don't re-render every
+// star — the per-frame loop reads .current each frame.
 function pickBoost(
-  cluster: string,
+  path: string,
   campaignBoost: number,
-  defaultBoost: number,
+  canonicalBoost: number,
+  otherBoost: number,
 ): number {
-  return cluster.toLowerCase().startsWith('campaigns/')
-    ? campaignBoost
-    : defaultBoost;
+  const tier = anchorTier(path);
+  if (tier === 'campaign') return campaignBoost;
+  if (tier === 'canonical') return canonicalBoost;
+  return otherBoost;
 }
 
 type Cluster = {
@@ -113,6 +116,7 @@ function fibSphere(i: number, n: number): THREE.Vector3 {
 // Both values live behind refs so the user can tweak via slider without
 // re-positioning the layout.
 const DEFAULT_CAMPAIGN_BOOST = 2.0;
+const DEFAULT_CANONICAL_BOOST = 1.5;
 const DEFAULT_OTHER_BOOST = 1.25;
 // Within-cluster spacing multiplier. 1.0 = packed tight, 1.48 pushes the
 // files in each canonical folder back by 48 % so the cluster reads as a
@@ -240,13 +244,25 @@ function placeNodes(
         // world-unit range as the original `radiusForDegree(d)/4`.
         const r = nodeRenderRadius(n.id, n.degree) / 4;
         const scale = Math.max(1.2, r);
-        // Anchors sit at the parent centre; everything else fans out.
-        const isAnchor = isAnchorPath(n.id);
-        const rFrac = isAnchor || N <= 1 ? 0 : Math.sqrt(i / (N - 1));
-        const local = fibSphere(i, Math.max(N, 1)).multiplyScalar(subR * rFrac);
-        const pos = isAnchor
-          ? parentCenter.clone()
-          : subCenter.clone().add(local);
+        // Anchor placement is tier-aware:
+        //   - campaign tier (Campaigns/<slug>/index.md, World Lore roots):
+        //     pinned to the *parent* centre so the campaign reads as one
+        //     focal sphere with its canonical sub-folders orbiting.
+        //   - canonical tier (Characters/index.md, Loot/index.md, …):
+        //     pinned to the *sub* centre so it anchors that folder's own
+        //     huddle of leaves.
+        //   - leaf: fans out around the sub centre via Fibonacci shell.
+        const tier = anchorTier(n.id);
+        let pos: THREE.Vector3;
+        if (tier === 'campaign') {
+          pos = parentCenter.clone();
+        } else if (tier === 'canonical') {
+          pos = subCenter.clone();
+        } else {
+          const rFrac = N <= 1 ? 0 : Math.sqrt(i / (N - 1));
+          const local = fibSphere(i, Math.max(N, 1)).multiplyScalar(subR * rFrac);
+          pos = subCenter.clone().add(local);
+        }
         placed.push({
           id: n.id,
           title: n.title,
@@ -434,6 +450,7 @@ function Stars({
   waveFreqRef,
   waveSpeedRef,
   campaignBoostRef,
+  canonicalBoostRef,
   otherBoostRef,
 }: {
   placed: Placed[];
@@ -451,9 +468,10 @@ function Stars({
   waveAmpRef: React.RefObject<number>;
   waveFreqRef: React.RefObject<number>;
   waveSpeedRef: React.RefObject<number>;
-  // Live render-size boosts. Read each frame so slider drags update size
-  // without re-positioning the layout.
+  // Live render-size boosts (campaign / canonical-sub / leaf). Read each
+  // frame so slider drags update size without re-positioning the layout.
   campaignBoostRef: React.RefObject<number>;
+  canonicalBoostRef: React.RefObject<number>;
   otherBoostRef: React.RefObject<number>;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
@@ -569,8 +587,9 @@ function Stars({
       // Render at the boosted size; layout still uses the unboosted `scale`
       // for spacing/collision so the cluster doesn't expand to compensate.
       const cb = campaignBoostRef.current ?? DEFAULT_CAMPAIGN_BOOST;
+      const nb = canonicalBoostRef.current ?? DEFAULT_CANONICAL_BOOST;
       const ob = otherBoostRef.current ?? DEFAULT_OTHER_BOOST;
-      dummy.scale.setScalar(p.scale * pickBoost(p.cluster, cb, ob));
+      dummy.scale.setScalar(p.scale * pickBoost(p.id, cb, nb, ob));
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
 
@@ -746,6 +765,7 @@ function NodeLabels({
   proxRef,
   hoverLabelsRef,
   campaignBoostRef,
+  canonicalBoostRef,
   otherBoostRef,
 }: {
   placed: Placed[];
@@ -753,6 +773,7 @@ function NodeLabels({
   proxRef: React.RefObject<Float32Array>;
   hoverLabelsRef: React.RefObject<boolean>;
   campaignBoostRef: React.RefObject<number>;
+  canonicalBoostRef: React.RefObject<number>;
   otherBoostRef: React.RefObject<number>;
 }) {
   return (
@@ -766,6 +787,7 @@ function NodeLabels({
           proxRef={proxRef}
           hoverLabelsRef={hoverLabelsRef}
           campaignBoostRef={campaignBoostRef}
+          canonicalBoostRef={canonicalBoostRef}
           otherBoostRef={otherBoostRef}
         />
       ))}
@@ -780,6 +802,7 @@ function NodeLabel({
   proxRef,
   hoverLabelsRef,
   campaignBoostRef,
+  canonicalBoostRef,
   otherBoostRef,
 }: {
   p: Placed;
@@ -788,6 +811,7 @@ function NodeLabel({
   proxRef: React.RefObject<Float32Array>;
   hoverLabelsRef: React.RefObject<boolean>;
   campaignBoostRef: React.RefObject<number>;
+  canonicalBoostRef: React.RefObject<number>;
   otherBoostRef: React.RefObject<number>;
 }) {
   // We mutate the inner div's opacity directly via ref so the per-frame
@@ -830,8 +854,9 @@ function NodeLabel({
   // size each render so slider tweaks slide the label up/down in step
   // with the geometry.
   const cb = campaignBoostRef.current ?? DEFAULT_CAMPAIGN_BOOST;
+  const nb = canonicalBoostRef.current ?? DEFAULT_CANONICAL_BOOST;
   const ob = otherBoostRef.current ?? DEFAULT_OTHER_BOOST;
-  const labelOffset = p.scale * pickBoost(p.cluster, cb, ob) + 0.4;
+  const labelOffset = p.scale * pickBoost(p.id, cb, nb, ob) + 0.4;
   return (
     <Html
       position={[p.pos.x, p.pos.y + labelOffset, p.pos.z]}
@@ -865,10 +890,12 @@ function NodeLabel({
 function CameraFitter({
   placed,
   campaignBoostRef,
+  canonicalBoostRef,
   otherBoostRef,
 }: {
   placed: Placed[];
   campaignBoostRef: React.RefObject<number>;
+  canonicalBoostRef: React.RefObject<number>;
   otherBoostRef: React.RefObject<number>;
 }) {
   const { camera } = useThree();
@@ -884,9 +911,10 @@ function CameraFitter({
     // *rendered* radius (post-boost) so even the outermost sphere surface
     // stays inside the frustum, plus a small constant for wave drift.
     const cb = campaignBoostRef.current ?? DEFAULT_CAMPAIGN_BOOST;
+    const nb = canonicalBoostRef.current ?? DEFAULT_CANONICAL_BOOST;
     const ob = otherBoostRef.current ?? DEFAULT_OTHER_BOOST;
     const maxScale = placed.reduce(
-      (m, p) => Math.max(m, p.scale * pickBoost(p.cluster, cb, ob)),
+      (m, p) => Math.max(m, p.scale * pickBoost(p.id, cb, nb, ob)),
       0,
     );
     const r = Math.max(sphere.radius + maxScale + DEFAULT_WAVE_AMP * 2, 10);
@@ -969,6 +997,7 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   // don't force a re-layout.
   const [subSpread, setSubSpread] = useState<number>(DEFAULT_SUB_SPREAD);
   const [campaignBoost, setCampaignBoost] = useState<number>(DEFAULT_CAMPAIGN_BOOST);
+  const [canonicalBoost, setCanonicalBoost] = useState<number>(DEFAULT_CANONICAL_BOOST);
   const [otherBoost, setOtherBoost] = useState<number>(DEFAULT_OTHER_BOOST);
   // Mirror tunables into refs so the per-frame inner loops read live
   // values without each setState re-rendering Stars / NodeLabels.
@@ -981,12 +1010,14 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   const waveFreqRef = useRef<number>(DEFAULT_WAVE_FREQ);
   const waveSpeedRef = useRef<number>(DEFAULT_WAVE_SPEED);
   const campaignBoostRef = useRef<number>(DEFAULT_CAMPAIGN_BOOST);
+  const canonicalBoostRef = useRef<number>(DEFAULT_CANONICAL_BOOST);
   const otherBoostRef = useRef<number>(DEFAULT_OTHER_BOOST);
   useEffect(() => { visDistRef.current = labelVis; }, [labelVis]);
   useEffect(() => { waveAmpRef.current = waveAmp; }, [waveAmp]);
   useEffect(() => { waveFreqRef.current = waveFreq; }, [waveFreq]);
   useEffect(() => { waveSpeedRef.current = waveSpeed; }, [waveSpeed]);
   useEffect(() => { campaignBoostRef.current = campaignBoost; }, [campaignBoost]);
+  useEffect(() => { canonicalBoostRef.current = canonicalBoost; }, [canonicalBoost]);
   useEffect(() => { otherBoostRef.current = otherBoost; }, [otherBoost]);
 
   // Per-star magnet/proximity buffers, owned here so both Stars and
@@ -1089,10 +1120,12 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
           const parsed = JSON.parse(raw) as {
             spread?: number;
             campaign?: number;
+            canonical?: number;
             other?: number;
           };
           if (typeof parsed.spread === 'number') setSubSpread(parsed.spread);
           if (typeof parsed.campaign === 'number') setCampaignBoost(parsed.campaign);
+          if (typeof parsed.canonical === 'number') setCanonicalBoost(parsed.canonical);
           if (typeof parsed.other === 'number') setOtherBoost(parsed.other);
         }
       } catch {
@@ -1158,13 +1191,14 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
         JSON.stringify({
           spread: subSpread,
           campaign: campaignBoost,
+          canonical: canonicalBoost,
           other: otherBoost,
         }),
       );
     } catch {
       /* ignore */
     }
-  }, [hydrated, subSpread, campaignBoost, otherBoost]);
+  }, [hydrated, subSpread, campaignBoost, canonicalBoost, otherBoost]);
 
   useEffect(() => {
     if (!hydrated || typeof window === 'undefined') return;
@@ -1290,6 +1324,7 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
             <CameraFitter
               placed={placed}
               campaignBoostRef={campaignBoostRef}
+              canonicalBoostRef={canonicalBoostRef}
               otherBoostRef={otherBoostRef}
             />
             <Stars
@@ -1305,6 +1340,7 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
               waveFreqRef={waveFreqRef}
               waveSpeedRef={waveSpeedRef}
               campaignBoostRef={campaignBoostRef}
+              canonicalBoostRef={canonicalBoostRef}
               otherBoostRef={otherBoostRef}
             />
             <Edges placed={placed} edges={data?.edges ?? []} color={palette.edge} />
@@ -1314,6 +1350,7 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
               proxRef={proxRef}
               hoverLabelsRef={hoverLabelsRef}
               campaignBoostRef={campaignBoostRef}
+              canonicalBoostRef={canonicalBoostRef}
               otherBoostRef={otherBoostRef}
             />
             <CampaignLabels placed={placed} />
@@ -1354,13 +1391,16 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
         }}
         subSpread={subSpread}
         campaignBoost={campaignBoost}
+        canonicalBoost={canonicalBoost}
         otherBoost={otherBoost}
         onSubSpreadChange={setSubSpread}
         onCampaignBoostChange={setCampaignBoost}
+        onCanonicalBoostChange={setCanonicalBoost}
         onOtherBoostChange={setOtherBoost}
         onScaleReset={() => {
           setSubSpread(DEFAULT_SUB_SPREAD);
           setCampaignBoost(DEFAULT_CAMPAIGN_BOOST);
+          setCanonicalBoost(DEFAULT_CANONICAL_BOOST);
           setOtherBoost(DEFAULT_OTHER_BOOST);
         }}
         groups={groupsState}
@@ -1474,9 +1514,11 @@ function PanelStack({
   onMotionReset,
   subSpread,
   campaignBoost,
+  canonicalBoost,
   otherBoost,
   onSubSpreadChange,
   onCampaignBoostChange,
+  onCanonicalBoostChange,
   onOtherBoostChange,
   onScaleReset,
   groups,
@@ -1506,9 +1548,11 @@ function PanelStack({
   onMotionReset: () => void;
   subSpread: number;
   campaignBoost: number;
+  canonicalBoost: number;
   otherBoost: number;
   onSubSpreadChange: (v: number) => void;
   onCampaignBoostChange: (v: number) => void;
+  onCanonicalBoostChange: (v: number) => void;
   onOtherBoostChange: (v: number) => void;
   onScaleReset: () => void;
   groups: Group[];
@@ -1608,9 +1652,11 @@ function PanelStack({
       <ScalePanel
         subSpread={subSpread}
         campaignBoost={campaignBoost}
+        canonicalBoost={canonicalBoost}
         otherBoost={otherBoost}
         onSubSpreadChange={onSubSpreadChange}
         onCampaignBoostChange={onCampaignBoostChange}
+        onCanonicalBoostChange={onCanonicalBoostChange}
         onOtherBoostChange={onOtherBoostChange}
         onReset={onScaleReset}
       />
@@ -1787,24 +1833,30 @@ function MotionPanel({
 }
 
 // Layout-and-render-size knobs. Spread tightens or loosens how files
-// huddle around their canonical folder; the two boost sliders adjust the
-// rendered sphere size for campaigns vs everything else (world-lore,
-// plain notes). The boosts are render-only so the cluster footprint
-// doesn't change — sliding them is cheap. Spread re-runs the layout pass.
+// huddle around their canonical folder; the three boost sliders adjust the
+// rendered sphere size by tier — campaign-root indexes (top of hierarchy),
+// canonical sub-folder indexes (Characters, Loot, Adventure Log…), and
+// everything else (entity files, world-lore notes). The boosts are
+// render-only so the cluster footprint doesn't change — sliding them is
+// cheap. Spread re-runs the layout pass.
 function ScalePanel({
   subSpread,
   campaignBoost,
+  canonicalBoost,
   otherBoost,
   onSubSpreadChange,
   onCampaignBoostChange,
+  onCanonicalBoostChange,
   onOtherBoostChange,
   onReset,
 }: {
   subSpread: number;
   campaignBoost: number;
+  canonicalBoost: number;
   otherBoost: number;
   onSubSpreadChange: (v: number) => void;
   onCampaignBoostChange: (v: number) => void;
+  onCanonicalBoostChange: (v: number) => void;
   onOtherBoostChange: (v: number) => void;
   onReset: () => void;
 }) {
@@ -1843,6 +1895,14 @@ function ScalePanel({
             max={4}
             step={0.05}
             onChange={onCampaignBoostChange}
+          />
+          <FloatSliderRow
+            label="Canonical size"
+            value={canonicalBoost}
+            min={0.5}
+            max={4}
+            step={0.05}
+            onChange={onCanonicalBoostChange}
           />
           <FloatSliderRow
             label="Other size"
