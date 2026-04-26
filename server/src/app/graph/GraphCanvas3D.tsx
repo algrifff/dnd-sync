@@ -27,14 +27,22 @@ type Placed = {
   cluster: string;
   pos: THREE.Vector3;
   // Layout/collision radius — used by packing math and relax. Drives
-  // inter-sphere spacing.
+  // inter-sphere spacing. The render size (what the sphere actually draws
+  // at) is computed at render time from `scale × boost` so the user can
+  // adjust the boost live via slider without re-positioning every node.
   scale: number;
-  // Visual render radius — what the sphere geometry actually draws at,
-  // and what label offset / camera fitter padding uses. Decoupled from
-  // `scale` so we can render bigger than we pack: the layout stays tight
-  // while spheres read at the size the user actually wants on screen.
-  renderScale: number;
 };
+
+// Pick the live render boost for a node based on its cluster path. Both
+// values come in as refs so slider drags don't force a re-render of every
+// star — the per-frame loop reads .current each frame.
+function pickBoost(
+  cluster: string,
+  campaignBoost: number,
+  defaultBoost: number,
+): number {
+  return cluster.startsWith('campaigns/') ? campaignBoost : defaultBoost;
+}
 
 type Cluster = {
   key: string;
@@ -90,8 +98,16 @@ function fibSphere(i: number, n: number): THREE.Vector3 {
 // Campaign nodes get a heftier boost — they're the gameplay-critical
 // notes and benefit from being instantly recognisable; world-lore /
 // plain-note spheres get a lighter bump so the canvas isn't overwhelmed.
-const DEFAULT_RENDER_BOOST = 1.25;
-const CAMPAIGN_RENDER_BOOST = 2.0;
+// Both values live behind refs so the user can tweak via slider without
+// re-positioning the layout.
+const DEFAULT_CAMPAIGN_BOOST = 2.0;
+const DEFAULT_OTHER_BOOST = 1.25;
+// Within-cluster spacing multiplier. 1.0 = packed tight, 1.48 pushes the
+// files in each canonical folder back by 48 % so the cluster reads as a
+// loose huddle rather than a clump. Re-runs the layout when changed
+// (positions depend on it).
+const DEFAULT_SUB_SPREAD = 1.48;
+const SCALE_STORAGE_KEY = 'graph3d:scale';
 
 // Top-level grouping key — first two path segments. Each parent (campaign,
 // world-lore section) gets its own slot on the galaxy-wide Fibonacci shell.
@@ -104,7 +120,13 @@ function parentKey(path: string): string {
   return parts[0] || '__root__';
 }
 
-function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluster[] } {
+function placeNodes(
+  payload: GraphPayload,
+  // Multiplier on within-sub spacing. >1 pushes files away from each other
+  // inside a canonical folder; the parent shell + galaxy shell scale up
+  // proportionally so subs/parents don't bleed into each other.
+  spread: number = DEFAULT_SUB_SPREAD,
+): { placed: Placed[]; clusters: Cluster[] } {
   // ── Hierarchy: parent → sub → file ────────────────────────────────────
   // Parent: first 2 segments (the campaign / world-lore-section).
   // Sub:    first 3 segments (the canonical folder inside that parent).
@@ -137,8 +159,11 @@ function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluste
       const r = Math.max(1.2, radiusForDegree(n.degree) / 4);
       return s + r * r * r;
     }, 0);
+  // Packed radius is multiplied by `spread` so the within-sub spacing
+  // grows proportionally and shellR / galaxyRadius derived from it scale
+  // to keep parent / sub volumes clear of each other.
   const packedRadius = (nodes: GraphPayload['nodes']): number =>
-    Math.max(3, HEADROOM * Math.cbrt(sumCubes(nodes) / PACKING_EFF));
+    Math.max(3, HEADROOM * Math.cbrt(sumCubes(nodes) / PACKING_EFF)) * spread;
 
   // ── Layout sizes ──────────────────────────────────────────────────────
   // Fibonacci-shell chord geometry: for N points on a unit sphere the
@@ -190,14 +215,6 @@ function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluste
       const label = segs[segs.length - 1] || subKey;
       clusters.push({ key: subKey, label, center: subCenter });
 
-      // Render boost: spheres in `campaigns/*` get 2× visual size, everything
-      // else (world-lore, plain notes) gets 1.25×. Boost is render-only —
-      // the packing/relax math uses the unboosted `scale`, so the layout
-      // stays tight while spheres read bigger on screen.
-      const renderBoost = subKey.startsWith('campaigns/')
-        ? CAMPAIGN_RENDER_BOOST
-        : DEFAULT_RENDER_BOOST;
-
       // Hubs first — anchor at the centre, leaves spread outward.
       const sorted = [...nodes].sort(
         (a, b) => radiusForDegree(b.degree) - radiusForDegree(a.degree),
@@ -217,7 +234,6 @@ function placeNodes(payload: GraphPayload): { placed: Placed[]; clusters: Cluste
           cluster: subKey,
           pos,
           scale,
-          renderScale: scale * renderBoost,
         });
       });
     });
@@ -397,6 +413,8 @@ function Stars({
   waveAmpRef,
   waveFreqRef,
   waveSpeedRef,
+  campaignBoostRef,
+  otherBoostRef,
 }: {
   placed: Placed[];
   hoverIdx: number | null;
@@ -413,6 +431,10 @@ function Stars({
   waveAmpRef: React.RefObject<number>;
   waveFreqRef: React.RefObject<number>;
   waveSpeedRef: React.RefObject<number>;
+  // Live render-size boosts. Read each frame so slider drags update size
+  // without re-positioning the layout.
+  campaignBoostRef: React.RefObject<number>;
+  otherBoostRef: React.RefObject<number>;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
@@ -526,7 +548,9 @@ function Stars({
       );
       // Render at the boosted size; layout still uses the unboosted `scale`
       // for spacing/collision so the cluster doesn't expand to compensate.
-      dummy.scale.setScalar(p.renderScale);
+      const cb = campaignBoostRef.current ?? DEFAULT_CAMPAIGN_BOOST;
+      const ob = otherBoostRef.current ?? DEFAULT_OTHER_BOOST;
+      dummy.scale.setScalar(p.scale * pickBoost(p.cluster, cb, ob));
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
 
@@ -701,11 +725,15 @@ function NodeLabels({
   visDistRef,
   proxRef,
   hoverLabelsRef,
+  campaignBoostRef,
+  otherBoostRef,
 }: {
   placed: Placed[];
   visDistRef: React.RefObject<number>;
   proxRef: React.RefObject<Float32Array>;
   hoverLabelsRef: React.RefObject<boolean>;
+  campaignBoostRef: React.RefObject<number>;
+  otherBoostRef: React.RefObject<number>;
 }) {
   return (
     <>
@@ -717,6 +745,8 @@ function NodeLabels({
           visDistRef={visDistRef}
           proxRef={proxRef}
           hoverLabelsRef={hoverLabelsRef}
+          campaignBoostRef={campaignBoostRef}
+          otherBoostRef={otherBoostRef}
         />
       ))}
     </>
@@ -729,12 +759,16 @@ function NodeLabel({
   visDistRef,
   proxRef,
   hoverLabelsRef,
+  campaignBoostRef,
+  otherBoostRef,
 }: {
   p: Placed;
   idx: number;
   visDistRef: React.RefObject<number>;
   proxRef: React.RefObject<Float32Array>;
   hoverLabelsRef: React.RefObject<boolean>;
+  campaignBoostRef: React.RefObject<number>;
+  otherBoostRef: React.RefObject<number>;
 }) {
   // We mutate the inner div's opacity directly via ref so the per-frame
   // lerp doesn't trigger React re-renders. The visibility distance comes
@@ -772,9 +806,15 @@ function NodeLabel({
     // off-screen labels from contributing layout cost.
     el.style.display = cur.current > 0.01 ? 'block' : 'none';
   });
+  // Label sits just above the rendered sphere top — recompute the boosted
+  // size each render so slider tweaks slide the label up/down in step
+  // with the geometry.
+  const cb = campaignBoostRef.current ?? DEFAULT_CAMPAIGN_BOOST;
+  const ob = otherBoostRef.current ?? DEFAULT_OTHER_BOOST;
+  const labelOffset = p.scale * pickBoost(p.cluster, cb, ob) + 0.4;
   return (
     <Html
-      position={[p.pos.x, p.pos.y + p.renderScale + 0.4, p.pos.z]}
+      position={[p.pos.x, p.pos.y + labelOffset, p.pos.z]}
       center
       pointerEvents="none"
       zIndexRange={[10, 0]}
@@ -802,7 +842,15 @@ function NodeLabel({
   );
 }
 
-function CameraFitter({ placed }: { placed: Placed[] }) {
+function CameraFitter({
+  placed,
+  campaignBoostRef,
+  otherBoostRef,
+}: {
+  placed: Placed[];
+  campaignBoostRef: React.RefObject<number>;
+  otherBoostRef: React.RefObject<number>;
+}) {
   const { camera } = useThree();
   const did = useRef(false);
   useEffect(() => {
@@ -815,7 +863,12 @@ function CameraFitter({ placed }: { placed: Placed[] }) {
     // Bounding sphere is measured from node *centres*; add the largest
     // *rendered* radius (post-boost) so even the outermost sphere surface
     // stays inside the frustum, plus a small constant for wave drift.
-    const maxScale = placed.reduce((m, p) => Math.max(m, p.renderScale), 0);
+    const cb = campaignBoostRef.current ?? DEFAULT_CAMPAIGN_BOOST;
+    const ob = otherBoostRef.current ?? DEFAULT_OTHER_BOOST;
+    const maxScale = placed.reduce(
+      (m, p) => Math.max(m, p.scale * pickBoost(p.cluster, cb, ob)),
+      0,
+    );
     const r = Math.max(sphere.radius + maxScale + DEFAULT_WAVE_AMP * 2, 10);
 
     // Derive the fit distance from the camera's actual FOV instead of a
@@ -891,6 +944,12 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   const [waveAmp, setWaveAmp] = useState<number>(DEFAULT_WAVE_AMP);
   const [waveFreq, setWaveFreq] = useState<number>(DEFAULT_WAVE_FREQ);
   const [waveSpeed, setWaveSpeed] = useState<number>(DEFAULT_WAVE_SPEED);
+  // Scale tunables: spread re-positions the layout (in placeNodes deps);
+  // the boost values are render-only and live behind refs so slider drags
+  // don't force a re-layout.
+  const [subSpread, setSubSpread] = useState<number>(DEFAULT_SUB_SPREAD);
+  const [campaignBoost, setCampaignBoost] = useState<number>(DEFAULT_CAMPAIGN_BOOST);
+  const [otherBoost, setOtherBoost] = useState<number>(DEFAULT_OTHER_BOOST);
   // Mirror tunables into refs so the per-frame inner loops read live
   // values without each setState re-rendering Stars / NodeLabels.
   const visDistRef = useRef<number>(DEFAULT_LABEL_VIS);
@@ -901,10 +960,14 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   const waveAmpRef = useRef<number>(DEFAULT_WAVE_AMP);
   const waveFreqRef = useRef<number>(DEFAULT_WAVE_FREQ);
   const waveSpeedRef = useRef<number>(DEFAULT_WAVE_SPEED);
+  const campaignBoostRef = useRef<number>(DEFAULT_CAMPAIGN_BOOST);
+  const otherBoostRef = useRef<number>(DEFAULT_OTHER_BOOST);
   useEffect(() => { visDistRef.current = labelVis; }, [labelVis]);
   useEffect(() => { waveAmpRef.current = waveAmp; }, [waveAmp]);
   useEffect(() => { waveFreqRef.current = waveFreq; }, [waveFreq]);
   useEffect(() => { waveSpeedRef.current = waveSpeed; }, [waveSpeed]);
+  useEffect(() => { campaignBoostRef.current = campaignBoost; }, [campaignBoost]);
+  useEffect(() => { otherBoostRef.current = otherBoost; }, [otherBoost]);
 
   // Per-star magnet/proximity buffers, owned here so both Stars and
   // NodeLabels read the same lerped values. Resized below once `placed`
@@ -1000,6 +1063,21 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
       } catch {
         /* ignore */
       }
+      try {
+        const raw = window.localStorage.getItem(SCALE_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as {
+            spread?: number;
+            campaign?: number;
+            other?: number;
+          };
+          if (typeof parsed.spread === 'number') setSubSpread(parsed.spread);
+          if (typeof parsed.campaign === 'number') setCampaignBoost(parsed.campaign);
+          if (typeof parsed.other === 'number') setOtherBoost(parsed.other);
+        }
+      } catch {
+        /* ignore */
+      }
     }
     // Mark hydration complete so the save effects below start writing.
     // Doing this last guarantees every read setState above has been
@@ -1055,6 +1133,22 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   useEffect(() => {
     if (!hydrated || typeof window === 'undefined') return;
     try {
+      window.localStorage.setItem(
+        SCALE_STORAGE_KEY,
+        JSON.stringify({
+          spread: subSpread,
+          campaign: campaignBoost,
+          other: otherBoost,
+        }),
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [hydrated, subSpread, campaignBoost, otherBoost]);
+
+  useEffect(() => {
+    if (!hydrated || typeof window === 'undefined') return;
+    try {
       window.localStorage.setItem(GROUPS_APPLY_KEY, groupsApply ? '1' : '0');
     } catch {
       /* ignore */
@@ -1087,8 +1181,8 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
 
   const { placed } = useMemo(() => {
     if (!data) return { placed: [] as Placed[], clusters: [] as Cluster[] };
-    return placeNodes(data);
-  }, [data]);
+    return placeNodes(data, subSpread);
+  }, [data, subSpread]);
 
   useEffect(() => {
     offsetsRef.current = new Float32Array(placed.length * 3);
@@ -1173,7 +1267,11 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
 
         {placed.length > 0 && (
           <>
-            <CameraFitter placed={placed} />
+            <CameraFitter
+              placed={placed}
+              campaignBoostRef={campaignBoostRef}
+              otherBoostRef={otherBoostRef}
+            />
             <Stars
               placed={placed}
               hoverIdx={hoverIdx}
@@ -1186,6 +1284,8 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
               waveAmpRef={waveAmpRef}
               waveFreqRef={waveFreqRef}
               waveSpeedRef={waveSpeedRef}
+              campaignBoostRef={campaignBoostRef}
+              otherBoostRef={otherBoostRef}
             />
             <Edges placed={placed} edges={data?.edges ?? []} color={palette.edge} />
             <NodeLabels
@@ -1193,6 +1293,8 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
               visDistRef={visDistRef}
               proxRef={proxRef}
               hoverLabelsRef={hoverLabelsRef}
+              campaignBoostRef={campaignBoostRef}
+              otherBoostRef={otherBoostRef}
             />
             <CampaignLabels placed={placed} />
           </>
@@ -1229,6 +1331,17 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
           setWaveAmp(DEFAULT_WAVE_AMP);
           setWaveFreq(DEFAULT_WAVE_FREQ);
           setWaveSpeed(DEFAULT_WAVE_SPEED);
+        }}
+        subSpread={subSpread}
+        campaignBoost={campaignBoost}
+        otherBoost={otherBoost}
+        onSubSpreadChange={setSubSpread}
+        onCampaignBoostChange={setCampaignBoost}
+        onOtherBoostChange={setOtherBoost}
+        onScaleReset={() => {
+          setSubSpread(DEFAULT_SUB_SPREAD);
+          setCampaignBoost(DEFAULT_CAMPAIGN_BOOST);
+          setOtherBoost(DEFAULT_OTHER_BOOST);
         }}
         groups={groupsState}
         groupsApply={groupsApply}
@@ -1339,6 +1452,13 @@ function PanelStack({
   onWaveFreqChange,
   onWaveSpeedChange,
   onMotionReset,
+  subSpread,
+  campaignBoost,
+  otherBoost,
+  onSubSpreadChange,
+  onCampaignBoostChange,
+  onOtherBoostChange,
+  onScaleReset,
   groups,
   groupsApply,
   onGroupsApplyChange,
@@ -1364,6 +1484,13 @@ function PanelStack({
   onWaveFreqChange: (v: number) => void;
   onWaveSpeedChange: (v: number) => void;
   onMotionReset: () => void;
+  subSpread: number;
+  campaignBoost: number;
+  otherBoost: number;
+  onSubSpreadChange: (v: number) => void;
+  onCampaignBoostChange: (v: number) => void;
+  onOtherBoostChange: (v: number) => void;
+  onScaleReset: () => void;
   groups: Group[];
   groupsApply: boolean;
   onGroupsApplyChange: (v: boolean) => void;
@@ -1457,6 +1584,15 @@ function PanelStack({
         onFreqChange={onWaveFreqChange}
         onSpeedChange={onWaveSpeedChange}
         onReset={onMotionReset}
+      />
+      <ScalePanel
+        subSpread={subSpread}
+        campaignBoost={campaignBoost}
+        otherBoost={otherBoost}
+        onSubSpreadChange={onSubSpreadChange}
+        onCampaignBoostChange={onCampaignBoostChange}
+        onOtherBoostChange={onOtherBoostChange}
+        onReset={onScaleReset}
       />
       <GroupsPanel
         groups={groups}
@@ -1615,6 +1751,86 @@ function MotionPanel({
             max={4}
             step={0.05}
             onChange={onSpeedChange}
+          />
+          <button
+            type="button"
+            onClick={onReset}
+            className="w-full rounded-[6px] border px-2 py-1 text-xs text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)]"
+            style={{ borderColor: 'var(--rule)' }}
+          >
+            Reset
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Layout-and-render-size knobs. Spread tightens or loosens how files
+// huddle around their canonical folder; the two boost sliders adjust the
+// rendered sphere size for campaigns vs everything else (world-lore,
+// plain notes). The boosts are render-only so the cluster footprint
+// doesn't change — sliding them is cheap. Spread re-runs the layout pass.
+function ScalePanel({
+  subSpread,
+  campaignBoost,
+  otherBoost,
+  onSubSpreadChange,
+  onCampaignBoostChange,
+  onOtherBoostChange,
+  onReset,
+}: {
+  subSpread: number;
+  campaignBoost: number;
+  otherBoost: number;
+  onSubSpreadChange: (v: number) => void;
+  onCampaignBoostChange: (v: number) => void;
+  onOtherBoostChange: (v: number) => void;
+  onReset: () => void;
+}) {
+  const [open, setOpen] = useState<boolean>(false);
+  return (
+    <div
+      className="rounded-[10px] border bg-[var(--vellum)] text-[var(--ink)] shadow-[0_6px_18px_rgb(var(--ink-rgb)/0.10)]"
+      style={{ borderColor: 'var(--rule)', width: 200 }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+        aria-expanded={open}
+        aria-label="Toggle scale panel"
+      >
+        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
+          Scale
+        </span>
+        <span aria-hidden className="text-[var(--ink-muted)]">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div className="space-y-2 px-3 pb-3">
+          <FloatSliderRow
+            label="Sub spread"
+            value={subSpread}
+            min={0.5}
+            max={3}
+            step={0.02}
+            onChange={onSubSpreadChange}
+          />
+          <FloatSliderRow
+            label="Campaign size"
+            value={campaignBoost}
+            min={0.5}
+            max={4}
+            step={0.05}
+            onChange={onCampaignBoostChange}
+          />
+          <FloatSliderRow
+            label="Other size"
+            value={otherBoost}
+            min={0.5}
+            max={4}
+            step={0.05}
+            onChange={onOtherBoostChange}
           />
           <button
             type="button"
