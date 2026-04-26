@@ -931,7 +931,7 @@ function CameraFitter({
     const cam = camera as THREE.PerspectiveCamera;
     const vHalf = THREE.MathUtils.degToRad(cam.fov) / 2;
     const hHalf = Math.atan(Math.tan(vHalf) * cam.aspect);
-    const dist = (r / Math.min(Math.tan(vHalf), Math.tan(hHalf))) * 0.6;
+    const dist = (r / Math.min(Math.tan(vHalf), Math.tan(hHalf))) * 0.4;
 
     camera.position.set(sphere.center.x, sphere.center.y, sphere.center.z + dist);
     camera.lookAt(sphere.center);
