@@ -4,15 +4,18 @@
 //
 // Rules (see /Users/magig/.claude/plans/i-am-noticing-a-mutable-sedgewick.md
 // for the source-of-truth matrix):
-//   • Player characters (anything under Campaigns/<slug>/Characters/) are
-//     locked from any move.
+//   • Player characters (anything under Campaigns/<slug>/Characters/) can
+//     only move into another Characters/ folder — cross-campaign is fine,
+//     anywhere else is not.
 //   • Campaign root folders (Campaigns/<slug>) are locked.
 //   • Canonical subfolders (Characters, People, Enemies, Loot, Adventure
 //     Log, Places, Creatures, Quests, World Lore/World Info) are locked.
 //   • Session notes (under Campaigns/<slug>/Adventure Log/) can only land
-//     inside their *own* campaign's Adventure Log.
+//     inside some Adventure Log — the same campaign's or another's. And
+//     nothing other than a session can land in an Adventure Log.
 //   • Everything else can land anywhere inside a Campaigns/<slug>/...
-//     subtree (except Characters) or anywhere inside World Lore/... .
+//     subtree (except Characters and Adventure Log) or anywhere inside
+//     World Lore/... .
 //   • Vault root, the bare top-level headings, and Assets are never
 //     valid destinations.
 
@@ -109,10 +112,8 @@ export function assertMoveAllowed(args: {
   if (kind === 'folder' && isCanonicalSubfolder(from)) {
     return { ok: false, error: 'canonical_folder_locked', reason: 'canonical subfolder cannot be moved' };
   }
-  // PC lock — anything at-or-under Characters/ (file or user subfolder).
-  if (isUnderCharacters(from)) {
-    return { ok: false, error: 'pc_locked', reason: 'player characters cannot be moved' };
-  }
+  // (PC source lock is enforced jointly with the destination check below
+  //  so cross-campaign Characters → Characters moves are allowed.)
 
   // ---------- destination shape ----------
   const destFolder = parentOf(to);
@@ -137,7 +138,22 @@ export function assertMoveAllowed(args: {
       reason: 'destination must be inside a campaign or World Lore',
     };
   }
-  if (isUnderCharacters(destFolder)) {
+
+  // ---------- character confinement ----------
+  // Anything at-or-under Characters/ (PC files or user subfolders) is
+  // confined to Characters/ folders — cross-campaign Characters →
+  // Characters is allowed; anywhere else is blocked. Likewise nothing
+  // outside Characters can land inside it.
+  const srcUnderCharacters = isUnderCharacters(from);
+  const dstUnderCharacters = isUnderCharacters(destFolder);
+  if (srcUnderCharacters && !dstUnderCharacters) {
+    return {
+      ok: false,
+      error: 'pc_locked',
+      reason: 'player characters can only move between Characters folders',
+    };
+  }
+  if (!srcUnderCharacters && dstUnderCharacters) {
     return {
       ok: false,
       error: 'characters_locked',
@@ -146,22 +162,24 @@ export function assertMoveAllowed(args: {
   }
 
   // ---------- session-note confinement ----------
-  if (isUnderAdventureLog(from)) {
-    if (!isUnderAdventureLog(destFolder)) {
-      return {
-        ok: false,
-        error: 'session_outside_adventure_log',
-        reason: 'sessions can only be moved within an Adventure Log',
-      };
-    }
-    const srcSlug = campaignSlug(from);
-    if (srcSlug && dstSlug && srcSlug !== dstSlug) {
-      return {
-        ok: false,
-        error: 'session_cross_campaign',
-        reason: 'sessions cannot move between campaigns',
-      };
-    }
+  // Adventure Log is symmetric with Characters: sessions can only land
+  // in some Adventure Log (same campaign or another), and nothing else
+  // can land in an Adventure Log.
+  const srcUnderAdventureLog = isUnderAdventureLog(from);
+  const dstUnderAdventureLog = isUnderAdventureLog(destFolder);
+  if (srcUnderAdventureLog && !dstUnderAdventureLog) {
+    return {
+      ok: false,
+      error: 'session_outside_adventure_log',
+      reason: 'sessions can only be moved within an Adventure Log',
+    };
+  }
+  if (!srcUnderAdventureLog && dstUnderAdventureLog) {
+    return {
+      ok: false,
+      error: 'adventure_log_locked',
+      reason: 'only session notes belong in Adventure Log/',
+    };
   }
 
   // ---------- folder self-containment ----------
@@ -192,6 +210,7 @@ export function isDraggableSource(src: { kind: MoveKind; path: string }): boolea
   // canDropOn for any folder destination so they can't be nested —
   // the only legal drop target is a between-rows reorder gap.
   if (src.kind === 'folder' && isCanonicalSubfolder(src.path)) return false;
-  if (isUnderCharacters(src.path)) return false;
+  // PCs and Characters/-subfolders are draggable; canDropOn keeps them
+  // confined to other Characters/ folders.
   return true;
 }

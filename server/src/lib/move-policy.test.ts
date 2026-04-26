@@ -37,8 +37,26 @@ describe('move-policy', () => {
       if (!r.ok) expect(r.error).toBe('characters_locked');
     });
 
-    it('flags PC source as non-draggable', () => {
-      expect(isDraggableSource({ kind: 'file', path: 'Campaigns/X/Characters/Bob.md' })).toBe(false);
+    it('allows PC → Characters in another campaign', () => {
+      const r = assertMoveAllowed({
+        kind: 'file',
+        from: 'Campaigns/X/Characters/Bob.md',
+        to: 'Campaigns/Y/Characters/Bob.md',
+      });
+      expect(r).toEqual({ ok: true });
+    });
+
+    it('allows a folder under Characters to move to another campaign Characters', () => {
+      const r = assertMoveAllowed({
+        kind: 'folder',
+        from: 'Campaigns/X/Characters/Heroes',
+        to: 'Campaigns/Y/Characters/Heroes',
+      });
+      expect(r).toEqual({ ok: true });
+    });
+
+    it('flags PC source as draggable so it can be dropped into another Characters folder', () => {
+      expect(isDraggableSource({ kind: 'file', path: 'Campaigns/X/Characters/Bob.md' })).toBe(true);
     });
   });
 
@@ -198,14 +216,52 @@ describe('move-policy', () => {
       if (!r.ok) expect(r.error).toBe('session_outside_adventure_log');
     });
 
-    it('blocks session → other campaign Adventure Log', () => {
+    it('allows session → other campaign Adventure Log', () => {
       const r = assertMoveAllowed({
         kind: 'file',
         from: 'Campaigns/X/Adventure Log/Session 1.md',
         to: 'Campaigns/Y/Adventure Log/Session 1.md',
       });
+      expect(r).toEqual({ ok: true });
+    });
+
+    it('allows session → other campaign Adventure Log subfolder', () => {
+      const r = assertMoveAllowed({
+        kind: 'file',
+        from: 'Campaigns/X/Adventure Log/Session 1.md',
+        to: 'Campaigns/Y/Adventure Log/Arc 1/Session 1.md',
+      });
+      expect(r).toEqual({ ok: true });
+    });
+
+    it('blocks non-session → Adventure Log', () => {
+      const r = assertMoveAllowed({
+        kind: 'file',
+        from: 'Campaigns/X/People/Bob.md',
+        to: 'Campaigns/X/Adventure Log/Bob.md',
+      });
       expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.error).toBe('session_cross_campaign');
+      if (!r.ok) expect(r.error).toBe('adventure_log_locked');
+    });
+
+    it('blocks non-session → other campaign Adventure Log', () => {
+      const r = assertMoveAllowed({
+        kind: 'file',
+        from: 'Campaigns/X/Loot/Sword.md',
+        to: 'Campaigns/Y/Adventure Log/Sword.md',
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toBe('adventure_log_locked');
+    });
+
+    it('blocks user folder → Adventure Log', () => {
+      const r = assertMoveAllowed({
+        kind: 'folder',
+        from: 'Campaigns/X/People/Allies',
+        to: 'Campaigns/X/Adventure Log/Allies',
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toBe('adventure_log_locked');
     });
   });
 
@@ -266,7 +322,9 @@ describe('move-policy', () => {
       // nested — the only legal drop is a between-rows reorder gap.
       expect(isDraggableSource({ kind: 'folder', path: 'Campaigns/X' })).toBe(true);
       expect(isDraggableSource({ kind: 'folder', path: 'Campaigns/X/Enemies' })).toBe(false);
-      expect(isDraggableSource({ kind: 'file', path: 'Campaigns/X/Characters/Bob.md' })).toBe(false);
+      // PC files are draggable now — canDropOn keeps them confined to
+      // other Characters/ folders rather than blocking the drag itself.
+      expect(isDraggableSource({ kind: 'file', path: 'Campaigns/X/Characters/Bob.md' })).toBe(true);
       expect(isDraggableSource({ kind: 'file', path: 'Campaigns/X/People/Bob.md' })).toBe(true);
       expect(isDraggableSource({ kind: 'folder', path: 'World Lore/World Info' })).toBe(false);
       expect(isDraggableSource({ kind: 'folder', path: 'World Lore/Custom' })).toBe(true);
