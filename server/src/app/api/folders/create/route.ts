@@ -12,7 +12,11 @@ import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { ensureCampaignForPath } from '@/lib/characters';
 import { ensureIndexNote } from '@/lib/index-notes';
-import { deriveCampaignIndex } from '@/lib/campaign-index';
+import {
+  deriveFolderIndex,
+  isUnderCampaign,
+  parentFolderUnderCampaign,
+} from '@/lib/campaign-index';
 import { isAllowedPath } from '@/lib/notes';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
@@ -111,34 +115,35 @@ export async function POST(req: NextRequest): Promise<Response> {
     console.error('[folders/create] ensureCampaignForPath failed:', err);
   }
 
-  // Campaign roots + World Lore get a hidden index.md so the sidebar
-  // can treat the folder row as a Notion-style page, and the graph
-  // view shows the hub as a real node.
-  if (parent === 'Campaigns') {
-    try {
-      ensureIndexNote(session.currentGroupId, session.userId, path, cleanName);
-    } catch (err) {
-      console.error('[folders/create] ensureIndexNote failed:', err);
-    }
-    // Seed the empty managed-index callout so the page reads as
-    // "auto-managed" from the very first visit, even before any
-    // notes land in the campaign.
-    void deriveCampaignIndex(session.currentGroupId, path).catch((err) => {
-      console.error('[folders/create] campaign index seed failed:', err);
-    });
-  } else if (path === 'World Lore') {
+  // Every folder under Campaigns/<slug>/ — campaign roots, canonical
+  // subfolders, AND user-created subfolders — gets its own hidden
+  // index.md so the sidebar can treat it as a Notion-style page and
+  // the auto-managed callout has somewhere to live.
+  if (path === 'World Lore') {
     try {
       ensureIndexNote(session.currentGroupId, session.userId, 'World Lore', 'World Lore');
     } catch (err) {
       console.error('[folders/create] ensureIndexNote failed:', err);
     }
-  } else {
-    // Subfolder created inside an existing campaign — give the index
-    // a chance to add a fresh "no notes yet" table for the new bucket.
-    const m = /^(Campaigns\/[^/]+)\//.exec(path + '/');
-    if (m) {
-      void deriveCampaignIndex(session.currentGroupId, m[1]!).catch((err) => {
-        console.error('[folders/create] campaign index refresh failed:', err);
+  } else if (isUnderCampaign(path)) {
+    try {
+      ensureIndexNote(session.currentGroupId, session.userId, path, cleanName);
+    } catch (err) {
+      console.error('[folders/create] ensureIndexNote failed:', err);
+    }
+    // Seed the new folder's empty index, then refresh its parent so
+    // the new folder shows up in the parent's Folders table.
+    void deriveFolderIndex(session.currentGroupId, path, {
+      userId: session.userId,
+    }).catch((err) => {
+      console.error('[folders/create] folder index seed failed:', err);
+    });
+    const parentFolder = parentFolderUnderCampaign(path);
+    if (parentFolder) {
+      void deriveFolderIndex(session.currentGroupId, parentFolder, {
+        userId: session.userId,
+      }).catch((err) => {
+        console.error('[folders/create] parent index refresh failed:', err);
       });
     }
   }

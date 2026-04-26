@@ -11,7 +11,7 @@ import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
 import { assertMoveAllowed } from '@/lib/move-policy';
-import { deriveCampaignIndexesFor } from '@/lib/campaign-index';
+import { deriveFolderIndexesFor } from '@/lib/campaign-index';
 
 export const dynamic = 'force-dynamic';
 
@@ -224,14 +224,19 @@ export async function POST(req: NextRequest): Promise<Response> {
     await closeDocumentConnections(m.from);
   }
 
-  // Refresh auto-managed campaign indexes for every campaign touched
-  // by the move — both the source(s) (notes leaving) and destination(s)
-  // (notes arriving). Distinct so each is recomputed at most once.
-  const touchedPaths: string[] = [];
+  // Refresh auto-managed indexes for every folder touched by the
+  // move. Each path's parent (when under a campaign) is deduplicated
+  // and derived once. Include the move endpoints themselves so the
+  // CONTAINER folders on either side (the parent of `from` and the
+  // parent of `to`) also pick up that the moved folder appeared /
+  // disappeared from their child list.
+  const touchedPaths: string[] = [from, to];
   for (const m of moved) {
     touchedPaths.push(m.from, m.to);
   }
-  await deriveCampaignIndexesFor(groupId, touchedPaths);
+  await deriveFolderIndexesFor(groupId, touchedPaths, {
+    userId: session.userId,
+  });
 
   logAudit({
     action: 'folder.rename',

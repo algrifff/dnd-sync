@@ -8,7 +8,7 @@ import { getDb } from '@/lib/db';
 import { decodePath, loadNote, loadTags } from '@/lib/notes';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
-import { deriveCampaignIndex, campaignFolderOfPath } from '@/lib/campaign-index';
+import { deriveFolderIndex, parentFolderUnderCampaign } from '@/lib/campaign-index';
 
 export const dynamic = 'force-dynamic';
 
@@ -82,14 +82,14 @@ export async function DELETE(req: NextRequest, ctx: RouteCtx): Promise<Response>
   // persist updates against a row that no longer exists.
   await closeDocumentConnections(path);
 
-  // Refresh the owning campaign's auto-managed index so the deleted
+  // Refresh the parent folder's auto-managed index so the deleted
   // note drops out of its table.
-  const campaign = campaignFolderOfPath(path);
-  if (campaign) {
+  const parent = parentFolderUnderCampaign(path);
+  if (parent) {
     try {
-      await deriveCampaignIndex(session.currentGroupId, campaign);
+      await deriveFolderIndex(session.currentGroupId, parent);
     } catch (err) {
-      console.error('[notes/delete] campaign index refresh failed:', err);
+      console.error('[notes/delete] folder index refresh failed:', err);
     }
   }
 

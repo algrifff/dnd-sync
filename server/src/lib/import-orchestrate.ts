@@ -44,7 +44,7 @@ import { canonicalPath, type EntityKind } from './ai/paths';
 import { listCampaigns, ensureCampaignForPath } from './characters';
 import { ensureIndexNote } from './index-notes';
 import { deriveAllIndexes } from './derive-indexes';
-import { deriveCampaignIndex } from './campaign-index';
+import { deriveFolderIndex, allCampaignFoldersInDb } from './campaign-index';
 
 // Canonical subfolders created for every new campaign — mirrors CampaignCreateDialog.
 const CAMPAIGN_SUBFOLDERS = [
@@ -248,18 +248,28 @@ async function doOrchestrate(jobId: string, signal: AbortSignal): Promise<void> 
     orch.phase = 'done';
   }
 
-  // Refresh the auto-managed callout in every campaign index touched
-  // by this import. Runs once per campaign (not once per note) so a
-  // 200-note vault doesn't pay for 200 rebuilds. Errors are logged
-  // and swallowed — the import is already complete at this point.
-  for (const a of orch.campaignAssignments ?? []) {
-    if (!a.root) continue;
+  // Refresh the auto-managed callout in every folder under every
+  // campaign touched by this import — campaign roots, canonical
+  // subfolders (Sessions/Characters/...), AND any custom subfolder
+  // the user (or AI) created during the run. One pass at the end so
+  // a 200-note vault doesn't pay for 200 rebuilds.
+  const touchedRoots = new Set(
+    (orch.campaignAssignments ?? [])
+      .map((a) => a.root)
+      .filter((r): r is string => typeof r === 'string'),
+  );
+  for (const folder of allCampaignFoldersInDb()) {
+    if (folder.groupId !== job.groupId) continue;
+    const root = folder.path.split('/').slice(0, 2).join('/');
+    if (!touchedRoots.has(root)) continue;
     try {
-      await deriveCampaignIndex(job.groupId, a.root);
+      await deriveFolderIndex(job.groupId, folder.path, {
+        userId: job.createdBy,
+      });
     } catch (err) {
       console.error(
-        '[orchestrate] campaign index refresh failed for',
-        a.root,
+        '[orchestrate] folder index refresh failed for',
+        folder.path,
         err,
       );
     }

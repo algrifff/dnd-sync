@@ -509,6 +509,22 @@ html, body {
   outline: none;
 }
 
+/* Sidebar folder rows that link to an index.md page. The whole row
+   already gets a subtle background-tint on hover; this adds a clearer
+   "this text is a link" affordance — an underline that draws only
+   under the folder name (not the icon, not the chevron) and only when
+   the cursor is on the link itself. Mirrors the wikilink hover style
+   so the two read as the same kind of action. */
+.folder-row-link {
+  text-decoration: none;
+}
+.folder-row-link:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--candlelight);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
 /* Auth animations — a gentle fade + lift on mode swap, plus a subtle
    letter-spacing settle on titles so the hero line feels intentional.
    Users with prefers-reduced-motion: reduce see no animation. */

@@ -31,7 +31,7 @@ describe('campaign-index PM JSON', () => {
         },
         {
           type: 'callout',
-          attrs: { kind: 'info', title: '📚 Campaign Index' },
+          attrs: { kind: 'info', title: '📚 Folder Index' },
           content: [
             paragraph('Auto-managed — edit your own notes outside this block.'),
             {

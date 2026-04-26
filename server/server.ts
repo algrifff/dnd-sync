@@ -39,9 +39,9 @@ ensureConfig();
   ensureDefaultTemplates();
   ensureDefaultFolders(DEFAULT_GROUP_ID);
   backfillIndexNotes();
-  // Seed / refresh the auto-managed callout in every campaign's
-  // index.md so existing worlds catch up without waiting for the next
-  // create / move / delete event.
+  // Seed / refresh the auto-managed callout in every campaign + every
+  // subfolder under every campaign so existing worlds catch up
+  // without waiting for the next create / move / delete event.
   await backfillCampaignIndexes();
   const removed = cleanupExpiredSessions();
   if (removed > 0) console.log(`[compendium-server] pruned ${removed} expired session(s)`);

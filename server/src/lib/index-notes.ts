@@ -146,6 +146,36 @@ export function backfillIndexNotes(): void {
            VALUES (?, ?, ?)`,
         ).run(groupId, `${folderPath}/${sf}`, now);
       }
+
+      // Ensure every subfolder under this campaign also has an
+      // index.md — the canonical ones above plus any custom folder
+      // a user has already created. We discover the union from
+      // folder_markers and from note paths.
+      const subfolderPaths = new Set<string>();
+      for (const { path } of db
+        .query<{ path: string }, [string, string]>(
+          `SELECT DISTINCT path FROM folder_markers
+            WHERE group_id = ? AND path LIKE ? || '/%'`,
+        )
+        .all(groupId, folderPath)) {
+        subfolderPaths.add(path);
+      }
+      for (const { path } of db
+        .query<{ path: string }, [string, string]>(
+          `SELECT DISTINCT path FROM notes
+            WHERE group_id = ? AND path LIKE ? || '/%/%'`,
+        )
+        .all(groupId, folderPath)) {
+        const parts = path.split('/').slice(0, -1);
+        // Walk every ancestor folder under the campaign root.
+        for (let i = folderPath.split('/').length + 1; i <= parts.length; i++) {
+          subfolderPaths.add(parts.slice(0, i).join('/'));
+        }
+      }
+      for (const sub of subfolderPaths) {
+        const subTitle = prettifySlug(sub.split('/').pop() ?? '');
+        if (ensureIndexNote(groupId, userId, sub, subTitle)) created++;
+      }
     }
 
     // World Lore — ensure the marker exists, then the index.

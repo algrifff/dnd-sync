@@ -1097,7 +1097,7 @@ function TreeRow({
             <Link
               href={indexHref}
               onClick={() => { if (!item.open) onToggle(item.path); }}
-              className="flex flex-1 items-center gap-1 py-1 pr-2 text-left text-[var(--ink-soft)]"
+              className="folder-row-link flex flex-1 items-center gap-1 py-1 pr-2 text-left text-[var(--ink-soft)] hover:text-[var(--ink)]"
               style={isTopLevel ? { paddingLeft: padding } : undefined}
             >
               {folderIcon}
