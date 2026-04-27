@@ -20,7 +20,7 @@ const Body = z.object({
   beforeSlug: z.string().min(1).max(256).nullable(),
 });
 
-type Row = { slug: string; sort_order: number };
+type Row = { slug: string; folder_path: string; sort_order: number };
 
 export async function POST(req: NextRequest): Promise<Response> {
   const session = requireSession(req);
@@ -42,40 +42,58 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   const { slug, beforeSlug } = parsed;
-  if (slug === beforeSlug) return json({ ok: true });
 
   const db = getDb();
   const groupId = session.currentGroupId;
 
   const all = db
     .query<Row, [string]>(
-      `SELECT slug, sort_order FROM campaigns WHERE group_id = ? ORDER BY sort_order, name`,
+      `SELECT slug, folder_path, sort_order FROM campaigns
+        WHERE group_id = ? ORDER BY sort_order, name`,
     )
     .all(groupId);
 
-  if (!all.some((c) => c.slug === slug)) {
+  // Sidebar passes the raw folder name (e.g. "Campaign 3"), but rows in
+  // `campaigns` are stored slugified ("campaign-3"). Resolve via canonical
+  // slug first, then folder_path. Reorder writes campaigns.sort_order, so
+  // without a campaigns row there's nothing to reorder — no third tier.
+  const resolveSlug = (raw: string): string | null => {
+    const slugified = slugify(raw);
+    const bySlug = all.find((c) => c.slug === slugified);
+    if (bySlug) return bySlug.slug;
+    const byFolder = all.find((c) => c.folder_path === `Campaigns/${raw}`);
+    return byFolder?.slug ?? null;
+  };
+
+  const canonicalSlug = resolveSlug(slug);
+  if (!canonicalSlug) {
     return json({ error: 'not_found', reason: `campaign '${slug}' not in this world` }, 404);
   }
-  if (beforeSlug !== null && !all.some((c) => c.slug === beforeSlug)) {
-    return json(
-      { error: 'not_found', reason: `target '${beforeSlug}' not in this world` },
-      404,
-    );
+  let canonicalBeforeSlug: string | null = null;
+  if (beforeSlug !== null) {
+    canonicalBeforeSlug = resolveSlug(beforeSlug);
+    if (!canonicalBeforeSlug) {
+      return json(
+        { error: 'not_found', reason: `target '${beforeSlug}' not in this world` },
+        404,
+      );
+    }
   }
+  if (canonicalSlug === canonicalBeforeSlug) return json({ ok: true });
 
   db.transaction(() => {
     // Working list with the moved campaign removed, then re-inserted
     // at the target position. The list-after view is the source of
     // truth — sort_order is just its persisted form.
-    const without = all.filter((c) => c.slug !== slug);
+    const without = all.filter((c) => c.slug !== canonicalSlug);
     let insertAt = without.length; // append by default
-    if (beforeSlug !== null) {
-      const idx = without.findIndex((c) => c.slug === beforeSlug);
+    if (canonicalBeforeSlug !== null) {
+      const idx = without.findIndex((c) => c.slug === canonicalBeforeSlug);
       if (idx >= 0) insertAt = idx;
     }
     const after: Row[] = [
       ...without.slice(0, insertAt),
-      { slug, sort_order: 0 }, // placeholder, recomputed below
+      { slug: canonicalSlug, folder_path: '', sort_order: 0 }, // placeholder, recomputed below
       ...without.slice(insertAt),
     ];
 
@@ -109,7 +127,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     } else {
       db.query(
         `UPDATE campaigns SET sort_order = ? WHERE group_id = ? AND slug = ?`,
-      ).run(target, groupId, slug);
+      ).run(target, groupId, canonicalSlug);
     }
   })();
 
@@ -117,8 +135,8 @@ export async function POST(req: NextRequest): Promise<Response> {
     action: 'campaign.reorder',
     actorId: session.userId,
     groupId,
-    target: slug,
-    details: { beforeSlug },
+    target: canonicalSlug,
+    details: { beforeSlug: canonicalBeforeSlug },
   });
 
   return json({ ok: true });
@@ -129,4 +147,12 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function slugify(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }

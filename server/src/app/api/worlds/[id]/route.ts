@@ -85,18 +85,32 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
     }
   }
   if (body.activeCampaignSlug !== undefined) {
+    let canonicalSlug: string | null = null;
     if (body.activeCampaignSlug !== null) {
-      const campaign = db
+      // Sidebar Crown toggle passes the raw folder name (e.g. "Campaign 3"),
+      // but rows in `campaigns` are stored slugified ("campaign-3"). Resolve
+      // via canonical slug first, then folder_path. groups.active_campaign_slug
+      // must reference a real campaigns row, so no third (folder-marker) tier.
+      const slugified = slugify(body.activeCampaignSlug);
+      let row = db
         .query<{ slug: string }, [string, string]>(
           'SELECT slug FROM campaigns WHERE group_id = ? AND slug = ?',
         )
-        .get(id, body.activeCampaignSlug);
-      if (!campaign) {
+        .get(id, slugified);
+      if (!row) {
+        row = db
+          .query<{ slug: string }, [string, string]>(
+            'SELECT slug FROM campaigns WHERE group_id = ? AND folder_path = ?',
+          )
+          .get(id, `Campaigns/${body.activeCampaignSlug}`);
+      }
+      if (!row) {
         return json({ error: 'not_found', detail: 'Unknown campaign for this world.' }, 404);
       }
+      canonicalSlug = row.slug;
     }
     db.query('UPDATE groups SET active_campaign_slug = ? WHERE id = ?').run(
-      body.activeCampaignSlug,
+      canonicalSlug,
       id,
     );
     // The sidebar reads active_campaign_slug from the (app)/(content) layout,
@@ -156,4 +170,12 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function slugify(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
