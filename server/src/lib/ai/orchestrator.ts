@@ -152,7 +152,8 @@ You are in a read-only session. You cannot create, edit, move, link, or finalize
 - backlink_create     — add a [[wikilink]] + graph edge between two notes. Use BOTH directions to link entities together.
 - inventory_add       — add an item to a character's inventory.${ctx.role === 'dm' ? `
 - note_write_section  — replace a named section (GM only). Call note_read first.
-- entity_move         — rename or move a note (GM only).
+- entity_move         — rename, move, or relocate a note across folders or campaigns (GM only).
+- entity_change_kind  — change a note's entity type (e.g. person → creature). Updates kind AND moves to the canonical folder. Pass campaignSlug to also move it to a different campaign (GM only).
 - session_finalize    — mark a session closed. Call LAST, after all distribution work (GM only).` : ''}`}
 
 ## Behaviour

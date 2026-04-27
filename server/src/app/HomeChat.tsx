@@ -98,6 +98,21 @@ async function uploadForExtraction(file: File): Promise<string> {
   return data.content;
 }
 
+// AI SDK errors arrive as JSON-stringified SSE error events. Pull out the
+// underlying provider message so the user sees "You exceeded your current
+// quota" rather than a wall of JSON.
+function readableError(raw: string | undefined): string {
+  if (!raw) return 'unknown error';
+  try {
+    const parsed = JSON.parse(raw) as { error?: { message?: string } };
+    const msg = parsed.error?.message;
+    if (typeof msg === 'string' && msg.trim()) return msg;
+  } catch {
+    /* not JSON — fall through */
+  }
+  return raw;
+}
+
 // ── HomeChat component ─────────────────────────────────────────────────
 
 export function HomeChat({
@@ -136,7 +151,7 @@ export function HomeChat({
     [groupId, campaignSlug],
   );
 
-  const { messages, status, sendMessage, setMessages } = useChat({ transport });
+  const { messages, status, sendMessage, setMessages, error } = useChat({ transport });
 
   useRefreshTreeOnAiNoteMutations(messages, () => {
     router.refresh();
@@ -365,6 +380,11 @@ export function HomeChat({
             <div className="flex items-center gap-1.5 text-xs text-[var(--ink-soft)]">
               <Loader2 size={11} className="animate-spin" aria-hidden />
               Thinking…
+            </div>
+          )}
+          {error && !isStreaming && (
+            <div className="max-w-[min(92%,100%)] rounded-[10px] bg-[#F4E4E4] px-3 py-2 text-[12px] text-[#6B2F38]">
+              Couldn't reach the AI: {readableError(error.message)}
             </div>
           )}
         </div>

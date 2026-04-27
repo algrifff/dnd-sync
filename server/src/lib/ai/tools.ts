@@ -50,6 +50,7 @@ export function createTools(ctx: ToolContext) {
     note_read:           noteRead(ctx),
     note_write_section:  noteWriteSection(ctx),
     entity_move:         entityMove(ctx),
+    entity_change_kind:  entityChangeKind(ctx),
     backlink_create:     backlinkCreate(ctx),
     inventory_add:       inventoryAdd(ctx),
     session_finalize:    sessionFinalize(ctx),
@@ -62,13 +63,14 @@ export function getToolsForRole(ctx: ToolContext) {
   if (ctx.role === 'dm') {
     filtered = all;
   } else if (ctx.role === 'player') {
-    const { session_finalize: _sf, entity_move: _em, note_write_section: _nws, ...playerTools } = all;
+    const { session_finalize: _sf, entity_move: _em, entity_change_kind: _eck, note_write_section: _nws, ...playerTools } = all;
     filtered = playerTools;
   } else {
     // viewer: read-only surface — no mutating tools at all.
     const {
       session_finalize: _sf,
       entity_move: _em,
+      entity_change_kind: _eck,
       note_write_section: _nws,
       entity_create: _ec,
       entity_edit_sheet: _ees,
@@ -199,6 +201,18 @@ const EditContentSchema = z.object({
 const MoveSchema = z.object({
   from: z.string().min(1).max(512),
   to:   z.string().min(1).max(512),
+});
+
+const ChangeKindSchema = z.object({
+  path: z.string().min(1).max(512).describe('Full path of the existing note'),
+  newKind: z.enum([
+    'character', 'person', 'creature',
+    'item', 'location', 'session', 'lore', 'note',
+    'pc', 'npc', 'ally', 'villain', 'monster',
+  ]).describe('Target entity kind. Legacy aliases (pc/npc/ally/villain/monster) are normalised.'),
+  campaignSlug: z.string().optional().describe(
+    'Move to a different campaign at the same time. Omit to keep the note in its current campaign (or world-level).',
+  ),
 });
 
 const BacklinkSchema = z.object({
@@ -661,6 +675,109 @@ function entityMove(ctx: ToolContext) {
       });
 
       return { ok: true as const, path: to };
+    },
+  });
+}
+
+// ── entity_change_kind ────────────────────────────────────────────────
+
+function entityChangeKind(ctx: ToolContext) {
+  return tool({
+    description:
+      'Change the entity type of an existing note (e.g. person → creature, npc → character). ' +
+      'Updates frontmatter.kind AND moves the file to the canonical folder for the new kind ' +
+      '(People → Creatures, etc.). All backlinks, character refs, and session refs are preserved. ' +
+      'Pass campaignSlug to move it into a different campaign at the same time.',
+    inputSchema: ChangeKindSchema,
+    execute: async ({ path, newKind, campaignSlug: overrideSlug }: z.infer<typeof ChangeKindSchema>) => {
+      const db = getDb();
+      const note = loadNote(ctx.groupId, path);
+      if (!note) return { ok: false as const, error: `Not found: ${path}` };
+
+      const k = newKind as EntityKind;
+      const canonical = normalizeKind(k);
+
+      // Determine target campaign: explicit override, then current campaign
+      // by matching the note path against any registered campaign's
+      // folder_path, then ctx.campaignSlug, then world-level.
+      const campaigns = listCampaigns(ctx.groupId);
+      const matched = campaigns
+        .filter((c) => path.startsWith(c.folderPath + '/'))
+        .sort((a, b) => b.folderPath.length - a.folderPath.length)[0];
+      const targetSlug = overrideSlug ?? matched?.slug ?? ctx.campaignSlug;
+
+      let campaignRoot: string | undefined;
+      if (targetSlug) {
+        const camp = getCampaignBySlug(ctx.groupId, targetSlug);
+        if (!camp) {
+          return {
+            ok: false as const,
+            error: 'unknown_campaign',
+            message: `No registered campaign for slug "${targetSlug}". Call campaign_list.`,
+          };
+        }
+        campaignRoot = camp.folderPath;
+      }
+
+      // Compute new path. Reuse the existing leaf slug so links to the
+      // file by name still resolve.
+      const leaf = path.split('/').pop()?.replace(/\.md$/i, '') ?? note.title;
+      const folder = canonicalFolder({
+        kind: k,
+        ...(targetSlug    !== undefined ? { campaignSlug: targetSlug } : {}),
+        ...(campaignRoot  !== undefined ? { campaignRoot }              : {}),
+      });
+      const newPath = `${folder}/${nameToSlug(leaf)}.md`;
+
+      // Update kind in frontmatter (write either way — kind changed even
+      // if path is unchanged).
+      let fm: Record<string, unknown>;
+      try { fm = JSON.parse(note.frontmatter_json) as Record<string, unknown>; }
+      catch { fm = {}; }
+      const nextFm = { ...fm, kind: canonical, template: canonical };
+
+      if (newPath !== path) {
+        const conflict = db
+          .query<{ n: number }, [string, string]>('SELECT COUNT(*) AS n FROM notes WHERE group_id=? AND path=?')
+          .get(ctx.groupId, newPath);
+        if ((conflict?.n ?? 0) > 0) {
+          return { ok: false as const, error: `Path exists: ${newPath}` };
+        }
+      }
+
+      db.transaction(() => {
+        if (newPath !== path) {
+          db.query(`UPDATE notes SET path=?, frontmatter_json=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
+            .run(newPath, JSON.stringify(nextFm), Date.now(), ctx.userId, ctx.groupId, path);
+          for (const tbl of ['note_links', 'tags', 'aliases', 'characters', 'character_campaigns', 'session_notes']) {
+            const col = tbl === 'note_links' ? 'from_path'
+              : tbl === 'characters' || tbl === 'character_campaigns' || tbl === 'session_notes' ? 'note_path'
+              : 'path';
+            db.query(`UPDATE ${tbl} SET ${col}=? WHERE group_id=? AND ${col}=?`).run(newPath, ctx.groupId, path);
+          }
+          db.query(`UPDATE note_links SET to_path=? WHERE group_id=? AND to_path=?`).run(newPath, ctx.groupId, path);
+        } else {
+          db.query(`UPDATE notes SET frontmatter_json=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
+            .run(JSON.stringify(nextFm), Date.now(), ctx.userId, ctx.groupId, path);
+        }
+      })();
+
+      try {
+        deriveAllIndexes({
+          groupId: ctx.groupId, notePath: newPath,
+          frontmatterJson: JSON.stringify(nextFm),
+        });
+      } catch (err) {
+        console.error('[ai/tools] derive failed after entity_change_kind:', err);
+      }
+
+      void deriveFolderIndexesFor(ctx.groupId, [path, newPath], {
+        userId: ctx.userId,
+      }).catch((err) => {
+        console.error('[ai/tools] folder index refresh failed:', err);
+      });
+
+      return { ok: true as const, path: newPath, kind: canonical };
     },
   });
 }
