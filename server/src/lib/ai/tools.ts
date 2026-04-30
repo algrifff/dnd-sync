@@ -27,6 +27,8 @@ import {
   parentFolderUnderCampaign,
 } from '@/lib/campaign-index';
 import { validateSheet } from '@/lib/validateSheet';
+import { parseCharacter } from '@/lib/character-parser';
+import { writeNote } from '@/lib/import-apply';
 
 // ── Context ────────────────────────────────────────────────────────────
 
@@ -168,7 +170,7 @@ const SearchSchema = z.object({
 const CreateSchema = z.object({
   kind: z.enum([
     'character', 'person', 'creature',
-    'item', 'location', 'session', 'lore', 'note',
+    'item', 'location', 'session', 'quest', 'lore', 'note',
     // legacy aliases — mapped to canonical kinds in normalizeKind()
     'pc', 'npc', 'ally', 'villain', 'monster',
   ]),
@@ -180,6 +182,12 @@ const CreateSchema = z.object({
       'Registered campaign slug (see campaign_list). Required for campaign-scoped kinds. Omit only for lore or for notes under World Lore.',
     ),
   sheet: z.record(z.unknown()).optional().describe('Frontmatter sheet fields to pre-fill'),
+  body: z
+    .string()
+    .optional()
+    .describe(
+      'Optional initial markdown body for the note. For kind=character the body is auto-parsed for HP/AC/abilities/class/race tables and merged into the sheet (caller-supplied `sheet` fields win). Wikilinks, tags, and image embeds in the body are processed normally.',
+    ),
   dmOnly: z.boolean().optional().default(false),
 });
 
@@ -399,7 +407,7 @@ function entityCreate(ctx: ToolContext) {
     description:
       'Create a new structured entity. Path is auto-assigned from kind + a registered campaign (see campaign_list). Cannot create new campaigns — slug must already exist.',
     inputSchema: CreateSchema,
-    execute: async ({ kind, name, campaignSlug, sheet, dmOnly }: z.infer<typeof CreateSchema>) => {
+    execute: async ({ kind, name, campaignSlug, sheet, body, dmOnly }: z.infer<typeof CreateSchema>) => {
       const slugParam = (campaignSlug?.trim() ?? ctx.campaignSlug?.trim()) || undefined;
       const k = kind as EntityKind;
       const canonical = normalizeKind(k);
@@ -467,7 +475,37 @@ function entityCreate(ctx: ToolContext) {
         return { ok: false as const, error: `Already exists at ${path}` };
       }
 
+      // Build the seed frontmatter from the AI's structured input.
       const frontmatter = buildFrontmatter(kind as EntityKind, name, sheet ?? {}, ctx.userId);
+
+      // For characters with a body, run the structured-sheet extractor
+      // over the prose so HP/AC/abilities/class/race in markdown tables
+      // flow into `frontmatter.sheet` automatically. Caller-supplied
+      // sheet fields win on conflict (the AI made a deliberate choice).
+      let bodyToWrite = '';
+      if (typeof body === 'string' && body.trim().length > 0) {
+        if (canonical === 'character' || kind === 'character' || kind === 'pc') {
+          const parsed = parseCharacter(body, {
+            defaultPlayer:
+              typeof frontmatter.player === 'string' ? frontmatter.player : ctx.userId,
+          });
+          const parsedSheet =
+            (parsed.frontmatter.sheet as Record<string, unknown> | undefined) ?? {};
+          const aiSheet =
+            (frontmatter.sheet as Record<string, unknown> | undefined) ?? {};
+          // Parsed-from-body fills blanks; AI explicitly-set fields win.
+          frontmatter.sheet = { ...parsedSheet, ...aiSheet };
+          // Surface portrait at the top level so transfer-character / derive
+          // pick it up (they read fm.portrait, not fm.sheet.portrait).
+          if (parsed.frontmatter.portrait && frontmatter.portrait == null) {
+            frontmatter.portrait = parsed.frontmatter.portrait;
+          }
+          bodyToWrite = parsed.body;
+        } else {
+          bodyToWrite = body;
+        }
+      }
+
       const fmKind = typeof frontmatter.kind === 'string' ? frontmatter.kind : undefined;
       const vr = validateSheet(fmKind, frontmatter.sheet);
       if (!vr.ok) {
@@ -480,32 +518,31 @@ function entityCreate(ctx: ToolContext) {
       if (frontmatter.sheet && typeof frontmatter.sheet === 'object') {
         frontmatter.sheet = vr.data as Record<string, unknown>;
       }
-      const emptyDoc = { type: 'doc', content: [{ type: 'paragraph' }] };
-      const ydoc = prosemirrorJSONToYDoc(getPmSchema(), emptyDoc, 'default');
-      ydoc.getText('title').insert(0, name);
-      const state = Y.encodeStateAsUpdate(ydoc);
 
-      db.query(
-        `INSERT INTO notes
-           (id, group_id, path, title, content_json, content_text, content_md,
-            yjs_state, frontmatter_json, byte_size, updated_at, updated_by,
-            created_at, created_by, dm_only)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        randomUUID(), ctx.groupId, path, name,
-        JSON.stringify(emptyDoc), '', '', state,
-        JSON.stringify(frontmatter), 0,
-        Date.now(), ctx.userId, Date.now(), ctx.userId,
-        dmOnly ? 1 : 0,
-      );
-
+      // Persist via writeNote so md-to-pm, FTS triggers, note_links,
+      // tags, derived indexes, and Yjs state all stay in lock-step
+      // with every other write path. dm_only is set in a follow-up
+      // UPDATE since writeNote doesn't take it.
       try {
-        deriveAllIndexes({
-          groupId: ctx.groupId, notePath: path,
-          frontmatterJson: JSON.stringify(frontmatter),
+        writeNote({
+          groupId: ctx.groupId,
+          userId: ctx.userId,
+          path,
+          markdown: bodyToWrite,
+          frontmatter,
+          isUpdate: false,
         });
       } catch (err) {
-        console.error('[ai/tools] derive failed after entity_create:', err);
+        return {
+          ok: false as const,
+          error: 'write_failed',
+          message: (err as Error).message,
+        };
+      }
+      if (dmOnly) {
+        db.query(
+          'UPDATE notes SET dm_only = 1 WHERE group_id = ? AND path = ?',
+        ).run(ctx.groupId, path);
       }
 
       const parent = parentFolderUnderCampaign(path);
