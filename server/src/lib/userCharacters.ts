@@ -81,6 +81,11 @@ export type CreateUserCharacterInput = {
   kind?: UserCharacterKind | undefined;
   sheet?: Record<string, unknown> | undefined;
   portraitUrl?: string | null | undefined;
+  /** Optional initial body. Used by transfer-character to seed the
+   *  master record from a bound world note's content so the player
+   *  sees the imported prose on /me from the start. */
+  bodyJson?: Record<string, unknown> | null | undefined;
+  bodyMd?: string | null | undefined;
 };
 
 export function createUserCharacter(
@@ -100,13 +105,27 @@ export function createUserCharacter(
 
   const id = randomUUID();
   const now = Date.now();
+  const bodyJson = input.bodyJson ?? null;
+  const bodyMd = input.bodyMd ?? null;
   getDb()
     .query(
       `INSERT INTO user_characters
-         (id, owner_user_id, name, kind, sheet_json, portrait_url, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, owner_user_id, name, kind, sheet_json, portrait_url,
+          body_json, body_md, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(id, ownerUserId, name, kind, JSON.stringify(val.data ?? sheet), input.portraitUrl ?? null, now, now);
+    .run(
+      id,
+      ownerUserId,
+      name,
+      kind,
+      JSON.stringify(val.data ?? sheet),
+      input.portraitUrl ?? null,
+      bodyJson === null ? null : JSON.stringify(bodyJson),
+      bodyMd,
+      now,
+      now,
+    );
 
   return {
     id,
@@ -115,8 +134,8 @@ export function createUserCharacter(
     kind,
     sheet: (val.data as Record<string, unknown>) ?? sheet,
     portraitUrl: input.portraitUrl ?? null,
-    bodyJson: null,
-    bodyMd: null,
+    bodyJson,
+    bodyMd,
     createdAt: now,
     updatedAt: now,
   };
