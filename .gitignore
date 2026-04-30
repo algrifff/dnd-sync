@@ -32,3 +32,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# One-off main-notes import bundle (contains user data; never commit)
+bundle.json

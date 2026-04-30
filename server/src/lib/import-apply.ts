@@ -46,6 +46,7 @@ import { pmToMarkdown } from './pm-to-md';
 import type { PlannedNote } from './import-analyse';
 import type { ImportClassifyResult } from './ai/skills/types';
 import { runMerge } from './ai/skills/merge';
+import { planImport, type PlannedFile, type AiClassification } from './import-plan';
 
 export type ApplySummary = {
   moved: number;
@@ -101,6 +102,48 @@ export async function applyImportJob(jobId: string): Promise<ApplySummary> {
   // still land in the vault at the end.
   const committedAssets = new Set<string>();
 
+  // Build a deterministic plan over all source notes so the canonical
+  // rules (single-digit padding, Adventure Log flattening, World Lore
+  // subfolder routing, one-shot promotion, character-body sheet
+  // extraction) apply uniformly — regardless of whether the AI
+  // classifier picked a perfect canonicalPath. The plan is keyed by
+  // sourcePath; commitPlannedNote consults it to override targetPath
+  // and enrich character frontmatter.
+  const planByPath = new Map<string, PlannedFile>();
+  try {
+    const planInput = {
+      files: (plan.plannedNotes ?? []).map((pn) => {
+        const entry = entryByPath.get(pn.sourcePath);
+        const content = entry ? entry.getData().toString('utf-8') : '';
+        return { sourcePath: pn.sourcePath, content };
+      }),
+      assets: [] as never[], // assets are committed via commitAsset, not the planner
+      aiClassifications: new Map<string, AiClassification>(
+        (plan.plannedNotes ?? [])
+          .filter((pn) => pn.accepted && pn.classification)
+          .map((pn) => {
+            const c = pn.classification!;
+            const ai: AiClassification = {
+              kind: c.kind as AiClassification['kind'],
+            };
+            if (c.role === 'pc' || c.kind === 'character') ai.kind = 'character';
+            if (c.role === 'npc' || c.role === 'ally') ai.kind = 'person';
+            if (c.role === 'villain') ai.kind = 'creature';
+            const slug = pickPlanCampaignSlug(pn);
+            if (slug) ai.campaignSlug = slug;
+            if (c.displayName) ai.displayName = c.displayName;
+            if (c.canonicalPath) ai.canonicalPath = c.canonicalPath;
+            if (c.sheet) ai.sheet = c.sheet;
+            return [pn.sourcePath, ai] as const;
+          }),
+      ),
+    };
+    const result = planImport(planInput);
+    for (const f of result.files) planByPath.set(f.sourcePath, f);
+  } catch (err) {
+    console.error('[import.apply] planImport failed; falling back to AI canonicalPath:', err);
+  }
+
   // First pass: every note that was either accepted by the DM or
   // whose classification landed at confidence below 0.4 and kind
   // 'plain' — keep those in place as-is.
@@ -119,7 +162,7 @@ export async function applyImportJob(jobId: string): Promise<ApplySummary> {
           assetsByBasename,
           committedAssets,
           summary,
-          { forceKeepInPlace: true },
+          { forceKeepInPlace: true, plannerHint: planByPath.get(pn.sourcePath) },
         );
         continue;
       }
@@ -131,7 +174,7 @@ export async function applyImportJob(jobId: string): Promise<ApplySummary> {
         assetsByBasename,
         committedAssets,
         summary,
-        {},
+        { plannerHint: planByPath.get(pn.sourcePath) },
       );
     } catch (err) {
       summary.failed++;
@@ -199,7 +242,7 @@ async function commitPlannedNote(
   assetsByBasename: Map<string, ParsedAsset>,
   committedAssets: Set<string>,
   summary: ApplySummary,
-  opts: { forceKeepInPlace?: boolean },
+  opts: { forceKeepInPlace?: boolean; plannerHint?: PlannedFile | undefined },
 ): Promise<void> {
   const groupId = job.groupId;
   const userId = job.createdBy;
@@ -209,10 +252,14 @@ async function commitPlannedNote(
   if (!entry) throw new Error('zip entry missing');
   const raw = entry.getData().toString('utf-8');
 
-  // Determine final path.
+  // Determine final path. The deterministic planner gets first say —
+  // it normalises filenames, pads single-digit episodes, flattens
+  // Adventure Log player folders, classifies World Lore subfolders,
+  // and promotes One-Shots to per-file campaigns. Fall back to the
+  // AI's canonicalPath if the planner couldn't slot this file.
   const targetPath = opts.forceKeepInPlace
     ? pn.sourcePath
-    : pickTargetPath(pn, classification);
+    : opts.plannerHint?.targetPath ?? pickTargetPath(pn, classification);
 
   // Commit any associated images first so portrait / body references
   // have their canonical paths recorded.
@@ -241,6 +288,30 @@ async function commitPlannedNote(
     classification,
     portraitVaultPath,
   );
+  // Merge in the planner's enrichments — most importantly the
+  // structured character sheet extracted from the body's markdown
+  // tables (HP/AC/abilities/class/race/portrait), so the AI doesn't
+  // have to re-derive those from prose.
+  if (opts.plannerHint) {
+    const plannerSheet =
+      (opts.plannerHint.frontmatter.sheet as Record<string, unknown> | undefined) ?? {};
+    if (Object.keys(plannerSheet).length > 0) {
+      const existingSheet =
+        (incomingFm.sheet as Record<string, unknown> | undefined) ?? {};
+      // Planner-parsed fields fill blanks; existing/AI-suggested values win.
+      const mergedSheet: Record<string, unknown> = { ...plannerSheet };
+      for (const [k, v] of Object.entries(existingSheet)) {
+        if (v != null) mergedSheet[k] = v;
+      }
+      incomingFm.sheet = mergedSheet;
+    }
+    if (
+      typeof opts.plannerHint.frontmatter.portrait === 'string' &&
+      incomingFm.portrait == null
+    ) {
+      incomingFm.portrait = opts.plannerHint.frontmatter.portrait;
+    }
+  }
 
   // Does something already live at target?
   const existing = db
@@ -332,6 +403,18 @@ async function commitPlannedNote(
   if (existing) summary.merged++;
   else if (opts.forceKeepInPlace) summary.keptInPlace++;
   else summary.moved++;
+}
+
+/** Best-effort campaign slug pick for the planner. The classifier
+ *  doesn't always set a slug; fall back to slug-from-path if the
+ *  source lives under a Campaigns/<slug>/... structure or one of the
+ *  Main-Notes "Campaign N - Name" patterns. */
+function pickPlanCampaignSlug(pn: PlannedNote): string | null {
+  const fromAi = pn.classification?.canonicalPath?.match(/^Campaigns\/([^/]+)\//);
+  if (fromAi) return fromAi[1] ?? null;
+  const fromSrc = pn.sourcePath.match(/^Campaigns\/([^/]+)\//);
+  if (fromSrc) return fromSrc[1] ?? null;
+  return null;
 }
 
 function pickTargetPath(
@@ -480,6 +563,11 @@ export type WriteOpts = {
   frontmatter: Record<string, unknown>;
   isUpdate: boolean;
   noteId?: string | undefined;
+  /** Optional title→path overrides for the wikilink resolver. Used by
+   *  bulk-import scripts to bridge cases like `[[The Dancing Demon]]`
+   *  → `Campaigns/one-shot-the-dancing-demon/index.md` where basename
+   *  match alone can't reach the canonical path. */
+  aliasMap?: ReadonlyMap<string, string>;
 };
 
 export function writeNote(opts: WriteOpts): void {
@@ -509,7 +597,7 @@ export function writeNote(opts: WriteOpts): void {
 
   const ctx: IngestContext = {
     allPaths: new Set(vaultPaths),
-    aliasMap: new Map(),
+    aliasMap: opts.aliasMap ?? new Map(),
     assetsByName,
   };
 

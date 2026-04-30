@@ -33,6 +33,7 @@ export type EntityKind =
   | 'item'
   | 'location'
   | 'session'
+  | 'quest'
   | 'lore'
   | 'note'
   // legacy aliases kept for back-compat with older tool calls
@@ -65,6 +66,7 @@ export function canonicalFolder(opts: {
     case 'session':  return base ? `${base}/Adventure Log` : 'Adventure Log';
     case 'creature':
     case 'monster':  return base ? `${base}/Creatures`     : 'Creatures';
+    case 'quest':    return base ? `${base}/Quests`        : 'Quests';
     case 'lore':     return 'World Lore';
     case 'note':     return base ?? 'World Lore';
   }
@@ -108,6 +110,7 @@ const NOTE_SUBFOLDERS = [
   'Places',
   'Adventure Log',
   'Creatures',
+  'Quests',
 ] as const;
 
 const WORLD_ROOTS = ['World Lore', ...NOTE_SUBFOLDERS] as const;
@@ -139,7 +142,12 @@ export function isCanonicalNotePath(path: string): boolean {
   );
   if (validRoot) {
     const leaf = path.slice(validRoot.length + 1);
-    return leaf.length > 0 && !leaf.includes('/');
+    if (leaf.length === 0) return false;
+    // World Lore is the one place where users curate custom subfolders
+    // (Gods, Orders, Houses, etc.) — allow any depth there. Other roots
+    // remain flat.
+    if (validRoot === 'World Lore') return true;
+    return !leaf.includes('/');
   }
 
   return false;
