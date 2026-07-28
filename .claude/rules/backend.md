@@ -65,8 +65,22 @@ endpoint, preserve these invariants:
   `{ error: 'invalid_sheet', reason }` on failure, not `invalid_body`.
 - Return the merged + validated sheet as `{ ok: true, sheet }` so the
   client can reconcile optimistic state.
-- Hocuspocus broadcasts the frontmatter delta automatically after the row
-  is written — do not re-broadcast from the route handler.
+- `frontmatter_json` is a plain SQLite column — it is NOT part of the
+  note's Y.Doc (which carries only `XmlFragment('default')` and
+  `Y.Text('title')`). Writing it here does **not** reach connected
+  clients on its own; Hocuspocus has nothing to broadcast. Live mirroring
+  for a human editor's own PATCH is covered by the awareness `sheetEdit`
+  field the client already sends (`usePatchSheet.ts`). For a
+  server-originated writer with no client in the loop (AI tools calling
+  `entity_edit_sheet` / `inventory_add`), call
+  `signalSheetChanged(path)` from `@/collab/server` after the write —
+  it bumps a `rev` key in the note doc's `sheetMeta` Y.Map, which
+  broadcasts to open clients without triggering a `store()` (server
+  writes use a null transaction origin, which Hocuspocus's
+  `handleDocumentUpdate` treats as broadcast-only). `usePatchSheet.ts`
+  observes that map and re-fetches frontmatter on a `rev` bump. This
+  route itself does not call `signalSheetChanged` — see the AI tools
+  call sites instead.
 - `sheet.name` is `.min(1).optional()` — accept omission, reject empty
   string. Clients are expected to trim-and-skip rather than sending `''`.
 

@@ -25,7 +25,12 @@ export function SheetHeader({
   initialSheet: Record<string, unknown>;
   notePath: string;
   csrfToken: string;
-  provider: HocuspocusProvider;
+  /** Null during the ~1.2s server-reset reconnect gap (see
+   *  provider-cache.ts#RESET_REACQUIRE_DELAY_MS). usePatchSheet and
+   *  every per-kind header tolerate this — the header stays mounted
+   *  through the gap so the sheet's local state (and any pending
+   *  edits) survives instead of reverting to the page-load snapshot. */
+  provider: HocuspocusProvider | null;
   canEdit: boolean;
   displayName: string;
   /** Per-world highlight colour. Exposed to every descendant via the

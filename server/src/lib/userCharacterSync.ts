@@ -17,13 +17,12 @@
 // it sees its id there, so a master write that triggers A cannot then
 // trigger B on the note it just wrote.
 
-import { prosemirrorJSONToYDoc } from 'y-prosemirror';
-import * as Y from 'yjs';
 import { getDb } from './db';
 import { deriveAllIndexes } from './derive-indexes';
 import { getPmSchema } from './pm-schema';
 import { validateSheet } from './validateSheet';
 import type { UserCharacterKind } from './userCharacters';
+import { rebuildYjsState } from './yjs-rebuild';
 
 const syncingNoteIds = new Set<string>();
 const syncingUserCharacterIds = new Set<string>();
@@ -67,8 +66,16 @@ export function syncMasterToNotes(userCharacterId: string): void {
     syncingNoteIds.add(b.note_id);
     try {
       const noteRow = db
-        .query<{ path: string; frontmatter_json: string }, [string]>(
-          'SELECT path, frontmatter_json FROM notes WHERE id = ?',
+        .query<
+          {
+            path: string;
+            frontmatter_json: string;
+            content_json: string | null;
+            yjs_state: Uint8Array | null;
+          },
+          [string]
+        >(
+          'SELECT path, frontmatter_json, content_json, yjs_state FROM notes WHERE id = ?',
         )
         .get(b.note_id);
       if (!noteRow) continue;
@@ -95,15 +102,31 @@ export function syncMasterToNotes(userCharacterId: string): void {
       let nextYjsState: Uint8Array | null = null;
       let nextBodyMd: string | null = null;
       if (masterBody) {
-        try {
-          const schema = getPmSchema();
-          const ydoc = prosemirrorJSONToYDoc(schema, masterBody, 'default');
-          ydoc.getText('title').insert(0, uc.name);
-          nextYjsState = Y.encodeStateAsUpdate(ydoc);
-          nextContentJson = JSON.stringify(masterBody);
-          nextBodyMd = uc.body_md;
-        } catch (err) {
-          console.error('[userCharacterSync] body encode failed:', err);
+        const masterBodyJson = JSON.stringify(masterBody);
+        // No-op short-circuit: skip the yjs_state rebuild entirely when
+        // the master body hasn't actually changed since the last sync.
+        // rebuildYjsState's Y.Doc gets a fresh random clientID every
+        // call, so re-running it on an unchanged body still grows
+        // yjs_state by a permanent state-vector entry forever — see the
+        // same guard + rationale in campaign-index.ts.
+        if (masterBodyJson !== noteRow.content_json) {
+          try {
+            const schema = getPmSchema();
+            // Seed from the existing state so other Y roots (drawing
+            // strokes, excalidraw layers) survive — see @/lib/yjs-rebuild.
+            // `|| undefined`: an empty name must not wipe the Y.Text
+            // title — see the title contract documented in yjs-rebuild.ts.
+            nextYjsState = rebuildYjsState(
+              schema,
+              noteRow.yjs_state,
+              masterBody,
+              uc.name || undefined,
+            );
+            nextContentJson = masterBodyJson;
+            nextBodyMd = uc.body_md;
+          } catch (err) {
+            console.error('[userCharacterSync] body encode failed:', err);
+          }
         }
       }
 

@@ -13,18 +13,18 @@
 // their own narrative or notes around the auto-managed block.
 //
 // Sync model: rewrite content_json + content_md + content_text in
-// place, refresh yjs_state via prosemirrorJSONToYDoc, then
-// closeDocumentConnections() so any open editor reconnects against
-// the new state instead of overwriting it on save.
+// place, refresh yjs_state via rebuildYjsState (seeded from the
+// existing state so other Y roots survive — see @/lib/yjs-rebuild),
+// then closeDocumentConnections() so any open editor reconnects
+// against the new state instead of overwriting it on save.
 
-import * as Y from 'yjs';
-import { prosemirrorJSONToYDoc } from 'y-prosemirror';
 import { getDb } from './db';
 import { getPmSchema } from './pm-schema';
 import { pmToMarkdown } from './pm-to-md';
 import { extractPlaintext, type PmNode } from './md-to-pm';
 import { closeDocumentConnections } from '@/collab/server';
 import { ensureIndexNote } from './index-notes';
+import { rebuildYjsState } from './yjs-rebuild';
 
 /** Callout title marker — used both as the user-visible heading and as
  *  the detection sentinel when we look for the managed block. */
@@ -145,13 +145,19 @@ export async function deriveFolderIndex(
     content_json: string;
     title: string;
     frontmatter_json: string;
+    yjs_state: Uint8Array | null;
   } | null =>
     (db
       .query<
-        { content_json: string; title: string; frontmatter_json: string },
+        {
+          content_json: string;
+          title: string;
+          frontmatter_json: string;
+          yjs_state: Uint8Array | null;
+        },
         [string, string]
       >(
-        'SELECT content_json, title, frontmatter_json FROM notes WHERE group_id = ? AND path = ?',
+        'SELECT content_json, title, frontmatter_json, yjs_state FROM notes WHERE group_id = ? AND path = ?',
       )
       .get(groupId, indexPath) ?? null);
 
@@ -227,6 +233,18 @@ export async function deriveFolderIndex(
   const next = injectManagedCallout(doc, callout);
 
   const newJson = JSON.stringify(next);
+
+  // No-op short-circuit: if the rebuilt doc is byte-identical to what's
+  // already stored, skip the body write entirely. Without this,
+  // rebuildYjsState's Y.Doc gets a fresh random clientID every call, so
+  // a repeated no-op derive (deriveFolderIndex runs unconditionally on
+  // every note create/move/delete/rename touching this folder) grows
+  // yjs_state by a permanent state-vector entry + structs forever, even
+  // when nothing actually changed — measured ~23 bytes/call, linear,
+  // unbounded. The frontmatter tag merge above still applies
+  // unconditionally since it can change independently of the body.
+  if (newJson === indexRow.content_json) return;
+
   const newMd = pmToMarkdown(next);
   const newText = extractPlaintext(next);
 
@@ -234,9 +252,16 @@ export async function deriveFolderIndex(
   try {
     const schema = getPmSchema();
     schema.nodeFromJSON(next); // throws on invalid shape
-    const ydoc = prosemirrorJSONToYDoc(schema, next, 'default');
-    if (indexRow.title) ydoc.getText('title').insert(0, indexRow.title);
-    yjsState = Y.encodeStateAsUpdate(ydoc);
+    // Seed from the existing state so other Y roots (drawing strokes,
+    // excalidraw layers) survive the rebuild — see @/lib/yjs-rebuild.
+    // `|| undefined`: an empty title must not wipe the Y.Text title —
+    // see the title contract documented in yjs-rebuild.ts.
+    yjsState = rebuildYjsState(
+      schema,
+      indexRow.yjs_state,
+      next,
+      indexRow.title || undefined,
+    );
   } catch (err) {
     console.error(
       '[folder-index] schema validation failed for',

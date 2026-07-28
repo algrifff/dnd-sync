@@ -23,7 +23,14 @@ export function TitleEditor({
   initialTitle = '',
   lockedTitle,
 }: {
-  ydoc: Y.Doc;
+  /** Null during the ~1.2s reconnect gap after a server-initiated
+   *  reset (see provider-cache.ts#RESET_REACQUIRE_DELAY_MS).
+   *  NoteWorkspace keeps TitleEditor mounted through that gap rather
+   *  than tearing it down, so typing is simply disabled (via the
+   *  underlying input's readOnly-less-but-noop onChange) until the
+   *  fresh Y.Doc arrives — the last-known `value` state is untouched
+   *  and does not revert to `initialTitle`. */
+  ydoc: Y.Doc | null;
   placeholder?: string;
   /** Initial title from the DB. Used to seed the input so it never
    *  flashes empty while Hocuspocus is mid-sync, and as a fallback
@@ -35,13 +42,14 @@ export function TitleEditor({
    *  (canonical subfolders and campaign roots). */
   lockedTitle?: string;
 }): React.JSX.Element {
-  const yTitle = ydoc.getText('title');
+  const yTitle = ydoc?.getText('title') ?? null;
   const [value, setValue] = useState<string>(
-    () => yTitle.toString() || initialTitle,
+    () => yTitle?.toString() || initialTitle,
   );
   const treeRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (!yTitle) return;
     const observer = (): void => {
       const next = yTitle.toString() || initialTitle;
       setValue((prev) => (prev === next ? prev : next));
@@ -62,6 +70,10 @@ export function TitleEditor({
   }, []);
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    // No-op while mid-reconnect: `disabled` below should already stop
+    // this handler from firing, but guard anyway since there's no
+    // Y.Doc to write into during the gap.
+    if (!ydoc || !yTitle) return;
     const next = e.target.value;
     setValue(next);
     ydoc.transact(() => {
@@ -93,10 +105,11 @@ export function TitleEditor({
       type="text"
       value={value}
       onChange={onChange}
+      disabled={!ydoc}
       placeholder={placeholder}
       aria-label="Note title"
       spellCheck
-      className="w-full border-0 bg-transparent px-0 py-3 text-4xl font-bold leading-[1.3] tracking-tight text-[var(--ink)] outline-none placeholder:text-[var(--ink-soft)]/40"
+      className="w-full border-0 bg-transparent px-0 py-3 text-4xl font-bold leading-[1.3] tracking-tight text-[var(--ink)] outline-none placeholder:text-[var(--ink-soft)]/40 disabled:cursor-not-allowed"
       style={{ fontFamily: '"Fraunces", Georgia, serif' }}
     />
   );

@@ -12,6 +12,7 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { loadNote } from '@/lib/notes';
+import { closeDocumentConnections } from '@/collab/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,6 +66,14 @@ export async function PATCH(req: NextRequest): Promise<Response> {
       session.currentGroupId,
       body.path,
     );
+
+  // The dm_only gate in collab/server.ts#onAuthenticate is evaluated
+  // ONLY at connect time. Without this, a viewer who was already
+  // connected keeps receiving live updates for a note we just hid.
+  // AFTER the write, deliberately: the client reconnects and must
+  // re-authenticate against the committed flag. Evicting before the
+  // write would just let them straight back in under the old value.
+  await closeDocumentConnections(body.path);
 
   return json({ ok: true, dmOnly: body.dmOnly });
 }

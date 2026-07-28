@@ -194,37 +194,123 @@ describe('syncNoteToMaster', () => {
 describe('loop guard', () => {
   it('a master write does not re-enter itself through syncNoteToMaster', async () => {
     const ctx = await seed();
-    let masterUpdates = 0;
     const db = getDb();
-    // Count master-row version bumps via updated_at.
-    const before = db
-      .query<{ updated_at: number }, [string]>(
-        'SELECT updated_at FROM user_characters WHERE id = ?',
-      )
-      .get(ctx.ucId)!.updated_at;
-    masterUpdates++;
-    updateUserCharacter(ctx.ucId, ctx.userId, {
-      sheet: { hit_points: { current: 7, max: 10, temporary: 0 } },
-    });
-    // If loop-guard fails, the reverse sync would fire and bump
-    // updated_at again after the initial write. We assert the master's
-    // updated_at reflects exactly one write cycle by checking the note
-    // did receive the value and calling syncNoteToMaster directly —
-    // which, inside the master→notes window, should short-circuit.
-    syncNoteToMaster(ctx.noteId);
-    const after = db
-      .query<{ updated_at: number }, [string]>(
-        'SELECT updated_at FROM user_characters WHERE id = ?',
-      )
-      .get(ctx.ucId)!.updated_at;
-    expect(after).toBeGreaterThan(before);
-    expect(masterUpdates).toBe(1);
+
+    // Count real UPDATEs against user_characters via a SQL-level spy,
+    // instead of comparing `updated_at` timestamps. The old assertion
+    // (`toBeGreaterThan` on two Date.now() reads) raced at millisecond
+    // resolution: seed() + updateUserCharacter() + syncNoteToMaster()
+    // can all land in the same tick, so "before" and "after" tied and
+    // the test failed ~60-65% of runs — a false flake report, not a
+    // real regression. A call count proves the actual loop-guard
+    // property directly and has no timing dependency.
+    const originalQuery = db.query.bind(db);
+    let masterWrites = 0;
+    (db as unknown as { query: typeof db.query }).query = ((sql: string) => {
+      const stmt = originalQuery(sql) as { run: (...args: unknown[]) => unknown };
+      if (/UPDATE\s+user_characters\b/i.test(sql)) {
+        const originalRun = stmt.run.bind(stmt);
+        stmt.run = (...args: unknown[]) => {
+          masterWrites++;
+          return originalRun(...args);
+        };
+      }
+      return stmt;
+    }) as typeof db.query;
+
+    try {
+      updateUserCharacter(ctx.ucId, ctx.userId, {
+        sheet: { hit_points: { current: 7, max: 10, temporary: 0 } },
+      });
+      // updateUserCharacter's own write to the master row.
+      expect(masterWrites).toBe(1);
+
+      // Calling syncNoteToMaster here runs entirely after
+      // syncMasterToNotes's guarded window has already closed, so it's
+      // a legitimate, out-of-band reverse sync — not a re-entrant one.
+      // This proves the guard's Set is released cleanly (the call is
+      // NOT permanently blocked) while also proving it doesn't cascade
+      // into more than one write (no runaway ping-pong): exactly one
+      // additional write, no more, no fewer.
+      syncNoteToMaster(ctx.noteId);
+      expect(masterWrites).toBe(2);
+    } finally {
+      (db as unknown as { query: typeof db.query }).query = originalQuery;
+    }
+
     // The bound note saw the update from the master side.
     expect(readNoteSheet(ctx.noteId).hit_points).toEqual({
       current: 7,
       max: 10,
       temporary: 0,
     });
+  });
+
+  it('blocks a syncNoteToMaster call issued from inside syncMasterToNotes\'s guarded window (exercises userCharacterSync.ts:165 directly)', async () => {
+    const ctx = await seed();
+    const db = getDb();
+
+    // The test above proves the guard is RELEASED (no permanent lock)
+    // but never proves it actually FIRES: it calls syncNoteToMaster
+    // only after syncMasterToNotes has already returned, i.e. after
+    // `syncingNoteIds.delete(b.note_id)` has run in the `finally` at
+    // userCharacterSync.ts:159. That call is a legitimate later sync,
+    // not a re-entrant one, so it never reaches the `if
+    // (syncingNoteIds.has(noteId)) return;` branch at line 165.
+    //
+    // To exercise line 165 for real we need a synchronous callback that
+    // runs WHILE `b.note_id` is still in `syncingNoteIds` — i.e. from
+    // inside the `notes` UPDATE that syncMasterToNotes issues per
+    // binding (userCharacterSync.ts:145-148), which happens strictly
+    // between the `.add()` (line 66) and the `finally`'s `.delete()`
+    // (line 159). We hook that UPDATE's `.run()` the same way the test
+    // above hooks `user_characters` writes, and call
+    // syncNoteToMaster(ctx.noteId) from inside it.
+    const originalQuery = db.query.bind(db);
+    let masterWrites = 0;
+    let reentered = false;
+
+    (db as unknown as { query: typeof db.query }).query = ((sql: string) => {
+      const stmt = originalQuery(sql) as { run: (...args: unknown[]) => unknown };
+      if (/UPDATE\s+user_characters\b/i.test(sql)) {
+        const originalRun = stmt.run.bind(stmt);
+        stmt.run = (...args: unknown[]) => {
+          masterWrites++;
+          return originalRun(...args);
+        };
+      } else if (/UPDATE\s+notes\s+SET/i.test(sql)) {
+        const originalRun = stmt.run.bind(stmt);
+        stmt.run = (...args: unknown[]) => {
+          const result = originalRun(...args);
+          if (!reentered) {
+            reentered = true;
+            // Fires synchronously here, i.e. still inside
+            // syncMasterToNotes's try block for ctx.noteId — the guard
+            // at line 165 must return early, or this would proceed to
+            // its own `UPDATE user_characters` below.
+            syncNoteToMaster(ctx.noteId);
+          }
+          return result;
+        };
+      }
+      return stmt;
+    }) as typeof db.query;
+
+    try {
+      updateUserCharacter(ctx.ucId, ctx.userId, {
+        sheet: { hit_points: { current: 9, max: 10, temporary: 0 } },
+      });
+    } finally {
+      (db as unknown as { query: typeof db.query }).query = originalQuery;
+    }
+
+    expect(reentered).toBe(true);
+    // Only updateUserCharacter's own write should have landed. If the
+    // guard at userCharacterSync.ts:165 were replaced with a comment,
+    // the reentrant syncNoteToMaster call above would run to
+    // completion and issue a second `UPDATE user_characters`, making
+    // this 2.
+    expect(masterWrites).toBe(1);
   });
 
   it('calling syncMasterToNotes inside syncNoteToMaster does not recurse', async () => {

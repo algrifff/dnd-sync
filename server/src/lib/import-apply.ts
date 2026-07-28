@@ -46,6 +46,11 @@ import { pmToMarkdown } from './pm-to-md';
 import type { PlannedNote } from './import-analyse';
 import type { ImportClassifyResult } from './ai/skills/types';
 import { runMerge } from './ai/skills/merge';
+import {
+  closeDocumentForWrite,
+  closeDocumentConnections,
+  releaseServerWrite,
+} from '@/collab/server';
 import { planImport, type PlannedFile, type AiClassification } from './import-plan';
 
 export type ApplySummary = {
@@ -313,61 +318,97 @@ async function commitPlannedNote(
     }
   }
 
-  // Does something already live at target?
-  const existing = db
-    .query<
-      {
-        id: string;
-        content_md: string;
-        frontmatter_json: string;
-      },
-      [string, string]
-    >(
-      'SELECT id, content_md, frontmatter_json FROM notes WHERE group_id = ? AND path = ?',
-    )
-    .get(groupId, targetPath);
+  // Drain BEFORE reading the row the merge/append logic below is
+  // computed from. closeDocumentForWrite() is a cheap no-op when
+  // nothing is loaded for targetPath (e.g. a fresh insert, or nobody
+  // has the note open), so it's safe to call unconditionally here
+  // rather than gating it behind an existence check first — there's
+  // no permission/collision check in this function that a needless
+  // drain would cost us (unlike the promote route, which checks
+  // 404/409 before draining for exactly that reason).
+  //
+  // D4: the drain's own flush can land the live editor's newer body
+  // into this row. If we'd read `existing` before draining (the old
+  // ordering), the merge below would silently overwrite that flush
+  // with a stale pre-drain copy — an import applied while someone has
+  // the target note open would drop their last edits. Reading AFTER
+  // the drain keeps the merge input honest.
+  //
+  // The window between this call and the matching post-write evict
+  // contains `runMerge()` — an LLM call that routinely takes tens of
+  // seconds. That used to matter: the handshake was a 30 s per-path
+  // expiry, so a slow merge silently downgraded the post-write evict to
+  // a flush and re-exposed this write to the stale-flush clobber. The
+  // token has no expiry (see `issuedTokens` in collab/server.ts), so
+  // the merge can take as long as it takes. The `finally` is what keeps
+  // that safe — a throw anywhere in here (the caller catches per-note
+  // at the `planned` loop and moves on) releases the token instead of
+  // stranding it.
+  const token = await closeDocumentForWrite(targetPath);
+  try {
+    // Does something already live at target?
+    const existing = db
+      .query<
+        {
+          id: string;
+          content_md: string;
+          frontmatter_json: string;
+        },
+        [string, string]
+      >(
+        'SELECT id, content_md, frontmatter_json FROM notes WHERE group_id = ? AND path = ?',
+      )
+      .get(groupId, targetPath);
 
-  // For characters / sessions / etc., build the final markdown
-  // package (frontmatter + body) then run the existing
-  // md-to-pm + Y.Doc pipeline so every derive hook runs.
-  let finalFm: Record<string, unknown>;
-  let finalBody: string;
-  if (existing) {
-    const existingFm = parseJson(existing.frontmatter_json);
-    if (process.env.OPENAI_API_KEY) {
-      // Use the merge skill to produce a coherent combined body
-      // and suggest any missing frontmatter. Existing frontmatter
-      // keys still win per the merge rule.
-      try {
-        const m = await runMerge({
-          path: targetPath,
-          existing: { frontmatter: existingFm, body: existing.content_md },
-          incoming: {
-            frontmatter: incomingFm,
-            body: rewrittenBody,
-            sourceFilename: pn.basename,
-          },
-        });
-        summary.mergeSkillCalls++;
-        summary.mergeSkillCostUsd += m.costUsd;
-        // Merge: existing → + AI suggestions → + incoming (blank-fill).
-        const withSuggestions = mergeFrontmatter(
-          existingFm,
-          m.result.frontmatterSuggestions,
-        );
-        finalFm = mergeFrontmatter(withSuggestions, incomingFm);
-        // Tag union includes the merge skill's tag list.
-        const mergedTags = new Set([
-          ...readTagList(finalFm.tags),
-          ...m.result.tags,
-        ]);
-        if (mergedTags.size > 0) finalFm.tags = [...mergedTags];
-        finalBody = m.result.mergedBody;
-      } catch (err) {
-        console.warn(
-          '[import.apply] merge skill failed, falling back to append:',
-          err,
-        );
+    // For characters / sessions / etc., build the final markdown
+    // package (frontmatter + body) then run the existing
+    // md-to-pm + Y.Doc pipeline so every derive hook runs.
+    let finalFm: Record<string, unknown>;
+    let finalBody: string;
+    if (existing) {
+      const existingFm = parseJson(existing.frontmatter_json);
+      if (process.env.OPENAI_API_KEY) {
+        // Use the merge skill to produce a coherent combined body
+        // and suggest any missing frontmatter. Existing frontmatter
+        // keys still win per the merge rule.
+        try {
+          const m = await runMerge({
+            path: targetPath,
+            existing: { frontmatter: existingFm, body: existing.content_md },
+            incoming: {
+              frontmatter: incomingFm,
+              body: rewrittenBody,
+              sourceFilename: pn.basename,
+            },
+          });
+          summary.mergeSkillCalls++;
+          summary.mergeSkillCostUsd += m.costUsd;
+          // Merge: existing → + AI suggestions → + incoming (blank-fill).
+          const withSuggestions = mergeFrontmatter(
+            existingFm,
+            m.result.frontmatterSuggestions,
+          );
+          finalFm = mergeFrontmatter(withSuggestions, incomingFm);
+          // Tag union includes the merge skill's tag list.
+          const mergedTags = new Set([
+            ...readTagList(finalFm.tags),
+            ...m.result.tags,
+          ]);
+          if (mergedTags.size > 0) finalFm.tags = [...mergedTags];
+          finalBody = m.result.mergedBody;
+        } catch (err) {
+          console.warn(
+            '[import.apply] merge skill failed, falling back to append:',
+            err,
+          );
+          finalFm = mergeFrontmatter(existingFm, incomingFm);
+          finalBody = appendMergeBody(
+            existing.content_md,
+            rewrittenBody,
+            pn.basename,
+          );
+        }
+      } else {
         finalFm = mergeFrontmatter(existingFm, incomingFm);
         finalBody = appendMergeBody(
           existing.content_md,
@@ -376,33 +417,46 @@ async function commitPlannedNote(
         );
       }
     } else {
-      finalFm = mergeFrontmatter(existingFm, incomingFm);
-      finalBody = appendMergeBody(
-        existing.content_md,
-        rewrittenBody,
-        pn.basename,
-      );
+      finalFm = incomingFm;
+      finalBody = rewrittenBody;
     }
-  } else {
-    finalFm = incomingFm;
-    finalBody = rewrittenBody;
+
+    const finalMd = composeMarkdown(finalFm, finalBody);
+
+    // The drain already happened above, before `existing` was read —
+    // do NOT drain again here. `finalMd`/`finalFm` were computed from
+    // that post-drain row, so this write is safe to fire immediately;
+    // the AFTER-evict below is what handles anyone who reattached during
+    // the drain window, not a second drain.
+    writeNote({
+      groupId,
+      userId,
+      path: targetPath,
+      markdown: finalMd,
+      frontmatter: finalFm,
+      isUpdate: !!existing,
+      noteId: existing?.id,
+    });
+
+    // Evict anyone who reconnected DURING the drain window above — the
+    // client's provider reconnects almost instantly (initialDelay is 0),
+    // so it can re-attach mid-drain and pull the pre-write state back
+    // into memory. Without this, their next keystroke would silently
+    // revert the import merge we just persisted. See entity_edit_content
+    // in lib/ai/tools.ts for the fuller rationale. Harmless no-op when
+    // nobody had the doc open. The token is what makes it a discard
+    // rather than a flush.
+    await closeDocumentConnections(targetPath, token);
+
+    if (existing) summary.merged++;
+    else if (opts.forceKeepInPlace) summary.keptInPlace++;
+    else summary.moved++;
+  } finally {
+    // No-op on the success path; the whole point when `writeNote` (or
+    // anything else above) throws and the caller's per-note catch
+    // records a failure and moves on to the next planned note.
+    releaseServerWrite(token);
   }
-
-  const finalMd = composeMarkdown(finalFm, finalBody);
-
-  writeNote({
-    groupId,
-    userId,
-    path: targetPath,
-    markdown: finalMd,
-    frontmatter: finalFm,
-    isUpdate: !!existing,
-    noteId: existing?.id,
-  });
-
-  if (existing) summary.merged++;
-  else if (opts.forceKeepInPlace) summary.keptInPlace++;
-  else summary.moved++;
 }
 
 /** Best-effort campaign slug pick for the planner. The classifier

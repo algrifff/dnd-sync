@@ -19,7 +19,12 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type * as Y from 'yjs';
 import type { HocuspocusProvider } from '@hocuspocus/provider';
-import { acquireProvider, releaseProvider } from '../notes/provider-cache';
+import {
+  acquireProvider,
+  releaseProvider,
+  onDocumentReset,
+  RESET_REACQUIRE_DELAY_MS,
+} from '../notes/provider-cache';
 import '@excalidraw/excalidraw/index.css';
 
 // React.lazy + Suspense instead of next/dynamic — Next 15's dynamic chunk
@@ -62,6 +67,58 @@ export function ExcalidrawCanvas({
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingElementsRef = useRef<readonly unknown[] | null>(null);
   const pendingAppStateRef = useRef<Record<string, unknown> | null>(null);
+  // Tracks the real invariant the legacy-scene seed needs, instead of
+  // `epoch === 0`. Set to true the moment this path is observed with
+  // real Yjs elements (at any epoch) OR once the seed below actually
+  // runs. See the `onSynced` comment for why this — not the epoch
+  // number — is the condition that keeps the reset-stomp protection
+  // without the permanent-blank failure mode. Persists across resets
+  // because it lives on the component instance, not inside the
+  // per-epoch effect below.
+  const seededRef = useRef(false);
+
+  // Remount driver, mirroring NoteWorkspace: bumped whenever the server
+  // evicts this document (an AI tool / import / move rewrote the note
+  // that backs this canvas). The main acquire effect below depends on
+  // it, so bumping it tears down the old provider binding and acquires
+  // a fresh one.
+  const [epoch, setEpoch] = useState(0);
+  // True from the moment a reset is observed until the delayed
+  // re-acquire below completes and a fresh `synced` fires. Drives the
+  // status label and forces view-only mode so a mid-air stroke doesn't
+  // get silently dropped into a doc that's about to be torn down.
+  const [reconnecting, setReconnecting] = useState(false);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Server-initiated resets: same race this project's NoteWorkspace
+  // guards against (see provider-cache.ts#RESET_REACQUIRE_DELAY_MS /
+  // NoteWorkspace.tsx). Drop the refs to the doomed provider/ydoc
+  // immediately so in-flight draws can't write into a torn-down Y.Doc,
+  // then wait RESET_REACQUIRE_DELAY_MS — comfortably past the server's
+  // `closeDocumentForWrite` 500ms drain cap — before bumping `epoch` to
+  // re-run the acquire effect. Re-acquiring any sooner risks the same
+  // stale-reload/silent-revert bug D2b fixed for the note editor.
+  useEffect(() => {
+    const unsubscribe = onDocumentReset((resetPath) => {
+      if (resetPath !== path) return;
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+      ydocRef.current = null;
+      providerRef.current = null;
+      setReconnecting(true);
+      setReady(false);
+      resetTimerRef.current = setTimeout(() => {
+        resetTimerRef.current = null;
+        setEpoch((n) => n + 1);
+      }, RESET_REACQUIRE_DELAY_MS);
+    });
+    return () => {
+      unsubscribe();
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+    };
+  }, [path]);
 
   useEffect(() => {
     const { provider, ydoc } = acquireProvider(path);
@@ -95,7 +152,31 @@ export function ExcalidrawCanvas({
       setStatus('live');
       // Seed Y from the legacy frontmatter snapshot if Y is empty but we
       // have a stored scene from before realtime collab landed.
-      if (yElements.length === 0 && initialScene && initialScene.elements.length > 0) {
+      //
+      // This used to gate on `epoch === 0` — "only the very first mount
+      // can need seeding; any later reset means the Y state is
+      // authoritative, so re-seeding from the load-time `initialScene`
+      // prop would stomp that write with stale data." That holds when
+      // the reset happens AFTER real content existed. It does NOT hold
+      // if a reset fires before this path's elements were ever observed
+      // non-empty — e.g. the doc gets evicted moments after mount,
+      // before this seed had a chance to run. `epoch` has already
+      // ticked past 0 by the time we re-sync, the gate stays shut
+      // forever, and the canvas renders permanently blank — the first
+      // stroke then persists that blank scene over the legacy snapshot
+      // for good.
+      //
+      // `seededRef` tracks the real invariant instead: has this path,
+      // in this component instance's lifetime, ever been seen with real
+      // elements, or already been seeded? If yes, any later empty state
+      // is a legitimate reset and must NOT be re-seeded (this preserves
+      // the stomp protection the epoch gate existed for). If no —
+      // including after any number of resets — the doc's emptiness has
+      // never been confirmed genuine, so the legacy fallback stays live
+      // until it either seeds or observes real content.
+      if (yElements.length > 0) {
+        seededRef.current = true;
+      } else if (!seededRef.current && initialScene && initialScene.elements.length > 0) {
         ydoc.transact(() => {
           yElements.push(initialScene.elements as unknown[]);
           if (initialScene.appState) {
@@ -104,10 +185,12 @@ export function ExcalidrawCanvas({
             }
           }
         }, localOrigin);
+        seededRef.current = true;
       }
       // Push current Y state into the Excalidraw API once mounted.
       applyRemoteToScene();
       setReady(true);
+      setReconnecting(false);
     };
 
     if (provider.synced) onSynced();
@@ -127,8 +210,11 @@ export function ExcalidrawCanvas({
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
       releaseProvider(path);
     };
-    // initialScene is a one-shot seed — don't re-trigger on identity changes.
-  }, [path]);
+    // initialScene is a one-shot seed — don't re-trigger on identity
+    // changes. `epoch` IS a real dependency: it's how a server-initiated
+    // reset (see the effect above) forces this effect to release the
+    // stale provider/ydoc and acquire a fresh one.
+  }, [path, epoch]);
 
   const flushLocal = (): void => {
     const ydoc = ydocRef.current;
@@ -156,7 +242,13 @@ export function ExcalidrawCanvas({
     elements: readonly unknown[],
     appState: Record<string, unknown>,
   ): void => {
-    if (!canEdit) return;
+    // `reconnecting` also blocks writes: `viewModeEnabled` (below) should
+    // already stop Excalidraw from calling onChange for element edits
+    // during this window, but appState-only changes (pan/zoom) can still
+    // fire. `flushLocal` would no-op anyway once `ydocRef.current` is
+    // null, but skipping here avoids buffering a stroke that's about to
+    // be silently discarded.
+    if (!canEdit || reconnecting) return;
     pendingElementsRef.current = elements;
     pendingAppStateRef.current = {
       viewBackgroundColor: appState.viewBackgroundColor,
@@ -169,9 +261,17 @@ export function ExcalidrawCanvas({
   return (
     <div className="relative h-[calc(100vh-7rem)] w-full">
       <div className="absolute right-3 top-3 z-10 rounded-md bg-[var(--parchment)]/85 px-2 py-1 text-[11px] text-[var(--ink-soft)] shadow">
-        {status === 'connecting' && 'Connecting…'}
-        {status === 'live' && (ready ? 'Live' : 'Syncing…')}
-        {status === 'offline' && 'Offline'}
+        {reconnecting
+          ? 'Reconnecting…'
+          : status === 'connecting'
+            ? 'Connecting…'
+            : status === 'live'
+              ? ready
+                ? 'Live'
+                : 'Syncing…'
+              : status === 'offline'
+                ? 'Offline'
+                : null}
       </div>
       {mounted && (
         <Suspense fallback={null}>
@@ -180,7 +280,7 @@ export function ExcalidrawCanvas({
               apiRef.current = api as ExcalidrawAPI;
             }) as never}
             onChange={handleChange as never}
-            viewModeEnabled={!canEdit}
+            viewModeEnabled={!canEdit || reconnecting}
           />
         </Suspense>
       )}
