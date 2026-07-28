@@ -85,14 +85,15 @@ function seedNote(args: {
   pmDoc: Record<string, unknown>;
   contentMd: string;
   frontmatterJson?: string;
+  gmOnly?: boolean;
 }): void {
   const db = getDb();
   const state = buildYjsState(args.title, args.pmDoc);
   db.query(
     `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
                         content_md, yjs_state, frontmatter_json, byte_size,
-                        updated_at, updated_by, created_at, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        updated_at, updated_by, created_at, created_by, gm_only)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     randomUUID(),
     groupId,
@@ -108,6 +109,7 @@ function seedNote(args: {
     userId,
     Date.now(),
     userId,
+    args.gmOnly ? 1 : 0,
   );
   db.query(
     'INSERT INTO notes_fts(path, group_id, title, content) VALUES (?, ?, ?, ?)',
@@ -156,8 +158,25 @@ function flatText(pm: { content?: unknown[] }): string {
   return out.join(' ');
 }
 
-function ctxFor(role: ToolContext['role']): ToolContext {
-  return { groupId, userId, role, gmNamespace: role === 'dm' };
+/** `sessionRole` defaults to the most permissive plausible value for
+ *  each collapsed `role`, so every EXISTING call site (which predates
+ *  `sessionRole` and only ever passed `role`) keeps its prior
+ *  behaviour unchanged. Tests that need to distinguish an admin from
+ *  an editor — both of which collapse to `role: 'dm'` — pass
+ *  `sessionRole` explicitly. */
+function ctxFor(
+  role: ToolContext['role'],
+  sessionRole?: ToolContext['sessionRole'],
+): ToolContext {
+  const resolvedSessionRole: ToolContext['sessionRole'] =
+    sessionRole ?? (role === 'dm' ? 'admin' : role === 'player' ? 'editor' : 'viewer');
+  return {
+    groupId,
+    userId,
+    role,
+    sessionRole: resolvedSessionRole,
+    gmNamespace: role === 'dm',
+  };
 }
 
 // ── Concurrent-write-coordination regression tests (D2a / D4) ─────────
@@ -787,6 +806,189 @@ describe('entity_edit_sheet — does not touch yjs_state', () => {
     expect(after.yjs_state).not.toBeNull();
     expect(before.yjs_state).not.toBeNull();
     expect(Buffer.from(after.yjs_state!)).toEqual(Buffer.from(before.yjs_state!));
+  });
+});
+
+// ── C3: gm_only must be enforced by the tool layer, not just entity_search ─
+//
+// `ctx.role` collapses BOTH session roles 'admin' and 'editor' into
+// 'dm' — that fold is deliberate and load-bearing for every OTHER
+// permission check in this file, so it must stay. But `gm_only` is a
+// stricter, separate gate: only session role 'admin' may see gm_only
+// content (mirrors collab/server.ts#isNoteGmOnly and
+// lib/notes.ts#visibilityFor). Before this fix, note_read (and every
+// other path-based tool) only ever looked at the collapsed `role`, so
+// an editor — indistinguishable from an admin once collapsed — could
+// read or edit a note the UI itself would 404 them out of.
+//
+// ctxFor('dm', 'editor') is the exact shape of that scenario: the
+// collapsed role says "GM tools allowed" while the real session role
+// says "not the world owner."
+
+describe('note_read — gm_only enforcement (C3)', () => {
+  const path = 'Test/GmOnlySecret.md';
+
+  beforeEach(() => {
+    seedNote({
+      path,
+      title: 'GmOnlySecret',
+      pmDoc: { type: 'doc', content: [paragraph('Only the GM should see this.')] },
+      contentMd: 'Only the GM should see this.',
+      gmOnly: true,
+    });
+  });
+
+  it('hides a gm_only note from an editor (collapsed role dm, sessionRole editor)', async () => {
+    const tools = createTools(ctxFor('dm', 'editor'));
+    const result = await tools.note_read.execute!(
+      { path },
+      { toolCallId: 'gm1', messages: [] },
+    );
+    const r = result as { ok: boolean; error?: string };
+    expect(r.ok).toBe(false);
+    // Must be the SAME shape as a genuinely missing note — not a
+    // distinct "access denied" that would confirm the note exists.
+    expect(r.error).toBe(`Not found: ${path}`);
+  });
+
+  it('lets an admin (sessionRole admin) read the same gm_only note', async () => {
+    const tools = createTools(ctxFor('dm', 'admin'));
+    const result = await tools.note_read.execute!(
+      { path },
+      { toolCallId: 'gm2', messages: [] },
+    );
+    const r = result as { ok: boolean; content?: string };
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('Only the GM should see this');
+  });
+});
+
+describe('entity_edit_content — gm_only enforcement (C3)', () => {
+  const path = 'Test/GmOnlyEditable.md';
+
+  beforeEach(() => {
+    seedNote({
+      path,
+      title: 'GmOnlyEditable',
+      pmDoc: { type: 'doc', content: [paragraph('GM-only body.')] },
+      contentMd: 'GM-only body.',
+      gmOnly: true,
+    });
+  });
+
+  it('refuses to append content to a gm_only note for an editor', async () => {
+    const tools = createTools(ctxFor('dm', 'editor'));
+    const result = await tools.entity_edit_content.execute!(
+      { path, content: 'Leaked via chat.' },
+      { toolCallId: 'gm3', messages: [] },
+    );
+    const r = result as { ok: boolean; error?: string };
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe(`Not found: ${path}`);
+
+    // Nothing must have been written.
+    const row = readNote(path);
+    expect(row.content_md).toBe('GM-only body.');
+    expect(row.content_md).not.toContain('Leaked via chat');
+  });
+
+  it('lets an admin append content to the same gm_only note', async () => {
+    const tools = createTools(ctxFor('dm', 'admin'));
+    const result = await tools.entity_edit_content.execute!(
+      { path, content: 'Added by the GM.' },
+      { toolCallId: 'gm4', messages: [] },
+    );
+    expect((result as { ok: boolean }).ok).toBe(true);
+    const row = readNote(path);
+    expect(row.content_md).toContain('Added by the GM');
+  });
+});
+
+// ── Inline role guards on entity_move / entity_change_kind ────────────
+//
+// Both tools were previously GM-only ONLY by omission from
+// getToolsForRole's player/viewer maps — there was no check inside
+// execute(). api/sessions/end/route.ts already hand-picks tools from
+// createTools() directly rather than calling getToolsForRole(), so any
+// future caller that does the same (or a bug that mis-wires the
+// filter) would hand a 'player' context these GM tools with zero
+// enforcement. These tests call createTools(ctxFor('player')) directly
+// — bypassing getToolsForRole entirely — to prove the guard lives
+// inside execute(), matching the sibling pattern in note_write_section
+// / session_finalize.
+
+describe('entity_move — inline GM-only guard', () => {
+  it('rejects a non-dm caller even when handed the tool directly (bypassing getToolsForRole)', async () => {
+    const path = 'Test/MoveMe.md';
+    seedNote({
+      path,
+      title: 'MoveMe',
+      pmDoc: { type: 'doc', content: [paragraph('Movable body.')] },
+      contentMd: 'Movable body.',
+    });
+
+    const tools = createTools(ctxFor('player'));
+    const result = await tools.entity_move.execute!(
+      { from: path, to: 'Test/Moved.md' },
+      { toolCallId: 'mv1', messages: [] },
+    );
+    const r = result as { ok: boolean; error?: string };
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe('GM only');
+
+    // Nothing must have actually moved.
+    const db = getDb();
+    const still = db
+      .query<{ n: number }, [string, string]>(
+        'SELECT COUNT(*) AS n FROM notes WHERE group_id=? AND path=?',
+      )
+      .get(groupId, path);
+    expect(still?.n).toBe(1);
+  });
+
+  it('allows a dm caller to move the note', async () => {
+    const path = 'Test/MoveMeToo.md';
+    seedNote({
+      path,
+      title: 'MoveMeToo',
+      pmDoc: { type: 'doc', content: [paragraph('Movable body.')] },
+      contentMd: 'Movable body.',
+    });
+
+    const tools = createTools(ctxFor('dm'));
+    const result = await tools.entity_move.execute!(
+      { from: path, to: 'Test/MovedToo.md' },
+      { toolCallId: 'mv2', messages: [] },
+    );
+    expect((result as { ok: boolean; path?: string }).ok).toBe(true);
+    expect((result as { path?: string }).path).toBe('Test/MovedToo.md');
+  });
+});
+
+describe('entity_change_kind — inline GM-only guard', () => {
+  it('rejects a non-dm caller even when handed the tool directly (bypassing getToolsForRole)', async () => {
+    const path = 'Test/ChangeMe.md';
+    seedNote({
+      path,
+      title: 'ChangeMe',
+      pmDoc: { type: 'doc', content: [paragraph('Some body.')] },
+      contentMd: 'Some body.',
+      frontmatterJson: JSON.stringify({ kind: 'person', template: 'person', sheet: { name: 'ChangeMe' } }),
+    });
+
+    const tools = createTools(ctxFor('player'));
+    const result = await tools.entity_change_kind.execute!(
+      { path, newKind: 'creature', campaignSlug: undefined },
+      { toolCallId: 'ck1', messages: [] },
+    );
+    const r = result as { ok: boolean; error?: string };
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe('GM only');
+
+    // Frontmatter must be untouched.
+    const row = readNote(path);
+    const fm = JSON.parse(row.frontmatter_json) as { kind?: string };
+    expect(fm.kind).toBe('person');
   });
 });
 

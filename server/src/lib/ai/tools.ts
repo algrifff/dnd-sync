@@ -54,6 +54,14 @@ export type ToolContext = {
   groupId: string;
   userId: string;
   role: 'dm' | 'player' | 'viewer';
+  // The REAL session role, uncollapsed. `role` above folds both
+  // 'admin' and 'editor' into 'dm' for the many places that only care
+  // about GM-vs-player — but `gm_only` visibility is stricter than
+  // that fold: only 'admin' may see gm_only content (mirrors
+  // collab/server.ts#isNoteGmOnly and lib/notes.ts#visibilityFor).
+  // Every tool that reads or writes a note by path must gate on THIS
+  // field for gm_only, not on `role`.
+  sessionRole: 'admin' | 'editor' | 'viewer';
   campaignSlug?: string | undefined;
   // Whether this chat turn is running in the GM namespace (mirrors the
   // UI's GM-mode toggle — see lib/gm-mode.ts#isGmModeOn). Selects which
@@ -61,6 +69,18 @@ export type ToolContext = {
   // access to the other partition.
   gmNamespace: boolean;
 };
+
+/** True when a gm_only note must be hidden from this caller. Mirrors
+ *  `collab/server.ts#isNoteGmOnly`'s consumer exactly: gm_only content
+ *  is visible ONLY to session role 'admin' — an 'editor' (whose
+ *  collapsed `ctx.role` reads 'dm' for every other purpose) must not
+ *  see it. Callers should treat a `true` result the same way they treat
+ *  a missing note (return the tool's normal not-found error), never a
+ *  distinct "access denied" — a hidden note must be indistinguishable
+ *  from one that doesn't exist, matching every direct read path. */
+function isGmOnlyHiddenFrom(ctx: ToolContext, note: { gm_only: number }): boolean {
+  return note.gm_only === 1 && ctx.sessionRole !== 'admin';
+}
 
 // ── Factory ────────────────────────────────────────────────────────────
 
@@ -336,10 +356,11 @@ function campaignBrowse(ctx: ToolContext) {
         content_text: string;
         updated_at: number;
         dm_only: number;
+        gm_only: number;
       };
       const rows = getDb()
         .query<Row, [string, string, number]>(
-          `SELECT path, title, frontmatter_json, content_text, updated_at, dm_only
+          `SELECT path, title, frontmatter_json, content_text, updated_at, dm_only, gm_only
              FROM notes
             WHERE group_id = ? AND path LIKE ? || '%'
             ORDER BY updated_at DESC
@@ -351,6 +372,7 @@ function campaignBrowse(ctx: ToolContext) {
 
       const results = rows
         .filter((r) => ctx.role === 'dm' || r.dm_only === 0)
+        .filter((r) => !isGmOnlyHiddenFrom(ctx, r))
         .map((r) => {
           let fmKind: string | undefined;
           try {
@@ -408,11 +430,15 @@ function entitySearch(ctx: ToolContext) {
           // isGmModeOn(), which itself requires role === 'admin') picks
           // which partition (player vs GM) this search reads from, so
           // an admin in GM mode can find the gm_only notes they just
-          // created. NOTE: this only controls what entity_search can
-          // find — note_read still does NOT gate gm_only at all (that
-          // gap is deliberately deferred to a later sprint), so a
-          // gm_only path leaked to the model by any other means is
-          // still readable regardless of this query.
+          // created. This only controls what entity_search can find —
+          // it is not the authorization gate for gm_only content. That
+          // gate now lives on every read/write tool via
+          // `isGmOnlyHiddenFrom(ctx, note)` (see note_read,
+          // entity_edit_sheet, entity_edit_content, note_write_section,
+          // backlink_create, inventory_add, entity_move,
+          // entity_change_kind, campaign_browse) — so a gm_only path
+          // leaked to the model by any other means (e.g. a stale
+          // transcript, a backlink target) is still refused there.
           `SELECT n.path, n.title,
                   snippet(notes_fts, 2, '', '', '…', 20) AS snippet
              FROM notes_fts
@@ -590,6 +616,9 @@ function entityEditSheet(ctx: ToolContext) {
     execute: async ({ path, updates }: z.infer<typeof EditSheetSchema>) => {
       const note = loadNote(ctx.groupId, path);
       if (!note) return { ok: false as const, error: `Not found: ${path}` };
+      if (isGmOnlyHiddenFrom(ctx, note)) {
+        return { ok: false as const, error: `Not found: ${path}` };
+      }
 
       let fm: Record<string, unknown>;
       try { fm = JSON.parse(note.frontmatter_json) as Record<string, unknown>; }
@@ -652,6 +681,12 @@ function entityEditContent(ctx: ToolContext) {
     execute: async ({ path, content, heading }: z.infer<typeof EditContentSchema>) => {
       const exists = loadNote(ctx.groupId, path);
       if (!exists) return { ok: false as const, error: `Not found: ${path}` };
+      // Gate BEFORE the destructive drain below — a caller who cannot
+      // even see this note must not be able to trigger an eviction of
+      // its live editors as a side effect of a rejected request.
+      if (isGmOnlyHiddenFrom(ctx, exists)) {
+        return { ok: false as const, error: `Not found: ${path}` };
+      }
 
       // Evict + drain live editors BEFORE computing the new document.
       // Hocuspocus flushes the client's pending debounced state when
@@ -745,9 +780,21 @@ function entityMove(ctx: ToolContext) {
     description: 'Move or rename a note to a new path.',
     inputSchema: MoveSchema,
     execute: async ({ from, to }: z.infer<typeof MoveSchema>) => {
+      // GM only — mirrors note_write_section / session_finalize.
+      // Guarding here (not just by omission from getToolsForRole)
+      // matters because api/sessions/end/route.ts builds its tool map
+      // by hand-picking from createTools() rather than calling
+      // getToolsForRole(), so any future caller that does the same
+      // gets a real check instead of relying on the filter.
+      if (ctx.role !== 'dm') return { ok: false as const, error: 'GM only' };
+
       if (from === to) return { ok: true as const, path: from };
       const db = getDb();
-      if (!loadNote(ctx.groupId, from)) return { ok: false as const, error: `Not found: ${from}` };
+      const fromNote = loadNote(ctx.groupId, from);
+      if (!fromNote) return { ok: false as const, error: `Not found: ${from}` };
+      if (isGmOnlyHiddenFrom(ctx, fromNote)) {
+        return { ok: false as const, error: `Not found: ${from}` };
+      }
       const conflict = db
         .query<{ n: number }, [string, string]>('SELECT COUNT(*) AS n FROM notes WHERE group_id=? AND path=?')
         .get(ctx.groupId, to);
@@ -785,9 +832,16 @@ function entityChangeKind(ctx: ToolContext) {
       'Pass campaignSlug to move it into a different campaign at the same time.',
     inputSchema: ChangeKindSchema,
     execute: async ({ path, newKind, campaignSlug: overrideSlug }: z.infer<typeof ChangeKindSchema>) => {
+      // GM only — see entity_move for why this must be an inline check
+      // rather than relying solely on getToolsForRole's filtering.
+      if (ctx.role !== 'dm') return { ok: false as const, error: 'GM only' };
+
       const db = getDb();
       const note = loadNote(ctx.groupId, path);
       if (!note) return { ok: false as const, error: `Not found: ${path}` };
+      if (isGmOnlyHiddenFrom(ctx, note)) {
+        return { ok: false as const, error: `Not found: ${path}` };
+      }
 
       const k = newKind as EntityKind;
       const canonical = normalizeKind(k);
@@ -889,6 +943,11 @@ function backlinkCreate(ctx: ToolContext) {
       }
       const note0 = loadNote(ctx.groupId, fromPath);
       if (!note0) return { ok: false as const, error: `Not found: ${fromPath}` };
+      // Gate BEFORE the pre-drain check / destructive drain below —
+      // see entity_edit_content for why this must come first.
+      if (isGmOnlyHiddenFrom(ctx, note0)) {
+        return { ok: false as const, error: `Not found: ${fromPath}` };
+      }
 
       const targetBase = toPath.replace(/\.md$/i, '').split('/').pop() ?? toPath;
       // Cheap pre-drain check: if the link is already there, skip the
@@ -981,6 +1040,9 @@ function inventoryAdd(ctx: ToolContext) {
       }
       const note = loadNote(ctx.groupId, characterPath);
       if (!note) return { ok: false as const, error: `Not found: ${characterPath}` };
+      if (isGmOnlyHiddenFrom(ctx, note)) {
+        return { ok: false as const, error: `Not found: ${characterPath}` };
+      }
 
       let fm: Record<string, unknown>;
       try { fm = JSON.parse(note.frontmatter_json) as Record<string, unknown>; }
@@ -1035,6 +1097,14 @@ function noteRead(ctx: ToolContext) {
       if (note.dm_only === 1 && ctx.role !== 'dm') {
         return { ok: false as const, error: 'Access denied: GM-only note' };
       }
+      // gm_only is a stricter, separate gate — visible only to session
+      // role 'admin' (an 'editor' has ctx.role === 'dm' but must NOT
+      // see this). Return the plain not-found shape, matching the
+      // `!note` branch above, so a hidden note is indistinguishable
+      // from a missing one — see isGmOnlyHiddenFrom.
+      if (isGmOnlyHiddenFrom(ctx, note)) {
+        return { ok: false as const, error: `Not found: ${path}` };
+      }
 
       let frontmatter: Record<string, unknown> = {};
       try { frontmatter = JSON.parse(note.frontmatter_json) as Record<string, unknown>; }
@@ -1066,6 +1136,11 @@ function noteWriteSection(ctx: ToolContext) {
 
       const exists = loadNote(ctx.groupId, path);
       if (!exists) return { ok: false as const, error: `Not found: ${path}` };
+      // Gate BEFORE the destructive drain below — see
+      // entity_edit_content for why this must come first.
+      if (isGmOnlyHiddenFrom(ctx, exists)) {
+        return { ok: false as const, error: `Not found: ${path}` };
+      }
 
       // Drain BEFORE reading the body we splice against. writeFullContent
       // no longer drains itself — the content it's asked to write must

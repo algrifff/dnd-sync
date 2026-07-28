@@ -90,6 +90,10 @@ export async function POST(req: NextRequest): Promise<Response> {
     groupId: session.currentGroupId,
     userId: session.userId,
     role: 'dm',
+    // The real, uncollapsed session role — required so gm_only guards
+    // inside the tools (which check sessionRole, not the collapsed
+    // `role` above) behave the same here as they do in api/chat.
+    sessionRole: session.role,
     // Not an interactive GM-mode session — this route hardcodes
     // role: 'dm' for its own extraction pass, so there is no GM-mode
     // cookie to read here.

@@ -106,6 +106,50 @@ export function visibilityFor(
   return { hideDmOnly: role === 'viewer', hideGmOnly: role !== 'admin' };
 }
 
+/** Inputs to `canWriteAllSheetFields` — deliberately plain data, no DB
+ *  row or session object, so the decision is unit-testable without a
+ *  request/session fixture. */
+export type SheetWriteContext = {
+  sessionRole: 'admin' | 'editor' | 'viewer';
+  sessionUserId: string;
+  sessionUsername: string;
+  /** `created_by` column of the note being patched. */
+  noteCreatedBy: string | null;
+  /** Character role inferred for the note (`pc` / `npc` / `ally` /
+   *  `villain`), or `null` for non-character kinds (item, location, …). */
+  characterRole: string | null;
+  /** Raw `frontmatter.player` value — may be missing/non-string. */
+  fmPlayer: unknown;
+};
+
+/** Full-sheet write eligibility for `PATCH /api/notes/sheet`.
+ *
+ *  Mirrors the documented permission model:
+ *    - admin / editor          — may write any field
+ *    - creator of the note     — may write any field (regardless of role)
+ *    - PC owner (player match) — may write any field on their PC
+ *    - anyone else             — playerEditable fields only (checked by
+ *                                the caller, not here)
+ *
+ *  Deliberately does NOT consider "who last wrote this row"
+ *  (`updated_by`) — that column is overwritten by every PATCH,
+ *  including this route's own previous call, so using it as a
+ *  capability check lets any player who makes one permitted
+ *  `playerEditable` edit silently escalate to full-sheet write on
+ *  their next PATCH. */
+export function canWriteAllSheetFields(ctx: SheetWriteContext): boolean {
+  if (ctx.sessionRole === 'admin' || ctx.sessionRole === 'editor') return true;
+  if (ctx.noteCreatedBy !== null && ctx.noteCreatedBy === ctx.sessionUserId) return true;
+  if (
+    ctx.characterRole === 'pc' &&
+    typeof ctx.fmPlayer === 'string' &&
+    ctx.fmPlayer.trim().toLowerCase() === ctx.sessionUsername.trim().toLowerCase()
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function loadNote(groupId: string, path: string): NoteRow | null {
   return (
     getDb()

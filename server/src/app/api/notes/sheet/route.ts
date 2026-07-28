@@ -22,7 +22,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
-import { loadNote } from '@/lib/notes';
+import { canWriteAllSheetFields, loadNote } from '@/lib/notes';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { validateSheet } from '@/lib/validateSheet';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
@@ -91,16 +91,14 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     }
   }
 
-  const isOwner =
-    role === 'pc' &&
-    typeof fm.player === 'string' &&
-    fm.player.trim().toLowerCase() === session.username.toLowerCase();
-  const canWriteAll =
-    session.role === 'admin' ||
-    session.role === 'editor' ||
-    note.updated_by === session.userId ||
-    isCreatorMatch(session.currentGroupId, body.path, session.userId) ||
-    isOwner;
+  const canWriteAll = canWriteAllSheetFields({
+    sessionRole: session.role,
+    sessionUserId: session.userId,
+    sessionUsername: session.username,
+    noteCreatedBy: note.created_by,
+    characterRole: role,
+    fmPlayer: fm.player,
+  });
 
   const currentSheet =
     fm.sheet && typeof fm.sheet === 'object'
@@ -171,19 +169,6 @@ function inferRole(
   if (/(^|\/)villains\//.test(p)) return 'villain';
   if (/(^|\/)npcs\//.test(p)) return 'npc';
   return 'npc';
-}
-
-function isCreatorMatch(
-  groupId: string,
-  path: string,
-  userId: string,
-): boolean {
-  const row = getDb()
-    .query<{ created_by: string | null }, [string, string]>(
-      'SELECT created_by FROM notes WHERE group_id = ? AND path = ?',
-    )
-    .get(groupId, path);
-  return !!row && row.created_by === userId;
 }
 
 function json(body: unknown, status = 200): Response {
