@@ -35,6 +35,11 @@ export type ToolContext = {
   userId: string;
   role: 'dm' | 'player' | 'viewer';
   campaignSlug?: string | undefined;
+  // Whether this chat turn is running in the GM namespace (mirrors the
+  // UI's GM-mode toggle — see lib/gm-mode.ts#isGmModeOn). Selects which
+  // gm_only partition entity_search reads from; it does not grant
+  // access to the other partition.
+  gmNamespace: boolean;
 };
 
 // ── Factory ────────────────────────────────────────────────────────────
@@ -371,10 +376,23 @@ function entitySearch(ctx: ToolContext) {
 
       type FtsRow = { path: string; title: string; snippet: string };
       const rows = getDb()
-        .query<FtsRow, [string, string, string, number]>(
+        .query<FtsRow, [string, string, number, number, number]>(
           // group_id moved into notes_fts in migration #33 — scope
           // MATCH per world directly so the FTS rank is correct and
           // we don't leak hits across tenants.
+          //
+          // Visibility: dm_only rows are withheld from non-GM callers
+          // (ctx.role === 'dm' ⟺ session role admin|editor). gm_only is
+          // namespace *selection*, not an extra filter — mirrors
+          // api/ui/search/route.ts: ctx.gmNamespace (set from
+          // isGmModeOn(), which itself requires role === 'admin') picks
+          // which partition (player vs GM) this search reads from, so
+          // an admin in GM mode can find the gm_only notes they just
+          // created. NOTE: this only controls what entity_search can
+          // find — note_read still does NOT gate gm_only at all (that
+          // gap is deliberately deferred to a later sprint), so a
+          // gm_only path leaked to the model by any other means is
+          // still readable regardless of this query.
           `SELECT n.path, n.title,
                   snippet(notes_fts, 2, '', '', '…', 20) AS snippet
              FROM notes_fts
@@ -382,10 +400,12 @@ function entitySearch(ctx: ToolContext) {
                ON n.group_id = notes_fts.group_id AND n.path = notes_fts.path
              WHERE notes_fts MATCH ?
                AND notes_fts.group_id = ?
+               AND (n.dm_only = 0 OR ? = 1)
+               AND n.gm_only = ?
              ORDER BY notes_fts.rank
              LIMIT ?`,
         )
-        .all(fts, ctx.groupId, ctx.groupId, limit ?? 10);
+        .all(fts, ctx.groupId, ctx.role === 'dm' ? 1 : 0, ctx.gmNamespace ? 1 : 0, limit ?? 10);
 
       return { ok: true as const, results: rows };
     },

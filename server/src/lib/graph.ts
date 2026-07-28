@@ -57,10 +57,14 @@ export type GraphMode = 'player' | 'gm';
 export function buildGraph(
   groupId: string,
   scope: GraphScope,
-  opts: { mode?: GraphMode } = {},
+  opts: { mode?: GraphMode; hideDmOnly: boolean },
 ): GraphPayload {
   const db = getDb();
   const gmFlag = opts.mode === 'gm' ? 1 : 0;
+  // Viewers don't see dm_only notes. gm_only is already namespace-
+  // selected by `mode` above, so it needs no second predicate here.
+  const dmClause = opts.hideDmOnly ? ' AND dm_only = 0' : '';
+  const dmClauseN = opts.hideDmOnly ? ' AND n.dm_only = 0' : '';
 
   // Fetch the scoped note set first; everything else joins off these.
   type NoteRow = { path: string; title: string; updatedAt: number };
@@ -69,7 +73,7 @@ export function buildGraph(
     noteRows = db
       .query<NoteRow, [string, number]>(
         `SELECT path, title, updated_at AS updatedAt
-           FROM notes WHERE group_id = ? AND gm_only = ?`,
+           FROM notes WHERE group_id = ? AND gm_only = ?${dmClause}`,
       )
       .all(groupId, gmFlag);
   } else if (scope.kind === 'folder') {
@@ -77,7 +81,7 @@ export function buildGraph(
       .query<NoteRow, [string, number, string, string]>(
         `SELECT path, title, updated_at AS updatedAt
            FROM notes
-          WHERE group_id = ? AND gm_only = ? AND (path = ? OR path LIKE ? || '/%')`,
+          WHERE group_id = ? AND gm_only = ? AND (path = ? OR path LIKE ? || '/%')${dmClause}`,
       )
       .all(groupId, gmFlag, scope.path, scope.path);
   } else {
@@ -86,7 +90,7 @@ export function buildGraph(
         `SELECT n.path AS path, n.title AS title, n.updated_at AS updatedAt
            FROM notes n
            JOIN tags t ON t.group_id = n.group_id AND t.path = n.path
-          WHERE n.group_id = ? AND n.gm_only = ? AND t.tag = ?`,
+          WHERE n.group_id = ? AND n.gm_only = ? AND t.tag = ?${dmClauseN}`,
       )
       .all(groupId, gmFlag, scope.tag);
   }
@@ -139,7 +143,7 @@ export function buildGraph(
     nodes,
     edges,
     updatedAt: maxUpdatedAt,
-    etag: `"graph-${opts.mode ?? 'player'}-${scope.kind}-${noteRows.length}-${maxUpdatedAt}-${sha1Short(scopeKey(scope))}"`,
+    etag: `"graph-${opts.mode ?? 'player'}${opts.hideDmOnly ? '-nodm' : ''}-${scope.kind}-${noteRows.length}-${maxUpdatedAt}-${sha1Short(scopeKey(scope))}"`,
   };
 }
 
@@ -150,20 +154,37 @@ export function buildNeighborhood(
   groupId: string,
   path: string,
   depth = 1,
-  opts: { mode?: GraphMode } = {},
+  opts: { mode?: GraphMode; hideDmOnly: boolean },
 ): GraphPayload | null {
   if (depth < 1) depth = 1;
   if (depth > 2) depth = 2;
   const db = getDb();
   const gmFlag = opts.mode === 'gm' ? 1 : 0;
+  const dmClause = opts.hideDmOnly ? ' AND dm_only = 0' : '';
+  const dmClauseN = opts.hideDmOnly ? ' AND n.dm_only = 0' : '';
 
   const root = db
     .query<{ path: string; title: string; updatedAt: number }, [string, number, string]>(
       `SELECT path, title, updated_at AS updatedAt
-         FROM notes WHERE group_id = ? AND gm_only = ? AND path = ?`,
+         FROM notes WHERE group_id = ? AND gm_only = ? AND path = ?${dmClause}`,
     )
     .get(groupId, gmFlag, path);
   if (!root) return null;
+
+  // Both hop queries join `notes` and re-apply the same gm_only/dm_only
+  // predicate as the root lookup — a hop can only traverse THROUGH a note
+  // the caller can actually see. Without this, a note reachable only via a
+  // hidden note would surface in `neighbours` (and later in `nodes`) as an
+  // unexplainable orphan, leaking the hidden note's existence + adjacency
+  // even though its own title/body stay hidden.
+  const outSql = `SELECT nl.to_path AS to_path
+                     FROM note_links nl
+                     JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.to_path
+                    WHERE nl.group_id = ? AND nl.from_path = ? AND n.gm_only = ?${dmClauseN}`;
+  const inSql = `SELECT nl.from_path AS from_path
+                    FROM note_links nl
+                    JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.from_path
+                   WHERE nl.group_id = ? AND nl.to_path = ? AND n.gm_only = ?${dmClauseN}`;
 
   const neighbours = new Set<string>([root.path]);
   let frontier = new Set<string>([root.path]);
@@ -171,15 +192,11 @@ export function buildNeighborhood(
     const next = new Set<string>();
     for (const p of frontier) {
       const outRows = db
-        .query<{ to_path: string }, [string, string]>(
-          `SELECT to_path FROM note_links WHERE group_id = ? AND from_path = ?`,
-        )
-        .all(groupId, p);
+        .query<{ to_path: string }, [string, string, number]>(outSql)
+        .all(groupId, p, gmFlag);
       const inRows = db
-        .query<{ from_path: string }, [string, string]>(
-          `SELECT from_path FROM note_links WHERE group_id = ? AND to_path = ?`,
-        )
-        .all(groupId, p);
+        .query<{ from_path: string }, [string, string, number]>(inSql)
+        .all(groupId, p, gmFlag);
       for (const r of outRows) {
         if (r.to_path.startsWith('__orphan__:')) continue;
         if (!neighbours.has(r.to_path)) {
@@ -204,7 +221,7 @@ export function buildNeighborhood(
     .query<{ path: string; title: string; updatedAt: number }, [string, number, ...string[]]>(
       `SELECT path, title, updated_at AS updatedAt
          FROM notes
-        WHERE group_id = ? AND gm_only = ? AND path IN (${placeholders})`,
+        WHERE group_id = ? AND gm_only = ? AND path IN (${placeholders})${dmClause}`,
     )
     .all(groupId, gmFlag, ...neighbours);
 
@@ -252,7 +269,7 @@ export function buildNeighborhood(
     nodes,
     edges,
     updatedAt: maxUpdatedAt,
-    etag: `"nbhd-${opts.mode ?? 'player'}-${depth}-${nodes.length}-${maxUpdatedAt}-${sha1Short(path)}"`,
+    etag: `"nbhd-${opts.mode ?? 'player'}${opts.hideDmOnly ? '-nodm' : ''}-${depth}-${nodes.length}-${maxUpdatedAt}-${sha1Short(path)}"`,
   };
 }
 

@@ -332,13 +332,12 @@ All routes live under `/api/`. ~70 endpoints; grouped:
 | Health | `GET /api/health` |
 | Auth / profile | `POST /api/sessions/create`, `POST /api/sessions/end`, `GET /api/profile`, `POST /api/profile/password`, `POST /api/profile/avatar` |
 | Notes | `GET /api/notes/[...path]`, `POST /api/notes/create`, `DELETE /api/notes/[...path]`, `POST /api/notes/move`, `POST /api/notes/duplicate`, `POST /api/notes/visibility`, `POST /api/notes/sheet`, `POST /api/notes/excalidraw-scene` |
-| Search | `GET /api/search?q=...` (FTS5), `GET /api/ui/search` |
+| Search | `GET /api/ui/search` |
 | Worlds (groups) | `GET /api/worlds`, `POST /api/worlds`, `GET /api/worlds/active`, `PATCH /api/worlds/[id]`, `POST /api/worlds/[id]/invite`, `POST /api/worlds/[id]/transfer`, `GET /api/worlds/[id]/members`, `GET /api/worlds/[id]/personalities` |
 | Campaigns | `POST /api/campaigns/reorder`, `DELETE /api/campaigns/delete`, `POST /api/worlds/[id]/campaigns/[slug]/join` |
 | Folders | `POST /api/folders/create`, `POST /api/folders/move`, `DELETE /api/folders/delete` |
 | Tree | `GET /api/tree` |
 | Characters | `GET /api/characters`, `POST /api/characters/create`, `GET /api/me/characters`, `POST /api/me/characters/import-pdf` |
-| Inventory | `GET /api/inventory`, `POST /api/inventory` |
 | Sessions (game) | `POST /api/sessions/mark-closed` |
 | Tags | `GET /api/tags`, `GET /api/note-tags`, `GET /api/asset-tags` |
 | Assets | `POST /api/assets/upload`, `GET /api/assets/[id]`, `GET /api/assets/list`, `GET /api/assets/by-path` |

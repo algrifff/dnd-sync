@@ -7,6 +7,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
+import { visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,12 +42,13 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const db = getDb();
   const note = db
-    .query<{ frontmatter_json: string; gm_only: number }, [string, string]>(
-      'SELECT frontmatter_json, gm_only FROM notes WHERE group_id = ? AND path = ?',
+    .query<{ frontmatter_json: string; gm_only: number; dm_only: number }, [string, string]>(
+      'SELECT frontmatter_json, gm_only, dm_only FROM notes WHERE group_id = ? AND path = ?',
     )
     .get(session.currentGroupId, body.path);
   if (!note) return json({ error: 'not_found' }, 404);
-  if (note.gm_only === 1 && session.role !== 'admin') {
+  const vis = visibilityFor(session.role);
+  if ((note.gm_only === 1 && vis.hideGmOnly) || (note.dm_only === 1 && vis.hideDmOnly)) {
     return json({ error: 'not_found' }, 404);
   }
 

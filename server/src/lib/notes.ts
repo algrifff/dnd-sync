@@ -93,6 +93,19 @@ export type TagRow = {
   tag: string;
 };
 
+/** Visibility filter for the note read helpers. Mirrors the gates in
+ *  `collab/server.ts`: viewers never see `dm_only` notes, non-admins
+ *  never see `gm_only` notes. */
+export type VisibilityOpts = { hideDmOnly?: boolean; hideGmOnly?: boolean };
+
+/** The canonical role → visibility mapping. Every REST / RSC read path
+ *  derives its filter here rather than re-deriving the comparison. */
+export function visibilityFor(
+  role: 'admin' | 'editor' | 'viewer',
+): { hideDmOnly: boolean; hideGmOnly: boolean } {
+  return { hideDmOnly: role === 'viewer', hideGmOnly: role !== 'admin' };
+}
+
 export function loadNote(groupId: string, path: string): NoteRow | null {
   return (
     getDb()
@@ -117,10 +130,19 @@ export function loadUser(userId: string): NoteAuthor | null {
   );
 }
 
-export function loadPreview(groupId: string, path: string): NotePreview | null {
+export function loadPreview(
+  groupId: string,
+  path: string,
+  opts: VisibilityOpts,
+): NotePreview | null {
+  // Filtered in SQL so a hidden note is indistinguishable from a
+  // missing one — the caller 404s on null either way.
+  const dmFilter = opts.hideDmOnly ? ' AND dm_only = 0' : '';
+  const gmFilter = opts.hideGmOnly ? ' AND gm_only = 0' : '';
   const row = getDb()
     .query<{ title: string; content_text: string }, [string, string]>(
-      `SELECT title, content_text FROM notes WHERE group_id = ? AND path = ?`,
+      `SELECT title, content_text FROM notes
+        WHERE group_id = ? AND path = ?${dmFilter}${gmFilter}`,
     )
     .get(groupId, path);
   if (!row) return null;
@@ -131,10 +153,16 @@ export function loadPreview(groupId: string, path: string): NotePreview | null {
 export function loadBacklinks(
   groupId: string,
   path: string,
-  opts?: { hideDmOnly?: boolean },
+  opts: VisibilityOpts,
 ): BacklinkRow[] {
-  const dmFilter = opts?.hideDmOnly
+  // LEFT JOIN — `IS NULL` means the source note row is gone (a dangling
+  // note_links entry). Those stay visible; the panel falls back to
+  // rendering the raw from_path.
+  const dmFilter = opts.hideDmOnly
     ? ' AND (n.dm_only IS NULL OR n.dm_only = 0)'
+    : '';
+  const gmFilter = opts.hideGmOnly
+    ? ' AND (n.gm_only IS NULL OR n.gm_only = 0)'
     : '';
   return getDb()
     .query<BacklinkRow, [string, string]>(
@@ -143,13 +171,21 @@ export function loadBacklinks(
               nl.is_manual AS is_manual
          FROM note_links nl
          LEFT JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.from_path
-        WHERE nl.group_id = ? AND nl.to_path = ?${dmFilter}
+        WHERE nl.group_id = ? AND nl.to_path = ?${dmFilter}${gmFilter}
         ORDER BY nl.from_path`,
     )
     .all(groupId, path);
 }
 
-export function loadOutgoingLinks(groupId: string, fromPath: string): OutgoingLinkRow[] {
+export function loadOutgoingLinks(
+  groupId: string,
+  fromPath: string,
+  opts: VisibilityOpts,
+): OutgoingLinkRow[] {
+  // INNER JOIN — the target note always exists here, so no IS NULL
+  // disjunct (unlike loadBacklinks).
+  const dmFilter = opts.hideDmOnly ? ' AND n.dm_only = 0' : '';
+  const gmFilter = opts.hideGmOnly ? ' AND n.gm_only = 0' : '';
   return getDb()
     .query<OutgoingLinkRow, [string, string]>(
       // INNER JOIN so only links where the target note actually exists are
@@ -163,7 +199,7 @@ export function loadOutgoingLinks(groupId: string, fromPath: string): OutgoingLi
          FROM note_links nl
          JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.to_path
         WHERE nl.group_id = ? AND nl.from_path = ?
-          AND nl.to_path NOT LIKE '__orphan__%'
+          AND nl.to_path NOT LIKE '__orphan__%'${dmFilter}${gmFilter}
         ORDER BY nl.to_path`,
     )
     .all(groupId, fromPath);

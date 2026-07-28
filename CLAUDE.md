@@ -158,7 +158,9 @@ Pattern: AAA (Arrange → Act → Assert). Real in-memory SQLite — no DB mocki
 
 **Characters table is a derived index** — rebuilt from note frontmatter on every save. Never write to it directly; always update the source note.
 
-**`dm_only` is enforced at the API layer** — viewers get the note path/title but body is withheld. Not a DB-level permission.
+**`dm_only` / `gm_only` are enforced at the API layer** — a hidden note
+404s (indistinguishable from missing). Not a DB-level permission.
+`loadNote()` does not filter; use `visibilityFor(session.role)`.
 
 **Admin password only shown once** — logged to stdout on first boot in a styled banner. Never recoverable after that (Argon2 hash only).
 

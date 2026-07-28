@@ -11,11 +11,12 @@ import { PenTool } from 'lucide-react';
 import { readSession } from '@/lib/session';
 import { getDb } from '@/lib/db';
 import { getWorldFeatures } from '@/lib/groups';
+import { visibilityFor } from '@/lib/notes';
 import { NewDrawingButton } from '../../../excalidraw/NewDrawingButton';
 
 export const dynamic = 'force-dynamic';
 
-type Row = { path: string; title: string; updated_at: number; gm_only: number };
+type Row = { path: string; title: string; updated_at: number; gm_only: number; dm_only: number };
 
 export default async function ExcalidrawIndexPage(): Promise<ReactElement> {
   const jar = await cookies();
@@ -32,7 +33,7 @@ export default async function ExcalidrawIndexPage(): Promise<ReactElement> {
   const isAdmin = session.role === 'admin';
   const rows = getDb()
     .query<Row, [string]>(
-      `SELECT path, title, updated_at, gm_only
+      `SELECT path, title, updated_at, gm_only, dm_only
          FROM notes
         WHERE group_id = ?
           AND path LIKE 'Excalidraw/%'
@@ -41,7 +42,10 @@ export default async function ExcalidrawIndexPage(): Promise<ReactElement> {
     )
     .all(session.currentGroupId);
 
-  const visible = isAdmin ? rows : rows.filter((r) => r.gm_only !== 1);
+  const vis = visibilityFor(session.role);
+  const visible = rows.filter(
+    (r) => !((r.gm_only === 1 && vis.hideGmOnly) || (r.dm_only === 1 && vis.hideDmOnly)),
+  );
   const gmOnly = visible.filter((r) => r.gm_only === 1);
   const shared = visible.filter((r) => r.gm_only !== 1);
 

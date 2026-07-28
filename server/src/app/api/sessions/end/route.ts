@@ -90,6 +90,10 @@ export async function POST(req: NextRequest): Promise<Response> {
     groupId: session.currentGroupId,
     userId: session.userId,
     role: 'dm',
+    // Not an interactive GM-mode session — this route hardcodes
+    // role: 'dm' for its own extraction pass, so there is no GM-mode
+    // cookie to read here.
+    gmNamespace: false,
     ...(campaignSlug !== undefined ? { campaignSlug } : {}),
   };
 

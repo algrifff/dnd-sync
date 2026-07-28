@@ -25,9 +25,13 @@ paths:
 - Add timeouts for external calls (AI provider requests in particular).
 - Rate-limit anything password-adjacent — see `ratelimit.ts` for the
   existing primitive.
-- `dm_only` is enforced at the API layer, not the DB layer. Every note
-  read path must either withhold the body for viewers or route through
-  `loadNote()` which already does.
+- `dm_only` and `gm_only` are enforced at the API layer, not the DB
+  layer. `loadNote()` returns the raw row and filters NOTHING — every
+  read path must gate explicitly. Derive the predicate with
+  `visibilityFor(session.role)` from `lib/notes.ts`; a hidden note 404s
+  (never 403, never a withheld-body payload). Reference implementations:
+  `collab/server.ts` (single-note gates) and `api/ui/search/route.ts`
+  (list surfaces).
 
 ## Error Handling
 - Catch errors at the route level; never let a stack trace reach the client.
