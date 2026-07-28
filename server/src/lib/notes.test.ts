@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
 import {
+  canWriteAllSheetFields,
   decodePath,
   loadBacklinks,
   loadNote,
@@ -244,6 +245,87 @@ describe('visibilityFor', () => {
 
   it('hides neither flag from admins', () => {
     expect(visibilityFor('admin')).toEqual({ hideDmOnly: false, hideGmOnly: false });
+  });
+});
+
+// ── canWriteAllSheetFields ───────────────────────────────────────────────
+
+describe('canWriteAllSheetFields', () => {
+  const base = {
+    sessionRole: 'viewer' as const,
+    sessionUserId: 'user-1',
+    sessionUsername: 'alice',
+    noteCreatedBy: 'user-2',
+    characterRole: 'pc' as string | null,
+    fmPlayer: 'bob' as unknown,
+  };
+
+  it('grants full write to admins regardless of ownership', () => {
+    expect(canWriteAllSheetFields({ ...base, sessionRole: 'admin' })).toBe(true);
+  });
+
+  it('grants full write to editors regardless of ownership', () => {
+    expect(canWriteAllSheetFields({ ...base, sessionRole: 'editor' })).toBe(true);
+  });
+
+  it('grants full write to the note creator', () => {
+    expect(
+      canWriteAllSheetFields({ ...base, noteCreatedBy: 'user-1', fmPlayer: 'someone-else' }),
+    ).toBe(true);
+  });
+
+  it('grants full write to the matched PC owner (case/whitespace-insensitive)', () => {
+    expect(
+      canWriteAllSheetFields({ ...base, noteCreatedBy: 'user-2', fmPlayer: '  Alice  ' }),
+    ).toBe(true);
+  });
+
+  it('does NOT grant full write to the last editor of the note', () => {
+    // Regression guard for the privilege-escalation bug: a player who
+    // made one permitted `playerEditable` edit becomes `updated_by` on
+    // the row, but that must never imply full-sheet write on their next
+    // PATCH. `updated_by` isn't even part of the input shape any more —
+    // this test documents that "last editor" is not a grant path.
+    expect(
+      canWriteAllSheetFields({
+        ...base,
+        noteCreatedBy: 'user-2',
+        fmPlayer: 'bob',
+      }),
+    ).toBe(false);
+  });
+
+  it('denies an unrelated player with no creator or ownership match', () => {
+    expect(
+      canWriteAllSheetFields({ ...base, noteCreatedBy: 'gm-user', fmPlayer: 'someone-else' }),
+    ).toBe(false);
+  });
+
+  it('does not grant PC-owner write on non-pc character roles (npc/ally/villain)', () => {
+    expect(
+      canWriteAllSheetFields({
+        ...base,
+        noteCreatedBy: 'gm-user',
+        characterRole: 'npc',
+        fmPlayer: 'alice',
+      }),
+    ).toBe(false);
+  });
+
+  it('denies when fmPlayer is not a string (missing/undefined frontmatter.player)', () => {
+    expect(
+      canWriteAllSheetFields({ ...base, noteCreatedBy: 'gm-user', fmPlayer: undefined }),
+    ).toBe(false);
+  });
+
+  it('denies a null noteCreatedBy from matching a null-ish sessionUserId comparison', () => {
+    expect(
+      canWriteAllSheetFields({
+        ...base,
+        noteCreatedBy: null,
+        fmPlayer: 'someone-else',
+      }),
+    ).toBe(false);
   });
 });
 

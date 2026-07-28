@@ -326,12 +326,52 @@ export function deleteWorld(opts: {
     .get(opts.actorId, opts.groupId);
   if (!otherWorld) throw new Error('last_world');
 
-  // If any session is currently in this world, redirect it.
+  // Every session currently pointed at the world being deleted has to be
+  // repointed before the DELETE (current_group_id is NOT NULL + FK'd to
+  // groups.id, and PRAGMA foreign_keys is ON — leaving it dangling would
+  // fail the constraint). The fallback world MUST be resolved from THAT
+  // session's own user's memberships, not the deleting admin's — using
+  // the admin's world here would silently hand an unrelated member a
+  // valid `viewer`-role session pointed at a world they were never
+  // invited to (loadSessionRowById LEFT JOINs group_members and
+  // shapeSession defaults a missing role to 'viewer', and no route
+  // re-checks membership against session.currentGroupId). A user left
+  // with zero remaining worlds is logged out instead — there is no
+  // "no world" session state elsewhere in this codebase, and
+  // current_group_id can't be null, so an invalid/absent session
+  // (same as any other logged-out user) is the only safe representation.
+  const affectedSessions = db
+    .query<{ id: string; user_id: string }, [string]>(
+      'SELECT id, user_id FROM sessions WHERE current_group_id = ?',
+    )
+    .all(opts.groupId);
+  const wasAffected = new Set(affectedSessions.map((s) => s.id));
+  const repointedTo = new Map<string, string | null>();
+
   db.transaction(() => {
-    db.query(
-      `UPDATE sessions SET current_group_id = ?
-        WHERE current_group_id = ?`,
-    ).run(otherWorld.id, opts.groupId);
+    for (const s of affectedSessions) {
+      const fallback = db
+        .query<{ id: string }, [string, string]>(
+          `SELECT g.id FROM groups g
+             JOIN group_members gm ON gm.group_id = g.id
+            WHERE gm.user_id = ? AND g.id != ?
+            LIMIT 1`,
+        )
+        .get(s.user_id, opts.groupId);
+
+      if (fallback) {
+        db.query('UPDATE sessions SET current_group_id = ? WHERE id = ?').run(
+          fallback.id,
+          s.id,
+        );
+        repointedTo.set(s.id, fallback.id);
+      } else {
+        // No world left for this user at all — do not leave the session
+        // valid-but-pointed-at-something-inaccessible. Force logout.
+        db.query('DELETE FROM sessions WHERE id = ?').run(s.id);
+        repointedTo.set(s.id, null);
+      }
+    }
 
     // audit_log.group_id has no ON DELETE CASCADE, so clear it manually.
     db.query('DELETE FROM audit_log WHERE group_id = ?').run(opts.groupId);
@@ -346,14 +386,14 @@ export function deleteWorld(opts: {
     details: {},
   });
 
-  // Tell the caller whether their own session was redirected.
-  const mySession = db
-    .query<{ current_group_id: string }, [string]>(
-      'SELECT current_group_id FROM sessions WHERE id = ?',
-    )
-    .get(opts.sessionId);
-  const switched = mySession?.current_group_id === otherWorld.id;
-  return { switchToId: switched ? otherWorld.id : null };
+  // Tell the caller whether their own session was redirected (and where).
+  // The actor is guaranteed a non-null fallback (the `otherWorld` check
+  // above ran the identical membership query for opts.actorId), so this
+  // is never `null` when the caller's own session was affected.
+  const switchToId = wasAffected.has(opts.sessionId)
+    ? (repointedTo.get(opts.sessionId) ?? null)
+    : null;
+  return { switchToId };
 }
 
 /** Upsert an invite token for a world (one active token per world).
