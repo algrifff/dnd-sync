@@ -38,7 +38,7 @@ export function WorldSwitchProvider({
   const [isPending, startTransition] = useTransition();
   const [isSwitching, setIsSwitching] = useState<boolean>(false);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingDestRef = useRef<string>('/');
+  const pendingDestRef = useRef<string>('/home');
   const lastReportedWorldRef = useRef<string | null>(null);
   const lastIdentifiedUserRef = useRef<string | null>(null);
 
@@ -86,7 +86,13 @@ export function WorldSwitchProvider({
   //     from the local list, the highlight lags by one switch even
   //     though the page content has refreshed — which was the bug.
   const switchTo = useCallback(
-    async (id: string, destination: string = '/'): Promise<boolean> => {
+    // Default destination is /home (the world's overview) directly, NOT
+    // '/'. Routing through '/' triggers page.tsx's `redirect('/home')`
+    // server action during the post-switch `router.refresh()`, which
+    // clobbers any client navigation the user made between switching
+    // and that RSC payload finishing — e.g. clicking a note in the
+    // sidebar would briefly load it then snap back to /home.
+    async (id: string, destination: string = '/home'): Promise<boolean> => {
       if (isPending || isSwitching) return false;
       setIsSwitching(true);
       try {
