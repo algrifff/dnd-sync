@@ -11,6 +11,7 @@
 import { generateStructured } from '../openai';
 import type { TokenUsage } from '../pricing';
 import type { TemplateKind } from '../../templates';
+import { parseCharacter } from '../../character-parser';
 import {
   renderContextBlock,
   renderUserBlock,
@@ -44,28 +45,28 @@ export async function extractPc(
   costUsd: number;
   model: string;
 }> {
-  return runExtract('pc', SYSTEM_PC, input, opts);
+  return runCharacterExtract('pc', SYSTEM_PC, input, opts);
 }
 
 export async function extractNpc(
   input: ExtractInput,
   opts: { signal?: AbortSignal } = {},
 ) {
-  return runExtract('npc', SYSTEM_NPC, input, opts);
+  return runCharacterExtract('npc', SYSTEM_NPC, input, opts);
 }
 
 export async function extractAlly(
   input: ExtractInput,
   opts: { signal?: AbortSignal } = {},
 ) {
-  return runExtract('ally', SYSTEM_ALLY, input, opts);
+  return runCharacterExtract('ally', SYSTEM_ALLY, input, opts);
 }
 
 export async function extractVillain(
   input: ExtractInput,
   opts: { signal?: AbortSignal } = {},
 ) {
-  return runExtract('villain', SYSTEM_VILLAIN, input, opts);
+  return runCharacterExtract('villain', SYSTEM_VILLAIN, input, opts);
 }
 
 export async function extractLocation(
@@ -87,6 +88,84 @@ export async function extractSession(
   opts: { signal?: AbortSignal } = {},
 ) {
   return runExtract('session', SYSTEM_SESSION, input, opts);
+}
+
+// ── Character runner: deterministic parse first, AI for the gaps ──────
+
+/** Decide whether the deterministic parser found enough structured data
+ *  to skip the AI call entirely. The hot fields (HP/AC/abilities/class)
+ *  are what the SheetHeader and party sidebar key off; if those are all
+ *  present the AI extractor adds nothing material and we save tokens.
+ */
+function parsedSheetIsComplete(sheet: Record<string, unknown>): boolean {
+  return (
+    sheet.ability_scores != null &&
+    sheet.hit_points != null &&
+    sheet.armor_class != null &&
+    (sheet.classes != null || typeof sheet.class === 'string')
+  );
+}
+
+async function runCharacterExtract(
+  kind: TemplateKind,
+  systemSpecific: string,
+  input: ExtractInput,
+  opts: { signal?: AbortSignal },
+): Promise<{
+  result: ExtractResult;
+  usage: TokenUsage;
+  costUsd: number;
+  model: string;
+}> {
+  // 1. Try deterministic table extraction. Fast, free, and accurate
+  // when the source has the standard `Field | Value` / `STR | DEX` /
+  // `HP | AC | …` markdown tables.
+  const parsed = parseCharacter(input.content, {
+    defaultPlayer:
+      typeof input.existingFrontmatter.player === 'string'
+        ? input.existingFrontmatter.player
+        : '',
+  });
+  const parsedSheet =
+    (parsed.frontmatter.sheet as Record<string, unknown> | undefined) ?? {};
+
+  if (parsedSheetIsComplete(parsedSheet)) {
+    return {
+      result: { sheet: dropEmpty(parsedSheet) },
+      usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0 },
+      costUsd: 0,
+      model: 'local-character-parser',
+    };
+  }
+
+  // 2. AI fallback — fills the gaps the parser couldn't infer (pure-prose
+  // backstory pages, atypical layouts). Send the parsed sheet as context
+  // so the AI doesn't hallucinate over fields we already know.
+  const aiOut = await runExtract(kind, systemSpecific, input, opts);
+
+  // 3. Merge: deterministic parser wins for fields it explicitly set;
+  // AI fills blanks. Drops nulls + empty arrays per the runExtract
+  // contract.
+  const merged: Record<string, unknown> = { ...aiOut.result.sheet };
+  for (const [k, v] of Object.entries(parsedSheet)) {
+    if (v == null) continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    merged[k] = v;
+  }
+  return {
+    ...aiOut,
+    result: { sheet: merged },
+  };
+}
+
+function dropEmpty(sheet: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(sheet)) {
+    if (v == null) continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    out[k] = v;
+  }
+  return out;
 }
 
 // ── Shared runner ──────────────────────────────────────────────────────
