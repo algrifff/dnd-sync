@@ -12,6 +12,7 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
+import { visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +28,8 @@ type NoteRow = {
   yjs_state: Uint8Array | null;
   frontmatter_json: string;
   byte_size: number;
+  dm_only: number;
+  gm_only: number;
 };
 
 export async function POST(req: NextRequest): Promise<Response> {
@@ -48,11 +51,19 @@ export async function POST(req: NextRequest): Promise<Response> {
   const src = getDb()
     .query<NoteRow, [string, string]>(
       `SELECT id, path, title, content_json, content_text, content_md,
-              yjs_state, frontmatter_json, byte_size
+              yjs_state, frontmatter_json, byte_size, dm_only, gm_only
          FROM notes WHERE group_id = ? AND path = ?`,
     )
     .get(session.currentGroupId, body.path);
   if (!src) return json({ error: 'not_found' }, 404);
+
+  // Hidden notes must not be duplicatable into visibility the caller
+  // couldn't otherwise see — 404 (not 403) so a hidden path's existence
+  // isn't disclosed, matching `api/notes/[...path]/route.ts`.
+  const vis = visibilityFor(session.role);
+  if ((src.gm_only === 1 && vis.hideGmOnly) || (src.dm_only === 1 && vis.hideDmOnly)) {
+    return json({ error: 'not_found' }, 404);
+  }
 
   const newPath = nextAvailablePath(session.currentGroupId, body.path);
   const newTitle = deriveTitle(src.title, newPath);
@@ -64,8 +75,9 @@ export async function POST(req: NextRequest): Promise<Response> {
     db.query(
       `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
                           content_md, yjs_state, frontmatter_json, byte_size,
-                          updated_at, updated_by, created_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          updated_at, updated_by, created_at, created_by,
+                          dm_only, gm_only)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       session.currentGroupId,
@@ -81,6 +93,8 @@ export async function POST(req: NextRequest): Promise<Response> {
       session.userId,
       now,
       session.userId,
+      src.dm_only,
+      src.gm_only,
     );
     // Copy outgoing links + tags only. Inbound links (note_links where
     // to_path = src.path) shouldn't auto-point at the duplicate.

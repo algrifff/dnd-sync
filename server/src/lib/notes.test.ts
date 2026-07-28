@@ -1,7 +1,15 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
-import { decodePath, loadNote, loadTags } from './notes';
+import {
+  decodePath,
+  loadBacklinks,
+  loadNote,
+  loadOutgoingLinks,
+  loadPreview,
+  loadTags,
+  visibilityFor,
+} from './notes';
 import { setupTestDb, teardownTestDb } from './test-utils';
 import { DEFAULT_GROUP_ID } from './users';
 
@@ -23,6 +31,22 @@ function seedNote(groupId: string, path: string): string {
        VALUES (?, ?, ?, '{}', ?)`,
     )
     .run(id, groupId, path, Date.now());
+  return id;
+}
+
+function seedNoteWithFlags(
+  groupId: string,
+  path: string,
+  flags: { dmOnly?: boolean; gmOnly?: boolean },
+): string {
+  const id = randomUUID();
+  getDb()
+    .query(
+      `INSERT INTO notes (id, group_id, path, content_json, content_text,
+                          title, updated_at, dm_only, gm_only)
+       VALUES (?, ?, ?, '{}', 'secret body', 'Secret', ?, ?, ?)`,
+    )
+    .run(id, groupId, path, Date.now(), flags.dmOnly ? 1 : 0, flags.gmOnly ? 1 : 0);
   return id;
 }
 
@@ -200,5 +224,152 @@ describe('cascade delete', () => {
     seedTag(DEFAULT_GROUP_ID, other, 'unrelated');
     performCascadeDelete(DEFAULT_GROUP_ID, target);
     expect(loadTags(DEFAULT_GROUP_ID, other)).toEqual(['unrelated']);
+  });
+});
+
+// ── visibilityFor — the canonical role → visibility predicate ──────────
+//
+// This is the single point where a future regression would silently
+// reopen every dm_only/gm_only leak at once — see the audit brief.
+
+describe('visibilityFor', () => {
+  it('hides both dm_only and gm_only notes from viewers', () => {
+    expect(visibilityFor('viewer')).toEqual({ hideDmOnly: true, hideGmOnly: true });
+  });
+
+  it('shows dm_only but hides gm_only notes from editors', () => {
+    // The admin-vs-editor distinction — the one that already caused a bug.
+    expect(visibilityFor('editor')).toEqual({ hideDmOnly: false, hideGmOnly: true });
+  });
+
+  it('hides neither flag from admins', () => {
+    expect(visibilityFor('admin')).toEqual({ hideDmOnly: false, hideGmOnly: false });
+  });
+});
+
+// ── loadPreview — visibility filtering ──────────────────────────────────
+
+describe('loadPreview — visibility filtering', () => {
+  const dmPath = 'vault/dm-secret.md';
+  const gmPath = 'vault/gm-secret.md';
+  const plainPath = 'vault/plain.md';
+
+  beforeEach(() => {
+    seedNoteWithFlags(DEFAULT_GROUP_ID, dmPath, { dmOnly: true });
+    seedNoteWithFlags(DEFAULT_GROUP_ID, gmPath, { gmOnly: true });
+    seedNoteWithFlags(DEFAULT_GROUP_ID, plainPath, {});
+  });
+
+  // `opts` used to be optional and default to "no filtering" — the exact
+  // footgun that caused the backlinks leak (see loadBacklinks history).
+  // `VisibilityOpts` is now a required parameter, so TypeScript itself
+  // rejects any call site that forgets it; there is no runtime "no opts"
+  // path left to test. See notes.ts#VisibilityOpts.
+
+  it('returns null for a dm_only note when hideDmOnly is set', () => {
+    expect(loadPreview(DEFAULT_GROUP_ID, dmPath, { hideDmOnly: true })).toBeNull();
+  });
+
+  it('still returns a dm_only note when only hideGmOnly is set', () => {
+    expect(loadPreview(DEFAULT_GROUP_ID, dmPath, { hideGmOnly: true })).not.toBeNull();
+  });
+
+  it('returns null for a gm_only note when hideGmOnly is set', () => {
+    expect(loadPreview(DEFAULT_GROUP_ID, gmPath, { hideGmOnly: true })).toBeNull();
+  });
+
+  it('still returns a gm_only note when only hideDmOnly is set', () => {
+    expect(loadPreview(DEFAULT_GROUP_ID, gmPath, { hideDmOnly: true })).not.toBeNull();
+  });
+
+  it('does not lock out a plain note under a full viewer filter', () => {
+    const vis = visibilityFor('viewer');
+    expect(loadPreview(DEFAULT_GROUP_ID, plainPath, vis)).not.toBeNull();
+  });
+});
+
+// ── loadBacklinks — visibility filtering ────────────────────────────────
+
+describe('loadBacklinks — visibility filtering', () => {
+  const targetPath = 'vault/target.md';
+  const plainSource = 'vault/source-plain.md';
+  const dmSource = 'vault/source-dm.md';
+  const gmSource = 'vault/source-gm.md';
+
+  beforeEach(() => {
+    seedNoteWithFlags(DEFAULT_GROUP_ID, targetPath, {});
+    seedNoteWithFlags(DEFAULT_GROUP_ID, plainSource, {});
+    seedNoteWithFlags(DEFAULT_GROUP_ID, dmSource, { dmOnly: true });
+    seedNoteWithFlags(DEFAULT_GROUP_ID, gmSource, { gmOnly: true });
+    seedLink(DEFAULT_GROUP_ID, plainSource, targetPath);
+    seedLink(DEFAULT_GROUP_ID, dmSource, targetPath);
+    seedLink(DEFAULT_GROUP_ID, gmSource, targetPath);
+  });
+
+  it('yields only the plain source for a viewer', () => {
+    const rows = loadBacklinks(DEFAULT_GROUP_ID, targetPath, visibilityFor('viewer'));
+    expect(rows.map((r) => r.from_path)).toEqual([plainSource]);
+  });
+
+  it('yields plain + dm sources for an editor', () => {
+    const rows = loadBacklinks(DEFAULT_GROUP_ID, targetPath, visibilityFor('editor'));
+    expect(rows.map((r) => r.from_path).sort()).toEqual([dmSource, plainSource].sort());
+  });
+
+  it('yields all three sources for an admin', () => {
+    const rows = loadBacklinks(DEFAULT_GROUP_ID, targetPath, visibilityFor('admin'));
+    expect(rows.map((r) => r.from_path).sort()).toEqual(
+      [dmSource, gmSource, plainSource].sort(),
+    );
+  });
+
+  it('keeps a dangling backlink (no source note row) visible to a viewer', () => {
+    // Regression guard: the `IS NULL` disjunct in the dm filter. A
+    // "tightened" `n.dm_only = 0` would silently drop this row instead.
+    seedLink(DEFAULT_GROUP_ID, '__deleted-source__.md', targetPath);
+    const rows = loadBacklinks(DEFAULT_GROUP_ID, targetPath, visibilityFor('viewer'));
+    expect(rows.map((r) => r.from_path)).toContain('__deleted-source__.md');
+  });
+});
+
+// ── loadOutgoingLinks — visibility filtering ────────────────────────────
+
+describe('loadOutgoingLinks — visibility filtering', () => {
+  const fromPath = 'vault/source.md';
+  const plainTarget = 'vault/target-plain.md';
+  const dmTarget = 'vault/target-dm.md';
+  const gmTarget = 'vault/target-gm.md';
+
+  beforeEach(() => {
+    seedNoteWithFlags(DEFAULT_GROUP_ID, fromPath, {});
+    seedNoteWithFlags(DEFAULT_GROUP_ID, plainTarget, {});
+    seedNoteWithFlags(DEFAULT_GROUP_ID, dmTarget, { dmOnly: true });
+    seedNoteWithFlags(DEFAULT_GROUP_ID, gmTarget, { gmOnly: true });
+    seedLink(DEFAULT_GROUP_ID, fromPath, plainTarget);
+    seedLink(DEFAULT_GROUP_ID, fromPath, dmTarget);
+    seedLink(DEFAULT_GROUP_ID, fromPath, gmTarget);
+  });
+
+  it('yields only the plain target for a viewer', () => {
+    const rows = loadOutgoingLinks(DEFAULT_GROUP_ID, fromPath, visibilityFor('viewer'));
+    expect(rows.map((r) => r.to_path)).toEqual([plainTarget]);
+  });
+
+  it('yields plain + dm targets for an editor', () => {
+    const rows = loadOutgoingLinks(DEFAULT_GROUP_ID, fromPath, visibilityFor('editor'));
+    expect(rows.map((r) => r.to_path).sort()).toEqual([dmTarget, plainTarget].sort());
+  });
+
+  it('yields all three targets for an admin', () => {
+    const rows = loadOutgoingLinks(DEFAULT_GROUP_ID, fromPath, visibilityFor('admin'));
+    expect(rows.map((r) => r.to_path).sort()).toEqual(
+      [dmTarget, gmTarget, plainTarget].sort(),
+    );
+  });
+
+  it('drops a dangling target (INNER JOIN, by design — not a LEFT JOIN)', () => {
+    seedLink(DEFAULT_GROUP_ID, fromPath, '__deleted-target__.md');
+    const rows = loadOutgoingLinks(DEFAULT_GROUP_ID, fromPath, visibilityFor('admin'));
+    expect(rows.map((r) => r.to_path)).not.toContain('__deleted-target__.md');
   });
 });

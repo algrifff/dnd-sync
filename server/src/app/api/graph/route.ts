@@ -17,6 +17,7 @@ import type { NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
 import { requireSession } from '@/lib/session';
 import { buildGraph, parseScope } from '@/lib/graph';
+import { visibilityFor } from '@/lib/notes';
 import { GM_MODE_COOKIE, treeModeFor } from '@/lib/gm-mode';
 
 export const dynamic = 'force-dynamic';
@@ -36,7 +37,10 @@ export async function GET(req: NextRequest): Promise<Response> {
   const phase = parsePhase(req.nextUrl.searchParams.get('phase'));
   const jar = await cookies();
   const mode = treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role);
-  const payload = buildGraph(session.currentGroupId, scope, { mode });
+  const payload = buildGraph(session.currentGroupId, scope, {
+    mode,
+    hideDmOnly: visibilityFor(session.role).hideDmOnly,
+  });
 
   // Phase-scoped ETag so the nodes-only and edges-only responses
   // don't collide in the browser's HTTP cache (304s would mix the

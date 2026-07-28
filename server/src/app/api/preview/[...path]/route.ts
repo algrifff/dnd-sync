@@ -3,7 +3,7 @@
 
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
-import { decodePath, loadPreview } from '@/lib/notes';
+import { decodePath, loadPreview, visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
   const path = decodePath(segments);
   if (!path) return json({ error: 'invalid_path' }, 400);
 
-  const preview = loadPreview(session.currentGroupId, path);
+  const preview = loadPreview(session.currentGroupId, path, visibilityFor(session.role));
   if (!preview) return json({ error: 'not_found' }, 404);
 
   return json(preview);

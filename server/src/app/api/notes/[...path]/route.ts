@@ -5,7 +5,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
-import { decodePath, loadNote, loadTags } from '@/lib/notes';
+import { decodePath, loadNote, loadTags, visibilityFor } from '@/lib/notes';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
 import { deriveFolderIndex, parentFolderUnderCampaign } from '@/lib/campaign-index';
@@ -24,9 +24,12 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
 
   const note = loadNote(session.currentGroupId, path);
   if (!note) return json({ error: 'not_found' }, 404);
-  // GM-only notes: only admins can read. 404 instead of 403 so the
-  // existence of a GM path isn't disclosed to players.
-  if (note.gm_only === 1 && session.role !== 'admin') {
+  // GM-only notes: admins only. DM-only notes: hidden from viewers.
+  // 404 instead of 403 in both cases so the existence of a hidden path
+  // isn't disclosed. Same predicates as the collab gates in
+  // `collab/server.ts` — loadNote does NOT filter for us.
+  const vis = visibilityFor(session.role);
+  if ((note.gm_only === 1 && vis.hideGmOnly) || (note.dm_only === 1 && vis.hideDmOnly)) {
     return json({ error: 'not_found' }, 404);
   }
 

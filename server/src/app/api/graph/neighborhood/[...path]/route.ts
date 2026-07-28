@@ -7,7 +7,7 @@
 import type { NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
 import { requireSession } from '@/lib/session';
-import { decodePath } from '@/lib/notes';
+import { decodePath, visibilityFor } from '@/lib/notes';
 import { buildNeighborhood } from '@/lib/graph';
 import { GM_MODE_COOKIE, treeModeFor } from '@/lib/gm-mode';
 
@@ -28,7 +28,10 @@ export async function GET(req: NextRequest, ctx: Ctx): Promise<Response> {
 
   const jar = await cookies();
   const mode = treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role);
-  const payload = buildNeighborhood(session.currentGroupId, path, depth, { mode });
+  const payload = buildNeighborhood(session.currentGroupId, path, depth, {
+    mode,
+    hideDmOnly: visibilityFor(session.role).hideDmOnly,
+  });
   if (!payload) return json({ error: 'not_found' }, 404);
 
   if (req.headers.get('if-none-match') === payload.etag) {

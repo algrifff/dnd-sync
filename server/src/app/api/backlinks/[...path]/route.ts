@@ -2,7 +2,7 @@
 
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
-import { decodePath, loadBacklinks } from '@/lib/notes';
+import { decodePath, loadBacklinks, visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
   const path = decodePath(segments);
   if (!path) return json({ error: 'invalid_path' }, 400);
 
-  const backlinks = loadBacklinks(session.currentGroupId, path);
+  const backlinks = loadBacklinks(session.currentGroupId, path, visibilityFor(session.role));
   return json({ backlinks });
 }
 

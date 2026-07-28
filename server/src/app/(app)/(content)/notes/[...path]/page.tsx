@@ -9,6 +9,7 @@ import {
   loadNote,
   loadTags,
   loadUser,
+  visibilityFor,
 } from '@/lib/notes';
 import { getTemplate, type NoteTemplate, type TemplateKind } from '@/lib/templates';
 import { getWorldHeader } from '@/lib/groups';
@@ -42,9 +43,13 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
   const note = loadNote(session.currentGroupId, path);
   if (!note) notFound();
-  // GM-only notes are admin-exclusive — same response as a missing
-  // note so we don't leak the existence of a GM path to players.
-  if (note.gm_only === 1 && session.role !== 'admin') notFound();
+  // GM-only notes are admin-exclusive and DM-only notes are hidden
+  // from viewers — same response as a missing note so we don't leak
+  // the existence of a hidden path. Mirrors the collab gates, which
+  // already refuse the WebSocket for both of these combinations.
+  const vis = visibilityFor(session.role);
+  if (note.gm_only === 1 && vis.hideGmOnly) notFound();
+  if (note.dm_only === 1 && vis.hideDmOnly) notFound();
 
   const rightPanelOpen = jar.get('compendium_rightpanel_open')?.value !== 'false';
 
@@ -57,8 +62,8 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   const [worldHeader, backlinks, outgoingLinks, tags, creator] =
     await Promise.all([
       Promise.resolve(getWorldHeader(session.currentGroupId)),
-      Promise.resolve(loadBacklinks(session.currentGroupId, path)),
-      Promise.resolve(loadOutgoingLinks(session.currentGroupId, path)),
+      Promise.resolve(loadBacklinks(session.currentGroupId, path, vis)),
+      Promise.resolve(loadOutgoingLinks(session.currentGroupId, path, vis)),
       Promise.resolve(loadTags(session.currentGroupId, path)),
       note.created_by
         ? Promise.resolve(loadUser(note.created_by))

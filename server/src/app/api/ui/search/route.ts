@@ -35,7 +35,7 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   const noteRows = fts
     ? db
-        .query<{ path: string; title: string; snippet: string }, [string, string, string, number, number]>(
+        .query<{ path: string; title: string; snippet: string }, [string, string, number, number]>(
           // group_id lives directly on notes_fts (migration #33), so
           // MATCH is scoped per world inside the FTS index instead of
           // post-filtering via the JOIN. Cuts work on multi-world
@@ -55,7 +55,6 @@ export async function GET(req: NextRequest): Promise<Response> {
         )
         .all(
           fts,
-          session.currentGroupId,
           session.currentGroupId,
           session.role !== 'viewer' ? 1 : 0,
           gmOnlyValue,

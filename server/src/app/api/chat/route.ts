@@ -18,6 +18,7 @@ import { getToolsForRole, type ToolContext } from '@/lib/ai/tools';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 import { apiErrorResponse } from '@/lib/analytics/api-error';
+import { GM_MODE_COOKIE, isGmModeOn } from '@/lib/gm-mode';
 
 export const dynamic = 'force-dynamic';
 
@@ -82,10 +83,15 @@ export async function POST(req: NextRequest): Promise<Response> {
     campaignName = row?.name;
   }
 
+  // Same GM-mode cookie the UI search route reads — lets an admin who
+  // has flipped into GM mode search their gm_only notes through chat.
+  const gmNamespace = isGmModeOn(req.cookies.get(GM_MODE_COOKIE)?.value, session.role);
+
   const toolCtx: ToolContext = {
     groupId: session.currentGroupId,
     userId:  session.userId,
     role,
+    gmNamespace,
     ...(body.campaignSlug !== undefined ? { campaignSlug: body.campaignSlug } : {}),
   };
 

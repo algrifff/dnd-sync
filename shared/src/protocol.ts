@@ -10,21 +10,6 @@ export const AuthTokenSchema = z.object({
 });
 export type AuthToken = z.infer<typeof AuthTokenSchema>;
 
-// ── Search ───────────────────────────────────────────────────────────────────
-
-export const SearchResultSchema = z.object({
-  path: z.string(),
-  snippet: z.string(),
-  score: z.number().optional(),
-});
-export type SearchResult = z.infer<typeof SearchResultSchema>;
-
-export const SearchResponseSchema = z.object({
-  query: z.string(),
-  results: z.array(SearchResultSchema),
-});
-export type SearchResponse = z.infer<typeof SearchResponseSchema>;
-
 // ── Files ────────────────────────────────────────────────────────────────────
 
 export const FileMetadataSchema = z.object({
