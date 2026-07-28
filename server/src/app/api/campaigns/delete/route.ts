@@ -45,12 +45,38 @@ export async function POST(req: NextRequest): Promise<Response> {
   const db = getDb();
   const groupId = session.currentGroupId;
 
-  const campaign = db
+  // Sidebar passes the raw folder name (e.g. "Campaign 3"), but rows in
+  // `campaigns` are stored slugified ("campaign-3"). Resolve in three
+  // tiers: (a) canonical slug, (b) folder_path verbatim, (c) bare folder
+  // marker for default-seeded placeholders that never got a campaigns row.
+  const requestedFolderPath = `Campaigns/${slug}`;
+  const slugified = slugify(slug);
+
+  let campaign = db
     .query<{ slug: string; folder_path: string; name: string }, [string, string]>(
       `SELECT slug, folder_path, name FROM campaigns
         WHERE group_id = ? AND slug = ?`,
     )
-    .get(groupId, slug);
+    .get(groupId, slugified);
+  if (!campaign) {
+    campaign = db
+      .query<{ slug: string; folder_path: string; name: string }, [string, string]>(
+        `SELECT slug, folder_path, name FROM campaigns
+          WHERE group_id = ? AND folder_path = ?`,
+      )
+      .get(groupId, requestedFolderPath);
+  }
+  const hasCampaignRow = !!campaign;
+  if (!campaign) {
+    const marker = db
+      .query<{ path: string }, [string, string]>(
+        `SELECT path FROM folder_markers WHERE group_id = ? AND path = ?`,
+      )
+      .get(groupId, requestedFolderPath);
+    if (marker) {
+      campaign = { slug: slugified || slug, folder_path: requestedFolderPath, name: slug };
+    }
+  }
   if (!campaign) {
     return json({ error: 'not_found', reason: `campaign '${slug}' not in this world` }, 404);
   }
@@ -96,21 +122,28 @@ export async function POST(req: NextRequest): Promise<Response> {
 
     // Belt-and-braces cleanup of slug-keyed indexes (most rows would
     // already be gone via the notes cascade, but a stale row with no
-    // backing note would survive otherwise).
+    // backing note would survive otherwise). Always key off the
+    // canonical slug — character_campaigns/session_notes/etc. were
+    // written by the derive pipeline which always slugifies.
     db.query(
       `DELETE FROM character_campaigns WHERE group_id = ? AND campaign_slug = ?`,
-    ).run(groupId, slug);
+    ).run(groupId, campaign.slug);
     db.query(
       `DELETE FROM session_notes WHERE group_id = ? AND campaign_slug = ?`,
-    ).run(groupId, slug);
+    ).run(groupId, campaign.slug);
 
-    db.query(`DELETE FROM campaigns WHERE group_id = ? AND slug = ?`).run(groupId, slug);
+    if (hasCampaignRow) {
+      db.query(`DELETE FROM campaigns WHERE group_id = ? AND slug = ?`).run(
+        groupId,
+        campaign.slug,
+      );
+    }
 
     // Unpin the active campaign if the user just deleted it.
     db.query(
       `UPDATE groups SET active_campaign_slug = NULL
         WHERE id = ? AND active_campaign_slug = ?`,
-    ).run(groupId, slug);
+    ).run(groupId, campaign.slug);
   })();
 
   for (const n of notes) {
@@ -126,7 +159,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     action: 'campaign.destroy',
     actorId: session.userId,
     groupId,
-    target: slug,
+    target: campaign.slug,
     details: { folderPath, notesDeleted: notes.length, name: campaign.name },
   });
 
@@ -138,4 +171,12 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function slugify(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
