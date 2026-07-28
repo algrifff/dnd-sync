@@ -122,8 +122,13 @@ export function CharacterSheet({
   canWriteAll: boolean;
   /** Note's collab provider — used only for awareness broadcasts so
    *  peers see sheet edits before PATCH. All persistence still
-   *  flows through /api/notes/sheet. */
-  provider: HocuspocusProvider;
+   *  flows through /api/notes/sheet. Null during the ~1.2s reconnect
+   *  gap after a server-initiated reset (see
+   *  provider-cache.ts#RESET_REACQUIRE_DELAY_MS) — NoteWorkspace keeps
+   *  this component mounted through that gap (rather than tearing it
+   *  down and reverting to the page-load sheet snapshot), so every
+   *  awareness touch below must tolerate a null provider. */
+  provider: HocuspocusProvider | null;
 }): React.JSX.Element {
   const [sheet, setSheet] = useState<SheetValues>(initialSheet);
   const [pending, setPending] = useState<Record<string, true>>({});
@@ -222,7 +227,9 @@ export function CharacterSheet({
       pendingPatchRef.current[fieldId] = value;
       setPending((p) => ({ ...p, [fieldId]: true }));
       // Broadcast over awareness so peers' sheets update instantly.
-      const aw = provider.awareness;
+      // `provider` is null during the reconnect gap — skip the
+      // broadcast rather than throwing; the PATCH below still runs.
+      const aw = provider?.awareness;
       if (aw) {
         const seq = Date.now();
         aw.setLocalStateField('sheetEdit', {
@@ -243,7 +250,7 @@ export function CharacterSheet({
   // local state. We ignore our own client's awareness entry so the
   // local commit path doesn't bounce back through the observer.
   useEffect(() => {
-    const aw = provider.awareness;
+    const aw = provider?.awareness;
     if (!aw) return;
     const seen = new Map<number, number>();
     const onChange = (): void => {

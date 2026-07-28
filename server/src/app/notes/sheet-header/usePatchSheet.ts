@@ -89,6 +89,17 @@ export function usePatchSheet(args: {
           const fields = awarenessPendingRef.current;
           awarenessPendingRef.current = {};
           if (Object.keys(fields).length === 0) return;
+          // Using the `aw` captured when this timer was scheduled (not
+          // re-reading `provider` at fire time) is safe: the cleanup
+          // effect below clears `awarenessTimerRef` on every `provider`
+          // identity change (a server-initiated eviction —
+          // provider-cache.ts's `evict`, or NoteWorkspace swapping in a
+          // fresh provider on reconnect), so a timer can only ever fire
+          // against the same provider it was scheduled under. If that
+          // provider was destroyed without a swap (unmount), the
+          // unmount effect's own `clearTimeout` covers it. Broadcasting
+          // through a stale, destroyed Awareness would be harmless
+          // anyway (y-protocols just drops it), but it can't happen.
           aw.setLocalStateField('sheetEdit', {
             path: notePath,
             seq: Date.now(),
@@ -157,6 +168,117 @@ export function usePatchSheet(args: {
       if (Object.keys(pendingRef.current).length > 0) void flush();
     };
   }, [flush]);
+
+  // If `provider` changes identity while this component stays mounted
+  // (a server-initiated eviction swaps in a fresh provider — see
+  // provider-cache.ts's `evict` / NoteWorkspace's `onDocumentReset`
+  // handling), cancel any pending awareness timer instead of letting it
+  // fire later against the old, by-then-destroyed provider's awareness.
+  // The unmount effect above already covers the case where the
+  // component itself goes away; this covers the prop swap case.
+  //
+  // Deliberately does NOT clear `awarenessPendingRef.current` here.
+  // `NoteWorkspace` nulls `provider` for ~1200ms across a reset before
+  // swapping in the replacement; fields typed during that gap keep
+  // accumulating in the buffer (no timer is scheduled while `aw` is
+  // falsy, so nothing fires, but `patchSheet` still buffers them). If
+  // this cleanup wiped the buffer, that typing would be silently lost
+  // from peer mirroring instead of riding out on the next keystroke's
+  // timer once the new provider arrives. The server write path
+  // (`pendingRef` / `flush`) is unaffected either way — this buffer is
+  // display-only.
+  useEffect(() => {
+    return () => {
+      if (awarenessTimerRef.current) {
+        clearTimeout(awarenessTimerRef.current);
+        awarenessTimerRef.current = null;
+      }
+    };
+  }, [provider]);
+
+  // Server-originated sheet changes (AI tools writing frontmatter
+  // directly) arrive as a revision bump on the note doc's `sheetMeta`
+  // map — see collab/server.ts#signalSheetChanged. Awareness can't
+  // carry these: it's a client-originated, ephemeral broadcast with no
+  // server-side writer. On a bump, re-fetch authoritative frontmatter
+  // rather than trying to diff/guess what changed.
+  useEffect(() => {
+    if (!provider) return;
+    const doc = provider.document;
+    const meta = doc.getMap('sheetMeta');
+    let lastRev = 0;
+    let cancelled = false;
+    // Whether we've started reacting to `rev` changes yet — see
+    // `startObserving` below. Guards against double-`meta.observe` if
+    // `synced` fires while we're already observing (shouldn't happen,
+    // but keeps the effect idempotent).
+    let observing = false;
+
+    const onMeta = (): void => {
+      const rev = meta.get('rev');
+      if (typeof rev !== 'number' || rev <= lastRev) return;
+      lastRev = rev;
+      void (async () => {
+        try {
+          const res = await fetch(
+            `/api/notes/${notePath.split('/').map(encodeURIComponent).join('/')}`,
+            { headers: { 'Cache-Control': 'no-store' } },
+          );
+          if (!res.ok || cancelled) return;
+          const body = (await res.json()) as {
+            frontmatter?: { sheet?: Record<string, unknown> };
+          };
+          const next = body.frontmatter?.sheet;
+          if (next && typeof next === 'object' && !cancelled) {
+            // Server truth wins, but keep any field the user has typed
+            // since the last flush (pendingRef) so we don't stomp
+            // in-flight local edits that haven't reached the server yet.
+            setSheet((prev) => ({ ...prev, ...next, ...pendingRef.current }));
+          }
+        } catch {
+          /* transient — the next bump or a reload will reconcile */
+        }
+      })();
+    };
+
+    // Seed `lastRev` from whatever `rev` is on the doc, but only AFTER
+    // the provider has actually synced — not at mount, and not from a
+    // hardcoded 0. `rev` persists into `yjs_state` across reconnects/
+    // reloads, so on a note that has ever been AI-sheet-edited, the
+    // very first `meta.observe` firing on a cold mount is the initial
+    // sync itself replaying that persisted value into the (until then
+    // empty) local Y.Doc — not a genuine new bump. Seeding at mount
+    // (the previous fix) only worked for the warm/cache-hit case where
+    // `provider.synced` was already true; on a cold mount `meta` is
+    // still empty when this effect runs, `lastRev` fell back to 0, and
+    // the persisted `rev` arriving with the sync then looked like a
+    // bump — one spurious GET on every cold mount of any note that's
+    // ever been AI-sheet-edited.
+    //
+    // Waiting for `synced` before seeding *and* before attaching the
+    // observer closes that gap: nothing reacts to `rev` until the
+    // authoritative post-sync value is the baseline, so only bumps
+    // that happen after this point are ever treated as new.
+    const startObserving = (): void => {
+      if (observing) return;
+      observing = true;
+      const initialRev = meta.get('rev');
+      lastRev = typeof initialRev === 'number' ? initialRev : 0;
+      meta.observe(onMeta);
+    };
+
+    if (provider.synced) {
+      startObserving();
+    } else {
+      provider.on('synced', startObserving);
+    }
+
+    return () => {
+      cancelled = true;
+      provider.off('synced', startObserving);
+      if (observing) meta.unobserve(onMeta);
+    };
+  }, [provider, notePath]);
 
   return { sheet, patchSheet, saving, error };
 }

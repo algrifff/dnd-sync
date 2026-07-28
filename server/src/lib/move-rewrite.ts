@@ -4,17 +4,19 @@
 // at any old path (per the `note_links` index) and update the wikilink
 // node attrs in their content_json + content_md + the Y.Doc state.
 //
-// The yjs_state rewrite throws away CRDT history for that note. That's
-// acceptable here: a path rename is a structural edit and live editors
+// The yjs_state rewrite replaces the body's CRDT history for that note
+// (via updateYFragment's diff, not a raw doc swap) but preserves every
+// OTHER Y root — drawing-strokes-v3, excalidraw-* — by seeding from the
+// existing state first (see @/lib/yjs-rebuild). That's acceptable for
+// the body itself: a path rename is a structural edit and live editors
 // are kicked first via closeDocumentConnections so they reconnect with
 // fresh state. No unsaved keystrokes are at risk.
 
-import * as Y from 'yjs';
-import { prosemirrorJSONToYDoc } from 'y-prosemirror';
 import { getDb } from './db';
 import { getPmSchema } from './pm-schema';
 import { pmToMarkdown } from './pm-to-md';
 import { extractPlaintext, type PmNode } from './md-to-pm';
+import { rebuildYjsState } from './yjs-rebuild';
 
 export type Rename = { from: string; to: string };
 
@@ -95,13 +97,18 @@ export function rewriteWikilinksForLinkers(
     const newText = extractPlaintext(pm);
     const newMd = pmToMarkdown(pm);
 
-    // Round-trip the PM JSON through y-prosemirror to get a fresh
-    // yjs_state. The Y.Text('title') sidecar is preserved verbatim
-    // because hocuspocus reads it as a separate field — but we can
-    // restore the title from the existing row to keep parity.
-    const ydoc = prosemirrorJSONToYDoc(getPmSchema(), pm, 'default');
-    if (row.title) ydoc.getText('title').insert(0, row.title);
-    const state = Y.encodeStateAsUpdate(ydoc);
+    // Rebuild yjs_state, seeded from the existing state so every other
+    // Y root (drawing-strokes-v3, excalidraw-*) survives — see
+    // @/lib/yjs-rebuild. The Y.Text('title') sidecar is restored from
+    // the existing row to keep parity. `|| undefined`: an empty title
+    // must not wipe the Y.Text title — see the title contract
+    // documented in yjs-rebuild.ts.
+    const state = rebuildYjsState(
+      getPmSchema(),
+      row.yjs_state,
+      pm,
+      row.title || undefined,
+    );
 
     db.query(
       `UPDATE notes

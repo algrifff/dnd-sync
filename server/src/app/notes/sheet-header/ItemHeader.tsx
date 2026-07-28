@@ -74,7 +74,9 @@ export function ItemHeader({
   initialSheet: Record<string, unknown>;
   notePath: string;
   csrfToken: string;
-  provider: HocuspocusProvider;
+  /** Null during the reconnect gap after a server-initiated reset —
+   *  usePatchSheet tolerates this. See SheetHeader's provider doc. */
+  provider: HocuspocusProvider | null;
   canEdit: boolean;
   displayName: string;
 }): React.JSX.Element {
