@@ -107,20 +107,33 @@ export function RowMenu({
   }, [csrfToken, path, router]);
 
   // After deletion, if the user is viewing the deleted note (or a note
-  // inside the deleted folder), redirect them to the world home to avoid
-  // a 404; otherwise just refresh the tree in place.
-  const afterDelete = useCallback((): void => {
-    setShowDelete(false);
-    const activeIsAffected =
-      activePath != null &&
-      (activePath === path || activePath.startsWith(path + '/'));
-    if (activeIsAffected) {
-      const worldHome = '/notes/' + encodeURIComponent(path.split('/')[0] ?? '');
-      router.push(worldHome);
-    } else {
-      router.refresh();
-    }
-  }, [activePath, path, router]);
+  // inside the deleted folder), redirect them away to avoid a 404;
+  // otherwise just refresh the tree in place. `redirectTo` comes from
+  // the delete route — the nearest surviving ancestor folder's index
+  // page (see findNearestIndexPath in lib/notes.ts) — so we land back
+  // in the folder the user was working in rather than guessing a path
+  // that may not exist (the old code built `/notes/<first segment>`,
+  // which 404s for anything under `Campaigns/<slug>/…`). Falls back to
+  // the dashboard (`/`) when the route reports no surviving ancestor
+  // (folder/campaign delete with nothing left above it). Uses replace,
+  // not push, so Back doesn't return the user to the now-dead URL.
+  const afterDelete = useCallback(
+    (redirectTo?: string | null): void => {
+      setShowDelete(false);
+      const activeIsAffected =
+        activePath != null &&
+        (activePath === path || activePath.startsWith(path + '/'));
+      if (activeIsAffected) {
+        const dest = redirectTo
+          ? '/notes/' + redirectTo.split('/').map(encodeURIComponent).join('/')
+          : '/';
+        router.replace(dest);
+      } else {
+        router.refresh();
+      }
+    },
+    [activePath, path, router],
+  );
 
   const requestDelete = useCallback(() => {
     setOpen(false);
@@ -217,7 +230,7 @@ export function RowMenu({
               return body.error ?? `Delete failed (HTTP ${res.status})`;
             }
             broadcastTreeChange();
-            afterDelete();
+            afterDelete(typeof body.redirectTo === 'string' ? body.redirectTo : null);
           }}
         />
       )}
@@ -236,11 +249,12 @@ export function RowMenu({
           onClose={() => setShowMove(false)}
           onMoved={(newPath) => {
             setShowMove(false);
-            // If we moved the currently-open note, route there.
+            // If we moved the currently-open note, follow it — the old
+            // URL is dead now, so replace (not push) it out of history.
             if (kind === 'file' && typeof window !== 'undefined' && window.location.pathname.startsWith('/notes/')) {
               const here = decodeURIComponent(window.location.pathname.slice('/notes/'.length));
               if (here === path) {
-                router.push('/notes/' + newPath.split('/').map(encodeURIComponent).join('/'));
+                router.replace('/notes/' + newPath.split('/').map(encodeURIComponent).join('/'));
               }
             }
           }}

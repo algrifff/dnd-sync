@@ -571,16 +571,17 @@ export function FileTree({
           return;
         }
         setRenamingPath(null);
-        // If the rename targeted the currently-open note, route there.
+        // If the rename targeted the currently-open note, follow it —
+        // the old URL is dead now, so replace (not push) it in history.
         if (kind === 'file' && activePath === from) {
-          router.push('/notes/' + to.split('/').map(encodeURIComponent).join('/'));
+          router.replace('/notes/' + to.split('/').map(encodeURIComponent).join('/'));
         } else if (isCampaignRootRename && activePath?.startsWith(from + '/')) {
           // Active note lives under the renamed campaign; rewrite
           // its prefix and navigate so the page doesn't 404.
           const next =
             (typeof body.toFolder === 'string' ? body.toFolder : to) +
             activePath.slice(from.length);
-          router.push('/notes/' + next.split('/').map(encodeURIComponent).join('/'));
+          router.replace('/notes/' + next.split('/').map(encodeURIComponent).join('/'));
         }
         router.refresh();
         broadcastTreeChange();
@@ -644,7 +645,8 @@ export function FileTree({
           return;
         }
         if (src.kind === 'file' && activePath === src.path) {
-          router.push('/notes/' + to.split('/').map(encodeURIComponent).join('/'));
+          // Old URL is dead — replace (not push) so Back doesn't 404.
+          router.replace('/notes/' + to.split('/').map(encodeURIComponent).join('/'));
         }
         router.refresh();
         broadcastTreeChange();

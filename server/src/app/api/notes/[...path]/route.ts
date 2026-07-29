@@ -5,7 +5,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
-import { decodePath, loadNote, loadTags, visibilityFor } from '@/lib/notes';
+import { decodePath, findNearestIndexPath, loadNote, loadTags, visibilityFor } from '@/lib/notes';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
 import { deriveFolderIndex, parentFolderUnderCampaign } from '@/lib/campaign-index';
@@ -103,7 +103,19 @@ export async function DELETE(req: NextRequest, ctx: RouteCtx): Promise<Response>
     target: path,
   });
 
-  return json({ ok: true, path });
+  // Nearest surviving ancestor page — lets the client redirect a
+  // displaced viewer to a real, still-existing page (the containing
+  // folder's index) instead of guessing at a path or always bouncing
+  // to the dashboard. null when no ancestor has one (e.g. under
+  // Assets/Excalidraw) — the client falls back to the dashboard.
+  // Reuses the `parent` computed above (parentFolderUnderCampaign
+  // returns null outside Campaigns/<slug>/, so re-derive generically).
+  const parentFolder = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+  const redirectTo = parentFolder
+    ? findNearestIndexPath(session.currentGroupId, parentFolder)
+    : null;
+
+  return json({ ok: true, path, redirectTo });
 }
 
 function json(body: unknown, status = 200): Response {

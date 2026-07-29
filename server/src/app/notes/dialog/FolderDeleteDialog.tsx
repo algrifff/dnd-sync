@@ -29,8 +29,11 @@ export function FolderDeleteDialog({
   onClose: () => void;
   /** Called after the delete succeeds and the tree has been refreshed +
    *  broadcast. The caller (RowMenu) still decides whether to redirect —
-   *  it knows whether the active note lived inside the deleted folder. */
-  onDeleted: () => void;
+   *  it knows whether the active note lived inside the deleted folder.
+   *  `redirectTo` is the nearest surviving ancestor's index path from
+   *  the delete route's response (see findNearestIndexPath in
+   *  lib/notes.ts), or null when nothing survives above this folder. */
+  onDeleted: (redirectTo?: string | null) => void;
 }): React.JSX.Element {
   const router = useRouter();
   const titleId = useId();
@@ -102,7 +105,7 @@ export function FolderDeleteDialog({
         }
         router.refresh();
         broadcastTreeChange();
-        onDeleted();
+        onDeleted(typeof body.redirectTo === 'string' ? body.redirectTo : null);
       }}
     />
   );

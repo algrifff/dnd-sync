@@ -163,6 +163,38 @@ export function loadNote(groupId: string, path: string): NoteRow | null {
   );
 }
 
+/** Nearest ancestor folder — starting at `folderPath` itself and
+ *  walking up toward the root — that has an `index.md` note. Used to
+ *  pick a sensible redirect target after a note or folder delete:
+ *  landing back on the containing folder's page (which the user was
+ *  presumably already working in) reads better than always bouncing
+ *  to the dashboard, and it's a real page rather than a guess (unlike
+ *  building `/notes/<first path segment>`, which 404s for anything
+ *  under `Campaigns/<slug>/…` — there's no note at bare `Campaigns`).
+ *  Returns null when no ancestor has an index — true for content
+ *  directly under `Assets` or `Excalidraw`, which never get one (see
+ *  `index-notes.ts`) — so the caller falls back to the dashboard. */
+export function findNearestIndexPath(
+  groupId: string,
+  folderPath: string,
+): string | null {
+  const db = getDb();
+  let folder = folderPath;
+  while (folder) {
+    const indexPath = `${folder}/index.md`;
+    const row = db
+      .query<{ path: string }, [string, string]>(
+        'SELECT path FROM notes WHERE group_id = ? AND path = ?',
+      )
+      .get(groupId, indexPath);
+    if (row) return row.path;
+    const slash = folder.lastIndexOf('/');
+    if (slash < 0) break;
+    folder = folder.slice(0, slash);
+  }
+  return null;
+}
+
 export function loadUser(userId: string): NoteAuthor | null {
   return (
     getDb()

@@ -133,9 +133,10 @@ export function NoteMenu({
       }
       setPromoteMode(null);
       if (mode === 'move') {
-        // The current note is no longer in the GM namespace —
-        // navigate to wherever it landed (player view).
-        router.push('/notes/' + body.path.split('/').map(encodeURIComponent).join('/'));
+        // The current note is no longer in the GM namespace — the URL
+        // we're on is dead, so replace (not push) it with wherever the
+        // note landed (player view) so Back doesn't return to a 404.
+        router.replace('/notes/' + body.path.split('/').map(encodeURIComponent).join('/'));
       }
       router.refresh();
       broadcastTreeChange();
@@ -161,7 +162,16 @@ export function NoteMenu({
       return body.error ?? `Delete failed (HTTP ${res.status})`;
     }
     setShowDelete(false);
-    router.push('/');
+    // NoteMenu only ever deletes the note currently being viewed, so
+    // this URL is always dead afterwards — replace (not push) it.
+    // `redirectTo` (the nearest surviving ancestor folder's index —
+    // see findNearestIndexPath in lib/notes.ts) beats always bouncing
+    // to the dashboard when the containing folder still exists.
+    const dest =
+      typeof body.redirectTo === 'string'
+        ? '/notes/' + body.redirectTo.split('/').map(encodeURIComponent).join('/')
+        : '/';
+    router.replace(dest);
     router.refresh();
     broadcastTreeChange();
   }, [csrfToken, path, router]);

@@ -10,6 +10,7 @@ import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
 import { deriveFolderIndexesFor } from '@/lib/campaign-index';
+import { findNearestIndexPath } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -85,7 +86,14 @@ export async function POST(req: NextRequest): Promise<Response> {
     target: path,
   });
 
-  return json({ ok: true, deleted: notes.length });
+  // Same "redirect to the nearest surviving ancestor page" contract as
+  // the single-note delete route — see the comment there. The deleted
+  // folder's parent, not the folder itself (which along with its own
+  // index.md is now gone).
+  const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+  const redirectTo = parent ? findNearestIndexPath(groupId, parent) : null;
+
+  return json({ ok: true, deleted: notes.length, redirectTo });
 }
 
 function normalizePath(p: string): string {
