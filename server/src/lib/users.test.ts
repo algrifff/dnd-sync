@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
 import { setupTestDb, teardownTestDb } from './test-utils';
@@ -6,6 +6,7 @@ import {
   ACCENT_PALETTE,
   createUser,
   DEFAULT_GROUP_ID,
+  getUserStorageStats,
   listUsersInGroup,
   revokeUser,
 } from './users';
@@ -204,5 +205,123 @@ describe('revokeUser', () => {
     });
     revokeUser(target.id, actor.id, DEFAULT_GROUP_ID);
     expect(revokeUser(target.id, actor.id, DEFAULT_GROUP_ID)).toBe(false);
+  });
+});
+
+// ── getUserStorageStats ──────────────────────────────────────────────────
+//
+// Rewritten from per-row correlated subqueries to two GROUP BY
+// aggregates joined in application code (see users.ts + migration v47).
+// These tests discriminate against the most likely regression from that
+// rewrite: bytes from one user's notes/assets leaking into another
+// user's total via a bad join/group key.
+
+describe('getUserStorageStats', () => {
+  beforeEach(() => {
+    const db = getDb();
+    db.exec('DELETE FROM assets');
+    db.exec('DELETE FROM notes');
+  });
+
+  // notes.created_by / assets.uploaded_by FK-reference users(id). Clean
+  // these up here (not just in the next beforeEach) so the outer
+  // file-level `DELETE FROM users` doesn't fail with FOREIGN KEY
+  // constraint failed against a row this describe block just inserted.
+  afterEach(() => {
+    const db = getDb();
+    db.exec('DELETE FROM assets');
+    db.exec('DELETE FROM notes');
+  });
+
+  function seedNote(groupId: string, path: string, byteSize: number, createdBy: string): void {
+    getDb()
+      .query(
+        `INSERT INTO notes (id, group_id, path, content_json, content_text, byte_size, updated_at, created_by)
+         VALUES (?, ?, ?, '{}', '', ?, ?, ?)`,
+      )
+      .run(randomUUID(), groupId, path, byteSize, Date.now(), createdBy);
+  }
+
+  function seedAsset(groupId: string, size: number, uploadedBy: string): void {
+    getDb()
+      .query(
+        `INSERT INTO assets (id, group_id, hash, mime, size, original_name, uploaded_by, uploaded_at)
+         VALUES (?, ?, ?, 'image/png', ?, 'x.png', ?, ?)`,
+      )
+      .run(randomUUID(), groupId, randomUUID(), size, uploadedBy, Date.now());
+  }
+
+  it('attributes notes and assets bytes to the correct user, not summed across users', async () => {
+    const alice = await createUser({
+      username: 'stats-alice',
+      displayName: 'Alice',
+      password: 'passwordok',
+      role: 'editor',
+    });
+    const bob = await createUser({
+      username: 'stats-bob',
+      displayName: 'Bob',
+      password: 'passwordok',
+      role: 'editor',
+    });
+
+    seedNote(DEFAULT_GROUP_ID, 'vault/alice-1.md', 100, alice.id);
+    seedNote(DEFAULT_GROUP_ID, 'vault/alice-2.md', 250, alice.id);
+    seedAsset(DEFAULT_GROUP_ID, 1000, alice.id);
+
+    seedNote(DEFAULT_GROUP_ID, 'vault/bob-1.md', 40, bob.id);
+    seedAsset(DEFAULT_GROUP_ID, 500, bob.id);
+    seedAsset(DEFAULT_GROUP_ID, 700, bob.id);
+
+    const stats = getUserStorageStats();
+    const aliceStats = stats.find((s) => s.userId === alice.id);
+    const bobStats = stats.find((s) => s.userId === bob.id);
+
+    expect(aliceStats).toBeDefined();
+    expect(aliceStats!.notesBytes).toBe(350);
+    expect(aliceStats!.assetsBytes).toBe(1000);
+    expect(aliceStats!.totalBytes).toBe(1350);
+
+    expect(bobStats).toBeDefined();
+    expect(bobStats!.notesBytes).toBe(40);
+    expect(bobStats!.assetsBytes).toBe(1200);
+    expect(bobStats!.totalBytes).toBe(1240);
+  });
+
+  it('returns zero notesBytes/assetsBytes for a user with none', async () => {
+    const carol = await createUser({
+      username: 'stats-carol',
+      displayName: 'Carol',
+      password: 'passwordok',
+      role: 'viewer',
+    });
+
+    const stats = getUserStorageStats();
+    const carolStats = stats.find((s) => s.userId === carol.id);
+
+    expect(carolStats).toBeDefined();
+    expect(carolStats!.notesBytes).toBe(0);
+    expect(carolStats!.assetsBytes).toBe(0);
+    expect(carolStats!.totalBytes).toBe(0);
+  });
+
+  it('includes a row for every user, even ones with zero content', async () => {
+    const dave = await createUser({
+      username: 'stats-dave',
+      displayName: 'Dave',
+      password: 'passwordok',
+      role: 'editor',
+    });
+    const erin = await createUser({
+      username: 'stats-erin',
+      displayName: 'Erin',
+      password: 'passwordok',
+      role: 'editor',
+    });
+    seedNote(DEFAULT_GROUP_ID, 'vault/dave-1.md', 10, dave.id);
+
+    const ids = getUserStorageStats().map((s) => s.userId);
+    expect(ids).toContain(dave.id);
+    expect(ids).toContain(erin.id);
   });
 });

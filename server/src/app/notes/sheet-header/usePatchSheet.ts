@@ -9,6 +9,25 @@ import type { HocuspocusProvider } from '@hocuspocus/provider';
 
 export type PatchSheetFn = (partial: Record<string, unknown>) => void;
 
+/** Fetch the note's authoritative `frontmatter.sheet` from the server.
+ *  Returns null on any failure (non-2xx, network error, missing/odd
+ *  shape) so callers can treat "couldn't reconcile" uniformly without
+ *  a try/catch of their own. Shared by two reconcile paths in this
+ *  hook: the `sheetMeta` rev-bump observer (server-originated writes,
+ *  e.g. AI tools) and `flush`'s rejected-PATCH handler below — both
+ *  need the same "go get server truth" fetch, just with different
+ *  triggers and different call-time state to preserve on top of it. */
+async function fetchNoteSheet(notePath: string): Promise<Record<string, unknown> | null> {
+  const res = await fetch(
+    `/api/notes/${notePath.split('/').map(encodeURIComponent).join('/')}`,
+    { headers: { 'Cache-Control': 'no-store' } },
+  );
+  if (!res.ok) return null;
+  const body = (await res.json()) as { frontmatter?: { sheet?: Record<string, unknown> } };
+  const next = body.frontmatter?.sheet;
+  return next && typeof next === 'object' ? next : null;
+}
+
 export function usePatchSheet(args: {
   notePath: string;
   csrfToken: string;
@@ -59,6 +78,31 @@ export function usePatchSheet(args: {
         };
         if (!res.ok || !body.ok) {
           setError(body.detail ?? body.error ?? `save failed (${res.status})`);
+          // The server rejected this batch (validation error, 4xx), but
+          // `patchSheet` already applied it optimistically to local
+          // state and mirrored it to peers via awareness — left alone,
+          // this client and every peer keep displaying a value the
+          // database doesn't have, indefinitely, with only the `error`
+          // string as a clue. Reconcile against server truth instead of
+          // trying to invert the optimistic update: the shallow-merge
+          // PATCH contract doesn't preserve enough of the pre-patch
+          // state to undo a batch correctly once more than one field or
+          // more than one in-flight patch is involved.
+          try {
+            const next = await fetchNoteSheet(notePath);
+            // Merge order mirrors the sheetMeta rev-bump reconcile
+            // below: server truth wins, but pendingRef is merged LAST
+            // so any field the user has typed since this failed flush
+            // started (queued for the *next* flush) isn't stomped by
+            // the just-fetched server value.
+            if (next) setSheet((prev) => ({ ...prev, ...next, ...pendingRef.current }));
+          } catch {
+            // Re-fetch itself failed (network/transient). Deliberately
+            // not retried here — retrying from inside a failure handler
+            // is how you get an unbounded loop if the server or network
+            // stays down. The next successful flush, or a peer/AI
+            // sheetMeta bump, or a reload will reconcile instead.
+          }
           return;
         }
         setError(null);
@@ -220,16 +264,8 @@ export function usePatchSheet(args: {
       lastRev = rev;
       void (async () => {
         try {
-          const res = await fetch(
-            `/api/notes/${notePath.split('/').map(encodeURIComponent).join('/')}`,
-            { headers: { 'Cache-Control': 'no-store' } },
-          );
-          if (!res.ok || cancelled) return;
-          const body = (await res.json()) as {
-            frontmatter?: { sheet?: Record<string, unknown> };
-          };
-          const next = body.frontmatter?.sheet;
-          if (next && typeof next === 'object' && !cancelled) {
+          const next = await fetchNoteSheet(notePath);
+          if (next && !cancelled) {
             // Server truth wins, but keep any field the user has typed
             // since the last flush (pendingRef) so we don't stomp
             // in-flight local edits that haven't reached the server yet.

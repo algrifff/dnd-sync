@@ -65,6 +65,12 @@ export function PresenceClient({
   const [peers, setPeers] = useState<PresencePeer[]>([]);
   const providerRef = useRef(provider);
   providerRef.current = provider;
+  // Pending debounce timer for peer-driven router.refresh() calls — see
+  // the tree-sync effect below. Held in a ref (not effect-local state)
+  // so the effect's cleanup can always reach the latest timer and clear
+  // it on unmount, even though the effect itself only re-runs when
+  // `router` changes identity.
+  const remoteRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Seed the local awareness state once the provider is live. `user`
   // stays static; `viewing` is updated in a separate effect so route
@@ -178,7 +184,20 @@ export function PresenceClient({
           shouldRefresh = true;
         }
       }
-      if (shouldRefresh) {
+      if (!shouldRefresh) return;
+      // Debounce: with several peers actively creating/moving notes,
+      // each one's treeVersion bump lands as its own awareness 'change'
+      // event, which could otherwise fire a full RSC refresh —
+      // reconciling the entire sidebar tree — multiple times a second.
+      // Collapse a burst into a single trailing refresh ~500ms after
+      // the last bump seen, rather than either refreshing on every bump
+      // (the bug) or a leading-edge throttle that would swallow the
+      // tail bump of a burst and leave the sidebar stale. Re-arming the
+      // timer on every bump (instead of a fixed-window throttle) is
+      // what guarantees the trailing bump always gets its refresh.
+      if (remoteRefreshTimerRef.current) clearTimeout(remoteRefreshTimerRef.current);
+      remoteRefreshTimerRef.current = setTimeout(() => {
+        remoteRefreshTimerRef.current = null;
         router.refresh();
         // Fan out to local listeners that care about tree changes
         // (e.g. NoteTabs' stale-tab pruner) — separate event so
@@ -186,13 +205,20 @@ export function PresenceClient({
         // up and re-broadcast into awareness, which would loop back
         // to the originator.
         document.dispatchEvent(new CustomEvent(TREE_CHANGE_REMOTE_EVENT));
-      }
+      }, 500);
     };
     aw.on('change', onRemoteChange);
 
     return () => {
       document.removeEventListener(TREE_CHANGE_EVENT, onLocalChange);
       aw.off('change', onRemoteChange);
+      // Clear any pending trailing refresh so it can't fire after this
+      // effect (or the component) tears down — e.g. a peer bump lands
+      // right as the user navigates away or the provider is swapped.
+      if (remoteRefreshTimerRef.current) {
+        clearTimeout(remoteRefreshTimerRef.current);
+        remoteRefreshTimerRef.current = null;
+      }
     };
   }, [router]);
 

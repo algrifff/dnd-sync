@@ -23,7 +23,12 @@ import {
 import { Loader2, Send, Sparkles, X, Paperclip, FolderOpen, Trash2 } from 'lucide-react';
 import { ChatMarkdown } from './ChatMarkdown';
 import { noteEditorHref, useRefreshTreeOnAiNoteMutations } from './chat-tree-refresh';
-import { chatStorageKey, cleanupLegacyChatStorage } from './chat-storage';
+import {
+  chatStorageKey,
+  cleanupLegacyChatStorage,
+  persistChatHistory,
+  trimChatMessages,
+} from './chat-storage';
 import posthog from '@/lib/posthog-web';
 
 // ── File attachment types ───────────────────────────────────────────────
@@ -149,7 +154,10 @@ export function ChatPane({
       if (raw) {
         const parsed = JSON.parse(raw) as UIMessage[];
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setMessages(parsed);
+          // A session saved before the retention cap existed (or from a
+          // pathological client) could already be over budget — trim on
+          // the way in too, not just on the way out.
+          setMessages(trimChatMessages(parsed));
         } else {
           setMessages([]);
         }
@@ -163,13 +171,25 @@ export function ChatPane({
     }
   }, [setMessages, storageKey]);
 
+  // Cap what's RETAINED, not just what's persisted: `messages` is the same
+  // array useChat/DefaultChatTransport replays in full to /api/chat on
+  // every turn, so an unbounded array here would eventually build a
+  // request the server's checkChatMessageBudget() rejects with a 400
+  // (see lib/ai/input-limits.ts) — mid-conversation, with no recovery
+  // short of "clear chat". Trimming here keeps the live conversation
+  // itself under the same budget as what gets saved.
+  useEffect(() => {
+    if (!loaded || messages.length === 0) return;
+    const trimmed = trimChatMessages(messages);
+    if (trimmed !== messages) setMessages(trimmed);
+  }, [loaded, messages, setMessages]);
+
   useEffect(() => {
     if (!loaded) return;
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(messages));
-    } catch {
-      // Ignore local storage failures.
-    }
+    // persistChatHistory swallows quota errors internally (falling back
+    // to progressively shorter suffixes) so a full localStorage never
+    // throws and breaks the panel.
+    persistChatHistory(storageKey, messages);
   }, [loaded, messages, storageKey]);
 
   useEffect(() => {
