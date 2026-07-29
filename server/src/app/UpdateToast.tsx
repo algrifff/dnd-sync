@@ -49,6 +49,7 @@ export function UpdateToast(): React.ReactElement | null {
   useEffect(() => {
     let cancelled = false;
     let baseline: Health | null = null;
+    let id: ReturnType<typeof setInterval> | null = null;
 
     async function tick(): Promise<void> {
       const current = await fetchHealth();
@@ -62,10 +63,37 @@ export function UpdateToast(): React.ReactElement | null {
       }
     }
 
+    function startPolling(): void {
+      if (id != null) return;
+      id = setInterval(() => {
+        void tick();
+      }, POLL_INTERVAL_MS);
+    }
+
+    function stopPolling(): void {
+      if (id != null) {
+        clearInterval(id);
+        id = null;
+      }
+    }
+
     void tick();
-    const id = setInterval(() => {
-      void tick();
-    }, POLL_INTERVAL_MS);
+    // Poll every 60s while the tab is visible; a background tab has no one
+    // to show the toast to, so there's nothing to gain from checking on
+    // schedule — pause entirely and catch up the moment it's looked at
+    // again (visibilitychange fires on tab-switch; `focus` alone misses
+    // switching tabs within the same browser window, so both are kept).
+    if (document.visibilityState === 'visible') startPolling();
+
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === 'visible') {
+        void tick();
+        startPolling();
+      } else {
+        stopPolling();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     const onFocus = (): void => {
       void tick();
@@ -74,7 +102,8 @@ export function UpdateToast(): React.ReactElement | null {
 
     return () => {
       cancelled = true;
-      clearInterval(id);
+      stopPolling();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('focus', onFocus);
     };
   }, []);

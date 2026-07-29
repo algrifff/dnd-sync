@@ -8,6 +8,7 @@
 
 import {
   createContext,
+  memo,
   useCallback,
   useContext,
   useEffect,
@@ -728,6 +729,42 @@ export function FileTree({
     [csrfToken, router],
   );
 
+  // Stable, item-independent handlers for TreeRow (memoized below).
+  // These used to be created inline inside the `.map()` render loop,
+  // closing over the specific `item` of each row — a fresh function
+  // per row on every FileTree render, which defeats React.memo outright
+  // (a new prop reference always compares unequal). None of the logic
+  // here actually needs a particular item's identity: the bit that
+  // varies by row (a path, a kind) is passed in as an argument at call
+  // time by TreeRow itself, using props TreeRow already has. That keeps
+  // these references stable across renders where nothing relevant
+  // changed, so the memo comparison below can actually skip rows.
+  const handleDragEndRow = useCallback(() => {
+    setDragging(null);
+    setDragOver(null);
+    setDragOverGap(null);
+  }, []);
+
+  const handleDropDir = useCallback(
+    (dirPath: string) => {
+      if (!dragging) return;
+      void moveEntry(dragging, dirPath);
+      setDragging(null);
+      setDragOver(null);
+    },
+    [dragging, moveEntry],
+  );
+
+  const handleStartRename = useCallback((path: string) => {
+    setError(null);
+    setRenamingPath(path);
+  }, []);
+
+  const handleCancelRename = useCallback(() => {
+    setRenamingPath(null);
+    setError(null);
+  }, []);
+
   // Top-level vault sections (Campaigns, World Lore, …) are always
   // expanded — they act as section headings, not collapsible folders.
   // Everything deeper stays toggleable (campaign subfolders are seeded
@@ -899,33 +936,16 @@ export function FileTree({
             dragging={dragging}
             isDropTarget={item.kind === 'dir' && dragOver === item.path}
             isMoving={movingPath === item.path}
-            onDragStartRow={(src) => setDragging(src)}
-            onDragEndRow={() => {
-              setDragging(null);
-              setDragOver(null);
-              setDragOverGap(null);
-            }}
-            onDragOverDir={(dirPath) => setDragOver(dirPath)}
-            onDropDir={(dirPath) => {
-              if (!dragging) return;
-              void moveEntry(dragging, dirPath);
-              setDragging(null);
-              setDragOver(null);
-            }}
+            onDragStartRow={setDragging}
+            onDragEndRow={handleDragEndRow}
+            onDragOverDir={setDragOver}
+            onDropDir={handleDropDir}
             onToggle={toggle}
             onStartCreate={startCreate}
-            onUpload={(files, folder) => void uploadAsset(files, folder)}
-            onStartRename={() => {
-              setError(null);
-              setRenamingPath(item.path);
-            }}
-            onCancelRename={() => {
-              setRenamingPath(null);
-              setError(null);
-            }}
-            onSubmitRename={(name) =>
-              submitRename(item.kind === 'dir' ? 'folder' : 'file', item.path, name)
-            }
+            onUpload={uploadAsset}
+            onStartRename={handleStartRename}
+            onCancelRename={handleCancelRename}
+            onSubmitRename={submitRename}
           >
             {item.kind === 'dir' && creatingIn?.parent === item.path ? (
               <NewEntryRow
@@ -1071,7 +1091,24 @@ function prettyName(fileName: string): string {
   return fileName.replace(/\.(md|canvas)$/i, '');
 }
 
-function TreeRow({
+// Memoized: FileTree routinely renders 50+ visible rows, and its parent
+// re-renders on every awareness-driven tree refresh, drag-hover move,
+// and folder toggle. Without memo, every one of those reconciles the
+// entire visible list. All callback props below are stabilized by the
+// caller (FileTree) — see the handler definitions there — so the memo
+// comparison actually has a chance to skip a row instead of always
+// missing on a fresh function identity.
+//
+// Note: `item` itself still gets a new object identity for every
+// visible row whenever `open` or `tree.root` change (flatten() rebuilds
+// the whole list), so a folder toggle or a genuine tree mutation still
+// re-renders every visible row — that's real content change, not
+// something a memo can or should suppress. What this buys is skipping
+// re-renders for renders where the tree/open state didn't change at
+// all: drag-hover scanning across the tree, awareness-driven RSC
+// refreshes that land with no actual tree diff, unrelated dialog/local
+// state toggles, etc.
+const TreeRow = memo(function TreeRow({
   item,
   activePath,
   canCreate,
@@ -1121,9 +1158,14 @@ function TreeRow({
   onToggle: (path: string) => void;
   onStartCreate: (folder: string, kind: CreateKind) => void;
   onUpload: (files: FileList, folder: string) => void;
-  onStartRename: () => void;
+  /** Takes the path explicitly rather than being pre-bound per-row —
+   *  see the comment on TreeRow's memo wrapper above. */
+  onStartRename: (path: string) => void;
   onCancelRename: () => void;
-  onSubmitRename: (name: string) => void;
+  /** Takes (kind, path, name) explicitly for the same reason as
+   *  onStartRename — this lets FileTree pass its `submitRename`
+   *  useCallback straight through unwrapped. */
+  onSubmitRename: (kind: 'file' | 'folder', path: string, name: string) => void;
   children?: React.ReactNode;
 }): React.JSX.Element {
   const kindMap = useContext(KindMapContext);
@@ -1186,7 +1228,7 @@ function TreeRow({
             error={renameError}
             initialValue={item.name}
             onCancel={onCancelRename}
-            onSubmit={onSubmitRename}
+            onSubmit={(name) => onSubmitRename('folder', item.path, name)}
           />
           {children}
         </li>
@@ -1344,7 +1386,7 @@ function TreeRow({
                     name={item.name}
                     csrfToken={csrfToken}
                     activePath={activePath}
-                    onStartRename={onStartRename}
+                    onStartRename={() => onStartRename(item.path)}
                   />
                 ) : (
                   <span
@@ -1366,7 +1408,7 @@ function TreeRow({
                   kind="folder"
                   path={item.path}
                   csrfToken={csrfToken}
-                  onStartRename={onStartRename}
+                  onStartRename={() => onStartRename(item.path)}
                   activePath={activePath}
                 />
               )}
@@ -1387,7 +1429,7 @@ function TreeRow({
           error={renameError}
           initialValue={item.title || item.name}
           onCancel={onCancelRename}
-          onSubmit={onSubmitRename}
+          onSubmit={(name) => onSubmitRename('file', item.path, name)}
         />
       </li>
     );
@@ -1431,7 +1473,7 @@ function TreeRow({
               kind="file"
               path={item.path}
               csrfToken={csrfToken}
-              onStartRename={onStartRename}
+              onStartRename={() => onStartRename(item.path)}
               isWorldOwner={isWorldOwner}
               groupId={groupId}
               activePath={activePath}
@@ -1442,7 +1484,7 @@ function TreeRow({
       </div>
     </li>
   );
-}
+});
 
 function NewEntryDropdown({
   onPick,

@@ -25,6 +25,35 @@ import { EVENTS } from '@/lib/analytics/events';
 // misconfiguration rather than at the first request.
 const env = getEnv();
 
+// backfillIndexNotes()/backfillCampaignIndexes() are one-shot catch-up
+// scans for content that predates the folder-index feature — every
+// *current* creation path (folder create, note move, import) already
+// calls ensureIndexNote/deriveFolderIndex directly, so once a full pass
+// has succeeded across every group there is nothing left for a later
+// boot to find. Without this check every restart re-walks every group
+// -> every campaign folder -> every subfolder with several queries per
+// iteration before the listener binds, scaling with total campaign
+// count across all tenants. A single indexed SELECT against the
+// existing `config` table lets an already-backfilled DB skip both
+// scans entirely instead of moving the work off the critical path.
+const BOOT_BACKFILL_CONFIG_KEY = 'boot_backfill_v1';
+
+function hasCompletedBootBackfill(): boolean {
+  const row = getDb()
+    .query<{ value: string }, [string]>('SELECT value FROM config WHERE key = ?')
+    .get(BOOT_BACKFILL_CONFIG_KEY);
+  return row != null;
+}
+
+function markBootBackfillCompleted(): void {
+  getDb()
+    .query(
+      `INSERT INTO config (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    )
+    .run(BOOT_BACKFILL_CONFIG_KEY, String(Date.now()), Date.now());
+}
+
 const port = env.port;
 const hostname = process.env.HOSTNAME ?? '0.0.0.0';
 const dev = env.nodeEnv !== 'production';
@@ -40,11 +69,18 @@ ensureConfig();
   printAdminBanner(seed);
   ensureDefaultTemplates();
   ensureDefaultFolders(DEFAULT_GROUP_ID);
-  backfillIndexNotes();
-  // Seed / refresh the auto-managed callout in every campaign + every
-  // subfolder under every campaign so existing worlds catch up
-  // without waiting for the next create / move / delete event.
-  await backfillCampaignIndexes();
+  if (hasCompletedBootBackfill()) {
+    console.log(
+      '[compendium-server] boot backfill already completed; skipping folder-index scan',
+    );
+  } else {
+    backfillIndexNotes();
+    // Seed / refresh the auto-managed callout in every campaign + every
+    // subfolder under every campaign so existing worlds catch up
+    // without waiting for the next create / move / delete event.
+    await backfillCampaignIndexes();
+    markBootBackfillCompleted();
+  }
   const removed = cleanupExpiredSessions();
   if (removed > 0) console.log(`[compendium-server] pruned ${removed} expired session(s)`);
   const removedAudit = pruneExpiredAuditLog();

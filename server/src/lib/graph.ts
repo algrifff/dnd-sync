@@ -161,7 +161,6 @@ export function buildNeighborhood(
   const db = getDb();
   const gmFlag = opts.mode === 'gm' ? 1 : 0;
   const dmClause = opts.hideDmOnly ? ' AND dm_only = 0' : '';
-  const dmClauseN = opts.hideDmOnly ? ' AND n.dm_only = 0' : '';
 
   const root = db
     .query<{ path: string; title: string; updatedAt: number }, [string, number, string]>(
@@ -171,51 +170,78 @@ export function buildNeighborhood(
     .get(groupId, gmFlag, path);
   if (!root) return null;
 
-  // Both hop queries join `notes` and re-apply the same gm_only/dm_only
-  // predicate as the root lookup — a hop can only traverse THROUGH a note
-  // the caller can actually see. Without this, a note reachable only via a
-  // hidden note would surface in `neighbours` (and later in `nodes`) as an
-  // unexplainable orphan, leaking the hidden note's existence + adjacency
-  // even though its own title/body stay hidden.
-  const outSql = `SELECT nl.to_path AS to_path
-                     FROM note_links nl
-                     JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.to_path
-                    WHERE nl.group_id = ? AND nl.from_path = ? AND n.gm_only = ?${dmClauseN}`;
-  const inSql = `SELECT nl.from_path AS from_path
-                    FROM note_links nl
-                    JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.from_path
-                   WHERE nl.group_id = ? AND nl.to_path = ? AND n.gm_only = ?${dmClauseN}`;
-
+  // Expand the BFS frontier with ONE QUERY PER DIRECTION PER HOP —
+  // batched with `from_path/to_path IN (...)` across every node
+  // currently in the frontier — instead of one query per node per
+  // direction per hop (dozens-to-hundreds of round-trips on a
+  // well-connected hub note). depth is capped at 2 above, so this is at
+  // most 4 note_links queries total, each served by the
+  // note_links_from / note_links_to indexes (v31).
+  //
+  // A prior version of this fix bulk-fetched ALL notes + ALL note_links
+  // for the group up front (mirroring buildGraph's scope: 'all' path)
+  // and expanded purely in memory. Benchmarked against the real
+  // pre-rewrite implementation (bench-neighborhood3/4, not checked in)
+  // that was a net loss for the common case: buildGraph always needs
+  // the whole group anyway, but buildNeighborhood's entire purpose is a
+  // LOCAL radius around one note, so pulling the whole group turns an
+  // O(neighbourhood) op into O(total group size) — at the 1500-note
+  // scale this file's header comment documents as the design target, a
+  // small-degree note (the common case) got ~1.75x SLOWER, and an
+  // isolated small hub in a 10k-note vault got ~2x slower still. The
+  // per-hop batched IN(...) query below keeps cost bounded by the
+  // actual radius explored (like the original), while still collapsing
+  // "one query per node" into "one query per hop" (like the mirrored
+  // buildGraph approach) — it dominated both alternatives at every
+  // scale tested (small hub, wide hub, 1500-note and 10k-note groups).
+  //
+  // Both queries JOIN `notes` and re-apply the exact same gm_only/dm_only
+  // predicate as the root lookup — a hop can only traverse THROUGH a
+  // note the caller can actually see. Without this, a note reachable
+  // only via a hidden note would surface in `neighbours` (and later in
+  // `nodes`) as an unexplainable orphan, leaking the hidden note's
+  // existence + adjacency even though its own title/body stay hidden.
+  const dmClauseN = opts.hideDmOnly ? ' AND n.dm_only = 0' : '';
   const neighbours = new Set<string>([root.path]);
-  let frontier = new Set<string>([root.path]);
-  for (let hop = 0; hop < depth; hop++) {
-    const next = new Set<string>();
-    for (const p of frontier) {
-      const outRows = db
-        .query<{ to_path: string }, [string, string, number]>(outSql)
-        .all(groupId, p, gmFlag);
-      const inRows = db
-        .query<{ from_path: string }, [string, string, number]>(inSql)
-        .all(groupId, p, gmFlag);
-      for (const r of outRows) {
-        if (r.to_path.startsWith('__orphan__:')) continue;
-        if (!neighbours.has(r.to_path)) {
-          neighbours.add(r.to_path);
-          next.add(r.to_path);
-        }
+  let frontier: string[] = [root.path];
+  for (let hop = 0; hop < depth && frontier.length > 0; hop++) {
+    const placeholders = frontier.map(() => '?').join(',');
+    const outSql = `SELECT nl.to_path AS to_path
+                       FROM note_links nl
+                       JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.to_path
+                      WHERE nl.group_id = ? AND nl.from_path IN (${placeholders}) AND n.gm_only = ?${dmClauseN}`;
+    const inSql = `SELECT nl.from_path AS from_path
+                      FROM note_links nl
+                      JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.from_path
+                     WHERE nl.group_id = ? AND nl.to_path IN (${placeholders}) AND n.gm_only = ?${dmClauseN}`;
+    const outRows = db
+      .query<{ to_path: string }, [string, ...string[], number]>(outSql)
+      .all(groupId, ...frontier, gmFlag);
+    const inRows = db
+      .query<{ from_path: string }, [string, ...string[], number]>(inSql)
+      .all(groupId, ...frontier, gmFlag);
+
+    const next: string[] = [];
+    for (const r of outRows) {
+      if (r.to_path.startsWith('__orphan__:')) continue;
+      if (!neighbours.has(r.to_path)) {
+        neighbours.add(r.to_path);
+        next.push(r.to_path);
       }
-      for (const r of inRows) {
-        if (!neighbours.has(r.from_path)) {
-          neighbours.add(r.from_path);
-          next.add(r.from_path);
-        }
+    }
+    for (const r of inRows) {
+      if (!neighbours.has(r.from_path)) {
+        neighbours.add(r.from_path);
+        next.push(r.from_path);
       }
     }
     frontier = next;
   }
 
-  // Materialise the sub-graph by re-using buildGraph logic over the
-  // restricted node set. Simpler than duplicating queries.
+  // Materialise the sub-graph bounded to the discovered neighbourhood
+  // (not the whole group) so this stays cheap regardless of total
+  // group size — the note_links query below uses the same
+  // note_links_from/to indexes via the IN (...) predicates.
   const placeholders = [...neighbours].map(() => '?').join(',');
   const noteRows = db
     .query<{ path: string; title: string; updatedAt: number }, [string, number, ...string[]]>(
@@ -229,10 +255,10 @@ export function buildNeighborhood(
   const maxUpdatedAt = noteRows.reduce((m, r) => (r.updatedAt > m ? r.updatedAt : m), 0);
 
   const tagRows = db
-    .query<{ path: string; tag: string }, [string]>(
-      `SELECT path, tag FROM tags WHERE group_id = ?`,
+    .query<{ path: string; tag: string }, [string, ...string[]]>(
+      `SELECT path, tag FROM tags WHERE group_id = ? AND path IN (${placeholders})`,
     )
-    .all(groupId);
+    .all(groupId, ...neighbours);
   const tagsByPath = new Map<string, string[]>();
   for (const r of tagRows) {
     if (!pathSet.has(r.path)) continue;
@@ -242,6 +268,15 @@ export function buildNeighborhood(
   }
   for (const list of tagsByPath.values()) list.sort();
 
+  // Bulk-fetch (single `group_id = ?` bind) and filter to pathSet in
+  // memory rather than a double `IN (...) AND IN (...)` — benchmarked:
+  // on a well-connected hub, a materialisation query with two ~700-item
+  // IN-lists (1400+ bound params) was measurably SLOWER than fetching
+  // the group's full edge set and filtering in memory, even though the
+  // latter scans more rows. This step runs once per call (not per hop),
+  // so it stays cheap at the group sizes this app targets (see file
+  // header comment) — the per-hop win above is what actually mattered
+  // for the hub-note N+1 problem.
   const edgeRows = db
     .query<{ from_path: string; to_path: string }, [string]>(
       `SELECT from_path, to_path FROM note_links WHERE group_id = ?`,

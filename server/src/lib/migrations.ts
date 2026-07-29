@@ -852,6 +852,27 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX campaigns_sort ON campaigns(group_id, sort_order);
     `,
   },
+  {
+    version: 47,
+    description:
+      'perf: index notes.created_by + assets.uploaded_by for admin/users storage stats; drop redundant notes_group_path index',
+    sql: `
+      -- lib/users.ts#getUserStorageStats() joins/aggregates notes by
+      -- created_by and assets by uploaded_by for every user on the
+      -- admin/users page. Neither column had an index, so each lookup
+      -- was a full table scan; multiplies with user count.
+      CREATE INDEX IF NOT EXISTS notes_created_by ON notes(created_by);
+      CREATE INDEX IF NOT EXISTS assets_uploaded_by ON assets(uploaded_by);
+
+      -- notes already has UNIQUE (group_id, path) from v7, which SQLite
+      -- backs with an implicit index over the same two columns in the
+      -- same order. The explicit notes_group_path index added in the
+      -- same migration is a byte-for-byte duplicate covering no query
+      -- the unique index doesn't already serve — pure write
+      -- amplification on every notes INSERT/UPDATE/DELETE.
+      DROP INDEX IF EXISTS notes_group_path;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

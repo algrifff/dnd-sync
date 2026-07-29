@@ -126,26 +126,51 @@ export type UserStorageStats = {
 
 export function getUserStorageStats(): UserStorageStats[] {
   const db = getDb();
-  const rows = db
-    .query<
-      { user_id: string; notes_bytes: number; assets_bytes: number; avatar_bytes: number },
-      []
-    >(
-      `SELECT
-         u.id AS user_id,
-         COALESCE((SELECT SUM(n.byte_size) FROM notes n WHERE n.created_by = u.id), 0) AS notes_bytes,
-         COALESCE((SELECT SUM(a.size)      FROM assets a WHERE a.uploaded_by = u.id), 0) AS assets_bytes,
-         COALESCE(LENGTH(u.avatar_blob), 0) AS avatar_bytes
-       FROM users u`,
+
+  // Previously two correlated subqueries evaluated once per row of the
+  // outer `FROM users u` — O(users × (notes + assets)), each execution a
+  // full table scan (neither notes.created_by nor assets.uploaded_by was
+  // indexed; see migration v47). Rewritten as three independent
+  // GROUP BY aggregates (indexed on created_by/uploaded_by as of v47),
+  // joined in application code — each query is now a single indexed scan
+  // regardless of user count.
+  const userRows = db
+    .query<{ id: string; avatar_bytes: number }, []>(
+      `SELECT id, COALESCE(LENGTH(avatar_blob), 0) AS avatar_bytes FROM users`,
     )
     .all();
-  return rows.map((r) => ({
-    userId: r.user_id,
-    notesBytes: r.notes_bytes,
-    assetsBytes: r.assets_bytes,
-    avatarBytes: r.avatar_bytes,
-    totalBytes: r.notes_bytes + r.assets_bytes + r.avatar_bytes,
-  }));
+
+  const notesRows = db
+    .query<{ created_by: string; notes_bytes: number }, []>(
+      `SELECT created_by, SUM(byte_size) AS notes_bytes
+         FROM notes
+        WHERE created_by IS NOT NULL
+        GROUP BY created_by`,
+    )
+    .all();
+  const notesByUser = new Map(notesRows.map((r) => [r.created_by, r.notes_bytes]));
+
+  const assetsRows = db
+    .query<{ uploaded_by: string; assets_bytes: number }, []>(
+      `SELECT uploaded_by, SUM(size) AS assets_bytes
+         FROM assets
+        WHERE uploaded_by IS NOT NULL
+        GROUP BY uploaded_by`,
+    )
+    .all();
+  const assetsByUser = new Map(assetsRows.map((r) => [r.uploaded_by, r.assets_bytes]));
+
+  return userRows.map((u) => {
+    const notesBytes = notesByUser.get(u.id) ?? 0;
+    const assetsBytes = assetsByUser.get(u.id) ?? 0;
+    return {
+      userId: u.id,
+      notesBytes,
+      assetsBytes,
+      avatarBytes: u.avatar_bytes,
+      totalBytes: notesBytes + assetsBytes + u.avatar_bytes,
+    };
+  });
 }
 
 /** Delete a user and all worlds (groups) where they are the sole admin.

@@ -6,7 +6,10 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { listAllTags } from '@/lib/notes';
-import { GraphCanvas } from '../../../graph/GraphCanvas';
+// Lazy-loaded (ssr:false) — see GraphCanvasLoader.tsx for why this is a
+// separate Client Component file rather than a plain import, and for
+// the measured bundle-size before/after.
+import { GraphCanvas } from './GraphCanvasLoader';
 
 export const dynamic = 'force-dynamic';
 

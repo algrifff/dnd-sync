@@ -1,4 +1,13 @@
-// Legacy bearer-token admin dashboard. Polls /api/stats every 2s.
+// Legacy bearer-token admin dashboard. Polls /api/stats while the tab is
+// visible; pauses entirely when hidden (see the effect below for why).
+//
+// NOTE: as of this pass, no route imports this component — the app's
+// admin surface moved to the session-based /admin/* pages (see
+// src/app/admin/). This file is unreferenced dead code today (confirmed
+// via repo-wide grep), so the polling described below currently costs
+// nothing in production. Fixed anyway per the task brief, in case this
+// gets wired back up or kept as a fallback; flagged here so it isn't
+// mistaken for a live hot path.
 
 'use client';
 
@@ -15,7 +24,14 @@ type Stats = {
 };
 
 const TOKEN_KEY = 'compendium.adminToken';
-const POLL_MS = 2000;
+// Was 2000ms — polled on every open session regardless of tab visibility.
+// Nothing on this panel (uptime, note/asset counts, DB size, recent docs)
+// changes on a sub-5s cadence in practice; 5s keeps the dashboard feeling
+// live for an admin actively watching it while cutting request volume by
+// more than half. The bigger win is pausing entirely when the tab is
+// hidden (below) — that's what actually removes the "runs for the
+// lifetime of the page" waste.
+const POLL_MS = 5000;
 
 function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -76,9 +92,41 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!token) return;
+    let id: ReturnType<typeof setInterval> | null = null;
+
+    function startPolling(): void {
+      if (id != null) return;
+      id = setInterval(fetchStats, POLL_MS);
+    }
+
+    function stopPolling(): void {
+      if (id != null) {
+        clearInterval(id);
+        id = null;
+      }
+    }
+
     fetchStats();
-    const id = setInterval(fetchStats, POLL_MS);
-    return () => clearInterval(id);
+    // Pause polling while the tab is hidden — no one is watching the
+    // numbers change, so there's no reason to keep hitting /api/stats
+    // every POLL_MS. Refetch immediately on the hidden→visible
+    // transition so the panel doesn't show stale data on return.
+    if (document.visibilityState === 'visible') startPolling();
+
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === 'visible') {
+        fetchStats();
+        startPolling();
+      } else {
+        stopPolling();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [token, fetchStats]);
 
   if (!token) return <LoginForm onSubmit={(t) => { localStorage.setItem(TOKEN_KEY, t); setToken(t); }} />;
