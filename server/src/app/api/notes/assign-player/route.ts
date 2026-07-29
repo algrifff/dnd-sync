@@ -44,8 +44,11 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   // Load note
   const note = db
-    .query<{ id: string; frontmatter_json: string }, [string, string]>(
-      'SELECT id, frontmatter_json FROM notes WHERE group_id = ? AND path = ?',
+    .query<
+      { id: string; frontmatter_json: string; content_json: string; content_md: string },
+      [string, string]
+    >(
+      'SELECT id, frontmatter_json, content_json, content_md FROM notes WHERE group_id = ? AND path = ?',
     )
     .get(groupId, body.path);
   if (!note) {
@@ -112,12 +115,27 @@ export async function POST(req: NextRequest): Promise<Response> {
       ? sheet.name.trim()
       : body.path.slice(body.path.lastIndexOf('/') + 1).replace(/\.md$/i, '');
 
+  // Seed the master record's body from the note so the player sees
+  // the imported prose (backstory, appearances, etc.) on /me from
+  // the start. Without this, the master starts empty and the
+  // user_character "Notes" tab is blank until they edit there.
+  let bodyJson: Record<string, unknown> | null = null;
+  try {
+    const parsed = JSON.parse(note.content_json) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      bodyJson = parsed as Record<string, unknown>;
+    }
+  } catch {
+    /* tolerate corrupt JSON */
+  }
+  const bodyMd = note.content_md || null;
+
   if (existingBinding) {
     db.query(
       'UPDATE user_characters SET owner_user_id = ?, updated_at = ? WHERE id = ?',
     ).run(body.targetUserId, Date.now(), existingBinding.user_character_id);
   } else {
-    // Create a new user_character seeded from the note's sheet data
+    // Create a new user_character seeded from the note's sheet + body.
     let uc;
     try {
       uc = createUserCharacter(body.targetUserId, {
@@ -125,10 +143,17 @@ export async function POST(req: NextRequest): Promise<Response> {
         kind: 'character',
         sheet,
         portraitUrl: typeof fm.portrait === 'string' ? fm.portrait : null,
+        bodyJson,
+        bodyMd,
       });
     } catch {
       // Fall back to minimal data if sheet validation rejects the note's shape
-      uc = createUserCharacter(body.targetUserId, { name: charName, kind: 'character' });
+      uc = createUserCharacter(body.targetUserId, {
+        name: charName,
+        kind: 'character',
+        bodyJson,
+        bodyMd,
+      });
     }
 
     // Bind to the world note so two-way sync can work. campaign_slug is
