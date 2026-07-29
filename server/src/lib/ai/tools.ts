@@ -9,9 +9,6 @@
 
 import { tool } from 'ai';
 import { z } from 'zod';
-import { randomUUID } from 'node:crypto';
-import { prosemirrorJSONToYDoc } from 'y-prosemirror';
-import * as Y from 'yjs';
 import { getDb } from '@/lib/db';
 import { getPmSchema } from '@/lib/pm-schema';
 import { rebuildYjsState } from '@/lib/yjs-rebuild';
