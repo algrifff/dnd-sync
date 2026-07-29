@@ -18,7 +18,7 @@ const STORAGE_KEY = 'compendium.tabs.v1';
 
 type Tab = { path: string; title: string };
 
-export function NoteTabs(): React.JSX.Element {
+export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
   const router = useRouter();
   const pathname = usePathname() ?? '';
   const activePath = decodeNotePath(pathname);
@@ -94,8 +94,11 @@ export function NoteTabs(): React.JSX.Element {
   // and the cache can sweep it after its idle grace window.
   useEffect(() => {
     if (!mounted) return;
-    setPersistentPaths(tabs.map((t) => t.path));
-  }, [tabs, mounted]);
+    setPersistentPaths(
+      groupId,
+      tabs.map((t) => t.path),
+    );
+  }, [tabs, mounted, groupId]);
 
   // Prune tabs whose notes no longer exist. Runs on mount (catches
   // stale tabs carried across sessions) and whenever a tree-change

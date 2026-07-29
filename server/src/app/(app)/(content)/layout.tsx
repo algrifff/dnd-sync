@@ -128,7 +128,7 @@ export default async function ContentLayout({
           <SidebarFooter username={session.username} />
         </CollapsibleSidebar>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <NoteTabBar />
+          <NoteTabBar groupId={session.currentGroupId} />
           {children}
         </div>
       </div>

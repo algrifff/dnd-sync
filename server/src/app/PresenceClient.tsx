@@ -36,7 +36,15 @@ export function PresenceClient({
   groupId,
 }: {
   me: Me;
-  groupId?: string;
+  /** Current world/campaign id — REQUIRED. This used to be optional
+   *  with an un-suffixed `.presence` fallback for a missing groupId,
+   *  which was a second, latent cross-tenant channel: every world
+   *  without a groupId would share one global awareness doc leaking
+   *  display names, usernames, and `viewing` paths across every world.
+   *  Both callers (`AppHeader.tsx`) already pass a real groupId, so
+   *  the fallback was unreachable in practice — it's removed here so
+   *  it can't become reachable by a future caller forgetting the prop. */
+  groupId: string;
 }): React.JSX.Element {
   const router = useRouter();
   const pathname = usePathname() ?? '';
@@ -48,7 +56,7 @@ export function PresenceClient({
         url: buildCollabUrl(),
         // Scope presence per group so users from different worlds
         // don't appear in each other's avatar rows.
-        name: groupId ? `.presence:${groupId}` : '.presence',
+        name: `.presence:${groupId}`,
         document: ydoc,
       }),
     [ydoc, groupId],
@@ -122,7 +130,7 @@ export function PresenceClient({
       lastReportedCount = peerCount;
       track(EVENTS.PEER_PRESENCE_SEEN, {
         peer_count: peerCount,
-        group_id: groupId ?? null,
+        group_id: groupId,
       });
     };
 

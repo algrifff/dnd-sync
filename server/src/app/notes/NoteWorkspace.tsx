@@ -42,6 +42,7 @@ export type CharacterProp = {
 
 export function NoteWorkspace({
   path,
+  groupId,
   user,
   canEdit,
   csrfToken,
@@ -51,6 +52,12 @@ export function NoteWorkspace({
   lockedTitle,
 }: {
   path: string;
+  /** Current world/campaign id — `session.currentGroupId` from the
+   *  server page, threaded down as a prop (never refetched client-side).
+   *  Qualifies the Hocuspocus document name as `${groupId}:${path}` so
+   *  two worlds sharing an identical note path never collide on the
+   *  same Y.Doc. See `@/app/notes/provider-cache`. */
+  groupId: string;
   user: SurfaceUser;
   canEdit: boolean;
   csrfToken: string;
@@ -69,11 +76,12 @@ export function NoteWorkspace({
   // Provider + Y.Doc come from the shared module cache. They live as
   // long as the tab is open (or the idle grace window after release),
   // so tab switches between open notes don't replay the WS handshake.
-  // `path` is effectively static for a given NoteWorkspace instance —
-  // Next.js remounts the whole component on route change — so a single
-  // acquire on mount pairs with a single release on unmount.
+  // `path`/`groupId` are effectively static for a given NoteWorkspace
+  // instance — Next.js remounts the whole component on route change —
+  // so a single acquire on mount pairs with a single release on
+  // unmount.
   const [handle, setHandle] = useState<{ provider: HocuspocusProvider; ydoc: Y.Doc } | null>(() =>
-    acquireProvider(path),
+    acquireProvider(groupId, path),
   );
   // Remount key: bumped whenever the server evicts this document
   // (provider-cache#onDocumentReset — e.g. an AI tool rewrote the
@@ -105,13 +113,18 @@ export function NoteWorkspace({
   // `RESET_REACQUIRE_DELAY_MS` in provider-cache.ts for the full
   // writeup — do not shorten this delay without re-reading it.
   useEffect(() => {
-    const unsubscribe = onDocumentReset((resetPath) => {
-      if (resetPath !== path) return;
+    // The reset listener receives the QUALIFIED name (see
+    // provider-cache.ts#ResetListener) — compare against our own
+    // qualified name, not the bare path, or resets silently stop
+    // matching for this component.
+    const qualifiedName = `${groupId}:${path}`;
+    const unsubscribe = onDocumentReset((resetName) => {
+      if (resetName !== qualifiedName) return;
       if (reacquireTimerRef.current) clearTimeout(reacquireTimerRef.current);
       setHandle(null);
       reacquireTimerRef.current = setTimeout(() => {
         reacquireTimerRef.current = null;
-        setHandle(acquireProvider(path));
+        setHandle(acquireProvider(groupId, path));
         setEpoch((n) => n + 1);
       }, RESET_REACQUIRE_DELAY_MS);
     });
@@ -122,10 +135,14 @@ export function NoteWorkspace({
         reacquireTimerRef.current = null;
       }
     };
-  }, [path]);
+  }, [groupId, path]);
 
-  // Release on unmount / path change only — deliberately NOT keyed on
-  // `epoch`. Every reset's acquireProvider() call above always lands
+  // Release on unmount / path (or groupId) change only — deliberately
+  // NOT keyed on `epoch`. `groupId` is effectively as static as `path`
+  // here (both come from the same server-rendered page and only change
+  // via a full remount), so adding it to the dependency array doesn't
+  // change the reasoning below, only what's captured for the qualified
+  // name. Every reset's acquireProvider() call above always lands
   // on a fresh cache entry (the previous one is already gone, torn
   // down by evict()), so at any instant there is exactly one live
   // acquire for `path` that needs exactly one matching release. If
@@ -144,11 +161,12 @@ export function NoteWorkspace({
   // guard) rather than decrementing anything, so the invariant holds:
   // one acquire → one release, or zero of each, never a mismatch.
   useEffect(() => {
+    const capturedGroupId = groupId;
     const capturedPath = path;
     return () => {
-      releaseProvider(capturedPath);
+      releaseProvider(capturedGroupId, capturedPath);
     };
-  }, [path]);
+  }, [groupId, path]);
 
   // `handle` is null only in the RESET_REACQUIRE_DELAY_MS gap after a
   // server-initiated reset (see the effect above) — every other read

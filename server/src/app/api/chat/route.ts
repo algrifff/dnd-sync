@@ -91,6 +91,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     groupId: session.currentGroupId,
     userId:  session.userId,
     role,
+    sessionRole: session.role,
     gmNamespace,
     ...(body.campaignSlug !== undefined ? { campaignSlug: body.campaignSlug } : {}),
   };

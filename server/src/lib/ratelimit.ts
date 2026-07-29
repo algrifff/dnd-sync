@@ -92,6 +92,15 @@ export const resetRequestLimiter = createLimiter(5, 60 * 60_000);
 // Resend-verification-email clicks. 3 per hour per IP.
 export const verifyResendLimiter = createLimiter(3, 60 * 60_000);
 
+// /api/admin/login. Gates the __sa super-admin cookie that unlocks all of
+// /admin/*, off a single bearer token compared with timingSafeEqual — no
+// username, so there's nothing to lock per-account, only per-IP. 10 fails /
+// 5 min mirrors webLoginLimiter: the auto-generated default token is 192-bit
+// (unguessable regardless), so this bound exists for the weak-operator-set
+// ADMIN_TOKEN case — tight enough to kill unlimited brute force, loose
+// enough that a real operator mistyping a saved token isn't locked out.
+export const adminLoginLimiter = createLimiter(10, 5 * 60_000);
+
 // ── Backwards-compatible shims for the WS upgrade handler ──────────────
 
 export function checkAuthAttempt(ip: string, isLocalhost: boolean): RateLimitDecision {

@@ -336,7 +336,7 @@ export async function deriveFolderIndex(
     insertReverse.run(groupId, n.path, indexPath);
   }
 
-  await closeDocumentConnections(indexPath);
+  await closeDocumentConnections(groupId, indexPath);
 }
 
 /** Drive the derive across every distinct affected folder for a list

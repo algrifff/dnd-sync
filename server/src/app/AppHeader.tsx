@@ -29,11 +29,14 @@ export function AppHeader({
   user?: { displayName: string; username: string; accentColor: string };
   csrfToken?: string;
   canCreate?: boolean;
-  groupId?: string;
+  /** Current world/campaign id — required so <PresenceClient> always
+   *  gets a real groupId. See PresenceClient.tsx for why the old
+   *  optional/fallback shape was a latent cross-tenant leak. */
+  groupId: string;
   /** True when the GM-mode cookie is set on this admin's session. */
   gmMode?: boolean;
 }): ReactElement {
-  const worldHeader = groupId ? getWorldHeader(groupId) : null;
+  const worldHeader = getWorldHeader(groupId);
   const worldName = worldHeader?.name ?? '';
   const headerColor = worldHeader?.headerColor ?? 'var(--ink)';
 
@@ -43,7 +46,7 @@ export function AppHeader({
       {/* ── Left: gear → title → avatars ── */}
       <div className="flex min-w-0 items-center gap-2.5">
 
-        {role === 'admin' && groupId && (
+        {role === 'admin' && (
           <Link
             href="/settings/world"
             title="World settings"
@@ -67,7 +70,7 @@ export function AppHeader({
         )}
 
         {/* Live presence — sits right of the title */}
-        {groupId ? <PresenceClient me={me} groupId={groupId} /> : <PresenceClient me={me} />}
+        <PresenceClient me={me} groupId={groupId} />
 
         {/* Sidebar-less pages: inline nav */}
         {/* (includeNav is no longer needed — kept for API compat) */}

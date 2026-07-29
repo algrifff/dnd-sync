@@ -50,6 +50,9 @@ import {
 } from './server';
 
 const GROUP = 'grp-derive-test';
+/** A second world used to prove tenant scoping. Only ever addressed
+ *  through the collab helpers, so it needs no `groups` row. */
+const OTHER_GROUP = 'grp-derive-test-other';
 const PATH = 'Characters/Arin.md';
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -245,7 +248,7 @@ describe('storeNoteDocument — atomicity of the yjs_state + derive transaction 
     let threw = false;
     try {
       storeNoteDocument({
-        documentName: PATH,
+        path: PATH,
         state: nextState,
         document: ydoc,
         context: { groupId: GROUP, userId: 'nonexistent-user-id' },
@@ -297,7 +300,7 @@ describe('storeNoteDocument — atomicity of the yjs_state + derive transaction 
     let threw = false;
     try {
       storeNoteDocument({
-        documentName: PATH,
+        path: PATH,
         state: new Uint8Array([9, 9, 9]),
         document: hostile,
         context: { groupId: GROUP, userId: null },
@@ -323,7 +326,7 @@ describe('storeNoteDocument — atomicity of the yjs_state + derive transaction 
 
     // Act
     storeNoteDocument({
-      documentName: PATH,
+      path: PATH,
       state: nextState,
       document: ydoc,
       context: { groupId: GROUP, userId: null },
@@ -373,7 +376,15 @@ describe('storeNoteDocument — atomicity of the yjs_state + derive transaction 
 // therefore a faithful proxy for "would this eviction write the
 // in-memory doc back over the caller's row?".
 
-const STORE_DEBOUNCE_ID = (path: string): string => `onStoreDocument-${path}`;
+// Names on the wire — and therefore in Hocuspocus's `documents` map and
+// its debouncer ids — are QUALIFIED (`${groupId}:${path}`). The public
+// helpers take `(groupId, path)` and qualify internally, so the probes
+// below have to build the same key by hand to observe them.
+
+const STORE_DEBOUNCE_ID = (documentName: string): string =>
+  `onStoreDocument-${documentName}`;
+
+const qualify = (groupId: string, path: string): string => `${groupId}:${path}`;
 
 type EvictionProbe = {
   /** True while Hocuspocus still holds a pending debounced store — i.e.
@@ -392,9 +403,9 @@ type EvictionProbe = {
  *  spinning out the full `DRAIN_BUDGET_MS`, and — because it only fires
  *  AFTER the cancellation it is watching for — it cannot mask the
  *  behaviour under test. */
-function armLiveDocumentWithPendingStore(path: string): EvictionProbe {
-  const id = STORE_DEBOUNCE_ID(path);
-  collabServer.documents.set(path, new Document(path));
+function armLiveDocumentWithPendingStore(documentName: string): EvictionProbe {
+  const id = STORE_DEBOUNCE_ID(documentName);
+  collabServer.documents.set(documentName, new Document(documentName));
 
   // 5s/10s so the timer can never actually fire mid-test; the
   // assertions read `isDebounced`, never the callback.
@@ -402,7 +413,7 @@ function armLiveDocumentWithPendingStore(path: string): EvictionProbe {
 
   const watcher = setInterval(() => {
     if (!collabServer.debouncer.isDebounced(id)) {
-      collabServer.documents.delete(path);
+      collabServer.documents.delete(documentName);
       clearInterval(watcher);
     }
   }, 1);
@@ -411,7 +422,7 @@ function armLiveDocumentWithPendingStore(path: string): EvictionProbe {
     storeStillPending: () => collabServer.debouncer.isDebounced(id),
     cleanup: () => {
       clearInterval(watcher);
-      collabServer.documents.delete(path);
+      collabServer.documents.delete(documentName);
       void collabServer.debouncer.debounce(id, () => undefined, 0, 0);
     },
   };
@@ -419,15 +430,17 @@ function armLiveDocumentWithPendingStore(path: string): EvictionProbe {
 
 describe('closeDocumentConnections — server-write token protocol', () => {
   const PROTO_PATH = 'Characters/Contested.md';
+  /** The map/debouncer key the helpers will derive from (GROUP, PROTO_PATH). */
+  const PROTO_DOC = qualify(GROUP, PROTO_PATH);
 
   it('should discard the in-memory document when handed its own token', async () => {
     // Arrange
-    const token = await closeDocumentForWrite(PROTO_PATH);
-    const probe = armLiveDocumentWithPendingStore(PROTO_PATH);
+    const token = await closeDocumentForWrite(GROUP, PROTO_PATH);
+    const probe = armLiveDocumentWithPendingStore(PROTO_DOC);
 
     try {
       // Act
-      await closeDocumentConnections(PROTO_PATH, token);
+      await closeDocumentConnections(GROUP, PROTO_PATH, token);
 
       // Assert — the pre-write state must NOT be written back over the
       // row the caller just updated.
@@ -440,11 +453,11 @@ describe('closeDocumentConnections — server-write token protocol', () => {
   it('should flush rather than discard when no token is presented', async () => {
     // Arrange — the `notes/visibility` / folder-delete / campaign-delete
     // shape: evicting so clients re-authenticate, NOT replacing a body.
-    const probe = armLiveDocumentWithPendingStore(PROTO_PATH);
+    const probe = armLiveDocumentWithPendingStore(PROTO_DOC);
 
     try {
       // Act
-      await closeDocumentConnections(PROTO_PATH);
+      await closeDocumentConnections(GROUP, PROTO_PATH);
 
       // Assert — the live editor's keystrokes still reach disk.
       expect(probe.storeStillPending()).toBe(true);
@@ -456,13 +469,13 @@ describe('closeDocumentConnections — server-write token protocol', () => {
   it('should not let a stranded token make a later unrelated eviction destructive (NEW-1)', async () => {
     // Arrange — an operation takes a token and then early-returns
     // without consuming OR releasing it: the literal leak.
-    await closeDocumentForWrite(PROTO_PATH);
-    const probe = armLiveDocumentWithPendingStore(PROTO_PATH);
+    await closeDocumentForWrite(GROUP, PROTO_PATH);
+    const probe = armLiveDocumentWithPendingStore(PROTO_DOC);
 
     try {
       // Act — a completely different caller evicts the same path with
       // no token of its own.
-      await closeDocumentConnections(PROTO_PATH);
+      await closeDocumentConnections(GROUP, PROTO_PATH);
 
       // Assert — it must still get flush semantics. Under the per-path
       // flag this consumed the leaked mark and silently dropped up to
@@ -475,13 +488,13 @@ describe('closeDocumentConnections — server-write token protocol', () => {
 
   it('should refuse a token that was already released', async () => {
     // Arrange
-    const token = await closeDocumentForWrite(PROTO_PATH);
+    const token = await closeDocumentForWrite(GROUP, PROTO_PATH);
     releaseServerWrite(token);
-    const probe = armLiveDocumentWithPendingStore(PROTO_PATH);
+    const probe = armLiveDocumentWithPendingStore(PROTO_DOC);
 
     try {
       // Act — presenting a revoked token back.
-      await closeDocumentConnections(PROTO_PATH, token);
+      await closeDocumentConnections(GROUP, PROTO_PATH, token);
 
       // Assert — release really revokes; this is what makes the
       // unconditional `finally { releaseServerWrite(token) }` at the
@@ -494,18 +507,18 @@ describe('closeDocumentConnections — server-write token protocol', () => {
 
   it('should refuse a token that was already consumed', async () => {
     // Arrange
-    const token = await closeDocumentForWrite(PROTO_PATH);
-    const first = armLiveDocumentWithPendingStore(PROTO_PATH);
+    const token = await closeDocumentForWrite(GROUP, PROTO_PATH);
+    const first = armLiveDocumentWithPendingStore(PROTO_DOC);
     try {
-      await closeDocumentConnections(PROTO_PATH, token);
+      await closeDocumentConnections(GROUP, PROTO_PATH, token);
     } finally {
       first.cleanup();
     }
 
-    const second = armLiveDocumentWithPendingStore(PROTO_PATH);
+    const second = armLiveDocumentWithPendingStore(PROTO_DOC);
     try {
       // Act — the same token a second time.
-      await closeDocumentConnections(PROTO_PATH, token);
+      await closeDocumentConnections(GROUP, PROTO_PATH, token);
 
       // Assert — one token, one destructive evict.
       expect(second.storeStillPending()).toBe(true);
@@ -516,12 +529,12 @@ describe('closeDocumentConnections — server-write token protocol', () => {
 
   it('should refuse a token issued for a different path', async () => {
     // Arrange
-    const token = await closeDocumentForWrite('Characters/Elsewhere.md');
-    const probe = armLiveDocumentWithPendingStore(PROTO_PATH);
+    const token = await closeDocumentForWrite(GROUP, 'Characters/Elsewhere.md');
+    const probe = armLiveDocumentWithPendingStore(PROTO_DOC);
 
     try {
       // Act
-      await closeDocumentConnections(PROTO_PATH, token);
+      await closeDocumentConnections(GROUP, PROTO_PATH, token);
 
       // Assert
       expect(probe.storeStillPending()).toBe(true);
@@ -531,26 +544,75 @@ describe('closeDocumentConnections — server-write token protocol', () => {
     }
   });
 
+  it('should refuse a token issued for the same path in another world', async () => {
+    // Arrange — the same path in two worlds is NORMAL: the schema is
+    // UNIQUE (group_id, path), and `World Lore/index.md` plus every
+    // `Campaigns/<slug>/…/index.md` is created in every group. A server
+    // write in OTHER_GROUP takes a token for its own copy.
+    const foreignToken = await closeDocumentForWrite(OTHER_GROUP, PROTO_PATH);
+    const probe = armLiveDocumentWithPendingStore(PROTO_DOC);
+
+    try {
+      // Act — present it against GROUP's document.
+      await closeDocumentConnections(GROUP, PROTO_PATH, foreignToken);
+
+      // Assert — flush, not discard. The token names the QUALIFIED
+      // document, so it cannot authorise anything outside its own
+      // world. With bare names the two worlds shared one map entry and
+      // one token namespace: OTHER_GROUP's write would have discarded
+      // GROUP's in-memory document and dropped up to 1.5s of a foreign
+      // tenant's unflushed keystrokes.
+      expect(probe.storeStillPending()).toBe(true);
+    } finally {
+      probe.cleanup();
+      releaseServerWrite(foreignToken);
+    }
+  });
+
+  it('should evict only the caller\'s world when two worlds share a path', async () => {
+    // Arrange — take the token first, while nothing is loaded, so the
+    // pre-write drain early-returns instead of polling out its budget.
+    const token = await closeDocumentForWrite(GROUP, PROTO_PATH);
+    const mine = armLiveDocumentWithPendingStore(PROTO_DOC);
+    const theirs = armLiveDocumentWithPendingStore(qualify(OTHER_GROUP, PROTO_PATH));
+
+    try {
+      // Act
+      await closeDocumentConnections(GROUP, PROTO_PATH, token);
+
+      // Assert — the other world's document is untouched. Every
+      // coordination helper addresses Hocuspocus's `documents` map,
+      // which `closeConnections()` matches by name alone; an
+      // unqualified key would have hit BOTH (and, before the prefix,
+      // there was only ever one entry for the two of them).
+      expect(mine.storeStillPending()).toBe(false);
+      expect(theirs.storeStillPending()).toBe(true);
+    } finally {
+      mine.cleanup();
+      theirs.cleanup();
+    }
+  });
+
   it('should not let an unrelated eviction consume an in-flight operation\'s token (NEW-2)', async () => {
     // Arrange — op A (entity_edit_content) takes its token and starts
     // computing the new document.
-    const tokenA = await closeDocumentForWrite(PROTO_PATH);
+    const tokenA = await closeDocumentForWrite(GROUP, PROTO_PATH);
 
     // Act 1 — op B (notes/visibility on the same path) evicts, tokenless.
-    const probeB = armLiveDocumentWithPendingStore(PROTO_PATH);
+    const probeB = armLiveDocumentWithPendingStore(PROTO_DOC);
     let bDiscarded: boolean;
     try {
-      await closeDocumentConnections(PROTO_PATH);
+      await closeDocumentConnections(GROUP, PROTO_PATH);
       bDiscarded = !probeB.storeStillPending();
     } finally {
       probeB.cleanup();
     }
 
     // Act 2 — op A finishes its UPDATE and evicts with ITS token.
-    const probeA = armLiveDocumentWithPendingStore(PROTO_PATH);
+    const probeA = armLiveDocumentWithPendingStore(PROTO_DOC);
     let aDiscarded: boolean;
     try {
-      await closeDocumentConnections(PROTO_PATH, tokenA);
+      await closeDocumentConnections(GROUP, PROTO_PATH, tokenA);
       aDiscarded = !probeA.storeStillPending();
     } finally {
       probeA.cleanup();
@@ -566,24 +628,24 @@ describe('closeDocumentConnections — server-write token protocol', () => {
 
   it('should give each of two concurrent operations on one path its own token', async () => {
     // Arrange — two body-replacing operations overlap on one path.
-    const tokenA = await closeDocumentForWrite(PROTO_PATH);
-    const tokenB = await closeDocumentForWrite(PROTO_PATH);
+    const tokenA = await closeDocumentForWrite(GROUP, PROTO_PATH);
+    const tokenB = await closeDocumentForWrite(GROUP, PROTO_PATH);
 
     // Act 1 — B finishes first and consumes its own token.
-    const probeB = armLiveDocumentWithPendingStore(PROTO_PATH);
+    const probeB = armLiveDocumentWithPendingStore(PROTO_DOC);
     let bDiscarded: boolean;
     try {
-      await closeDocumentConnections(PROTO_PATH, tokenB);
+      await closeDocumentConnections(GROUP, PROTO_PATH, tokenB);
       bDiscarded = !probeB.storeStillPending();
     } finally {
       probeB.cleanup();
     }
 
     // Act 2 — A's token must be untouched by that.
-    const probeA = armLiveDocumentWithPendingStore(PROTO_PATH);
+    const probeA = armLiveDocumentWithPendingStore(PROTO_DOC);
     let aDiscarded: boolean;
     try {
-      await closeDocumentConnections(PROTO_PATH, tokenA);
+      await closeDocumentConnections(GROUP, PROTO_PATH, tokenA);
       aDiscarded = !probeA.storeStillPending();
     } finally {
       probeA.cleanup();
@@ -599,15 +661,15 @@ describe('closeDocumentConnections — server-write token protocol', () => {
   it('should still honour a token after a window longer than the old 30s TTL (NEW-3)', async () => {
     // Arrange — import-apply arms, then awaits `runMerge()`, an LLM
     // call that routinely runs longer than the old expiry.
-    const token = await closeDocumentForWrite(PROTO_PATH);
+    const token = await closeDocumentForWrite(GROUP, PROTO_PATH);
 
     const realNow = Date.now;
     Date.now = () => realNow() + 60_000;
     try {
-      const probe = armLiveDocumentWithPendingStore(PROTO_PATH);
+      const probe = armLiveDocumentWithPendingStore(PROTO_DOC);
       try {
         // Act
-        await closeDocumentConnections(PROTO_PATH, token);
+        await closeDocumentConnections(GROUP, PROTO_PATH, token);
 
         // Assert — pairing is explicit now, so nothing about the
         // elapsed time can downgrade this to a flush. The 30s TTL
@@ -656,7 +718,7 @@ describe('storeNoteDocument — derived rows written by persistDerived', () => {
 
     // Act
     storeNoteDocument({
-      documentName: PATH,
+      path: PATH,
       state: new Uint8Array([1]),
       document: ydoc,
       context: { groupId: GROUP, userId: null },
@@ -687,7 +749,7 @@ describe('storeNoteDocument — derived rows written by persistDerived', () => {
 
     // Act
     storeNoteDocument({
-      documentName: PATH,
+      path: PATH,
       state: new Uint8Array([1]),
       document: ydoc,
       context: { groupId: GROUP, userId: null },

@@ -83,7 +83,7 @@ export async function DELETE(req: NextRequest, ctx: RouteCtx): Promise<Response>
 
   // Kick any live editors so they disconnect instead of trying to
   // persist updates against a row that no longer exists.
-  await closeDocumentConnections(path);
+  await closeDocumentConnections(session.currentGroupId, path);
 
   // Refresh the parent folder's auto-managed index so the deleted
   // note drops out of its table.

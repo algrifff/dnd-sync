@@ -239,7 +239,7 @@ export async function moveFolder(args: {
   // Kick live editors for every moved note so they reconnect at the
   // new document name.
   for (const m of moved) {
-    await closeDocumentConnections(m.from);
+    await closeDocumentConnections(groupId, m.from);
   }
 
   // Rewrite wikilink targets in every linker that pointed at any of
@@ -255,7 +255,7 @@ export async function moveFolder(args: {
   if (renames.length > 0 && linkers.length > 0) {
     try {
       const touched = rewriteWikilinksForLinkers(groupId, linkers, renames);
-      for (const linker of touched) await closeDocumentConnections(linker);
+      for (const linker of touched) await closeDocumentConnections(groupId, linker);
     } catch (err) {
       console.error('[move-folder] wikilink rewrite failed:', err);
     }

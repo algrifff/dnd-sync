@@ -154,7 +154,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     }
   })();
 
-  await closeDocumentConnections(from);
+  await closeDocumentConnections(session.currentGroupId, from);
 
   // Rewrite wikilink targets in every note that pointed at the old
   // path, then kick their live editors so they pull the rewritten
@@ -171,7 +171,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     const touched = rewriteWikilinksForRenames(session.currentGroupId, [
       { from, to },
     ]);
-    for (const linker of touched) await closeDocumentConnections(linker);
+    for (const linker of touched) await closeDocumentConnections(session.currentGroupId, linker);
   } catch (err) {
     console.error('[notes/move] wikilink rewrite failed:', err);
   }

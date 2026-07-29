@@ -344,7 +344,7 @@ async function commitPlannedNote(
   // that safe — a throw anywhere in here (the caller catches per-note
   // at the `planned` loop and moves on) releases the token instead of
   // stranding it.
-  const token = await closeDocumentForWrite(targetPath);
+  const token = await closeDocumentForWrite(groupId, targetPath);
   try {
     // Does something already live at target?
     const existing = db
@@ -446,7 +446,7 @@ async function commitPlannedNote(
     // in lib/ai/tools.ts for the fuller rationale. Harmless no-op when
     // nobody had the doc open. The token is what makes it a discard
     // rather than a flush.
-    await closeDocumentConnections(targetPath, token);
+    await closeDocumentConnections(groupId, targetPath, token);
 
     if (existing) summary.merged++;
     else if (opts.forceKeepInPlace) summary.keptInPlace++;
