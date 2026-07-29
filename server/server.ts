@@ -10,6 +10,8 @@ import { getDb } from '@/lib/db';
 import { ensureConfig } from '@/lib/config';
 import { getEnv } from '@/lib/env';
 import { cleanupExpiredSessions } from '@/lib/session';
+import { pruneExpiredAuditLog } from '@/lib/audit';
+import { recoverImportJobs, startImportJanitor } from '@/lib/import-orchestrate';
 import { ensureDefaultAdmin, printAdminBanner, DEFAULT_GROUP_ID } from '@/lib/users';
 import { ensureDefaultTemplates } from '@/lib/templates';
 import { ensureDefaultFolders } from '@/lib/tree';
@@ -45,6 +47,22 @@ ensureConfig();
   await backfillCampaignIndexes();
   const removed = cleanupExpiredSessions();
   if (removed > 0) console.log(`[compendium-server] pruned ${removed} expired session(s)`);
+  const removedAudit = pruneExpiredAuditLog();
+  if (removedAudit > 0) console.log(`[compendium-server] pruned ${removedAudit} expired audit row(s)`);
+  // Import jobs track their phase in-process, so anything left mid-flight
+  // by a crash or redeploy is unreachable — the DM's pending-answer
+  // resolver in particular is just a Promise callback that died with the
+  // old process. Resolve them before we start accepting traffic, so the
+  // UI never shows a job that can no longer advance. Interrupted jobs are
+  // failed (not resumed) — resuming would fire billed AI calls with no
+  // human present on a job whose owner may have closed the tab hours ago.
+  const recovered = recoverImportJobs();
+  if (recovered.interrupted.length > 0 || recovered.expired.length > 0 || recovered.orphanZips > 0) {
+    console.log(
+      `[compendium-server] import recovery: ${recovered.interrupted.length} interrupted, ` +
+        `${recovered.expired.length} expired, ${recovered.orphanZips} orphan zip(s) removed`,
+    );
+  }
 }
 
 const app = next({ dev, hostname, port });
@@ -120,8 +138,42 @@ const heartbeat = setInterval(() => {
 // so SIGTERM doesn't have to wait for the interval to fire.
 heartbeat.unref?.();
 
+// Recurring cleanup of unbounded-growth tables. Both cleanupExpiredSessions
+// and pruneExpiredAuditLog were previously only run once at boot, so a
+// long-lived process (this is a persistent server, not serverless) would
+// accumulate expired sessions and out-of-retention audit rows for its
+// entire uptime. Both are single indexed DELETEs — cheap enough to run
+// hourly without a dedicated scheduler, frequent enough that a
+// weeks-long deployment never lets either table grow far past what a
+// restart would have cleaned anyway.
+const CLEANUP_INTERVAL_MS = 60 * 60_000;
+const cleanupTimer = setInterval(() => {
+  try {
+    const removedSessions = cleanupExpiredSessions();
+    if (removedSessions > 0) {
+      console.log(`[compendium-server] pruned ${removedSessions} expired session(s)`);
+    }
+    const removedAudit = pruneExpiredAuditLog();
+    if (removedAudit > 0) {
+      console.log(`[compendium-server] pruned ${removedAudit} expired audit row(s)`);
+    }
+  } catch (err) {
+    console.error('[compendium-server] periodic cleanup failed:', err);
+  }
+}, CLEANUP_INTERVAL_MS);
+cleanupTimer.unref?.();
+
+// Durable backstop for the two import failure modes an in-process timer
+// can't cover: a job left waiting on a DM answer that never comes, and a
+// raw upload ZIP whose job row died before it could be reclaimed. The
+// boot-time recovery above only runs once; this catches jobs that stall
+// while the process stays up. Timer is unref'd internally.
+const stopImportJanitor = startImportJanitor();
+
 for (const sig of ['SIGTERM', 'SIGINT'] as const) {
   process.once(sig, () => {
     clearInterval(heartbeat);
+    clearInterval(cleanupTimer);
+    stopImportJanitor();
   });
 }

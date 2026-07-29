@@ -20,7 +20,7 @@ import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getDb } from '@/lib/db';
+import { getDb, isUniqueConstraintError } from '@/lib/db';
 import { getPmSchema } from '@/lib/pm-schema';
 import { logAudit } from '@/lib/audit';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
@@ -67,15 +67,6 @@ export async function POST(req: NextRequest): Promise<Response> {
   const fileStem = slugTitle ? `${body.date}-${slugTitle}` : body.date;
   const path = `${campaign.folder_path}/Adventure Log/${fileStem}.md`;
 
-  const existing = db
-    .query<{ n: number }, [string, string]>(
-      'SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path = ?',
-    )
-    .get(session.currentGroupId, path);
-  if ((existing?.n ?? 0) > 0) {
-    return json({ error: 'exists', path }, 409);
-  }
-
   // Seed sheet with template defaults, then layer on the caller's
   // picks so explicit values win.
   const template = getTemplate('session');
@@ -107,27 +98,40 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const id = randomUUID();
   const now = Date.now();
-  db.query(
-    `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
-                        content_md, yjs_state, frontmatter_json, byte_size,
-                        updated_at, updated_by, created_at, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    session.currentGroupId,
-    path,
-    titleText,
-    JSON.stringify(emptyDoc),
-    '',
-    '',
-    state,
-    JSON.stringify(frontmatter),
-    0,
-    now,
-    session.userId,
-    now,
-    session.userId,
-  );
+  // Attempt the INSERT directly rather than SELECT-then-INSERT — two
+  // concurrent requests for the same session path (e.g. a rapid
+  // double-click on "New session") would otherwise both pass a
+  // pre-check and the loser's raw INSERT would 500 on the UNIQUE
+  // constraint. Translate a lost race into the same 409 the pre-check
+  // used to return.
+  try {
+    db.query(
+      `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
+                          content_md, yjs_state, frontmatter_json, byte_size,
+                          updated_at, updated_by, created_at, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      session.currentGroupId,
+      path,
+      titleText,
+      JSON.stringify(emptyDoc),
+      '',
+      '',
+      state,
+      JSON.stringify(frontmatter),
+      0,
+      now,
+      session.userId,
+      now,
+      session.userId,
+    );
+  } catch (err) {
+    if (isUniqueConstraintError(err)) {
+      return json({ error: 'exists', path }, 409);
+    }
+    throw err;
+  }
 
   try {
     deriveAllIndexes({

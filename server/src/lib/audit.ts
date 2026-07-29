@@ -99,3 +99,36 @@ export function recentAudit(groupId: string, limit = 50): AuditRow[] {
     )
     .all(groupId, Math.max(1, Math.min(limit, 500)));
 }
+
+// ── Retention ──────────────────────────────────────────────────────────
+
+// `audit_log` is append-only and has no other pruning path (the only
+// existing `DELETE FROM audit_log` fires when a whole group is deleted,
+// in lib/groups.ts). Left alone it grows forever — every login/logout
+// and every admin mutation adds a row. There is no other reader of this
+// table today (recentAudit() above is the only query site; no admin UI,
+// export, or compliance surface consumes it yet), so a fixed window is
+// safe to choose on operational grounds alone.
+//
+// Default: 180 days. That's long enough to cover any plausible "who did
+// this last quarter" investigation on a self-hosted single-tenant app,
+// short enough to keep the table from growing unbounded on a
+// long-lived instance. Configurable via AUDIT_LOG_RETENTION_DAYS for
+// operators who want a shorter/longer window.
+const DEFAULT_AUDIT_RETENTION_DAYS = 180;
+
+function auditRetentionMs(): number {
+  const raw = process.env.AUDIT_LOG_RETENTION_DAYS;
+  const days = raw ? Number(raw) : DEFAULT_AUDIT_RETENTION_DAYS;
+  const safeDays = Number.isFinite(days) && days > 0 ? days : DEFAULT_AUDIT_RETENTION_DAYS;
+  return safeDays * 24 * 60 * 60_000;
+}
+
+/** Delete audit rows older than the retention window. Returns the number
+ *  of rows removed. Safe to call opportunistically (on boot) or on a
+ *  recurring interval — it's a single indexed DELETE keyed on `at`. */
+export function pruneExpiredAuditLog(): number {
+  const cutoff = Date.now() - auditRetentionMs();
+  const res = getDb().query('DELETE FROM audit_log WHERE at < ?').run(cutoff);
+  return Number(res.changes);
+}

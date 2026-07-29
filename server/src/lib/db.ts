@@ -182,3 +182,28 @@ export function closeDb(): void {
   }
 }
 
+// ── constraint-violation detection (cross-adapter) ─────────────────────
+//
+// Both back-ends throw a driver-specific error class (bun:sqlite's
+// `SQLiteError`, better-sqlite3's `SqliteError`) but each sets `.code`
+// to the *same* extended SQLite result-code string — verified directly
+// against both adapters in this repo (`bun -e` against bun:sqlite;
+// better-sqlite3's C++ source at
+// node_modules/better-sqlite3/src/objects/database.cpp calls
+// `sqlite3_extended_errcode()` and maps it through the same code table
+// as node_modules/better-sqlite3/src/util/constants.cpp, e.g.
+// `SQLITE_CONSTRAINT_UNIQUE` / `SQLITE_CONSTRAINT_PRIMARYKEY`).
+//
+// Do NOT match on `.message` — it embeds the table/column name and
+// wording isn't a contract either adapter guarantees to keep stable.
+// `.code` is the stable, adapter-agnostic signal.
+//
+// Only the UNIQUE and PRIMARYKEY constraint codes are treated as "the
+// row already exists" — a NOTNULL/FOREIGNKEY/CHECK violation is a real
+// bug and should still surface as an unhandled 500.
+export function isUniqueConstraintError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const code = (err as { code?: unknown }).code;
+  return code === 'SQLITE_CONSTRAINT_UNIQUE' || code === 'SQLITE_CONSTRAINT_PRIMARYKEY';
+}
+

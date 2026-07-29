@@ -10,7 +10,7 @@ import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getDb } from '@/lib/db';
+import { getDb, isUniqueConstraintError } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { visibilityFor } from '@/lib/notes';
 
@@ -65,57 +65,83 @@ export async function POST(req: NextRequest): Promise<Response> {
     return json({ error: 'not_found' }, 404);
   }
 
-  const newPath = nextAvailablePath(session.currentGroupId, body.path);
-  const newTitle = deriveTitle(src.title, newPath);
-
   const id = randomUUID();
   const now = Date.now();
   const db = getDb();
-  db.transaction(() => {
-    db.query(
-      `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
-                          content_md, yjs_state, frontmatter_json, byte_size,
-                          updated_at, updated_by, created_at, created_by,
-                          dm_only, gm_only)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      id,
-      session.currentGroupId,
-      newPath,
-      newTitle,
-      src.content_json,
-      src.content_text,
-      src.content_md,
-      src.yjs_state,
-      src.frontmatter_json,
-      src.byte_size,
-      now,
-      session.userId,
-      now,
-      session.userId,
-      src.dm_only,
-      src.gm_only,
-    );
-    // Copy outgoing links + tags only. Inbound links (note_links where
-    // to_path = src.path) shouldn't auto-point at the duplicate.
-    for (const { to_path } of db
-      .query<{ to_path: string }, [string, string]>(
-        'SELECT to_path FROM note_links WHERE group_id = ? AND from_path = ?',
-      )
-      .all(session.currentGroupId, src.path)) {
-      if (to_path === newPath) continue; // no self-loops
-      db.query('INSERT OR IGNORE INTO note_links (group_id, from_path, to_path) VALUES (?, ?, ?)')
-        .run(session.currentGroupId, newPath, to_path);
+
+  // nextAvailablePath() scans via SELECT for a free "<name> (copy N)"
+  // path, but that scan and the INSERT below aren't atomic — a second
+  // concurrent duplicate of the same source note can land on the same
+  // candidate in between. Rather than trust the scan, attempt the
+  // INSERT and, on a lost race (UNIQUE constraint violation), rescan
+  // and retry with the next candidate. Bounded so a pathological storm
+  // of concurrent requests still terminates in a clean 409 rather than
+  // retrying forever.
+  const MAX_ATTEMPTS = 5;
+  let newPath = nextAvailablePath(session.currentGroupId, body.path);
+  let newTitle = deriveTitle(src.title, newPath);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      db.transaction(() => {
+        db.query(
+          `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
+                              content_md, yjs_state, frontmatter_json, byte_size,
+                              updated_at, updated_by, created_at, created_by,
+                              dm_only, gm_only)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          id,
+          session.currentGroupId,
+          newPath,
+          newTitle,
+          src.content_json,
+          src.content_text,
+          src.content_md,
+          src.yjs_state,
+          src.frontmatter_json,
+          src.byte_size,
+          now,
+          session.userId,
+          now,
+          session.userId,
+          src.dm_only,
+          src.gm_only,
+        );
+        // Copy outgoing links + tags only. Inbound links (note_links
+        // where to_path = src.path) shouldn't auto-point at the
+        // duplicate.
+        for (const { to_path } of db
+          .query<{ to_path: string }, [string, string]>(
+            'SELECT to_path FROM note_links WHERE group_id = ? AND from_path = ?',
+          )
+          .all(session.currentGroupId, src.path)) {
+          if (to_path === newPath) continue; // no self-loops
+          db.query(
+            'INSERT OR IGNORE INTO note_links (group_id, from_path, to_path) VALUES (?, ?, ?)',
+          ).run(session.currentGroupId, newPath, to_path);
+        }
+        for (const { tag } of db
+          .query<{ tag: string }, [string, string]>(
+            'SELECT tag FROM tags WHERE group_id = ? AND path = ?',
+          )
+          .all(session.currentGroupId, src.path)) {
+          db.query('INSERT OR IGNORE INTO tags (group_id, path, tag) VALUES (?, ?, ?)').run(
+            session.currentGroupId,
+            newPath,
+            tag,
+          );
+        }
+      })();
+      break;
+    } catch (err) {
+      if (!isUniqueConstraintError(err)) throw err;
+      if (attempt >= MAX_ATTEMPTS) {
+        return json({ error: 'exists', path: newPath }, 409);
+      }
+      newPath = nextAvailablePath(session.currentGroupId, body.path);
+      newTitle = deriveTitle(src.title, newPath);
     }
-    for (const { tag } of db
-      .query<{ tag: string }, [string, string]>(
-        'SELECT tag FROM tags WHERE group_id = ? AND path = ?',
-      )
-      .all(session.currentGroupId, src.path)) {
-      db.query('INSERT OR IGNORE INTO tags (group_id, path, tag) VALUES (?, ?, ?)')
-        .run(session.currentGroupId, newPath, tag);
-    }
-  })();
+  }
 
   logAudit({
     action: 'note.create',

@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getDb } from '@/lib/db';
+import { getDb, isUniqueConstraintError } from '@/lib/db';
 import { getPmSchema } from '@/lib/pm-schema';
 import { logAudit } from '@/lib/audit';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
@@ -89,14 +89,6 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   const db = getDb();
-  const existing = db
-    .query<{ n: number }, [string, string]>(
-      'SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path = ?',
-    )
-    .get(session.currentGroupId, path);
-  if ((existing?.n ?? 0) > 0) {
-    return json({ error: 'exists', path }, 409);
-  }
 
   // Seed frontmatter from the template whenever a kind is specified.
   // Plain pages still get '{}' so the JSON is valid downstream.
@@ -117,28 +109,40 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const id = randomUUID();
   const now = Date.now();
-  db.query(
-    `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
-                        content_md, yjs_state, frontmatter_json, byte_size,
-                        updated_at, updated_by, created_at, created_by, gm_only)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    session.currentGroupId,
-    path,
-    cleanName,
-    JSON.stringify(emptyDoc),
-    '',
-    '',
-    state,
-    JSON.stringify(frontmatter),
-    0,
-    now,
-    session.userId,
-    now,
-    session.userId,
-    gmOnly ? 1 : 0,
-  );
+  // No pre-check + separate INSERT — that leaves a race window where
+  // two concurrent requests for the same path both pass a SELECT and
+  // the loser's INSERT then throws a raw UNIQUE-constraint error. Try
+  // the INSERT directly and translate a lost race into the same 409
+  // the old pre-check returned.
+  try {
+    db.query(
+      `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
+                          content_md, yjs_state, frontmatter_json, byte_size,
+                          updated_at, updated_by, created_at, created_by, gm_only)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      session.currentGroupId,
+      path,
+      cleanName,
+      JSON.stringify(emptyDoc),
+      '',
+      '',
+      state,
+      JSON.stringify(frontmatter),
+      0,
+      now,
+      session.userId,
+      now,
+      session.userId,
+      gmOnly ? 1 : 0,
+    );
+  } catch (err) {
+    if (isUniqueConstraintError(err)) {
+      return json({ error: 'exists', path }, 409);
+    }
+    throw err;
+  }
 
   // Run the derive pipeline so the characters / campaigns index
   // rows catch up without waiting for the first collab save.

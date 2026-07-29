@@ -18,6 +18,8 @@ import { loadNote } from '@/lib/notes';
 import { getDb } from '@/lib/db';
 import { createTools, type ToolContext } from '@/lib/ai/tools';
 import { listCampaigns } from '@/lib/characters';
+import { checkSessionNoteBudget } from '@/lib/ai/input-limits';
+import { claimSessionForProcessing, releaseSessionClaim } from '@/lib/sessions';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,17 +62,36 @@ export async function POST(req: NextRequest): Promise<Response> {
     return json({ error: 'not_a_session', reason: 'note is not a session kind' }, 400);
   }
 
-  // Check current status
-  const row = getDb()
-    .query<{ status: string }, [string, string]>(
-      `SELECT status FROM session_notes WHERE group_id=? AND note_path=?`,
-    )
-    .get(session.currentGroupId, body.sessionPath);
-  const status = row?.status ?? 'open';
-
-  if (status === 'closed' && !body.force) {
-    return json({ error: 'already_closed' }, 409);
+  // Atomically claim this session for processing before doing any AI work.
+  // This is the double-submit guard for M3: two concurrent POSTs (a
+  // double-click, or a client retry after a slow response) must not both
+  // pass a status check and both run the full extraction pipeline, which
+  // would create duplicate entities/backlinks. The claim is a single
+  // UPSERT with a WHERE guard evaluated atomically by SQLite (see
+  // lib/sessions.ts#claimSessionForProcessing) — the loser gets a 409
+  // here instead of racing into generateText(). A crashed/abandoned claim
+  // is recoverable after PROCESSING_STALE_MS (5 min) — see that file for
+  // the full design and trade-offs.
+  const claim = claimSessionForProcessing(session.currentGroupId, body.sessionPath, {
+    force: body.force,
+  });
+  if (!claim.claimed) {
+    if (claim.status === 'closed') {
+      return json({ error: 'already_closed' }, 409);
+    }
+    return json(
+      { error: 'session_processing', reason: 'another request is already processing this session' },
+      409,
+    );
   }
+
+  // Where a failed attempt reverts to: preserve "closed" (this was a
+  // force-reprocess of an already-completed session) in every other case
+  // — including the rare one where previousStatus was itself a stale
+  // "processing" row we just reclaimed — fall back to "open" so the
+  // session is immediately retryable rather than left in a transient
+  // state.
+  const revertStatus: 'open' | 'closed' = claim.previousStatus === 'closed' ? 'closed' : 'open';
 
   // Resolve campaign slug from frontmatter or path
   const fmCampaigns = Array.isArray(fm.campaigns) ? fm.campaigns : [];
@@ -85,6 +106,17 @@ export async function POST(req: NextRequest): Promise<Response> {
   const sessionTitle = typeof sheet.title === 'string' ? sheet.title : note.title;
 
   const content = note.content_md.trim();
+
+  // Reject an implausibly large session note before it becomes the AI
+  // prompt. See lib/ai/input-limits.ts for the chosen limit and rationale.
+  // The claim above already flipped this session to "processing" — release
+  // it back to its pre-claim status so a rejected request doesn't leave the
+  // session stuck until the stale-claim timeout.
+  const noteBudget = checkSessionNoteBudget(content);
+  if (!noteBudget.ok) {
+    releaseSessionClaim(session.currentGroupId, body.sessionPath, revertStatus);
+    return json({ error: noteBudget.error, reason: noteBudget.reason }, 400);
+  }
 
   const toolCtx: ToolContext = {
     groupId: session.currentGroupId,
@@ -155,10 +187,19 @@ Session date: ${sessionDate || 'unknown'}
       prompt: userPrompt,
       tools,
       stopWhen: stepCountIs(20),
+      // Abort the provider call if the client disconnects mid-request,
+      // rather than burning tokens/tool-call steps for a response nobody
+      // will see. Verified against ai@6.0.168's generateText signature,
+      // which accepts `abortSignal?: AbortSignal` (same as streamText).
+      abortSignal: req.signal,
     });
     resultText = result.text || 'Session processed.';
   } catch (err) {
     console.error('[sessions/end] AI error:', err);
+    // Release the processing claim so a failed attempt is immediately
+    // retryable instead of sitting in "processing" until the stale-claim
+    // timeout (see lib/sessions.ts#PROCESSING_STALE_MS).
+    releaseSessionClaim(session.currentGroupId, body.sessionPath, revertStatus);
     return json({ error: 'ai_error', reason: err instanceof Error ? err.message : 'unknown' }, 502);
   }
 
