@@ -119,8 +119,11 @@ export function CampaignRowMenu({
           onDeleted={() => {
             setShowDelete(false);
             if (activeIsAffected) {
-              // Bounce out of the deleted note before the refresh.
-              router.push('/');
+              // The whole campaign (and everything under it, including
+              // any index pages) is gone — the dashboard is the only
+              // guaranteed-surviving destination. Replace, not push, so
+              // Back doesn't return to the now-dead URL.
+              router.replace('/');
             }
           }}
         />

@@ -222,11 +222,11 @@ function parseStats(body: string): Stats {
     return m ? intFromCell(m[1]!) : null;
   };
   if (out.initiative_bonus == null) {
-    const v = inline(/\*\*\s*Initiative\s*:?\s*\*\*\s*([+\-]?\d+)/i);
+    const v = inline(/\*\*\s*Initiative\s*:?\s*\*\*\s*([+-]?\d+)/i);
     if (v != null) out.initiative_bonus = v;
   }
   if (out.proficiency_bonus == null) {
-    const v = inline(/\*\*\s*Proficiency Bonus\s*:?\s*\*\*\s*([+\-]?\d+)/i);
+    const v = inline(/\*\*\s*Proficiency Bonus\s*:?\s*\*\*\s*([+-]?\d+)/i);
     if (v != null) out.proficiency_bonus = v;
   }
 

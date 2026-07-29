@@ -34,7 +34,13 @@ import {
 } from 'lucide-react';
 import { ChatMarkdown } from './ChatMarkdown';
 import { noteEditorHref, useRefreshTreeOnAiNoteMutations } from './chat-tree-refresh';
-import { chatStorageKey, cleanupLegacyChatStorage } from './chat-storage';
+import {
+  chatStorageKey,
+  cleanupLegacyChatStorage,
+  persistChatHistory,
+  trimChatMessages,
+} from './chat-storage';
+import { ChatErrorBubble } from './chat-error';
 import posthog from '@/lib/posthog-web';
 
 // ── File attachment helpers (shared shape with ChatPane) ───────────────
@@ -98,21 +104,6 @@ async function uploadForExtraction(file: File): Promise<string> {
   return data.content;
 }
 
-// AI SDK errors arrive as JSON-stringified SSE error events. Pull out the
-// underlying provider message so the user sees "You exceeded your current
-// quota" rather than a wall of JSON.
-function readableError(raw: string | undefined): string {
-  if (!raw) return 'unknown error';
-  try {
-    const parsed = JSON.parse(raw) as { error?: { message?: string } };
-    const msg = parsed.error?.message;
-    if (typeof msg === 'string' && msg.trim()) return msg;
-  } catch {
-    /* not JSON — fall through */
-  }
-  return raw;
-}
-
 // ── HomeChat component ─────────────────────────────────────────────────
 
 export function HomeChat({
@@ -171,7 +162,10 @@ export function HomeChat({
       if (raw) {
         const parsed = JSON.parse(raw) as UIMessage[];
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setMessages(parsed);
+          // A session saved before the retention cap existed (or from a
+          // pathological client) could already be over budget — trim on
+          // the way in too, not just on the way out.
+          setMessages(trimChatMessages(parsed));
         } else {
           setMessages([]);
         }
@@ -185,13 +179,25 @@ export function HomeChat({
     }
   }, [setMessages, storageKey]);
 
+  // Cap what's RETAINED, not just what's persisted: `messages` is the same
+  // array useChat/DefaultChatTransport replays in full to /api/chat on
+  // every turn, so an unbounded array here would eventually build a
+  // request the server's checkChatMessageBudget() rejects with a 400
+  // (see lib/ai/input-limits.ts) — mid-conversation, with no recovery
+  // short of "clear chat". Trimming here keeps the live conversation
+  // itself under the same budget as what gets saved.
+  useEffect(() => {
+    if (!loaded || messages.length === 0) return;
+    const trimmed = trimChatMessages(messages);
+    if (trimmed !== messages) setMessages(trimmed);
+  }, [loaded, messages, setMessages]);
+
   useEffect(() => {
     if (!loaded) return;
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(messages));
-    } catch {
-      // Ignore local storage failures.
-    }
+    // persistChatHistory swallows quota errors internally (falling back
+    // to progressively shorter suffixes) so a full localStorage never
+    // throws and breaks the panel.
+    persistChatHistory(storageKey, messages);
   }, [loaded, messages, storageKey]);
 
   useEffect(() => {
@@ -382,11 +388,7 @@ export function HomeChat({
               Thinking…
             </div>
           )}
-          {error && !isStreaming && (
-            <div className="max-w-[min(92%,100%)] rounded-[10px] bg-[#F4E4E4] px-3 py-2 text-[12px] text-[#6B2F38]">
-              Couldn't reach the AI: {readableError(error.message)}
-            </div>
-          )}
+          {error && !isStreaming && <ChatErrorBubble message={error.message} />}
         </div>
       </div>
 

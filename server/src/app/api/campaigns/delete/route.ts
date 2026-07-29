@@ -12,6 +12,7 @@ import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
 import { deriveFolderIndexesFor } from '@/lib/campaign-index';
+import { slugify } from '@/lib/compendium';
 
 export const dynamic = 'force-dynamic';
 
@@ -171,12 +172,4 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
-}
-
-function slugify(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
 }

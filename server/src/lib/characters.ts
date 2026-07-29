@@ -15,6 +15,7 @@
 
 import { getDb } from './db';
 import type { TemplateKind } from './templates';
+import { slugify } from './compendium';
 
 /** Character roles we derive today. 'session' isn't here because
  *  sessions get their own index table in Phase 2. */
@@ -411,14 +412,6 @@ function extractCampaignSlugFromPath(notePath: string): string | null {
   const folder = extractCampaignFolderPath(notePath);
   if (!folder) return null;
   return slugify(folder.split('/').pop() ?? '');
-}
-
-function slugify(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
 }
 
 function filenameDisplayName(notePath: string): string {

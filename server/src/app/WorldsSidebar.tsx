@@ -40,6 +40,7 @@ export function WorldsSidebar({
   avatarVersion,
   role,
   worldId,
+  variant = 'rail',
 }: {
   csrfToken: string;
   userId: string;
@@ -48,6 +49,11 @@ export function WorldsSidebar({
   avatarVersion: number;
   role: 'admin' | 'editor' | 'viewer';
   worldId: string;
+  /** 'rail' (default) is the desktop Discord-style column — hidden
+   *  below `md`, unchanged. 'drawer' renders the identical content as
+   *  a plain always-visible flex column with no `hidden`/`md:` guard,
+   *  for use inside MobileNavDrawer, which is itself `md:hidden`. */
+  variant?: 'rail' | 'drawer';
 }): React.JSX.Element {
   const { isPending, switchTo } = useWorldSwitch();
   const router = useRouter();
@@ -141,7 +147,11 @@ export function WorldsSidebar({
     <>
       <aside
         aria-label="Worlds"
-        className="hidden h-full w-[56px] shrink-0 flex-col items-center gap-1.5 bg-[var(--shadow)] py-2 md:flex"
+        className={
+          variant === 'drawer'
+            ? 'flex h-full w-[56px] shrink-0 flex-col items-center gap-1.5 overflow-y-auto bg-[var(--shadow)] py-2'
+            : 'hidden h-full w-[56px] shrink-0 flex-col items-center gap-1.5 bg-[var(--shadow)] py-2 md:flex'
+        }
       >
         <button
           type="button"

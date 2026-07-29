@@ -4,6 +4,7 @@ import { getDb } from './db';
 import {
   canWriteAllSheetFields,
   decodePath,
+  findNearestIndexPath,
   loadBacklinks,
   loadNote,
   loadOutgoingLinks,
@@ -453,5 +454,44 @@ describe('loadOutgoingLinks — visibility filtering', () => {
     seedLink(DEFAULT_GROUP_ID, fromPath, '__deleted-target__.md');
     const rows = loadOutgoingLinks(DEFAULT_GROUP_ID, fromPath, visibilityFor('admin'));
     expect(rows.map((r) => r.to_path)).not.toContain('__deleted-target__.md');
+  });
+});
+
+// ── findNearestIndexPath ─────────────────────────────────────────────────
+// Drives the post-delete redirect target: the note/folder delete routes
+// walk up from the deleted item's parent looking for a surviving
+// index.md, so a displaced viewer lands on a real page instead of a
+// guessed one.
+
+describe('findNearestIndexPath', () => {
+  it('returns the immediate folder index when it exists', () => {
+    seedNote(DEFAULT_GROUP_ID, 'Campaigns/Foo/Characters/index.md');
+    expect(
+      findNearestIndexPath(DEFAULT_GROUP_ID, 'Campaigns/Foo/Characters'),
+    ).toBe('Campaigns/Foo/Characters/index.md');
+  });
+
+  it('walks up to an ancestor index when the immediate folder has none', () => {
+    seedNote(DEFAULT_GROUP_ID, 'Campaigns/Foo/index.md');
+    // Campaigns/Foo/Characters/index.md deliberately not seeded.
+    expect(
+      findNearestIndexPath(DEFAULT_GROUP_ID, 'Campaigns/Foo/Characters'),
+    ).toBe('Campaigns/Foo/index.md');
+  });
+
+  it('returns null when no ancestor has an index (e.g. Excalidraw)', () => {
+    expect(findNearestIndexPath(DEFAULT_GROUP_ID, 'Excalidraw')).toBeNull();
+  });
+
+  it('does not cross into a different group', () => {
+    seedGroup('other-group-for-index-test');
+    seedNote('other-group-for-index-test', 'Campaigns/Foo/index.md');
+    expect(findNearestIndexPath(DEFAULT_GROUP_ID, 'Campaigns/Foo')).toBeNull();
+  });
+
+  it('re-queries live state — a just-deleted index is not returned', () => {
+    const id = seedNote(DEFAULT_GROUP_ID, 'Campaigns/Foo/index.md');
+    getDb().query('DELETE FROM notes WHERE id = ?').run(id);
+    expect(findNearestIndexPath(DEFAULT_GROUP_ID, 'Campaigns/Foo')).toBeNull();
   });
 });

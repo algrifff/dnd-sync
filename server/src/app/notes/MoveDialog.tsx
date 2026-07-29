@@ -6,12 +6,13 @@
 // or /api/folders/move on confirm — the same endpoint the drag-and-drop
 // path uses, so server-side rule enforcement is identical.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, X } from 'lucide-react';
 import type { Tree, TreeDir } from '@/lib/tree';
 import { broadcastTreeChange } from '@/lib/tree-sync';
 import { canDropOn } from '@/lib/move-policy';
+import { useModalA11y } from './dialog/useModalA11y';
 
 type MoveKind = 'file' | 'folder';
 
@@ -35,11 +36,16 @@ export function MoveDialog({
   onMoved: (newPath: string) => void;
 }): React.JSX.Element {
   const router = useRouter();
+  const titleId = useId();
   const [tree, setTree] = useState<Tree | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [filter, setFilter] = useState<string>('');
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const filterRef = useRef<HTMLInputElement>(null);
+
+  useModalA11y(containerRef, filterRef);
 
   useEffect(() => {
     let alive = true;
@@ -143,9 +149,10 @@ export function MoveDialog({
 
   return (
     <div
+      ref={containerRef}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="move-dialog-title"
+      aria-labelledby={titleId}
       className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--ink)]/50 p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -154,7 +161,7 @@ export function MoveDialog({
       <div className="flex w-full max-w-md flex-col overflow-hidden rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] shadow-[0_16px_48px_rgb(var(--ink-rgb)/0.3)]">
         <div className="flex items-center justify-between border-b border-[var(--rule)] px-4 py-3">
           <div className="min-w-0">
-            <h3 id="move-dialog-title" className="text-sm font-semibold text-[var(--ink)]">
+            <h3 id={titleId} className="text-sm font-semibold text-[var(--ink)]">
               Move {src.kind === 'folder' ? 'folder' : 'note'}
             </h3>
             <p className="mt-0.5 truncate text-xs text-[var(--ink-soft)]" title={src.path}>
@@ -173,6 +180,7 @@ export function MoveDialog({
 
         <div className="border-b border-[var(--rule)] px-4 py-2">
           <input
+            ref={filterRef}
             type="text"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}

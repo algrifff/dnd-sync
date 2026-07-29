@@ -38,7 +38,8 @@ export function TabCleaner(): null {
       /* quota / private-mode / malformed — leave it */
     }
 
-    const t = setTimeout(() => router.push('/'), 1500);
+    // replace, not push — this URL is dead, Back shouldn't return to it.
+    const t = setTimeout(() => router.replace('/home'), 1500);
     return () => clearTimeout(t);
   }, [pathname, router]);
 

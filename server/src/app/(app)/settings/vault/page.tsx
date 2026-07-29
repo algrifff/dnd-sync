@@ -115,8 +115,6 @@ export default async function SettingsVaultPage(): Promise<ReactElement> {
         </section>
       )}
 
-      <ImportLauncher csrfToken={session.csrfToken} />
-
       <p className="text-xs text-[var(--ink-soft)]">
         Rate limit: up to 5 uploads per hour per admin. Cap: 500 MB per ZIP, 50 MB per file
         inside. Tool metadata folders (<code>.obsidian/</code>, <code>.trash/</code>) and system files (<code>.DS_Store</code>, <code>Thumbs.db</code>){' '}

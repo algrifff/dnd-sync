@@ -47,7 +47,6 @@ import { getDb } from '../../server/src/lib/db';
 import { writeNote } from '../../server/src/lib/import-apply';
 import { createWorld } from '../../server/src/lib/groups';
 import { ensureDefaultFolders } from '../../server/src/lib/tree';
-import { nameToSlug } from '../../server/src/lib/ai/paths';
 import { assetPath, sniffMime } from '../../server/src/lib/assets';
 import * as YAML from 'yaml';
 import { parseCharacter } from '../../server/src/lib/character-parser';

@@ -1,4 +1,8 @@
-# Build context is the `compendium-ai/` folder (set via railway.toml).
+# Build context is the repo root (see railway.toml — dockerfilePath
+# points here, at server/Dockerfile, but the context itself is the
+# default: repo root). That's why the COPY instructions below reference
+# shared/ and server/ as top-level folders instead of relative to this
+# file's own directory.
 #
 # Three-stage split:
 #

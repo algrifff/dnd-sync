@@ -71,7 +71,14 @@ const COLLAGE: Array<{
   { src: '/landing/Image-duke.png', left: '74%', top: '70%', width: '48%', shadow: true },
 ];
 
-export function LandingClient(): ReactElement {
+export function LandingClient({
+  inviteStatus,
+}: {
+  /** Set when this visitor bounced off an expired/invalid /join/[token]
+   *  link and doesn't have a session (rare — normally that flow forces a
+   *  login first, so the authenticated branch in page.tsx handles it). */
+  inviteStatus?: 'expired' | 'invalid';
+}): ReactElement {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // null during SSR + first paint; set by the layout-effect below using the
   // real viewport width. We don't render the collage until scale is known,
@@ -369,6 +376,13 @@ export function LandingClient(): ReactElement {
         >
           Notes, sheets &amp; stories for your table.
         </p>
+        {inviteStatus && (
+          <p className="pointer-events-auto max-w-xs text-center text-sm text-[var(--wine)]">
+            {inviteStatus === 'expired'
+              ? "That invite link has expired — sign in and ask whoever sent it for a fresh one."
+              : "That invite link isn't valid — sign in and ask whoever sent it to send a new one."}
+          </p>
+        )}
         <Link
           href="/login"
           className="pointer-events-auto mt-4 inline-block rounded-[12px] bg-[var(--ink)] px-10 py-4 text-lg font-semibold text-[var(--parchment)] shadow-[0_2px_0_rgba(0,0,0,0.2)] transition hover:bg-[var(--wine)]"

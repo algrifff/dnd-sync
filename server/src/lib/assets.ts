@@ -401,3 +401,78 @@ export function getAssetByVaultPath(
       .get(groupId, basename) ?? null
   );
 }
+
+/** How many notes in this group still reference the asset — either as
+ *  an embed (pm-schema.ts bakes `"assetId":"<id>"` into content_json)
+ *  or as a portrait/path reference in frontmatter (character-parser.ts
+ *  stores the vault *path*, not the asset id, in `frontmatter.portrait` /
+ *  `sheet.portrait` — see getAssetByVaultPath above). Checked before
+ *  delete so we refuse rather than orphan a live reference. */
+export function assetReferenceCount(
+  id: string,
+  groupId: string,
+  originalPath: string | null,
+): number {
+  const db = getDb();
+  const contentHit = db
+    .query<{ n: number }, [string, string]>(
+      `SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND content_json LIKE ?`,
+    )
+    .get(groupId, `%${id}%`);
+  let count = contentHit?.n ?? 0;
+
+  if (originalPath) {
+    const fmHit = db
+      .query<{ n: number }, [string, string]>(
+        `SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND frontmatter_json LIKE ?`,
+      )
+      .get(groupId, `%${originalPath}%`);
+    count += fmHit?.n ?? 0;
+  }
+  return count;
+}
+
+export type DeleteAssetResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' }
+  | { ok: false; reason: 'in_use'; noteCount: number };
+
+/** Delete an asset row (+ its tags), refusing if any note in the group
+ *  still references it (see assetReferenceCount). The on-disk blob is
+ *  content-addressed and deduped *per group* (UNIQUE(group_id, hash) —
+ *  see storeAssetFromBuffer), so another group can share the same
+ *  hash+mime file; only unlink it from disk once no `assets` row
+ *  anywhere still points at it. */
+export function deleteAsset(id: string, groupId: string): DeleteAssetResult {
+  const db = getDb();
+  const asset = db
+    .query<{ hash: string; mime: string; original_path: string | null }, [string, string]>(
+      'SELECT hash, mime, original_path FROM assets WHERE id = ? AND group_id = ?',
+    )
+    .get(id, groupId);
+  if (!asset) return { ok: false, reason: 'not_found' };
+
+  const noteCount = assetReferenceCount(id, groupId, asset.original_path);
+  if (noteCount > 0) return { ok: false, reason: 'in_use', noteCount };
+
+  db.transaction(() => {
+    db.query('DELETE FROM asset_tags WHERE group_id = ? AND asset_id = ?').run(groupId, id);
+    db.query('DELETE FROM assets WHERE id = ? AND group_id = ?').run(id, groupId);
+  })();
+
+  const stillReferenced = db
+    .query<{ n: number }, [string, string]>(
+      'SELECT COUNT(*) AS n FROM assets WHERE hash = ? AND mime = ?',
+    )
+    .get(asset.hash, asset.mime);
+  if (!stillReferenced || stillReferenced.n === 0) {
+    try {
+      rmSync(assetPath(asset.hash, asset.mime), { force: true });
+    } catch {
+      /* best-effort — an orphaned blob is a disk-space leak, not a
+       * correctness bug, and shouldn't fail the delete the user asked for. */
+    }
+  }
+
+  return { ok: true };
+}

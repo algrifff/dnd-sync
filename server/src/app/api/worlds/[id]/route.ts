@@ -132,7 +132,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
   }
 
   logAudit({
-    action: 'group.switch',
+    action: 'group.settings_update',
     actorId: session.userId,
     groupId: id,
     target: id,
