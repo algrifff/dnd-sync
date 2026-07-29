@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { getDb } from './db';
 import {
+  cleanupExpiredSessions,
   createSession,
   destroySession,
   hashPassword,
@@ -122,6 +123,34 @@ describe('destroySession', () => {
   it('is idempotent on a missing id', () => {
     destroySession('anything');
     destroySession('');
+  });
+});
+
+describe('cleanupExpiredSessions', () => {
+  it('removes only rows whose expires_at has passed, leaving live sessions intact', async () => {
+    const user = await makeUser();
+    const live = createSession({ userId: user.id, groupId: DEFAULT_GROUP_ID });
+    const expired = createSession({ userId: user.id, groupId: DEFAULT_GROUP_ID });
+    getDb().query('UPDATE sessions SET expires_at = ? WHERE id = ?').run(1, expired.id);
+
+    const removed = cleanupExpiredSessions();
+    expect(removed).toBe(1);
+
+    const liveRow = getDb()
+      .query<{ n: number }, [string]>('SELECT COUNT(*) AS n FROM sessions WHERE id = ?')
+      .get(live.id);
+    expect(liveRow?.n).toBe(1);
+
+    const expiredRow = getDb()
+      .query<{ n: number }, [string]>('SELECT COUNT(*) AS n FROM sessions WHERE id = ?')
+      .get(expired.id);
+    expect(expiredRow?.n).toBe(0);
+  });
+
+  it('is a no-op when there is nothing expired', async () => {
+    const user = await makeUser();
+    createSession({ userId: user.id, groupId: DEFAULT_GROUP_ID });
+    expect(cleanupExpiredSessions()).toBe(0);
   });
 });
 

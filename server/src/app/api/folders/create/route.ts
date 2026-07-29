@@ -8,7 +8,7 @@ import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getDb } from '@/lib/db';
+import { getDb, isUniqueConstraintError } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { ensureCampaignForPath } from '@/lib/characters';
 import { ensureIndexNote } from '@/lib/index-notes';
@@ -84,24 +84,37 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const db = getDb();
 
-  // Conflicts: a note or another marker already sitting at this path.
+  // Conflict with an existing note nested under this path. This is a
+  // LIKE-based prefix match against a *different* table, not a key
+  // equality — there's no UNIQUE constraint backing it, so unlike the
+  // marker-vs-marker case below this check can't be made fully
+  // race-free by catching a constraint violation. It narrows the
+  // window; it doesn't close it. (A note landing under this exact path
+  // between this check and the marker INSERT is the residual race.)
   const noteClash = db
     .query<{ n: number }, [string, string]>(
       "SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path LIKE ? || '/%'",
     )
     .get(session.currentGroupId, path);
-  const markerClash = db
-    .query<{ n: number }, [string, string]>(
-      'SELECT COUNT(*) AS n FROM folder_markers WHERE group_id = ? AND path = ?',
-    )
-    .get(session.currentGroupId, path);
-  if ((markerClash?.n ?? 0) > 0 || (noteClash?.n ?? 0) > 0) {
+  if ((noteClash?.n ?? 0) > 0) {
     return rejectFolder(session, parent, 'exists', { error: 'exists', path }, 409);
   }
 
-  db.query(
-    `INSERT INTO folder_markers (group_id, path, created_at) VALUES (?, ?, ?)`,
-  ).run(session.currentGroupId, path, Date.now());
+  // Marker-vs-marker conflicts ARE backed by folder_markers' own
+  // PRIMARY KEY (group_id, path). Attempt the INSERT directly instead
+  // of a separate SELECT — two concurrent requests for the same folder
+  // would otherwise both pass the pre-check and the loser's raw INSERT
+  // would 500 on the constraint violation instead of a clean 409.
+  try {
+    db.query(
+      `INSERT INTO folder_markers (group_id, path, created_at) VALUES (?, ?, ?)`,
+    ).run(session.currentGroupId, path, Date.now());
+  } catch (err) {
+    if (isUniqueConstraintError(err)) {
+      return rejectFolder(session, parent, 'exists', { error: 'exists', path }, 409);
+    }
+    throw err;
+  }
 
   // Register a campaigns row the moment a "Campaigns/<name>" folder
   // exists, so /sessions + /characters dashboards pick it up in

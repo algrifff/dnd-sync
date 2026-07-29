@@ -19,6 +19,7 @@ import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 import { apiErrorResponse } from '@/lib/analytics/api-error';
 import { GM_MODE_COOKIE, isGmModeOn } from '@/lib/gm-mode';
+import { checkChatMessageBudget } from '@/lib/ai/input-limits';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,16 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const body = await parseBody(req);
   if (body instanceof Response) return body;
+
+  // Reject implausibly large client-supplied history BEFORE it reaches
+  // convertToModelMessages()/streamText() — the client replays its whole
+  // conversation from localStorage on every turn, and stopWhen: stepCountIs(8)
+  // below only bounds the tool-call loop, not this input. See
+  // lib/ai/input-limits.ts for the chosen limits and rationale.
+  const budget = checkChatMessageBudget(body.messages);
+  if (!budget.ok) {
+    return json({ error: budget.error, reason: budget.reason }, 400);
+  }
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -133,6 +144,13 @@ export async function POST(req: NextRequest): Promise<Response> {
     messages: modelMessages,
     tools:    getToolsForRole(toolCtx),
     stopWhen: stepCountIs(8),
+    // Abort the provider call if the client disconnects (tab closed, nav
+    // away, connection drop) mid-stream, instead of burning tokens on
+    // output nobody receives. NextRequest extends the standard Fetch
+    // Request, whose `.signal` fires when the underlying connection
+    // closes — verified against ai@6.0.168's streamText signature, which
+    // accepts `abortSignal?: AbortSignal` (node_modules/ai/dist/index.d.ts).
+    abortSignal: req.signal,
     experimental_telemetry: {
       isEnabled: true,
       functionId: 'compendium-chat',

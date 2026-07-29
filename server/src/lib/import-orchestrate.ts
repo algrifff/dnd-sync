@@ -11,16 +11,19 @@
 // flips the job to `waiting_for_answer`, then awaits a Promise resolved
 // by the /api/import/:id/answer endpoint.
 
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import AdmZip from 'adm-zip';
 import { getDb } from './db';
 import {
   getImportJob,
+  importsDir,
   updateImportJob,
   deleteJobZip,
   type ImportJob,
   type ImportStatus,
 } from './imports';
+import { isAnalyseRunning } from './import-analyse';
 import type { ImportPlan } from './import-parse';
 import { writeNote, commitAsset, composeMarkdown } from './import-apply';
 import { runClassify, type ClassifyInput } from './ai/skills/classify';
@@ -50,6 +53,90 @@ import { deriveFolderIndex, allCampaignFoldersInDb } from './campaign-index';
 const CAMPAIGN_SUBFOLDERS = [
   'Characters', 'People', 'Enemies', 'Loot', 'Adventure Log', 'Places', 'Creatures', 'Quests',
 ] as const;
+
+// ── Durability knobs ───────────────────────────────────────────────────
+//
+// Everything an interrupted job needs to be recovered already lives in
+// the `import_jobs` row: `status` says which phase it died in,
+// `plan_json.orchestration` carries the assetMap / entityMap / campaign
+// assignments / conversation history, `raw_zip_path` points at the
+// upload and `updated_at` is stamped by every write the worker makes
+// (so it doubles as a liveness clock). No extra column is needed — see
+// `recoverImportJobs` for how each status is resolved.
+
+/** How long a job may sit in `waiting_for_answer` before we give up on
+ *  the DM. 30 minutes: the question is posed in a modal the DM is
+ *  actively watching, so a reply normally lands in seconds — but people
+ *  get pulled away mid-session, and a short bound would fail imports
+ *  that were only ever going to be a coffee break. Much longer than
+ *  this and the job is holding an open AbortController, a parsed ZIP in
+ *  process memory and the upload on disk hostage to a tab nobody is
+ *  looking at. Override with IMPORT_ANSWER_TIMEOUT_MS. */
+const DEFAULT_ANSWER_TIMEOUT_MS = 30 * 60_000;
+
+/** Age at which an untouched `uploaded` / `ready` job — one nobody ever
+ *  pressed "Smart Import" on — is considered abandoned and cancelled so
+ *  its ZIP can be reclaimed. */
+const DEFAULT_IDLE_JOB_TTL_MS = 7 * 24 * 60 * 60_000;
+
+/** How often the janitor sweeps for stalled jobs + orphaned ZIPs. */
+const DEFAULT_JANITOR_INTERVAL_MS = 5 * 60_000;
+
+/** A ZIP on disk younger than this is never treated as an orphan: the
+ *  upload route writes the bytes *before* inserting the job row, so
+ *  there is a brief window where a perfectly healthy upload has no row
+ *  pointing at it. */
+const ORPHAN_ZIP_GRACE_MS = 10 * 60_000;
+
+/** Persist `orch.entityMap` at least every N writes during the entities
+ *  phase. The map is the resume checkpoint: anything in it is skipped on
+ *  the next attempt, so a smaller number means less re-work after a
+ *  crash and more SQLite writes. 10 is a compromise — at ~1 write per
+ *  note the plan blob is already re-serialised by `setActivity` anyway,
+ *  this just guarantees a floor if that ever stops being true. */
+const ENTITY_CHECKPOINT_EVERY = 10;
+
+/** Statuses that can only exist while an in-process worker owns the job.
+ *  Seeing one of these at boot means the worker died with it. */
+const INTERRUPTED_STATUSES: readonly ImportStatus[] = [
+  'parsing',
+  'analysing',
+  'orchestrating_assets',
+  'orchestrating_campaign',
+  'orchestrating_entities',
+  'orchestrating_quality',
+  'waiting_for_answer',
+];
+
+/** Non-terminal statuses that are a legitimate *resting* state — the job
+ *  is parked waiting for a human to press a button, not for a worker. */
+const IDLE_STATUSES: readonly ImportStatus[] = ['uploaded', 'ready'];
+
+export const INTERRUPTED_REASON =
+  'The server restarted while this import was running. ' +
+  'Nothing further will happen to it — re-upload the vault to try again. ' +
+  'Notes that were already written have been kept.';
+
+export const STALLED_REASON =
+  'Timed out waiting for an answer — the import asked a question and ' +
+  'nobody replied. Re-upload the vault to try again.';
+
+export const IDLE_EXPIRED_REASON =
+  'Abandoned — this upload was never started and has been cleaned up.';
+
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/** Node/Bun timers are unref-able; the DOM lib types them as `number`.
+ *  Unref so a pending timer never holds the process open. */
+function unref(timer: ReturnType<typeof setTimeout>): void {
+  const t = timer as unknown as { unref?: () => void };
+  if (typeof t.unref === 'function') t.unref();
+}
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -106,23 +193,44 @@ export function startOrchestration(jobId: string): void {
   if (inFlight.has(jobId)) return;
   const ctl = new AbortController();
   aborters.set(jobId, ctl);
-  const p = doOrchestrate(jobId, ctl.signal)
+  const p = runOrchestration(jobId, ctl.signal)
     .catch((err: unknown) => {
       if (ctl.signal.aborted) return;
       console.error('[import.orchestrate] unhandled:', err);
-      const job = getImportJob(jobId);
-      const plan = job?.plan as PlanWithOrch | null;
-      updateImportJob(jobId, {
-        status: 'failed',
-        plan: plan ?? undefined,
-        stats: { fatalError: err instanceof Error ? err.message : String(err) },
-      });
+      failImportJob(jobId, err instanceof Error ? err.message : String(err));
     })
     .finally(() => {
       inFlight.delete(jobId);
       aborters.delete(jobId);
     });
   inFlight.set(jobId, p);
+}
+
+/** Flip a job terminal and reclaim its uploaded ZIP.
+ *
+ *  The ZIP is only useful to a running worker; once the job is `failed`
+ *  nothing can read it again (the orchestrate route refuses anything
+ *  that isn't `uploaded`/`ready`), so leaving it on disk under DATA_DIR
+ *  is a pure leak. The plan blob is deliberately left untouched — the
+ *  orchestration state is the post-mortem, and `entityMap` records which
+ *  notes did land. */
+export function failImportJob(
+  jobId: string,
+  reason: string,
+  extra: Record<string, unknown> = {},
+): void {
+  const job = getImportJob(jobId);
+  if (!job) return;
+  deleteJobZip(job);
+  const prev =
+    job.stats && typeof job.stats === 'object'
+      ? (job.stats as Record<string, unknown>)
+      : {};
+  updateImportJob(jobId, {
+    status: 'failed',
+    rawZipPath: null,
+    stats: { ...prev, fatalError: reason, failedAt: Date.now(), ...extra },
+  });
 }
 
 /** Called by the /answer endpoint when the DM submits a reply. */
@@ -149,9 +257,208 @@ export function resolveDmQuestion(jobId: string, reply: string): boolean {
   return true;
 }
 
+// ── Recovery + janitor ─────────────────────────────────────────────────
+//
+// Job state is durable (the `import_jobs` row) but the *worker* is not:
+// it is a Promise in a Map. A crash or redeploy therefore leaves rows in
+// statuses that imply a running worker with no worker behind them.
+//
+// We deliberately do NOT auto-resume those at boot. Resuming means
+// firing off a pile of billed AI calls with no human present, on a job
+// whose owner may have closed the tab hours ago — and the phases differ
+// in how safely they can be re-entered. Failing cleanly with a reason
+// the UI can render is the honest outcome; the entities checkpoint in
+// `runEntitiesPhase` means the notes that did land are kept.
+//
+// Single-process assumption: the app runs as one container (Next.js and
+// the WebSocket server share a port — see `server/server.ts`), so at
+// boot nothing else can legitimately own a job. `recoverImportJobs` is
+// still guarded by the in-process registries so it stays safe to call
+// more than once.
+
+export type ImportRecoveryReport = {
+  /** Jobs that died mid-phase and were flipped to `failed`. */
+  interrupted: string[];
+  /** Never-started uploads past the idle TTL, flipped to `cancelled`. */
+  expired: string[];
+  /** Orphaned ZIP files removed from DATA_DIR/imports. */
+  orphanZips: number;
+};
+
+/** True when an in-process worker currently owns this job. */
+function isWorkerRunning(jobId: string): boolean {
+  return isOrchestrationRunning(jobId) || isAnalyseRunning(jobId);
+}
+
+/** Boot hook: resolve every job left in a non-terminal status.
+ *
+ *  NOTE FOR WIRING: call this once from `server/server.ts` after the DB
+ *  is open and before the HTTP listener starts accepting traffic. */
+export function recoverImportJobs(
+  opts: { now?: number; idleTtlMs?: number } = {},
+): ImportRecoveryReport {
+  const now = opts.now ?? Date.now();
+  const idleTtlMs =
+    opts.idleTtlMs ?? envInt('IMPORT_IDLE_JOB_TTL_MS', DEFAULT_IDLE_JOB_TTL_MS);
+
+  const rows = getDb()
+    .query<{ id: string; status: string; updated_at: number }, []>(
+      `SELECT id, status, updated_at FROM import_jobs
+        WHERE status NOT IN ('applied', 'cancelled', 'failed')`,
+    )
+    .all();
+
+  const report: ImportRecoveryReport = { interrupted: [], expired: [], orphanZips: 0 };
+
+  for (const row of rows) {
+    if (isWorkerRunning(row.id)) continue;
+    const status = row.status as ImportStatus;
+
+    if (INTERRUPTED_STATUSES.includes(status)) {
+      failImportJob(row.id, INTERRUPTED_REASON, {
+        interruptedStatus: status,
+        recoveredAt: now,
+      });
+      report.interrupted.push(row.id);
+      continue;
+    }
+
+    // `uploaded` / `ready` are resting states — someone may still press
+    // the button. Only reclaim them once they are properly stale.
+    if (IDLE_STATUSES.includes(status) && now - row.updated_at > idleTtlMs) {
+      const job = getImportJob(row.id);
+      if (job) deleteJobZip(job);
+      updateImportJob(row.id, {
+        status: 'cancelled',
+        rawZipPath: null,
+        stats: { fatalError: IDLE_EXPIRED_REASON, expiredAt: now },
+      });
+      report.expired.push(row.id);
+    }
+  }
+
+  report.orphanZips = sweepOrphanImportZips({ now });
+
+  if (report.interrupted.length || report.expired.length || report.orphanZips) {
+    console.log(
+      `[import.recovery] ${report.interrupted.length} interrupted, ` +
+        `${report.expired.length} expired, ${report.orphanZips} orphan zips removed`,
+    );
+  }
+  return report;
+}
+
+/** Fail any job that has been sitting in `waiting_for_answer` longer than
+ *  the answer timeout. Complements the in-process timer in `askDmChat`,
+ *  which is lost whenever the worker dies. Returns the ids it failed. */
+export function sweepStalledImportJobs(
+  opts: { now?: number; timeoutMs?: number } = {},
+): string[] {
+  const now = opts.now ?? Date.now();
+  const timeoutMs =
+    opts.timeoutMs ?? envInt('IMPORT_ANSWER_TIMEOUT_MS', DEFAULT_ANSWER_TIMEOUT_MS);
+
+  // `updated_at` is stamped by every worker write. Nothing writes while a
+  // job waits for an answer, so it is exactly when the question was posed.
+  const rows = getDb()
+    .query<{ id: string; updated_at: number }, [number]>(
+      `SELECT id, updated_at FROM import_jobs
+        WHERE status = 'waiting_for_answer' AND updated_at <= ?`,
+    )
+    .all(now - timeoutMs);
+
+  const failed: string[] = [];
+  for (const row of rows) {
+    // Kill the worker first (if this process still has one) so its
+    // pending Promise settles and in-flight fetches are cancelled, then
+    // flip the row terminal. `runOrchestration` bails on `signal.aborted`
+    // before writing any further status, so it cannot resurrect the row.
+    abortOrchestration(row.id);
+    failImportJob(row.id, STALLED_REASON, { stalledAt: now });
+    failed.push(row.id);
+  }
+  return failed;
+}
+
+/** Delete ZIPs under DATA_DIR/imports that no job row points at.
+ *
+ *  Covers the crash-between-write-and-insert window in the upload route
+ *  and any path where a job went terminal without its blob being
+ *  reclaimed. Returns the number of files removed. */
+export function sweepOrphanImportZips(opts: { now?: number } = {}): number {
+  const now = opts.now ?? Date.now();
+  let dir: string;
+  let names: string[];
+  try {
+    dir = importsDir();
+    names = readdirSync(dir);
+  } catch (err) {
+    console.warn('[import.janitor] cannot read imports dir:', err);
+    return 0;
+  }
+
+  const live = new Set<string>();
+  for (const r of getDb()
+    .query<{ p: string }, []>(
+      `SELECT raw_zip_path AS p FROM import_jobs WHERE raw_zip_path IS NOT NULL`,
+    )
+    .all()) {
+    live.add(r.p);
+    // Rows may carry a path written under a different DATA_DIR (dev vs
+    // container). Match on basename too so we never delete a live blob.
+    const base = r.p.split('/').pop();
+    if (base) live.add(base);
+  }
+
+  let removed = 0;
+  for (const name of names) {
+    if (!name.toLowerCase().endsWith('.zip')) continue;
+    const full = join(dir, name);
+    if (live.has(full) || live.has(name)) continue;
+    try {
+      if (now - statSync(full).mtimeMs < ORPHAN_ZIP_GRACE_MS) continue;
+      rmSync(full, { force: true });
+      removed++;
+    } catch {
+      /* best-effort — another process may have won the race */
+    }
+  }
+  return removed;
+}
+
+/** Start the periodic sweep. Returns a stop function.
+ *
+ *  NOTE FOR WIRING: call once from `server/server.ts` alongside
+ *  `recoverImportJobs()`. The timer is unref'd so it never keeps the
+ *  process alive on its own. */
+export function startImportJanitor(
+  opts: { intervalMs?: number } = {},
+): () => void {
+  const intervalMs =
+    opts.intervalMs ?? envInt('IMPORT_JANITOR_INTERVAL_MS', DEFAULT_JANITOR_INTERVAL_MS);
+  const timer = setInterval(() => {
+    try {
+      sweepStalledImportJobs();
+      sweepOrphanImportZips();
+    } catch (err) {
+      console.error('[import.janitor] sweep failed:', err);
+    }
+  }, intervalMs);
+  unref(timer);
+  return (): void => clearInterval(timer);
+}
+
 // ── Worker ─────────────────────────────────────────────────────────────
 
-async function doOrchestrate(jobId: string, signal: AbortSignal): Promise<void> {
+/** Run the orchestration worker to completion.
+ *
+ *  `startOrchestration` is the fire-and-forget wrapper the route uses;
+ *  this is exported so tests — and any future graceful-shutdown path
+ *  that wants to drain in-flight imports — can await the same work. */
+export async function runOrchestration(
+  jobId: string,
+  signal: AbortSignal,
+): Promise<void> {
   const job = getImportJob(jobId);
   if (!job) return;
   const resumable =
@@ -294,6 +601,9 @@ function runAssetsPhase(
   setActivity: (msg: string) => void,
 ): void {
   for (const asset of rawPlan.assets) {
+    // Resume checkpoint: anything already in the asset map was committed
+    // by a previous attempt.
+    if (has(orch.assetMap, asset.basename.toLowerCase())) continue;
     const entry = entryByPath.get(asset.sourcePath);
     if (!entry) continue;
     const folder = asset.mime?.startsWith('image/') ? 'Assets/Portraits' : 'Assets';
@@ -805,7 +1115,23 @@ async function runEntitiesPhase(
 ): Promise<void> {
   const ctx = buildClassifyContext(job, rawPlan, orch);
   const concurrency = 4;
-  const notes = rawPlan.notes;
+
+  // ── Resume checkpoint ────────────────────────────────────────────────
+  //
+  // `orch.entityMap` (sourcePath → vault path) is the durable record of
+  // which source notes already landed. Skipping them is not just a cost
+  // saving: the batch de-duplicator below reserves every path in the map
+  // as "used", so re-processing a note that was already written would
+  // find its own canonical path taken and write a `-2` copy alongside it.
+  // Before this filter, every crash-and-retry duplicated the whole
+  // already-applied prefix of the vault.
+  const notes = rawPlan.notes.filter((n) => !has(orch.entityMap, n.sourcePath));
+  const alreadyWritten = rawPlan.notes.length - notes.length;
+  if (alreadyWritten > 0) {
+    console.log(
+      `[orchestrate.entities] resuming job ${jobId} — skipping ${alreadyWritten}/${rawPlan.notes.length} notes already written`,
+    );
+  }
   let nextIdx = 0;
 
   type ClassifiedNote = {
@@ -926,6 +1252,14 @@ async function runEntitiesPhase(
     Object.values(orch.entityMap), // paths from a resumed partial run
   );
 
+  // Force the entityMap to disk every ENTITY_CHECKPOINT_EVERY writes so
+  // a crash mid-batch loses at most that many notes' worth of progress.
+  let sinceCheckpoint = 0;
+  const checkpoint = (): void => {
+    sinceCheckpoint = 0;
+    updateImportJob(jobId, { plan: { ...rawPlan, orchestration: orch } });
+  };
+
   for (const cn of confident) {
     if (signal.aborted) return;
 
@@ -943,6 +1277,7 @@ async function runEntitiesPhase(
         setActivity(`Merging "${cn.displayName}" into ${assignment.name} index…`);
         mergeIntoIndexNote(job, indexPath, assignment.name, cn.body);
         orch.entityMap[cn.sourcePath] = indexPath;
+        if (++sinceCheckpoint >= ENTITY_CHECKPOINT_EVERY) checkpoint();
       } catch (err) {
         console.error('[orchestrate.entities] merge-into-index failed', indexPath, err);
       }
@@ -984,10 +1319,13 @@ async function runEntitiesPhase(
         noteId: existing?.id,
       });
       orch.entityMap[cn.sourcePath] = targetPath;
+      if (++sinceCheckpoint >= ENTITY_CHECKPOINT_EVERY) checkpoint();
     } catch (err) {
       console.error('[orchestrate.entities] write failed', targetPath, err);
     }
   }
+
+  if (sinceCheckpoint > 0) checkpoint();
 }
 
 // ── Phase 3: Quality ───────────────────────────────────────────────────
@@ -1289,16 +1627,33 @@ async function askDmChat(
     plan: { ...rawPlan, orchestration: orch },
   });
 
+  // Bounded wait. Without this the worker parks on an unresolved
+  // Promise forever if the DM never replies, holding the job in a
+  // non-terminal status, the ZIP on disk and the AbortController in
+  // memory. The janitor sweep (`sweepStalledImportJobs`) is the durable
+  // backstop for the case where the process died and this timer with it.
+  const timeoutMs = envInt('IMPORT_ANSWER_TIMEOUT_MS', DEFAULT_ANSWER_TIMEOUT_MS);
   const reply = await new Promise<string>((resolve, reject) => {
-    pendingAnswers.set(jobId, resolve);
-    signal.addEventListener(
-      'abort',
-      () => {
-        pendingAnswers.delete(jobId);
-        reject(new Error('aborted'));
-      },
-      { once: true },
-    );
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const done = (value: string): void => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      resolve(value);
+    };
+    const fail = (err: Error): void => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      pendingAnswers.delete(jobId);
+      reject(err);
+    };
+
+    pendingAnswers.set(jobId, done);
+    timer = setTimeout(() => fail(new Error(STALLED_REASON)), timeoutMs);
+    unref(timer);
+
+    signal.addEventListener('abort', () => fail(new Error('aborted')), {
+      once: true,
+    });
   });
 
   // Pull the DM's reply (appended to DB by the /answer route) back into
@@ -1630,6 +1985,13 @@ function enrichWithHubLinks(
 
 function slugify(raw: string): string {
   return raw.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/** Own-key check for the JSON-round-tripped checkpoint maps. Plain `in`
+ *  would match inherited keys like `toString`, which are real note
+ *  basenames often enough to matter. */
+function has(map: Record<string, string>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(map, key);
 }
 
 function readTagList(v: unknown): string[] {

@@ -34,6 +34,62 @@ const DEFAULT_CONCURRENCY = 4;
 const DEFAULT_MAX_CALLS = 500;
 const DEFAULT_MAX_TOKENS = 500_000;
 
+// ── Token budget estimation ────────────────────────────────────────────
+//
+// The budget guard has to price a call BEFORE making it. Checking only
+// what has been spent so far lets a single large extract blow past the
+// cap by the entire size of that call — and with IMPORT_CONCURRENCY
+// workers all clearing the same stale check, by that much times N.
+//
+// We do not ship a real tokeniser: a BPE table is megabytes of data for
+// what is a cost guard, not an accounting system. A character estimate
+// is fine as long as it errs high.
+//
+// Calibration: English prose is ~4 chars/token, but import payloads are
+// markdown tables, YAML frontmatter, stat blocks and proper nouns, which
+// tokenise closer to 3. We use 3, add the fixed prompt scaffolding each
+// skill wraps around the note, reserve room for the completion plus the
+// reasoning tokens that are invisible until they are billed, and apply a
+// safety factor on top. Over-estimating costs a few unclassified notes
+// at the tail of a very large import (the DM sees `capHit` and can raise
+// the cap); under-estimating costs real money.
+
+/** Conservative chars-per-token for markdown/YAML import content. */
+const CHARS_PER_TOKEN = 3;
+/** System prompt + context block (known paths, tags, conventions). */
+const PROMPT_OVERHEAD_TOKENS = 2_000;
+/** Completion + reasoning headroom for one structured call. */
+const OUTPUT_RESERVE_TOKENS = 4_000;
+/** Multiplier applied to the whole estimate. */
+const ESTIMATE_SAFETY_FACTOR = 1.25;
+
+/** Upper-bound token cost of one classify/extract call over `contentChars`
+ *  characters of note body. Deliberately pessimistic — see above. */
+export function estimateCallTokens(contentChars: number): number {
+  const input =
+    Math.ceil(Math.max(0, contentChars) / CHARS_PER_TOKEN) + PROMPT_OVERHEAD_TOKENS;
+  return Math.ceil((input + OUTPUT_RESERVE_TOKENS) * ESTIMATE_SAFETY_FACTOR);
+}
+
+/** Total tokens billed so far on this job. */
+export function tokensSpent(stats: Pick<
+  AnalyseStats,
+  'inputTokens' | 'outputTokens' | 'reasoningTokens'
+>): number {
+  return stats.inputTokens + stats.outputTokens + stats.reasoningTokens;
+}
+
+/** True when a call estimated at `estimate` tokens still fits in the cap.
+ *  The estimate itself is the headroom: we refuse the call whose own
+ *  projected cost would cross `maxTokens`, rather than noticing after. */
+export function hasTokenBudget(
+  spent: number,
+  estimate: number,
+  maxTokens: number,
+): boolean {
+  return spent + estimate <= maxTokens;
+}
+
 /** Per-note shape stored back into plan.notes after analyse. We
  *  extend the ParsedNote with the AI's suggestion + an `accepted`
  *  flag the review UI drives. */
@@ -81,7 +137,7 @@ export function runAnalyseInBackground(jobId: string): void {
   if (inFlight.has(jobId)) return;
   const ctl = new AbortController();
   aborters.set(jobId, ctl);
-  const p = doAnalyse(jobId, ctl.signal)
+  const p = runAnalyse(jobId, ctl.signal)
     .catch((err) => {
       console.error('[import.analyse] unhandled:', err);
       updateImportJob(jobId, {
@@ -100,7 +156,10 @@ export function runAnalyseInBackground(jobId: string): void {
 
 // ── Worker ─────────────────────────────────────────────────────────────
 
-async function doAnalyse(jobId: string, signal: AbortSignal): Promise<void> {
+/** Run the analyse pass to completion. `runAnalyseInBackground` is the
+ *  fire-and-forget wrapper the route uses; this is exported so tests can
+ *  await the same work. */
+export async function runAnalyse(jobId: string, signal: AbortSignal): Promise<void> {
   const job = getImportJob(jobId);
   if (!job) return;
   if (job.status !== 'uploaded' && job.status !== 'analysing') return;
@@ -160,16 +219,20 @@ async function doAnalyse(jobId: string, signal: AbortSignal): Promise<void> {
         stats.capHit = true;
         return;
       }
-      const tokensSoFar =
-        stats.inputTokens + stats.outputTokens + stats.reasoningTokens;
-      if (tokensSoFar >= maxTokens) {
-        stats.capHit = true;
-        return;
-      }
       const idx = nextIdx++;
       if (idx >= planned.length) return;
 
       const note = planned[idx]!;
+
+      // Budget check BEFORE the call, priced on the call we are about to
+      // make. The note keeps analyseStatus 'pending' so the review UI can
+      // tell "we ran out of budget here" from "this one failed".
+      const estimate = estimateCallTokens(note.content.length);
+      if (!hasTokenBudget(tokensSpent(stats), estimate, maxTokens)) {
+        stats.capHit = true;
+        return;
+      }
+
       try {
         const classifyInput: ClassifyInput = {
           filename: note.basename,
@@ -189,8 +252,12 @@ async function doAnalyse(jobId: string, signal: AbortSignal): Promise<void> {
         // kind=lore (no structured sheet). Call the specific
         // extractor so each one can carry its own narrow prompt.
         let extract: { result: ExtractResult; usage: TokenUsage; costUsd: number } | null = null;
+        // Re-check both caps against the freshly-billed classify usage —
+        // the extract is a second call of comparable size and must be
+        // priced on its own before it runs.
         if (
-          stats.callCount < envInt('IMPORT_MAX_AI_CALLS', DEFAULT_MAX_CALLS)
+          stats.callCount < maxCalls &&
+          hasTokenBudget(tokensSpent(stats), estimate, maxTokens)
         ) {
           const extractInput: ExtractInput = {
             ...classifyInput,
@@ -202,6 +269,8 @@ async function doAnalyse(jobId: string, signal: AbortSignal): Promise<void> {
             extract = await extractor(extractInput, { signal });
             addUsage(stats, extract.usage, extract.costUsd);
           }
+        } else {
+          stats.capHit = true;
         }
 
         const merged: ImportClassifyResult = {

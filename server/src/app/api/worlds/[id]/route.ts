@@ -10,7 +10,7 @@ import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { deleteWorld, setWorldFeatures } from '@/lib/groups';
-import { setActivePersonality } from '@/lib/ai/personalities';
+import { DEFAULT_PERSONALITY, getPersonality, setActivePersonality } from '@/lib/ai/personalities';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,46 +69,66 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
     return json({ error: 'invalid_body', detail: 'Nothing to update' }, 400);
   }
 
-  if (body.name !== undefined) {
-    db.query('UPDATE groups SET name = ? WHERE id = ?').run(body.name, id);
+  // Validate every referenced id BEFORE any write. Previously each
+  // field applied its own independent UPDATE statement; if an early
+  // field succeeded and a later one referenced an unknown id
+  // (personality / campaign), the handler returned 404 with the
+  // earlier writes already committed — the client saw an error while
+  // the world had, in fact, been partially renamed. Resolving all
+  // references up front means a 404 here is returned before anything
+  // is written.
+  if (
+    body.activePersonalityId !== undefined &&
+    body.activePersonalityId !== null &&
+    body.activePersonalityId !== DEFAULT_PERSONALITY.id &&
+    !getPersonality(id, body.activePersonalityId)
+  ) {
+    return json({ error: 'not_found', detail: 'Unknown personality for this world.' }, 404);
   }
-  if (body.headerColor !== undefined) {
-    db.query('UPDATE groups SET header_color = ? WHERE id = ?').run(body.headerColor, id);
+  if (body.activeCampaignSlug !== undefined && body.activeCampaignSlug !== null) {
+    const campaign = db
+      .query<{ slug: string }, [string, string]>(
+        'SELECT slug FROM campaigns WHERE group_id = ? AND slug = ?',
+      )
+      .get(id, body.activeCampaignSlug);
+    if (!campaign) {
+      return json({ error: 'not_found', detail: 'Unknown campaign for this world.' }, 404);
+    }
   }
-  if (body.activePersonalityId !== undefined) {
-    const ok = setActivePersonality(id, body.activePersonalityId);
-    if (!ok) {
-      return json(
-        { error: 'not_found', detail: 'Unknown personality for this world.' },
-        404,
+
+  // Every reference is now known-good — apply all fields as a single
+  // transaction so an unrelated failure partway through (rather than a
+  // validation failure, already ruled out above) can't leave a partial
+  // write either. db.transaction() callbacks run synchronously on both
+  // adapters; nothing in this block awaits.
+  db.transaction(() => {
+    if (body.name !== undefined) {
+      db.query('UPDATE groups SET name = ? WHERE id = ?').run(body.name, id);
+    }
+    if (body.headerColor !== undefined) {
+      db.query('UPDATE groups SET header_color = ? WHERE id = ?').run(body.headerColor, id);
+    }
+    if (body.activePersonalityId !== undefined) {
+      setActivePersonality(id, body.activePersonalityId);
+    }
+    if (body.activeCampaignSlug !== undefined) {
+      db.query('UPDATE groups SET active_campaign_slug = ? WHERE id = ?').run(
+        body.activeCampaignSlug,
+        id,
       );
     }
-  }
-  if (body.activeCampaignSlug !== undefined) {
-    if (body.activeCampaignSlug !== null) {
-      const campaign = db
-        .query<{ slug: string }, [string, string]>(
-          'SELECT slug FROM campaigns WHERE group_id = ? AND slug = ?',
-        )
-        .get(id, body.activeCampaignSlug);
-      if (!campaign) {
-        return json({ error: 'not_found', detail: 'Unknown campaign for this world.' }, 404);
-      }
+    if (body.features !== undefined) {
+      setWorldFeatures(id, body.features);
     }
-    db.query('UPDATE groups SET active_campaign_slug = ? WHERE id = ?').run(
-      body.activeCampaignSlug,
-      id,
-    );
+  })();
+
+  if (body.activeCampaignSlug !== undefined) {
     // The sidebar reads active_campaign_slug from the (app)/(content) layout,
     // a different segment from /settings/world. router.refresh() on the client
     // only revalidates the current route, so the parent layout's cached RSC
     // payload kept the stale slug in production. Invalidate the whole layout
     // tree so any segment that reads this value re-renders on next navigation.
     revalidatePath('/', 'layout');
-  }
-
-  if (body.features !== undefined) {
-    setWorldFeatures(id, body.features);
   }
 
   logAudit({
