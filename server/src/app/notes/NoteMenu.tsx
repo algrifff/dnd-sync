@@ -1,14 +1,18 @@
 'use client';
 
-// Tiny "…" menu next to the breadcrumb on each note page. Two
-// actions: Duplicate (copies to "<name> (copy).md" and navigates
-// there) and Delete (confirms, removes, navigates home). Uses the
-// session's CSRF token for the multipart-free JSON POSTs.
+// Tiny "…" menu next to the breadcrumb on each note page. Actions:
+// Duplicate (copies to "<name> (copy).md" and navigates there),
+// Promote (GM-only, styled destination-path prompt instead of a native
+// prompt()), Mark/Unmark DM-only, and Delete (styled confirm instead of
+// a native confirm(), removes, navigates home). Uses the session's CSRF
+// token for the multipart-free JSON POSTs.
 
-import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { MoreHorizontal, Copy, Trash2, EyeOff, Eye, Send } from 'lucide-react';
 import { broadcastTreeChange } from '@/lib/tree-sync';
+import { ConfirmDialog } from './dialog/ConfirmDialog';
+import { PromptDialog } from './dialog/PromptDialog';
 
 export function NoteMenu({
   path,
@@ -26,9 +30,13 @@ export function NoteMenu({
   isAdmin?: boolean;
 }): React.JSX.Element {
   const router = useRouter();
+  const deleteTitleId = useId();
+  const promoteTitleId = useId();
   const [open, setOpen] = useState<boolean>(false);
   const [pending, startTransition] = useTransition();
   const [dmState, setDmState] = useState<boolean>(dmOnly);
+  const [showDelete, setShowDelete] = useState<boolean>(false);
+  const [promoteMode, setPromoteMode] = useState<'copy' | 'move' | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -102,70 +110,60 @@ export function NoteMenu({
     });
   }, [csrfToken, path, router, dmState]);
 
-  const promote = useCallback(
-    (mode: 'copy' | 'move') => {
-      setOpen(false);
-      const dest = prompt(
-        `Promote this note to players. Destination path:`,
-        path,
-      );
-      if (!dest) return;
-      const trimmed = dest.trim();
-      if (!trimmed) return;
-      startTransition(async () => {
-        try {
-          const res = await fetch('/api/notes/promote', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-CSRF-Token': csrfToken,
-            },
-            body: JSON.stringify({ fromPath: path, toPath: trimmed, mode }),
-          });
-          const body = await res.json().catch(() => ({}));
-          if (!res.ok || !body.ok) {
-            alert(body.error ?? `Promote failed (HTTP ${res.status})`);
-            return;
-          }
-          if (mode === 'move') {
-            // The current note is no longer in the GM namespace —
-            // navigate to wherever it landed (player view).
-            router.push('/notes/' + body.path.split('/').map(encodeURIComponent).join('/'));
-          }
-          router.refresh();
-          broadcastTreeChange();
-        } catch (err) {
-          alert(err instanceof Error ? err.message : 'network error');
-        }
+  const requestPromote = useCallback((mode: 'copy' | 'move') => {
+    setOpen(false);
+    setPromoteMode(mode);
+  }, []);
+
+  const submitPromote = useCallback(
+    async (toPath: string): Promise<string | void> => {
+      const mode = promoteMode;
+      if (!mode) return;
+      const res = await fetch('/api/notes/promote', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+        body: JSON.stringify({ fromPath: path, toPath, mode }),
       });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.ok) {
+        return body.error ?? `Promote failed (HTTP ${res.status})`;
+      }
+      setPromoteMode(null);
+      if (mode === 'move') {
+        // The current note is no longer in the GM namespace —
+        // navigate to wherever it landed (player view).
+        router.push('/notes/' + body.path.split('/').map(encodeURIComponent).join('/'));
+      }
+      router.refresh();
+      broadcastTreeChange();
     },
-    [csrfToken, path, router],
+    [csrfToken, path, promoteMode, router],
   );
 
-  const destroy = useCallback(() => {
+  const requestDelete = useCallback(() => {
     setOpen(false);
-    if (!confirm(`Delete "${path}"? This can't be undone.`)) return;
-    startTransition(async () => {
-      try {
-        const res = await fetch(
-          '/api/notes/' + path.split('/').map(encodeURIComponent).join('/'),
-          {
-            method: 'DELETE',
-            headers: { 'X-CSRF-Token': csrfToken },
-          },
-        );
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok || !body.ok) {
-          alert(body.error ?? `Delete failed (HTTP ${res.status})`);
-          return;
-        }
-        router.push('/');
-        router.refresh();
-        broadcastTreeChange();
-      } catch (err) {
-        alert(err instanceof Error ? err.message : 'network error');
-      }
-    });
+    setShowDelete(true);
+  }, []);
+
+  const submitDelete = useCallback(async (): Promise<string | void> => {
+    const res = await fetch(
+      '/api/notes/' + path.split('/').map(encodeURIComponent).join('/'),
+      {
+        method: 'DELETE',
+        headers: { 'X-CSRF-Token': csrfToken },
+      },
+    );
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.ok) {
+      return body.error ?? `Delete failed (HTTP ${res.status})`;
+    }
+    setShowDelete(false);
+    router.push('/');
+    router.refresh();
+    broadcastTreeChange();
   }, [csrfToken, path, router]);
 
   return (
@@ -192,13 +190,13 @@ export function NoteMenu({
           {isAdmin && gmOnly && (
             <>
               <MenuItem
-                onClick={() => promote('copy')}
+                onClick={() => requestPromote('copy')}
                 icon={<Send size={14} aria-hidden />}
               >
                 Promote (copy to players)
               </MenuItem>
               <MenuItem
-                onClick={() => promote('move')}
+                onClick={() => requestPromote('move')}
                 icon={<Send size={14} aria-hidden />}
               >
                 Promote (move to players)
@@ -219,13 +217,43 @@ export function NoteMenu({
           </MenuItem>
           <div className="h-px bg-[var(--rule)]" />
           <MenuItem
-            onClick={destroy}
+            onClick={requestDelete}
             icon={<Trash2 size={14} aria-hidden />}
             tone="danger"
           >
             Delete
           </MenuItem>
         </div>
+      )}
+      {showDelete && (
+        <ConfirmDialog
+          titleId={deleteTitleId}
+          title="Delete note"
+          tone="danger"
+          confirmLabel="Delete"
+          confirmingLabel="Deleting…"
+          description={
+            <p>
+              Are you sure you want to delete <span className="font-semibold">{path}</span>?
+              This can&rsquo;t be undone.
+            </p>
+          }
+          onClose={() => setShowDelete(false)}
+          onConfirm={submitDelete}
+        />
+      )}
+      {promoteMode && (
+        <PromptDialog
+          titleId={promoteTitleId}
+          title="Promote to players"
+          description="Copies or moves this note out of the GM namespace so players can see it. Destination path:"
+          label="Destination path"
+          initialValue={path}
+          submitLabel={promoteMode === 'move' ? 'Move' : 'Copy'}
+          submittingLabel={promoteMode === 'move' ? 'Moving…' : 'Copying…'}
+          onClose={() => setPromoteMode(null)}
+          onSubmit={submitPromote}
+        />
       )}
     </div>
   );

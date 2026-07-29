@@ -86,7 +86,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   })();
 
   logAudit({
-    action: 'note.create', // reuse — we don't have a note.update action yet
+    action: 'note.tags_update',
     actorId: session.userId,
     groupId: session.currentGroupId,
     target: body.path,

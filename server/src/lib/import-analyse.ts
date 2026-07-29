@@ -29,6 +29,7 @@ import type { ImportClassifyResult } from './ai/skills/types';
 import type { TokenUsage } from './ai/pricing';
 import { listCampaigns } from './characters';
 import { getDb } from './db';
+import { slugify } from './compendium';
 
 const DEFAULT_CONCURRENCY = 4;
 const DEFAULT_MAX_CALLS = 500;
@@ -444,14 +445,6 @@ function pickCampaignFromPaths(paths: string[]): string | null {
     }
   }
   return null;
-}
-
-function slugify(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
 }
 
 function envInt(name: string, fallback: number): number {

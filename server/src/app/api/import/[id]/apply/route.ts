@@ -68,6 +68,7 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
       200,
     );
   } catch (err) {
+    console.error('[import/apply] unexpected:', err);
     updateImportJob(id, {
       status: 'failed',
       stats: {
@@ -85,13 +86,11 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
         duration_ms: Date.now() - startedAt,
       },
     });
-    return json(
-      {
-        error: 'apply_failed',
-        message: err instanceof Error ? err.message : String(err),
-      },
-      500,
-    );
+    // 500-class unexpected failure — the analytics event above still
+    // carries the real message for our own observability; the client
+    // only gets a generic code (see .claude/rules/backend.md "Error
+    // Handling"). job.stats.applyError likewise stays server-side.
+    return json({ error: 'apply_failed' }, 500);
   }
 }
 

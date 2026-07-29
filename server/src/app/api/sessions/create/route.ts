@@ -26,6 +26,7 @@ import { logAudit } from '@/lib/audit';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { getTemplate } from '@/lib/templates';
 import { generateSessionTitle } from '@/lib/session-title';
+import { slugify } from '@/lib/compendium';
 
 export const dynamic = 'force-dynamic';
 
@@ -152,14 +153,6 @@ export async function POST(req: NextRequest): Promise<Response> {
   });
 
   return json({ ok: true, path }, 201);
-}
-
-function slugify(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
 }
 
 function json(body: unknown, status: number): Response {

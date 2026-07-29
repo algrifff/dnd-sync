@@ -32,4 +32,25 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Deliberately plain CommonJS — see the file header. It's the
+    // Railway-shell fallback for apply-bundle.ts and must keep running
+    // under plain `node` with no TS/path-alias resolution, so it can't
+    // switch to ESM imports. Scope the Node globals + require() carve-out
+    // to just this script rather than loosening the rule project-wide.
+    files: ['scripts/main-notes-import/*.cjs'],
+    languageOptions: {
+      globals: {
+        require: 'readonly',
+        module: 'readonly',
+        process: 'readonly',
+        console: 'readonly',
+        Buffer: 'readonly',
+        __dirname: 'readonly',
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
 );

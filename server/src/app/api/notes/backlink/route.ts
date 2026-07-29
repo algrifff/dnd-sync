@@ -46,6 +46,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   // Verify both notes exist in this group.
   if (!loadNote(session.currentGroupId, fromPath)) return json({ error: 'from_not_found' }, 404);
+  if (!loadNote(session.currentGroupId, toPath)) return json({ error: 'to_not_found' }, 404);
 
   getDb()
     .query(

@@ -331,8 +331,9 @@ All routes live under `/api/`. ~70 endpoints; grouped:
 |-------|---------------|
 | Health | `GET /api/health` |
 | Auth / profile | `POST /api/sessions/create`, `POST /api/sessions/end`, `GET /api/profile`, `POST /api/profile/password`, `POST /api/profile/avatar` |
-| Notes | `GET /api/notes/[...path]`, `POST /api/notes/create`, `DELETE /api/notes/[...path]`, `POST /api/notes/move`, `POST /api/notes/duplicate`, `POST /api/notes/visibility`, `POST /api/notes/sheet`, `POST /api/notes/excalidraw-scene` |
-| Search | `GET /api/ui/search` |
+| Notes | `GET /api/notes/[...path]`, `POST /api/notes/create`, `DELETE /api/notes/[...path]`, `POST /api/notes/move`, `POST /api/notes/duplicate`, `POST /api/notes/visibility`, `POST /api/notes/sheet`, `POST /api/notes/excalidraw-scene`, `GET /api/preview/[...path]` (hover popover payload) |
+| Search | `GET /api/ui/search`, `GET /api/compendium/search` (cross-world rules library typeahead) |
+| Templates | `GET /api/templates`, `GET /api/templates/[kind]` |
 | Worlds (groups) | `GET /api/worlds`, `POST /api/worlds`, `GET /api/worlds/active`, `PATCH /api/worlds/[id]`, `POST /api/worlds/[id]/invite`, `POST /api/worlds/[id]/transfer`, `GET /api/worlds/[id]/members`, `GET /api/worlds/[id]/personalities` |
 | Campaigns | `POST /api/campaigns/reorder`, `DELETE /api/campaigns/delete`, `POST /api/worlds/[id]/campaigns/[slug]/join` |
 | Folders | `POST /api/folders/create`, `POST /api/folders/move`, `DELETE /api/folders/delete` |

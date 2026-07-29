@@ -3,16 +3,23 @@
 // "…" affordance on each tree row. Opens a tiny menu with Rename /
 // Duplicate / Delete. Rename and delete always apply; duplicate is
 // only meaningful for files (the existing /api/notes/duplicate
-// endpoint doesn't yet copy folder trees). All handlers fire through
-// fetch + router.refresh and surface errors via alert().
+// endpoint doesn't yet copy folder trees). Duplicate/move/transfer
+// failures still surface via alert() (low blast radius, rare path);
+// delete — the highest blast-radius action here, especially for
+// folders, which cascade an arbitrary number of nested notes,
+// characters, and assets — goes through the shared ConfirmDialog
+// (file) / FolderDeleteDialog (folder, shows counts) instead of a
+// native confirm().
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MoreHorizontal, Pencil, Copy, Trash2, FolderInput, UserPlus } from 'lucide-react';
 import { broadcastTreeChange } from '@/lib/tree-sync';
 import { isDraggableSource } from '@/lib/move-policy';
 import { MoveDialog } from './MoveDialog';
 import { TransferCharacterDialog } from './TransferCharacterDialog';
+import { ConfirmDialog } from './dialog/ConfirmDialog';
+import { FolderDeleteDialog } from './dialog/FolderDeleteDialog';
 
 type Props = {
   kind: 'file' | 'folder';
@@ -42,10 +49,12 @@ export function RowMenu({
   activePath,
 }: Props): React.JSX.Element {
   const router = useRouter();
+  const titleId = useId();
   const [open, setOpen] = useState<boolean>(false);
   const [dropUp, setDropUp] = useState<boolean>(false);
   const [showMove, setShowMove] = useState<boolean>(false);
   const [showTransfer, setShowTransfer] = useState<boolean>(false);
+  const [showDelete, setShowDelete] = useState<boolean>(false);
   const ref = useRef<HTMLDivElement>(null);
 
   const movable = isDraggableSource({ kind, path });
@@ -97,73 +106,26 @@ export function RowMenu({
     }
   }, [csrfToken, path, router]);
 
-  const destroy = useCallback(async () => {
-    setOpen(false);
-
-    // After deletion, if the user is viewing the deleted note (or a note
-    // inside the deleted folder), redirect them to the world home to avoid a 404.
+  // After deletion, if the user is viewing the deleted note (or a note
+  // inside the deleted folder), redirect them to the world home to avoid
+  // a 404; otherwise just refresh the tree in place.
+  const afterDelete = useCallback((): void => {
+    setShowDelete(false);
     const activeIsAffected =
       activePath != null &&
       (activePath === path || activePath.startsWith(path + '/'));
-    const worldHome = '/notes/' + encodeURIComponent(path.split('/')[0] ?? '');
-
-    if (kind === 'file') {
-      if (!confirm(`Delete "${path}"? This can't be undone.`)) return;
-      try {
-        const res = await fetch(
-          '/api/notes/' + path.split('/').map(encodeURIComponent).join('/'),
-          {
-            method: 'DELETE',
-            headers: { 'X-CSRF-Token': csrfToken },
-          },
-        );
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok || !body.ok) {
-          alert(body.error ?? `Delete failed (HTTP ${res.status})`);
-          return;
-        }
-        broadcastTreeChange();
-        if (activeIsAffected) {
-          router.push(worldHome);
-        } else {
-          router.refresh();
-        }
-      } catch (err) {
-        alert(err instanceof Error ? err.message : 'network error');
-      }
+    if (activeIsAffected) {
+      const worldHome = '/notes/' + encodeURIComponent(path.split('/')[0] ?? '');
+      router.push(worldHome);
     } else {
-      if (
-        !confirm(
-          `Delete folder "${path}" and everything inside it? This can't be undone.`,
-        )
-      ) {
-        return;
-      }
-      try {
-        const res = await fetch('/api/folders/delete', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': csrfToken,
-          },
-          body: JSON.stringify({ path }),
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok || !body.ok) {
-          alert(body.error ?? `Delete failed (HTTP ${res.status})`);
-          return;
-        }
-        broadcastTreeChange();
-        if (activeIsAffected) {
-          router.push(worldHome);
-        } else {
-          router.refresh();
-        }
-      } catch (err) {
-        alert(err instanceof Error ? err.message : 'network error');
-      }
+      router.refresh();
     }
-  }, [activePath, csrfToken, kind, path, router]);
+  }, [activePath, path, router]);
+
+  const requestDelete = useCallback(() => {
+    setOpen(false);
+    setShowDelete(true);
+  }, []);
 
   return (
     <div ref={ref} className="relative">
@@ -223,10 +185,49 @@ export function RowMenu({
             </MenuItem>
           )}
           <div className="h-px bg-[var(--rule)]" />
-          <MenuItem onClick={destroy} icon={<Trash2 size={13} aria-hidden />} tone="danger">
+          <MenuItem onClick={requestDelete} icon={<Trash2 size={13} aria-hidden />} tone="danger">
             Delete
           </MenuItem>
         </div>
+      )}
+      {showDelete && kind === 'file' && (
+        <ConfirmDialog
+          titleId={titleId}
+          title="Delete note"
+          tone="danger"
+          confirmLabel="Delete"
+          confirmingLabel="Deleting…"
+          description={
+            <p>
+              Are you sure you want to delete <span className="font-semibold">{path}</span>?
+              This can&rsquo;t be undone.
+            </p>
+          }
+          onClose={() => setShowDelete(false)}
+          onConfirm={async () => {
+            const res = await fetch(
+              '/api/notes/' + path.split('/').map(encodeURIComponent).join('/'),
+              {
+                method: 'DELETE',
+                headers: { 'X-CSRF-Token': csrfToken },
+              },
+            );
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok || !body.ok) {
+              return body.error ?? `Delete failed (HTTP ${res.status})`;
+            }
+            broadcastTreeChange();
+            afterDelete();
+          }}
+        />
+      )}
+      {showDelete && kind === 'folder' && (
+        <FolderDeleteDialog
+          path={path}
+          csrfToken={csrfToken}
+          onClose={() => setShowDelete(false)}
+          onDeleted={afterDelete}
+        />
       )}
       {showMove && (
         <MoveDialog

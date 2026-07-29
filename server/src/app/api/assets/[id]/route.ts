@@ -8,7 +8,9 @@ import { stat } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
-import { getAssetById, assetPath } from '@/lib/assets';
+import { verifyCsrf } from '@/lib/csrf';
+import { getAssetById, assetPath, deleteAsset } from '@/lib/assets';
+import { logAudit } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,6 +75,59 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
       ...baseHeaders,
       'Content-Length': String(diskSize),
     },
+  });
+}
+
+// DELETE /api/assets/<id> — remove an asset. Gated the same way the
+// gallery's upload button already is: viewers cannot mutate, only
+// editor/admin. Refuses (409) if any note in the group still embeds or
+// references it, rather than silently orphaning a live reference.
+export async function DELETE(req: NextRequest, ctx: RouteCtx): Promise<Response> {
+  const session = requireSession(req);
+  if (session instanceof Response) return session;
+
+  const csrf = verifyCsrf(req, session);
+  if (csrf) return csrf;
+
+  if (session.role === 'viewer') {
+    return json({ error: 'forbidden' }, 403);
+  }
+
+  const { id } = await ctx.params;
+  if (!id || !/^[a-zA-Z0-9-]+$/.test(id)) {
+    return json({ error: 'invalid_id' }, 400);
+  }
+
+  const asset = getAssetById(id, session.currentGroupId);
+  if (!asset) return json({ error: 'not_found' }, 404);
+
+  const result = deleteAsset(id, session.currentGroupId);
+  if (!result.ok) {
+    if (result.reason === 'not_found') return json({ error: 'not_found' }, 404);
+    return json(
+      {
+        error: 'asset_in_use',
+        reason: `still referenced by ${result.noteCount} note${result.noteCount === 1 ? '' : 's'} — remove the embed or portrait reference first`,
+      },
+      409,
+    );
+  }
+
+  logAudit({
+    action: 'asset.delete',
+    actorId: session.userId,
+    groupId: session.currentGroupId,
+    target: id,
+    details: { mime: asset.mime, size: asset.size, originalName: asset.original_name },
+  });
+
+  return json({ ok: true });
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
   });
 }
 

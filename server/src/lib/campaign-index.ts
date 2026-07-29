@@ -25,6 +25,7 @@ import { extractPlaintext, type PmNode } from './md-to-pm';
 import { closeDocumentConnections } from '@/collab/server';
 import { ensureIndexNote } from './index-notes';
 import { rebuildYjsState } from './yjs-rebuild';
+import { slugify } from './compendium';
 
 /** Callout title marker — used both as the user-visible heading and as
  *  the detection sentinel when we look for the managed block. */
@@ -46,14 +47,6 @@ const CANONICAL_SUBFOLDERS = new Set(
     'Quests',
   ].map((s) => s.toLowerCase()),
 );
-
-function slugify(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
 
 /** Tags we automatically apply to a folder's index.md. The folder's
  *  own slugified name is always included; canonical campaign

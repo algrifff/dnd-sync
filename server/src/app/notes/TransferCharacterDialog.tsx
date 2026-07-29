@@ -4,8 +4,9 @@
 // member. Fetches the member list from GET /api/worlds/[id]/members, then
 // POSTs to /api/notes/assign-player on confirm.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Loader2, UserRound, X } from 'lucide-react';
+import { useModalA11y } from './dialog/useModalA11y';
 
 type Member = {
   id: string;
@@ -27,11 +28,15 @@ export function TransferCharacterDialog({
   onClose: () => void;
   onTransferred: () => void;
 }): React.JSX.Element {
+  const titleId = useId();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useModalA11y(containerRef);
 
   useEffect(() => {
     let alive = true;
@@ -99,9 +104,10 @@ export function TransferCharacterDialog({
 
   return (
     <div
+      ref={containerRef}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="transfer-dialog-title"
+      aria-labelledby={titleId}
       className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--ink)]/50 p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -112,7 +118,7 @@ export function TransferCharacterDialog({
         <div className="flex items-center justify-between border-b border-[var(--rule)] px-4 py-3">
           <div className="min-w-0">
             <h3
-              id="transfer-dialog-title"
+              id={titleId}
               className="text-sm font-semibold text-[var(--ink)]"
             >
               Transfer character

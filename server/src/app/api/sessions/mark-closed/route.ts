@@ -9,6 +9,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
+import { loadNote } from '@/lib/notes';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 import { apiErrorResponse } from '@/lib/analytics/api-error';
@@ -34,6 +35,22 @@ export async function POST(req: NextRequest): Promise<Response> {
       body = Body.parse(await req.json());
     } catch {
       return json({ error: 'invalid_body' }, 400);
+    }
+
+    // Mirror /api/sessions/end's guard: a note must actually exist at
+    // this path and be kind=session before we upsert a session_notes
+    // row for it. Without this, any caller can create session_notes
+    // rows keyed on a nonexistent path.
+    const note = loadNote(session.currentGroupId, body.sessionPath);
+    if (!note) return json({ error: 'not_found' }, 404);
+    let fm: Record<string, unknown>;
+    try {
+      fm = JSON.parse(note.frontmatter_json) as Record<string, unknown>;
+    } catch {
+      return json({ error: 'invalid_note', reason: 'cannot parse frontmatter' }, 400);
+    }
+    if (fm.kind !== 'session') {
+      return json({ error: 'not_a_session', reason: 'note is not a session kind' }, 400);
     }
 
     const now = Date.now();

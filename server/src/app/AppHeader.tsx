@@ -12,6 +12,7 @@ import { Settings2 } from 'lucide-react';
 import { PresenceClient, type Me } from './PresenceClient';
 import { WorldSearchBar } from './WorldSearchBar';
 import { GmModeToggle } from './GmModeToggle';
+import { MobileNavToggle } from './MobileNavToggle';
 import { getWorldHeader } from '@/lib/groups';
 import { logoutAction } from './login/actions';
 
@@ -43,8 +44,10 @@ export function AppHeader({
   return (
     <header className="surface-paper grid h-14 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-[var(--rule)] bg-[var(--parchment-sunk)] px-4">
 
-      {/* ── Left: gear → title → avatars ── */}
+      {/* ── Left: hamburger (mobile) → gear → title → avatars ── */}
       <div className="flex min-w-0 items-center gap-2.5">
+
+        <MobileNavToggle />
 
         {role === 'admin' && (
           <Link

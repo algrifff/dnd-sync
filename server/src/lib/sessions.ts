@@ -12,6 +12,7 @@
 // not explicit in frontmatter.
 
 import { getDb } from './db';
+import { slugify } from './compendium';
 
 export type SessionListRow = {
   notePath: string;
@@ -261,14 +262,6 @@ function resolveCampaignSlug(
   }
   const m = /^(?:[^/]+\/)?Campaigns\/([^/]+)(?:\/|$)/i.exec(notePath);
   return m ? slugify(m[1]!) : null;
-}
-
-function slugify(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
 }
 
 function strOrNull(v: unknown): string | null {

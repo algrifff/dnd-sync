@@ -28,7 +28,6 @@
 //     [--out bundle.json]
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { getDb } from '../../server/src/lib/db';
 import { assetPath } from '../../server/src/lib/assets';

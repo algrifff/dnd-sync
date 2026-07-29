@@ -29,6 +29,7 @@ import {
   persistChatHistory,
   trimChatMessages,
 } from './chat-storage';
+import { ChatErrorBubble } from './chat-error';
 import posthog from '@/lib/posthog-web';
 
 // ── File attachment types ───────────────────────────────────────────────
@@ -135,7 +136,7 @@ export function ChatPane({
     [groupId, campaignSlug, activePath],
   );
 
-  const { messages, status, sendMessage, setMessages } = useChat({ transport });
+  const { messages, status, sendMessage, setMessages, error } = useChat({ transport });
 
   useRefreshTreeOnAiNoteMutations(messages, () => {
     router.refresh();
@@ -420,6 +421,11 @@ export function ChatPane({
               <div className="mt-3 flex items-center gap-1.5 text-xs text-[var(--ink-soft)]">
                 <Loader2 size={11} className="animate-spin" aria-hidden />
                 Thinking…
+              </div>
+            )}
+            {error && !isStreaming && (
+              <div className="mt-3">
+                <ChatErrorBubble message={error.message} />
               </div>
             )}
           </div>

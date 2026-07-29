@@ -48,6 +48,7 @@ import { listCampaigns, ensureCampaignForPath } from './characters';
 import { ensureIndexNote } from './index-notes';
 import { deriveAllIndexes } from './derive-indexes';
 import { deriveFolderIndex, allCampaignFoldersInDb } from './campaign-index';
+import { slugify } from './compendium';
 
 // Canonical subfolders created for every new campaign — mirrors CampaignCreateDialog.
 const CAMPAIGN_SUBFOLDERS = [
@@ -1981,10 +1982,6 @@ function enrichWithHubLinks(
       .join(' · ') +
     '\n';
   return body.replace(/\s+$/, '') + section;
-}
-
-function slugify(raw: string): string {
-  return raw.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
 /** Own-key check for the JSON-round-tripped checkpoint maps. Plain `in`

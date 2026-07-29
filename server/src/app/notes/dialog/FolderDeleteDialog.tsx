@@ -1,35 +1,35 @@
 'use client';
 
-// Are-you-sure dialog for nuking a whole campaign. Opened from the
-// campaign-row "…" menu in FileTree. Calls /api/campaigns/delete on
-// confirm — that route cascades through every note, folder marker,
-// and slug-keyed index in one transaction.
-//
-// Built on the shared ConfirmDialog chrome (server/src/app/notes/dialog/
-// ConfirmDialog.tsx) — FolderDeleteDialog and the file/folder delete
-// confirmations in RowMenu use the same primitive so there's one dialog
-// convention instead of three. Counts come from the same "fetch
-// /api/tree, walk the subtree" approach FolderDeleteDialog uses (see
-// dialog/tree-counts.ts) — there's no dedicated counts endpoint.
+// Are-you-sure dialog for deleting a folder. Was previously a native
+// window.confirm() in RowMenu with no indication of what would be
+// destroyed — folder delete cascades an arbitrary number of nested
+// notes/characters/assets, the same blast radius as campaign delete,
+// which already gets counts + a styled dialog (CampaignDeleteDialog).
+// This brings folder delete up to the same standard, reusing the shared
+// ConfirmDialog chrome and the same "fetch /api/tree, walk the subtree"
+// counts approach — there's no dedicated counts endpoint, and /api/tree
+// is already the cheap way to get one (MoveDialog and CampaignDeleteDialog
+// both fetch it for their own purposes).
 
 import { useEffect, useId, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Tree } from '@/lib/tree';
 import { broadcastTreeChange } from '@/lib/tree-sync';
-import { ConfirmDialog } from './dialog/ConfirmDialog';
-import { countTreeContents, type TreeCounts } from './dialog/tree-counts';
+import { ConfirmDialog } from './ConfirmDialog';
+import { countTreeContents, type TreeCounts } from './tree-counts';
 
-export function CampaignDeleteDialog({
-  slug,
-  name,
+export function FolderDeleteDialog({
+  path,
   csrfToken,
   onClose,
   onDeleted,
 }: {
-  slug: string;
-  name: string;
+  path: string;
   csrfToken: string;
   onClose: () => void;
+  /** Called after the delete succeeds and the tree has been refreshed +
+   *  broadcast. The caller (RowMenu) still decides whether to redirect —
+   *  it knows whether the active note lived inside the deleted folder. */
   onDeleted: () => void;
 }): React.JSX.Element {
   const router = useRouter();
@@ -43,7 +43,7 @@ export function CampaignDeleteDialog({
         const res = await fetch('/api/tree', { credentials: 'same-origin' });
         if (!res.ok) return;
         const data = (await res.json()) as Tree;
-        const found = countTreeContents(data, `Campaigns/${slug}`);
+        const found = countTreeContents(data, path);
         if (alive && found) setCounts(found);
       } catch {
         /* counts are decorative — silent fail keeps the dialog usable */
@@ -52,24 +52,24 @@ export function CampaignDeleteDialog({
     return () => {
       alive = false;
     };
-  }, [slug]);
+  }, [path]);
+
+  const name = path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path;
 
   return (
     <ConfirmDialog
       titleId={titleId}
-      title="Delete campaign"
+      title="Delete folder"
       tone="danger"
-      confirmLabel="Delete campaign"
+      confirmLabel="Delete folder"
       confirmingLabel="Deleting…"
       description={
         <>
           <p>
-            Are you sure you want to delete <span className="font-semibold">{name}</span>?
+            Are you sure you want to delete <span className="font-semibold">{name}</span>{' '}
+            and everything inside it?
           </p>
-          <p className="mt-2 text-xs text-[var(--ink-soft)]">
-            This permanently removes every folder, note, character, session, and
-            asset entry inside this campaign. This can&rsquo;t be undone.
-          </p>
+          <p className="mt-2 text-xs text-[var(--ink-soft)]">This can&rsquo;t be undone.</p>
         </>
       }
       detail={
@@ -88,13 +88,13 @@ export function CampaignDeleteDialog({
       }
       onClose={onClose}
       onConfirm={async () => {
-        const res = await fetch('/api/campaigns/delete', {
+        const res = await fetch('/api/folders/delete', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'X-CSRF-Token': csrfToken,
           },
-          body: JSON.stringify({ slug }),
+          body: JSON.stringify({ path }),
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok || !body.ok) {

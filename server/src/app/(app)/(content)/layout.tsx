@@ -30,6 +30,9 @@ import { FileTree } from '../../notes/FileTree';
 import { ActivePartySection } from '../../notes/ActivePartySection';
 import { CollapsibleSidebar } from '../../CollapsibleSidebar';
 import { NewSessionButton } from '../../NewSessionButton';
+import { MobileNavProvider } from '../../MobileNavContext';
+import { MobileNavInertBoundary } from '../../MobileNavInertBoundary';
+import { MobileNavDrawer } from '../../MobileNavDrawer';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,68 +73,92 @@ export default async function ContentLayout({
       )
       .get(session.currentGroupId)?.slug ?? null);
 
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <AppHeader
-        role={session.role}
-        me={{
-          userId: session.userId,
-          displayName: session.displayName,
-          username: session.username,
-          accentColor: session.accentColor,
-          avatarVersion: session.avatarVersion,
-        }}
+  // The file-tree sidebar body — built once and handed to *both* the
+  // desktop CollapsibleSidebar and the mobile MobileNavDrawer below, so
+  // there is a single source of truth for its markup and no risk of
+  // the two drifting apart. Each still mounts its own instance (the
+  // drawer's only while open), but both render from this one element.
+  const sidebarBody = (
+    <>
+      <SidebarHeader role={session.role} features={features} />
+      <NewSessionButton
+        campaignSlug={activeCampaignSlug}
         csrfToken={session.csrfToken}
         canCreate={session.role !== 'viewer'}
-        groupId={session.currentGroupId}
-        gmMode={gmMode}
       />
-      <div className="flex min-h-0 flex-1">
-        <CollapsibleSidebar initialOpen={sidebarOpen}>
-          <SidebarHeader role={session.role} features={features} />
-          <NewSessionButton
-            campaignSlug={activeCampaignSlug}
-            csrfToken={session.csrfToken}
-            canCreate={session.role !== 'viewer'}
-          />
-          <div className="shrink-0 px-2 pt-3">
-            <ActivePartySection
-              groupId={session.currentGroupId}
-              activeCampaignSlug={activeCampaignSlug}
-              csrfToken={session.csrfToken}
-              isWorldOwner={session.role === 'admin'}
-            />
-          </div>
-          {gmTree && (
-            <FileTree
-              tree={gmTree}
-              groupId={session.currentGroupId}
-              csrfToken={session.csrfToken}
-              canCreate={session.role !== 'viewer'}
-              isWorldOwner={session.role === 'admin'}
-              kindMap={kindMap}
-              activeCampaignSlug={activeCampaignSlug}
-              sectionTone="gm"
-              storageNamespace="gm"
-            />
-          )}
-          <FileTree
-            tree={playerTree}
-            groupId={session.currentGroupId}
-            csrfToken={session.csrfToken}
-            canCreate={session.role !== 'viewer'}
-            isWorldOwner={session.role === 'admin'}
-            kindMap={kindMap}
-            activeCampaignSlug={activeCampaignSlug}
-            {...(gmMode ? { sectionTone: 'players' as const, storageNamespace: 'player' } : {})}
-          />
-          <SidebarFooter username={session.username} />
-        </CollapsibleSidebar>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <NoteTabBar groupId={session.currentGroupId} />
-          {children}
-        </div>
+      <div className="shrink-0 px-2 pt-3">
+        <ActivePartySection
+          groupId={session.currentGroupId}
+          activeCampaignSlug={activeCampaignSlug}
+          csrfToken={session.csrfToken}
+          isWorldOwner={session.role === 'admin'}
+        />
       </div>
-    </div>
+      {gmTree && (
+        <FileTree
+          tree={gmTree}
+          groupId={session.currentGroupId}
+          csrfToken={session.csrfToken}
+          canCreate={session.role !== 'viewer'}
+          isWorldOwner={session.role === 'admin'}
+          kindMap={kindMap}
+          activeCampaignSlug={activeCampaignSlug}
+          sectionTone="gm"
+          storageNamespace="gm"
+        />
+      )}
+      <FileTree
+        tree={playerTree}
+        groupId={session.currentGroupId}
+        csrfToken={session.csrfToken}
+        canCreate={session.role !== 'viewer'}
+        isWorldOwner={session.role === 'admin'}
+        kindMap={kindMap}
+        activeCampaignSlug={activeCampaignSlug}
+        {...(gmMode ? { sectionTone: 'players' as const, storageNamespace: 'player' } : {})}
+      />
+      <SidebarFooter username={session.username} />
+    </>
+  );
+
+  return (
+    <MobileNavProvider>
+      <MobileNavInertBoundary className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <AppHeader
+          role={session.role}
+          me={{
+            userId: session.userId,
+            displayName: session.displayName,
+            username: session.username,
+            accentColor: session.accentColor,
+            avatarVersion: session.avatarVersion,
+          }}
+          csrfToken={session.csrfToken}
+          canCreate={session.role !== 'viewer'}
+          groupId={session.currentGroupId}
+          gmMode={gmMode}
+        />
+        <div className="flex min-h-0 flex-1">
+          <CollapsibleSidebar initialOpen={sidebarOpen}>
+            {sidebarBody}
+          </CollapsibleSidebar>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <NoteTabBar groupId={session.currentGroupId} />
+            {children}
+          </div>
+        </div>
+      </MobileNavInertBoundary>
+      <MobileNavDrawer
+        csrfToken={session.csrfToken}
+        userId={session.userId}
+        displayName={session.displayName}
+        accentColor={session.accentColor}
+        avatarVersion={session.avatarVersion}
+        role={session.role}
+        worldId={session.currentGroupId}
+      >
+        {sidebarBody}
+      </MobileNavDrawer>
+    </MobileNavProvider>
   );
 }

@@ -213,6 +213,10 @@ export function AssetsGallery({
           canEdit={canEdit}
           onClose={() => setPreview(null)}
           onTagsChange={(tags) => setPreview((p) => p ? { ...p, tags } : p)}
+          onDeleted={() => {
+            setPreview(null);
+            router.refresh();
+          }}
         />
       )}
     </div>
@@ -225,14 +229,48 @@ function PreviewModal({
   canEdit,
   onClose,
   onTagsChange,
+  onDeleted,
 }: {
   asset: Asset;
   csrfToken: string;
   canEdit: boolean;
   onClose: () => void;
   onTagsChange: (tags: string[]) => void;
+  onDeleted: () => void;
 }): React.JSX.Element {
   const isImage = asset.mime.startsWith('image/');
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = useCallback(async () => {
+    if (
+      !confirm(
+        `Delete "${asset.originalName}"? This cannot be undone.\n\nIf it's still used in a note (embedded image or portrait), the delete will be refused.`,
+      )
+    )
+      return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/assets/${encodeURIComponent(asset.id)}`, {
+        method: 'DELETE',
+        headers: { 'X-CSRF-Token': csrfToken },
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; reason?: string };
+        if (res.status === 409) {
+          alert(`Can't delete — ${body.reason ?? 'this asset is still in use.'}`);
+        } else {
+          alert(body.reason ?? body.error ?? `Delete failed (HTTP ${res.status})`);
+        }
+        setDeleting(false);
+        return;
+      }
+      onDeleted();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'network error');
+      setDeleting(false);
+    }
+  }, [asset.id, asset.originalName, csrfToken, onDeleted]);
+
   return (
     <div
       role="dialog"
@@ -261,6 +299,16 @@ function PreviewModal({
           >
             Open
           </a>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => void handleDelete()}
+              disabled={deleting}
+              className="rounded-[6px] border border-[var(--wine)]/40 px-2 py-1 text-xs font-medium text-[var(--wine)] transition hover:bg-[var(--wine)]/10 disabled:opacity-60"
+            >
+              {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}

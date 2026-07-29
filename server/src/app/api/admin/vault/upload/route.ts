@@ -37,23 +37,17 @@ export async function GET(): Promise<Response> {
 
 export async function POST(req: NextRequest): Promise<Response> {
   // Outer safety net: no matter where a throw happens, respond with JSON
-  // (including the stack head) so the client shows the real cause rather
-  // than Next's generic HTML 500 page.
+  // so the client shows a real (if generic) cause rather than Next's
+  // generic HTML 500 page. The stack — and any exception detail beyond
+  // a generic message — stays server-side in the console.error below;
+  // this is a 500-class unexpected failure, not a validated 4xx, so
+  // nothing about it is safe to hand to the client (see
+  // .claude/rules/backend.md "Error Handling").
   try {
     return await handleUpload(req);
   } catch (err) {
     console.error('[vault.upload] unhandled:', err);
-    return json(
-      {
-        error: 'unhandled',
-        message: err instanceof Error ? err.message : String(err),
-        stack:
-          err instanceof Error
-            ? (err.stack ?? '').split('\n').slice(0, 5).join('\n')
-            : undefined,
-      },
-      500,
-    );
+    return json({ error: 'unhandled' }, 500);
   }
 }
 
@@ -120,14 +114,7 @@ async function handleUpload(req: NextRequest): Promise<Response> {
   } catch (err) {
     adminUploadLimiter.recordFailure(authed.userId, false);
     console.error('[vault.upload] tmp write failed:', err);
-    return json(
-      {
-        error: 'tmp_write_failed',
-        message: err instanceof Error ? err.message : 'unknown',
-        tmpDir,
-      },
-      500,
-    );
+    return json({ error: 'tmp_write_failed' }, 500);
   }
 
   // Snapshot every currently-stored path BEFORE ingest so we can
@@ -156,13 +143,7 @@ async function handleUpload(req: NextRequest): Promise<Response> {
   } catch (err) {
     adminUploadLimiter.recordFailure(authed.userId, false);
     console.error('[vault.upload] ingest failed:', err);
-    return json(
-      {
-        error: 'ingest_failed',
-        message: err instanceof Error ? err.message : 'unknown',
-      },
-      500,
-    );
+    return json({ error: 'ingest_failed' }, 500);
   } finally {
     try {
       if (tmpPath) rmSync(tmpPath, { force: true });

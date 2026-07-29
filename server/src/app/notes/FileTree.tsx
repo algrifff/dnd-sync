@@ -12,6 +12,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -49,6 +50,7 @@ import { canDropOn, isDraggableSource, isCampaignRoot, campaignRootSlug } from '
 import { RowMenu } from './RowMenu';
 import { CampaignRowMenu } from './CampaignRowMenu';
 import { PeerStack } from './PeerStack';
+import { useModalA11y } from './dialog/useModalA11y';
 
 export type FileTreeKind = 'pc' | 'npc' | 'ally' | 'villain' | 'session';
 type KindMap = Record<string, FileTreeKind>;
@@ -268,6 +270,13 @@ export function FileTree({
   const [renaming, setRenaming] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [showCampaignDialog, setShowCampaignDialog] = useState<boolean>(false);
+  // Inline error for tree-wide actions that aren't anchored to a single
+  // row's inline editor (drag-and-drop move, campaign reorder) — same
+  // "small wine-colored text, no blocking dialog" convention as the
+  // create/rename inline errors above, just surfaced as a dismissible
+  // banner at the top of the nav since there's no single row to attach
+  // it to. Previously these fell back to alert().
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // HTML5 DnD. dragging = the source row; dragOver = the folder path
   // currently being hovered, or '' for the implicit root drop zone.
@@ -608,6 +617,7 @@ export function FileTree({
       if (destFolder) {
         setOpen((prev) => new Set(prev).add(destFolder));
       }
+      setActionError(null);
       setMovingPath(src.path);
       setMovingTo(to);
       setMoveBaselineAt(tree.updatedAt);
@@ -622,7 +632,7 @@ export function FileTree({
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok || !body.ok) {
-          alert(
+          setActionError(
             body.error === 'exists'
               ? `"${basename}" already exists in that folder.`
               : (body.error ?? `Move failed (HTTP ${res.status})`),
@@ -643,7 +653,7 @@ export function FileTree({
         // a single clean reflow instead of the disappear/popback/jump
         // sequence.
       } catch (err) {
-        alert(err instanceof Error ? err.message : 'network error');
+        setActionError(err instanceof Error ? err.message : 'network error');
         setMovingPath(null);
         setMovingTo(null);
         setMoveBaselineAt(null);
@@ -654,6 +664,7 @@ export function FileTree({
 
   const reorderCampaign = useCallback(
     async (slug: string, beforeSlug: string | null): Promise<void> => {
+      setActionError(null);
       try {
         const res = await fetch('/api/campaigns/reorder', {
           method: 'POST',
@@ -665,13 +676,13 @@ export function FileTree({
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok || !body.ok) {
-          alert(body.error ?? `Reorder failed (HTTP ${res.status})`);
+          setActionError(body.error ?? `Reorder failed (HTTP ${res.status})`);
           return;
         }
         router.refresh();
         broadcastTreeChange();
       } catch (err) {
-        alert(err instanceof Error ? err.message : 'network error');
+        setActionError(err instanceof Error ? err.message : 'network error');
       }
     },
     [csrfToken, router],
@@ -851,6 +862,22 @@ export function FileTree({
             ) : null}
             …
           </span>
+        </div>
+      )}
+      {actionError && (
+        <div
+          role="alert"
+          className="mx-2 mb-2 flex items-start gap-2 rounded-[6px] border border-[var(--wine)]/40 bg-[rgb(var(--wine-rgb)/0.08)] px-2 py-1.5 text-xs text-[var(--wine)]"
+        >
+          <span className="min-w-0 flex-1">{actionError}</span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            aria-label="Dismiss error"
+            className="shrink-0 rounded-[4px] p-0.5 text-[var(--wine)] transition hover:bg-[var(--wine)]/10"
+          >
+            <X size={11} aria-hidden />
+          </button>
         </div>
       )}
       <ul
@@ -1728,7 +1755,9 @@ function CampaignCreateDialog({
   onClose: () => void;
   onCreated: (campaignPath: string) => void;
 }): React.JSX.Element {
+  const titleId = useId();
   const nameRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [name, setName] = useState<string>('');
   const [selected, setSelected] = useState<Set<CampaignSubfolder>>(
     () => new Set(CAMPAIGN_SUBFOLDERS),
@@ -1736,9 +1765,7 @@ function CampaignCreateDialog({
   const [pending, setPending] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    nameRef.current?.focus();
-  }, []);
+  useModalA11y(containerRef, nameRef);
 
   const allSelected = selected.size === CAMPAIGN_SUBFOLDERS.length;
 
@@ -1790,9 +1817,10 @@ function CampaignCreateDialog({
 
   return (
     <div
+      ref={containerRef}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="campaign-dialog-title"
+      aria-labelledby={titleId}
       className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--ink)]/50 p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -1803,7 +1831,7 @@ function CampaignCreateDialog({
         className="w-full max-w-sm rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-4 shadow-[0_16px_48px_rgb(var(--ink-rgb) / 0.3)]"
       >
         <div className="mb-3 flex items-center justify-between">
-          <h3 id="campaign-dialog-title" className="text-sm font-semibold text-[var(--ink)]">
+          <h3 id={titleId} className="text-sm font-semibold text-[var(--ink)]">
             New campaign
           </h3>
           <button
