@@ -665,7 +665,7 @@ function entityEditSheet(ctx: ToolContext) {
       // nothing without this ping. Deliberately NOT a connection
       // close — this write cannot conflict with the live body doc, and
       // evicting would throw the player out of the editor mid-session.
-      signalSheetChanged(path);
+      signalSheetChanged(ctx.groupId, path);
 
       return { ok: true as const, sheet: nextSheet };
     },
@@ -701,7 +701,7 @@ function entityEditContent(ctx: ToolContext) {
       // `closeDocumentConnections(path, token)` is wrapped so that the
       // `!note` early return below — and any throw — releases it
       // instead of stranding it.
-      const token = await closeDocumentForWrite(path);
+      const token = await closeDocumentForWrite(ctx.groupId, path);
       try {
         // Re-read AFTER the drain — this is the copy the flush (if any)
         // just landed in, so we build on top of it instead of the
@@ -761,7 +761,7 @@ function entityEditContent(ctx: ToolContext) {
         // memory. Without this, their next keystroke would silently
         // revert the append we just persisted. Passing `token` is what
         // makes this discard the stale doc rather than flush it.
-        await closeDocumentConnections(path, token);
+        await closeDocumentConnections(ctx.groupId, path, token);
 
         return { ok: true as const };
       } finally {
@@ -957,7 +957,7 @@ function backlinkCreate(ctx: ToolContext) {
       // See entity_edit_content for why the drain happens BEFORE we
       // read the content used to compute the new document, and why
       // yjs_state is rebuilt rather than nulled.
-      const token = await closeDocumentForWrite(fromPath);
+      const token = await closeDocumentForWrite(ctx.groupId, fromPath);
       try {
         const note = loadNote(ctx.groupId, fromPath);
         if (!note) return { ok: false as const, error: `Not found: ${fromPath}` };
@@ -1018,7 +1018,7 @@ function backlinkCreate(ctx: ToolContext) {
 
         // Evict anyone who reconnected DURING the drain window — see
         // entity_edit_content for the full rationale.
-        await closeDocumentConnections(fromPath, token);
+        await closeDocumentConnections(ctx.groupId, fromPath, token);
 
         return { ok: true as const };
       } finally {
@@ -1076,7 +1076,7 @@ function inventoryAdd(ctx: ToolContext) {
 
       // See entity_edit_sheet — frontmatter-only write, no Y.Doc
       // conflict possible, so ping rather than evict.
-      signalSheetChanged(characterPath);
+      signalSheetChanged(ctx.groupId, characterPath);
 
       return { ok: true as const };
     },
@@ -1150,7 +1150,7 @@ function noteWriteSection(ctx: ToolContext) {
       // section position that may no longer be accurate (see D4 in the
       // module-level notes; same invariant as entity_edit_content /
       // backlink_create).
-      const token = await closeDocumentForWrite(path);
+      const token = await closeDocumentForWrite(ctx.groupId, path);
       try {
         const note = loadNote(ctx.groupId, path);
         if (!note) return { ok: false as const, error: `Not found: ${path}` };
@@ -1273,7 +1273,7 @@ async function writeFullContent(
 
   // Evict anyone who reconnected DURING the drain window in the
   // caller — see entity_edit_content for the full rationale.
-  await closeDocumentConnections(path, token);
+  await closeDocumentConnections(ctx.groupId, path, token);
 
   return { ok: true as const };
 }

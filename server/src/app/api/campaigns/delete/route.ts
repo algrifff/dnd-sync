@@ -147,7 +147,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   })();
 
   for (const n of notes) {
-    await closeDocumentConnections(n.path);
+    await closeDocumentConnections(groupId, n.path);
   }
 
   await deriveFolderIndexesFor(

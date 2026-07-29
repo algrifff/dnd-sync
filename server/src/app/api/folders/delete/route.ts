@@ -66,7 +66,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   })();
 
   for (const n of notes) {
-    await closeDocumentConnections(n.path);
+    await closeDocumentConnections(groupId, n.path);
   }
 
   // Refresh auto-managed indexes. Include the deleted folder's own

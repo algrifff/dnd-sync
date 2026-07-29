@@ -73,7 +73,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   // AFTER the write, deliberately: the client reconnects and must
   // re-authenticate against the committed flag. Evicting before the
   // write would just let them straight back in under the old value.
-  await closeDocumentConnections(body.path);
+  await closeDocumentConnections(session.currentGroupId, body.path);
 
   return json({ ok: true, dmOnly: body.dmOnly });
 }

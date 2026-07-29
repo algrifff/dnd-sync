@@ -135,6 +135,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
     return (
       <ExcalidrawCanvas
         path={path}
+        groupId={session.currentGroupId}
         csrfToken={session.csrfToken}
         initialScene={scene}
         canEdit={canEdit}
@@ -218,6 +219,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
                   <NoteWorkspace
                     path={path}
+                    groupId={session.currentGroupId}
                     user={{
                       userId: session.userId,
                       displayName: session.displayName,

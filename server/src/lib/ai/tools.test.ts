@@ -208,12 +208,12 @@ async function withSimulatedConcurrentFlush(
 ): Promise<unknown> {
   const realClose = ORIGINAL_COLLAB_SERVER.closeDocumentForWrite;
   // Must return the REAL token: the tool threads it into its
-  // post-write `closeDocumentConnections(path, token)`, and a spy that
-  // swallowed it would silently downgrade every one of these tests to
-  // the tokenless flush path.
-  const drainSpy = async (documentName: string): Promise<ServerWriteToken> => {
-    if (documentName === path) applyFlush();
-    return realClose(documentName);
+  // post-write `closeDocumentConnections(groupId, path, token)`, and a
+  // spy that swallowed it would silently downgrade every one of these
+  // tests to the tokenless flush path.
+  const drainSpy = async (gid: string, p: string): Promise<ServerWriteToken> => {
+    if (p === path) applyFlush();
+    return realClose(gid, p);
   };
   mock.module('@/collab/server', () => ({ ...ORIGINAL_COLLAB_SERVER, closeDocumentForWrite: drainSpy }));
   try {
@@ -452,9 +452,14 @@ describe('backlink_create — releases its write token on the post-drain no-op b
       contentMd: 'Bob is a travelling merchant.',
     });
 
+    // The Hocuspocus documents map is keyed by the QUALIFIED document
+    // name (`${groupId}:${path}`) — see collab/server.ts. Match that
+    // here so the in-memory doc/debounce entries this test plants are
+    // actually the ones closeDocumentConnections looks up.
+    const documentName = `${groupId}:${path}`;
     const hocuspocus = ORIGINAL_COLLAB_SERVER.collabServer;
-    const storeId = `onStoreDocument-${path}`;
-    hocuspocus.documents.set(path, new Document(path));
+    const storeId = `onStoreDocument-${documentName}`;
+    hocuspocus.documents.set(documentName, new Document(documentName));
     void hocuspocus.debouncer.debounce(storeId, () => undefined, 5_000, 10_000);
 
     try {
@@ -479,14 +484,14 @@ describe('backlink_create — releases its write token on the post-drain no-op b
       expect(readNote(path).content_md).toBe('Bob is a travelling merchant.\n\n[[Carol]]');
 
       // Act 2 — an unrelated caller evicts the same path, tokenless.
-      await ORIGINAL_COLLAB_SERVER.closeDocumentConnections(path);
+      await ORIGINAL_COLLAB_SERVER.closeDocumentConnections(groupId, path);
 
       // Assert — flush semantics preserved. If the tool had stranded
       // its token, this eviction would have consumed it and cancelled
       // the live editor's pending store instead.
       expect(hocuspocus.debouncer.isDebounced(storeId)).toBe(true);
     } finally {
-      hocuspocus.documents.delete(path);
+      hocuspocus.documents.delete(documentName);
       void hocuspocus.debouncer.debounce(storeId, () => undefined, 0, 0);
     }
   });
@@ -503,13 +508,14 @@ describe('entity_edit_content — evicts reattached editors AFTER the write (D2a
     });
 
     const realEvict = ORIGINAL_COLLAB_SERVER.closeDocumentConnections;
-    const calls: Array<{ documentName: string; hadToken: boolean }> = [];
+    const calls: Array<{ groupId: string; path: string; hadToken: boolean }> = [];
     const evictSpy = async (
-      documentName: string,
+      gid: string,
+      p: string,
       token?: ServerWriteToken,
     ): Promise<void> => {
-      calls.push({ documentName, hadToken: token !== undefined });
-      return realEvict(documentName, token);
+      calls.push({ groupId: gid, path: p, hadToken: token !== undefined });
+      return realEvict(gid, p, token);
     };
     mock.module('@/collab/server', () => ({ ...ORIGINAL_COLLAB_SERVER, closeDocumentConnections: evictSpy }));
     try {
@@ -523,7 +529,7 @@ describe('entity_edit_content — evicts reattached editors AFTER the write (D2a
       // carry the token from the tool's own `closeDocumentForWrite` —
       // without it the evict lets Hocuspocus flush the pre-write doc
       // straight back over the row the tool just wrote.
-      expect(calls).toEqual([{ documentName: path, hadToken: true }]);
+      expect(calls).toEqual([{ groupId, path, hadToken: true }]);
     } finally {
       // Restore from the frozen snapshot — see ORIGINAL_COLLAB_SERVER.
       mock.module('@/collab/server', () => ORIGINAL_COLLAB_SERVER);
@@ -537,12 +543,12 @@ describe('note_write_section — its post-write evict is actually destructive', 
     // one function and consumes it in another: it owns the
     // `try/finally`, but `writeFullContent` does the write and the
     // evict. Dropping the token on the way through that hand-off —
-    // `closeDocumentConnections(path)` instead of
-    // `closeDocumentConnections(path, token)` — leaves every other test
-    // in this file green while silently restoring the flush-on-evict
-    // that lets a live editor's pre-write document land back on top of
-    // the section write. Verified: that one-word change fails this test
-    // and nothing else.
+    // `closeDocumentConnections(groupId, path)` instead of
+    // `closeDocumentConnections(groupId, path, token)` — leaves every
+    // other test in this file green while silently restoring the
+    // flush-on-evict that lets a live editor's pre-write document land
+    // back on top of the section write. Verified: that one-word change
+    // fails this test and nothing else.
     //
     // It has to assert the EFFECT, not the call. Spying on
     // `closeDocumentConnections` and checking that some token argument
@@ -561,9 +567,12 @@ describe('note_write_section — its post-write evict is actually destructive', 
       contentMd: '## Combat Notes\n\nOld combat notes.',
     });
 
+    // Document map is keyed by the QUALIFIED name — see the comment in
+    // the NEW-1 backlink_create test above.
+    const documentName = `${groupId}:${path}`;
     const hocuspocus = ORIGINAL_COLLAB_SERVER.collabServer;
-    const storeId = `onStoreDocument-${path}`;
-    hocuspocus.documents.set(path, new Document(path));
+    const storeId = `onStoreDocument-${documentName}`;
+    hocuspocus.documents.set(documentName, new Document(documentName));
     void hocuspocus.debouncer.debounce(storeId, () => undefined, 5_000, 10_000);
 
     try {
@@ -575,7 +584,7 @@ describe('note_write_section — its post-write evict is actually destructive', 
       expect((result as { ok: boolean }).ok).toBe(true);
       expect(hocuspocus.debouncer.isDebounced(storeId)).toBe(false);
     } finally {
-      hocuspocus.documents.delete(path);
+      hocuspocus.documents.delete(documentName);
       void hocuspocus.debouncer.debounce(storeId, () => undefined, 0, 0);
     }
   });

@@ -1,22 +1,35 @@
 // Module-level cache for Hocuspocus providers + their Y.Docs, keyed
-// by note path. The point is to survive page-level unmounts (= tab
-// switches): without this, every navigation between two open notes
-// destroys the WS connection and re-syncs the doc from scratch, which
-// is the bulk of the perceived "tab switching is slow" latency.
+// by `${groupId}:${path}` (the SAME qualified name used as the
+// Hocuspocus document name — see `@/collab/server`). The point is to
+// survive page-level unmounts (= tab switches): without this, every
+// navigation between two open notes destroys the WS connection and
+// re-syncs the doc from scratch, which is the bulk of the perceived
+// "tab switching is slow" latency.
+//
+// The `groupId` qualifier exists to prevent a cross-tenant collision:
+// two worlds can and routinely do have a note at the identical path
+// (e.g. every group gets its own `World Lore/index.md`). Before this
+// qualifier, two different worlds' tabs open in the same browser
+// session (or even just two tabs on two different worlds) would
+// resolve to the SAME cache entry — the same Y.Doc — and each would
+// silently read/write the other's content. See the tenant-isolation
+// spec for the full writeup. Every entry point below now takes
+// `groupId` explicitly; never accept a bare path in isolation.
 //
 // Lifecycle model:
-//   • `acquire(path)` returns the existing entry if cached, otherwise
-//     constructs a fresh provider+ydoc and registers it. Bumps a ref
-//     count so multiple consumers (e.g. NoteWorkspace + a peeking
-//     CharacterSheet) can share a single connection.
-//   • `release(path)` decrements the ref count. If the count hits 0
-//     AND the path is not in the persistent set (tabs the user has
-//     open), the entry is scheduled for destruction after IDLE_MS so
-//     a quick away-and-back tap doesn't pay reconnection cost either.
-//   • `setPersistentPaths(paths)` is the "tabs" channel — call from
-//     NoteTabs whenever the open-tab list changes. Persistent paths
-//     are never auto-destroyed; closing a tab moves it back into the
-//     idle pool, where the timer can sweep it.
+//   • `acquireProvider(groupId, path)` returns the existing entry if
+//     cached, otherwise constructs a fresh provider+ydoc and registers
+//     it. Bumps a ref count so multiple consumers (e.g. NoteWorkspace
+//     + a peeking CharacterSheet) can share a single connection.
+//   • `releaseProvider(groupId, path)` decrements the ref count. If
+//     the count hits 0 AND the qualified name is not in the persistent
+//     set (tabs the user has open), the entry is scheduled for
+//     destruction after IDLE_MS so a quick away-and-back tap doesn't
+//     pay reconnection cost either.
+//   • `setPersistentPaths(groupId, paths)` is the "tabs" channel — call
+//     from NoteTabs whenever the open-tab list changes. Persistent
+//     paths are never auto-destroyed; closing a tab moves it back into
+//     the idle pool, where the timer can sweep it.
 //
 // This module is intentionally not React-aware: it's a plain cache
 // that NoteWorkspace and NoteTabs poke at via the helpers below.
@@ -32,8 +45,19 @@ type Entry = {
   destroyTimer: ReturnType<typeof setTimeout> | null;
 };
 
+/** Both keyed by the QUALIFIED name (`${groupId}:${path}`) — never a
+ *  bare path. See the module banner comment for why. */
 const cache = new Map<string, Entry>();
 const persistent = new Set<string>();
+
+/** Build the qualified document/cache-key name from a group and a bare
+ *  note path. Parse the other direction on the FIRST colon only if you
+ *  ever need to (note paths may themselves contain colons; group ids
+ *  never do) — nothing here currently needs to un-qualify, but keep
+ *  that constraint in mind if you add something that does. */
+function qualify(groupId: string, path: string): string {
+  return `${groupId}:${path}`;
+}
 
 /** Grace period before destroying an idle non-persistent entry. Long
  *  enough to absorb a quick tab-flick away and back, short enough that
@@ -73,8 +97,13 @@ function buildCollabUrl(): string {
   return `${scheme}//${location.host}/collab`;
 }
 
-/** Callers subscribed via `onDocumentReset`. */
-type ResetListener = (path: string) => void;
+/** Callers subscribed via `onDocumentReset`. Receives the QUALIFIED
+ *  name (`${groupId}:${path}`) — the same string used as the cache key
+ *  — NOT the bare path. Every subscriber must build the same qualified
+ *  name from its own `(groupId, path)` props before comparing, or the
+ *  reset notification will silently never match and resets will stop
+ *  working for that consumer. */
+type ResetListener = (qualifiedName: string) => void;
 const resetListeners = new Set<ResetListener>();
 
 /** Subscribe to server-initiated document resets (see `evict` below).
@@ -88,14 +117,16 @@ export function onDocumentReset(fn: ResetListener): () => void {
   };
 }
 
-/** Tear down the cached provider + Y.Doc for `path` so the next
- *  `acquireProvider` call builds a clean one that loads server state
- *  from scratch, and notify subscribers so they can remount.
+/** Tear down the cached provider + Y.Doc for `qualifiedName` so the
+ *  next `acquireProvider` call builds a clean one that loads server
+ *  state from scratch, and notify subscribers so they can remount.
+ *  `qualifiedName` is the cache key (`${groupId}:${path}`), not a bare
+ *  path — see the module banner comment.
  *
- *  Idempotent per path — see the early-return comment below for why
- *  that's required, not just defensive. */
-function evict(path: string): void {
-  const entry = cache.get(path);
+ *  Idempotent per qualified name — see the early-return comment below
+ *  for why that's required, not just defensive. */
+function evict(qualifiedName: string): void {
+  const entry = cache.get(qualifiedName);
   if (!entry) {
     // Already evicted for this path — no-op, including the listener
     // notification below. This isn't just defensive: `onClose` above
@@ -124,7 +155,7 @@ function evict(path: string): void {
   } catch {
     /* ignore */
   }
-  cache.delete(path);
+  cache.delete(qualifiedName);
   // Defer the Y.Doc's own destruction to a macrotask instead of doing
   // it inline here. Subscribers below react to this eviction with a
   // React state update (e.g. NoteWorkspace swaps in a placeholder
@@ -152,34 +183,48 @@ function evict(path: string): void {
   }, 0);
   for (const fn of resetListeners) {
     try {
-      fn(path);
+      fn(qualifiedName);
     } catch {
       /* ignore — one bad listener shouldn't break the others */
     }
   }
 }
 
-/** Acquire (or create) the cached provider+ydoc for `path`. Callers
- *  must pair every acquire with a release when they unmount.
+/** Acquire (or create) the cached provider+ydoc for `path` within
+ *  `groupId`. Callers must pair every acquire with a release (same
+ *  `groupId`/`path` pair) when they unmount.
+ *
+ *  `groupId` MUST be the caller's own `session.currentGroupId`, passed
+ *  down as a prop from the server layout/page — never refetched or
+ *  derived client-side. The qualified name (`${groupId}:${path}`) is
+ *  both the cache key here AND the Hocuspocus document name sent over
+ *  the wire; the server asserts the group segment matches the
+ *  connecting session (`onAuthenticate` in `@/collab/server`), so a
+ *  wrong or stale `groupId` here fails closed as a rejected connection
+ *  rather than silently reading the wrong tenant's document.
  *
  *  INVARIANT: any component holding a handle from this function must
  *  also subscribe to `onDocumentReset` and stop using (or remount away
- *  from) the returned provider/ydoc when it fires for their path. The
- *  server can evict and destroy the cached entry out from under a
- *  holder at any time (AI tools, imports, moves, visibility changes —
- *  see `closeDocumentForWrite`/`closeDocumentConnections` in
+ *  from) the returned provider/ydoc when it fires for their qualified
+ *  name. The server can evict and destroy the cached entry out from
+ *  under a holder at any time (AI tools, imports, moves, visibility
+ *  changes — see `closeDocumentForWrite`/`closeDocumentConnections` in
  *  `@/collab/server`); a component that doesn't subscribe is left
  *  holding a destroyed provider/ydoc with no way back. `NoteWorkspace`
  *  and `ExcalidrawCanvas` are both current subscribers — copy their
  *  pattern (drop the reference immediately, wait
  *  `RESET_REACQUIRE_DELAY_MS`, then re-acquire) for any new consumer. */
-export function acquireProvider(path: string): { provider: HocuspocusProvider; ydoc: Y.Doc } {
-  let entry = cache.get(path);
+export function acquireProvider(
+  groupId: string,
+  path: string,
+): { provider: HocuspocusProvider; ydoc: Y.Doc } {
+  const qualifiedName = qualify(groupId, path);
+  let entry = cache.get(qualifiedName);
   if (!entry) {
     const ydoc = new Y.Doc();
     const provider = new HocuspocusProvider({
       url: buildCollabUrl(),
-      name: path,
+      name: qualifiedName,
       document: ydoc,
       // The server evicts us (closeDocumentConnections /
       // closeDocumentForWrite) when it's about to replace this note's
@@ -195,11 +240,11 @@ export function acquireProvider(path: string): { provider: HocuspocusProvider; y
       // treat every normal close as a reset.
       onClose: ({ event }) => {
         if (event?.reason !== 'Reset Connection') return;
-        evict(path);
+        evict(qualifiedName);
       },
     });
     entry = { provider, ydoc, refCount: 0, destroyTimer: null };
-    cache.set(path, entry);
+    cache.set(qualifiedName, entry);
   }
   // Cancel any pending sweep — the entry is in active use again.
   if (entry.destroyTimer) {
@@ -211,22 +256,29 @@ export function acquireProvider(path: string): { provider: HocuspocusProvider; y
 }
 
 /** Release a previously-acquired entry. If no consumers remain and the
- *  path isn't pinned by an open tab, schedule destruction after the
- *  idle grace period. */
-export function releaseProvider(path: string): void {
-  const entry = cache.get(path);
+ *  qualified name isn't pinned by an open tab, schedule destruction
+ *  after the idle grace period. */
+export function releaseProvider(groupId: string, path: string): void {
+  const qualifiedName = qualify(groupId, path);
+  const entry = cache.get(qualifiedName);
   if (!entry) return;
   entry.refCount = Math.max(0, entry.refCount - 1);
   if (entry.refCount > 0) return;
-  if (persistent.has(path)) return;
-  scheduleDestroy(path, entry);
+  if (persistent.has(qualifiedName)) return;
+  scheduleDestroy(qualifiedName, entry);
 }
 
-/** Update the set of paths that should never be auto-destroyed. The
- *  open-tabs list is the natural feed for this. Paths that drop out
- *  of the set become eligible for cleanup if they're also idle. */
-export function setPersistentPaths(paths: Iterable<string>): void {
-  const next = new Set<string>(paths);
+/** Update the set of paths (within `groupId`) that should never be
+ *  auto-destroyed. The open-tabs list is the natural feed for this.
+ *  Paths that drop out of the set become eligible for cleanup if
+ *  they're also idle.
+ *
+ *  Takes a single `groupId` because the tab strip is rendered from a
+ *  single server layout for the caller's current group — every open
+ *  tab belongs to that group's session. */
+export function setPersistentPaths(groupId: string, paths: Iterable<string>): void {
+  const next = new Set<string>();
+  for (const p of paths) next.add(qualify(groupId, p));
   // Newly-pinned paths: cancel any pending destruction.
   for (const p of next) {
     if (persistent.has(p)) continue;
@@ -246,11 +298,11 @@ export function setPersistentPaths(paths: Iterable<string>): void {
   for (const p of next) persistent.add(p);
 }
 
-function scheduleDestroy(path: string, entry: Entry): void {
+function scheduleDestroy(qualifiedName: string, entry: Entry): void {
   if (entry.destroyTimer) return;
   entry.destroyTimer = setTimeout(() => {
     // Re-check at fire time — refCount or persistence may have changed.
-    if (entry.refCount > 0 || persistent.has(path)) {
+    if (entry.refCount > 0 || persistent.has(qualifiedName)) {
       entry.destroyTimer = null;
       return;
     }
@@ -264,6 +316,6 @@ function scheduleDestroy(path: string, entry: Entry): void {
     } catch {
       /* ignore */
     }
-    cache.delete(path);
+    cache.delete(qualifiedName);
   }, IDLE_MS);
 }

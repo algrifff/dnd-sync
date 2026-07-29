@@ -100,7 +100,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   // Both branches read/rewrite the source row's yjs_state, so drain
   // any live editor on it first: copy would otherwise snapshot a
   // stale blob, and move would race the flush (see below).
-  const token = await closeDocumentForWrite(body.fromPath);
+  const token = await closeDocumentForWrite(session.currentGroupId, body.fromPath);
   try {
     // Re-select the full row AFTER the drain, so `src` reflects whatever
     // the drain's own flush just persisted rather than a pre-drain
@@ -185,11 +185,11 @@ export async function POST(req: NextRequest): Promise<Response> {
     // their store() would silently match zero rows). The token makes
     // this a discard: whatever reattached is holding pre-write state
     // for a row whose path and/or gm_only just changed underneath it.
-    await closeDocumentConnections(body.fromPath, token);
+    await closeDocumentConnections(session.currentGroupId, body.fromPath, token);
     if (toPath !== body.fromPath) {
       // No token for toPath — none was issued for it, and nothing wrote
       // over an in-memory doc there. Plain flush-on-evict is correct.
-      await closeDocumentConnections(toPath);
+      await closeDocumentConnections(session.currentGroupId, toPath);
     }
 
     logAudit({

@@ -17,23 +17,66 @@ import { computeDerived, persistDerived, deriveIndexesFor } from './derive';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 
-/** Per-socket bookkeeping so disconnect events can report a duration
- *  without hitting the DB. Keyed by Hocuspocus socketId (a string);
- *  entries are dropped in the onDisconnect hook. Stale entries would
- *  only accumulate on server crash — fine for a long-running process. */
+/** Per-connection bookkeeping so disconnect events can report a duration
+ *  without hitting the DB. Entries are dropped in the onDisconnect hook.
+ *  Stale entries would only accumulate on server crash — fine for a
+ *  long-running process.
+ *
+ *  Keyed by `${socketId}::${documentName}`, NOT by socketId alone.
+ *  Hocuspocus 3 multiplexes any number of documents over one socket
+ *  (`ClientConnection` keeps a `documentConnections` map), and both
+ *  `onAuthenticate` and `onDisconnect` fire once per document. Today
+ *  every provider opens its own socket so socketId happened to be 1:1
+ *  with a document — but the moment anything shares a
+ *  `HocuspocusProviderWebsocket`, a socketId-only key would have the
+ *  second document overwrite the first's entry, and the first
+ *  disconnect would then report the wrong document and delete the
+ *  survivor's row. */
 type ConnectionInfo = {
   userId: string;
   groupId: string;
-  documentName: string;
+  /** BARE note path (no group prefix) — for analytics only. */
+  path: string;
   connectedAt: number;
   readOnly: boolean;
 };
 const connectionInfo = new Map<string, ConnectionInfo>();
 
+function connectionKey(socketId: string, documentName: string): string {
+  return `${socketId}::${documentName}`;
+}
+
 /** Throttle NOTE_EDITED events to once per note per 60s window so a
  *  typist doesn't spam PostHog with one event per debounced save. */
 const lastEditCapture = new Map<string, number>();
 const NOTE_EDIT_THROTTLE_MS = 60_000;
+
+/** Hard cap on `lastEditCapture`. Without one the map grows by a
+ *  permanent entry per `group::path` ever edited and is never swept —
+ *  unbounded for the life of the process. */
+const LAST_EDIT_CAPTURE_MAX = 5_000;
+
+/** True when a NOTE_EDITED capture is due for `key`, recording the
+ *  decision. Keeps `lastEditCapture` bounded as a side effect.
+ *
+ *  The sweep cannot change behaviour: an entry older than the throttle
+ *  window can only ever answer "allowed", which is exactly what a
+ *  missing entry answers. The `clear()` fallback (>5000 distinct notes
+ *  edited inside one 60s window — not a real workload) can cost at most
+ *  one extra event per note, never a lost one. */
+function noteEditCaptureDue(key: string, now: number): boolean {
+  if (now - (lastEditCapture.get(key) ?? 0) < NOTE_EDIT_THROTTLE_MS) return false;
+
+  if (lastEditCapture.size >= LAST_EDIT_CAPTURE_MAX) {
+    for (const [k, ts] of lastEditCapture) {
+      if (now - ts >= NOTE_EDIT_THROTTLE_MS) lastEditCapture.delete(k);
+    }
+    if (lastEditCapture.size >= LAST_EDIT_CAPTURE_MAX) lastEditCapture.clear();
+  }
+
+  lastEditCapture.set(key, now);
+  return true;
+}
 
 type AuthContext = {
   userId: string;
@@ -52,9 +95,66 @@ function isAuthContext(x: unknown): x is AuthContext {
   );
 }
 
+// ── Document naming: `${groupId}:${path}` ──────────────────────────────
+//
+// Hocuspocus keys its `documents` map by NAME ALONE (`Hocuspocus.ts`),
+// and `createDocument()` returns an existing entry before `context` is
+// ever consulted. An unqualified name therefore makes two worlds that
+// happen to share a note path — `World Lore/index.md` exists in EVERY
+// group, `Campaigns/<slug>/Characters/index.md` in every campaign —
+// collaborate on ONE Y.Doc: each reads the other's body, and whichever
+// typed last persists over the other's row. Qualifying the name is what
+// separates them.
+//
+// The prefix on its own is decoration: the name arrives from the
+// CLIENT, so an attacker can simply send `<victim-group>:World
+// Lore/index.md` and rebuild the collision on purpose. `onAuthenticate`
+// asserting `parsed.groupId === session.currentGroupId` is what makes
+// it a boundary. Nothing downstream trusts the prefix for anything
+// except as a map key.
+
+/** Wire + `documents`-map name for a document. Group ids are
+ *  `randomUUID()` or the literal `'default'`, so they never contain a
+ *  colon. */
+export function qualifiedDocName(groupId: string, path: string): string {
+  return `${groupId}:${path}`;
+}
+
+/** Split a wire name back into its group id and BARE path.
+ *
+ *  Splits on the FIRST colon only. Note paths may legitimately contain
+ *  colons (`isAllowedPath` constrains only the first segment) and the
+ *  meta docs embed one by design (`graph-groups:<id>`,
+ *  `.graph-state:<id>`), so `split(':')` would silently corrupt them.
+ *
+ *  Returns null for anything without a colon, with an empty group id,
+ *  or with an empty path — including a pre-deploy client still sending
+ *  a bare path. That is deliberate: a fallback to the bare name would
+ *  keep the collision reachable for as long as one stale tab lives, so
+ *  an unparseable name is a clean rejection instead. */
+export function parseDocName(
+  documentName: string,
+): { groupId: string; path: string } | null {
+  const sep = documentName.indexOf(':');
+  if (sep <= 0) return null;
+  const path = documentName.slice(sep + 1);
+  if (path.length === 0) return null;
+  return { groupId: documentName.slice(0, sep), path };
+}
+
+/** True for the two doc families that do NOT back onto a `notes` row:
+ *  ephemeral `.`-channels (`.presence:<id>`, `.graph-state:<id>`) and
+ *  the persistent `graph-groups:<id>` doc. Takes a BARE path. */
+function isNonNoteDoc(path: string): boolean {
+  return path.startsWith('.') || path.startsWith('graph-groups:');
+}
+
 /** Meta docs are graph-wide state (currently only groups). Naming
- *  convention: `graph-groups:<groupId>`. Returning non-null means
- *  this doc goes to the graph_groups table, not the notes table. */
+ *  convention: `graph-groups:<groupId>` — as the BARE path, i.e. the
+ *  full wire name is `<groupId>:graph-groups:<groupId>`. The group id
+ *  appears twice; the redundancy is kept because it gives the storage
+ *  hooks a free second check that the two agree. Returning non-null
+ *  means this doc goes to the graph_groups table, not the notes table. */
 function parseMetaDocName(
   documentName: string,
 ): { kind: 'groups'; groupId: string } | null {
@@ -77,30 +177,31 @@ function parseMetaDocName(
  *    - `graph-groups:<id>`: editor/admin only — it's DM-configured
  *      colour grouping, not a per-user thing.
  */
-function isNoteDmOnly(groupId: string, documentName: string): boolean {
+function isNoteDmOnly(groupId: string, path: string): boolean {
   const row = getDb()
     .query<{ dm_only: number }, [string, string]>(
       'SELECT dm_only FROM notes WHERE group_id = ? AND path = ?',
     )
-    .get(groupId, documentName);
+    .get(groupId, path);
   return !!row && row.dm_only === 1;
 }
 
-function isNoteGmOnly(groupId: string, documentName: string): boolean {
+function isNoteGmOnly(groupId: string, path: string): boolean {
   const row = getDb()
     .query<{ gm_only: number }, [string, string]>(
       'SELECT gm_only FROM notes WHERE group_id = ? AND path = ?',
     )
-    .get(groupId, documentName);
+    .get(groupId, path);
   return !!row && row.gm_only === 1;
 }
 
-function canEditDoc(documentName: string, session: Session): boolean {
+/** `path` is the BARE note path — the caller has already stripped the
+ *  group prefix and asserted it matches the session. */
+function canEditDoc(path: string, session: Session): boolean {
   if (session.role === 'admin' || session.role === 'editor') return true;
 
   // Viewer path below.
-  if (documentName.startsWith('.')) return false;
-  if (documentName.startsWith('graph-groups:')) return false;
+  if (isNonNoteDoc(path)) return false;
 
   // Note path — allow if this user created the note OR owns the PC.
   const db = getDb();
@@ -108,9 +209,9 @@ function canEditDoc(documentName: string, session: Session): boolean {
     .query<{ created_by: string | null }, [string, string]>(
       'SELECT created_by FROM notes WHERE group_id = ? AND path = ?',
     )
-    .get(session.currentGroupId, documentName);
+    .get(session.currentGroupId, path);
   if (note && note.created_by === session.userId) return true;
-  if (isPcOwnedBy(session.currentGroupId, documentName, session.userId)) {
+  if (isPcOwnedBy(session.currentGroupId, path, session.userId)) {
     return true;
   }
   return false;
@@ -136,18 +237,23 @@ function canEditDoc(documentName: string, session: Session): boolean {
  *  and a long-held write lock stalls them up to `busy_timeout`) — it
  *  just also has to be caught. */
 export function storeNoteDocument(opts: {
-  documentName: string;
+  /** BARE note path — NOT the qualified wire name. `computeDerived`,
+   *  `persistDerived`, `deriveIndexesFor` and the `WHERE path = ?`
+   *  below all key off it, so a prefixed value would corrupt link
+   *  derivation and write a row under a bogus path. The group comes
+   *  from `context.groupId`, which is the authenticated one. */
+  path: string;
   state: Uint8Array;
   document: Y.Doc;
   context: { groupId: string; userId: string | null };
 }): void {
-  const { documentName, state, document, context } = opts;
+  const { path, state, document, context } = opts;
 
   try {
     // CPU-heavy derivation. No DB access, but can throw on malformed
     // input — see the function comment above for why this must stay
     // inside the try.
-    const derived = computeDerived({ path: documentName, doc: document });
+    const derived = computeDerived({ path, doc: document });
 
     // yjs_state + the derived caches + the FTS triggers they fire
     // commit as ONE unit. Previously yjs_state landed immediately and
@@ -158,10 +264,10 @@ export function storeNoteDocument(opts: {
     db.transaction(() => {
       db.query(
         'UPDATE notes SET yjs_state = ?, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
-      ).run(state, Date.now(), context.userId, context.groupId, documentName);
+      ).run(state, Date.now(), context.userId, context.groupId, path);
       persistDerived({
         groupId: context.groupId,
-        path: documentName,
+        path,
         userId: context.userId,
         derived,
       });
@@ -172,12 +278,14 @@ export function storeNoteDocument(opts: {
     // Loud on purpose — repeated failures (including a bad PM node
     // that throws inside computeDerived) mean the client's edits are
     // not reaching disk.
-    console.error(`[collab] store failed for ${documentName}:`, err);
+    console.error(`[collab] store failed for ${context.groupId}:${path}:`, err);
     void captureServer({
       userId: context.userId,
       groupId: context.groupId,
       event: EVENTS.API_ERROR,
-      properties: { route: 'collab.store', documentName },
+      // Bare path: `groupId` is already a first-class field on the
+      // event, so the qualified name would only duplicate it.
+      properties: { route: 'collab.store', documentName: path },
     });
     return;
   }
@@ -186,14 +294,18 @@ export function storeNoteDocument(opts: {
   // transaction on purpose — the store path never writes
   // frontmatter_json, so these tables can't be skewed by it, and
   // deriveCharacterFromFrontmatter opens its own transaction.
-  deriveIndexesFor(context.groupId, documentName);
+  deriveIndexesFor(context.groupId, path);
 
   // Signal graph clients to re-fetch — the note may have added or
   // removed wikilinks. After the commit so clients never re-fetch
   // mid-transaction.
+  //
+  // `documents` is keyed by the QUALIFIED name, so the lookup has to be
+  // qualified too — the group id appears twice because the ephemeral
+  // channel carries its own suffix (`.graph-state:<id>`).
   try {
     const graphStateDoc = collabServer.documents.get(
-      `.graph-state:${context.groupId}`,
+      qualifiedDocName(context.groupId, `.graph-state:${context.groupId}`),
     );
     if (graphStateDoc) {
       (graphStateDoc.getMap('meta') as Y.Map<number>).set(
@@ -202,21 +314,19 @@ export function storeNoteDocument(opts: {
       );
     }
   } catch (err) {
-    console.error(`[collab] graphDirty signal failed for ${documentName}:`, err);
+    console.error(`[collab] graphDirty signal failed for ${path}:`, err);
   }
 
   // Throttled note_edited capture — one event per note per minute so a
-  // fast typist doesn't flood PostHog.
-  const editKey = `${context.groupId}::${documentName}`;
-  const nowTs = Date.now();
-  const lastTs = lastEditCapture.get(editKey) ?? 0;
-  if (nowTs - lastTs >= NOTE_EDIT_THROTTLE_MS) {
-    lastEditCapture.set(editKey, nowTs);
+  // fast typist doesn't flood PostHog. The key stays `group::path`:
+  // `path` is bare here, so it still needs the group to be unique
+  // across worlds that share a path.
+  if (noteEditCaptureDue(`${context.groupId}::${path}`, Date.now())) {
     void captureServer({
       userId: context.userId,
       groupId: context.groupId,
       event: EVENTS.NOTE_EDITED,
-      properties: { documentName, byte_size: state.byteLength },
+      properties: { documentName: path, byte_size: state.byteLength },
     });
   }
 }
@@ -258,20 +368,49 @@ export const collabServer: Hocuspocus =
       throw new Error('Unauthorized');
     }
 
+    // ── THE TENANT BOUNDARY ─────────────────────────────────────────
+    // The document name is CLIENT-SUPPLIED. Hocuspocus keys `documents`
+    // by that name alone, so without this check an attacker sends
+    // `<victim-group-uuid>:World Lore/index.md` and deliberately joins
+    // the victim's Y.Doc — reading its body and, on the next store,
+    // overwriting the victim's row. The `${groupId}:` prefix is only a
+    // separator; THIS is what makes it a boundary.
+    //
+    // Also the rejection point for a stale pre-deploy tab still sending
+    // a bare path (`parseDocName` → null). Clean rejection on purpose:
+    // any fallback to bare names would keep the collision reachable for
+    // as long as one old tab lives.
+    const parsed = parseDocName(data.documentName);
+    if (!parsed || parsed.groupId !== session.currentGroupId) {
+      void captureServer({
+        userId: session.userId,
+        groupId: session.currentGroupId,
+        event: EVENTS.COLLAB_AUTH_REJECTED,
+        // Raw wire name here (not a bare path): when this fires it is
+        // either a stale client or a targeted attempt, and the prefix
+        // that was actually sent is the useful thing to see.
+        properties: { reason: 'group_mismatch', documentName: data.documentName },
+      });
+      throw new Error('Unauthorized');
+    }
+    // Every check below runs on the BARE path. Nothing downstream reads
+    // the prefix again — `session.currentGroupId` is the group of
+    // record from here on.
+    const path = parsed.path;
+
     // DM-only gate: block viewers from any note marked dm_only
     // entirely (they get no connection, so no live updates and no
     // awareness). Admins + editors see everything.
     if (
       session.role === 'viewer' &&
-      !data.documentName.startsWith('.') &&
-      !data.documentName.startsWith('graph-groups:') &&
-      isNoteDmOnly(session.currentGroupId, data.documentName)
+      !isNonNoteDoc(path) &&
+      isNoteDmOnly(session.currentGroupId, path)
     ) {
       void captureServer({
         userId: session.userId,
         groupId: session.currentGroupId,
         event: EVENTS.COLLAB_AUTH_REJECTED,
-        properties: { reason: 'dm_only_blocked', documentName: data.documentName },
+        properties: { reason: 'dm_only_blocked', documentName: path },
       });
       throw new Error('Unauthorized');
     }
@@ -281,15 +420,14 @@ export const collabServer: Hocuspocus =
     // live state ever ships to a player session.
     if (
       session.role !== 'admin' &&
-      !data.documentName.startsWith('.') &&
-      !data.documentName.startsWith('graph-groups:') &&
-      isNoteGmOnly(session.currentGroupId, data.documentName)
+      !isNonNoteDoc(path) &&
+      isNoteGmOnly(session.currentGroupId, path)
     ) {
       void captureServer({
         userId: session.userId,
         groupId: session.currentGroupId,
         event: EVENTS.COLLAB_AUTH_REJECTED,
-        properties: { reason: 'gm_only_blocked', documentName: data.documentName },
+        properties: { reason: 'gm_only_blocked', documentName: path },
       });
       throw new Error('Unauthorized');
     }
@@ -298,24 +436,23 @@ export const collabServer: Hocuspocus =
     // connect, still receive live updates from peers, just can't
     // broadcast their own document updates. Awareness (cursors) is
     // unaffected.
-    const readOnly = !canEditDoc(data.documentName, session);
+    const readOnly = !canEditDoc(path, session);
     if (readOnly) {
       data.connectionConfig.readOnly = true;
       void captureServer({
         userId: session.userId,
         groupId: session.currentGroupId,
         event: EVENTS.COLLAB_READONLY,
-        properties: { documentName: data.documentName, role: session.role },
+        properties: { documentName: path, role: session.role },
       });
     }
 
-    // Record per-socket connection info so the disconnect hook can
-    // compute duration. Keyed by socketId — the one stable identifier
-    // that appears in both onAuthenticate and onDisconnect payloads.
-    connectionInfo.set(data.socketId, {
+    // Record per-connection info so the disconnect hook can compute
+    // duration. Keyed by socket AND document — see `connectionKey`.
+    connectionInfo.set(connectionKey(data.socketId, data.documentName), {
       userId: session.userId,
       groupId: session.currentGroupId,
-      documentName: data.documentName,
+      path,
       connectedAt: Date.now(),
       readOnly,
     });
@@ -330,8 +467,10 @@ export const collabServer: Hocuspocus =
   },
 
   async onConnect(data): Promise<void> {
-    const info = connectionInfo.get(data.socketId);
+    const info = connectionInfo.get(connectionKey(data.socketId, data.documentName));
     if (!info) return;
+    // `documents` is keyed by the qualified wire name — look up with
+    // `data.documentName`, report with the bare path.
     const doc = collabServer.documents.get(data.documentName);
     const peerCount = doc ? doc.getConnectionsCount() : 1;
     void captureServer({
@@ -339,23 +478,24 @@ export const collabServer: Hocuspocus =
       groupId: info.groupId,
       event: EVENTS.COLLAB_CONNECTED,
       properties: {
-        documentName: data.documentName,
+        documentName: info.path,
         peer_count: peerCount,
-        is_ephemeral: data.documentName.startsWith('.') || data.documentName.startsWith('graph-groups:'),
+        is_ephemeral: isNonNoteDoc(info.path),
       },
     });
   },
 
   async onDisconnect(data): Promise<void> {
-    const info = connectionInfo.get(data.socketId);
-    connectionInfo.delete(data.socketId);
+    const key = connectionKey(data.socketId, data.documentName);
+    const info = connectionInfo.get(key);
+    connectionInfo.delete(key);
     if (!info) return;
     void captureServer({
       userId: info.userId,
       groupId: info.groupId,
       event: EVENTS.COLLAB_DISCONNECTED,
       properties: {
-        documentName: info.documentName,
+        documentName: info.path,
         duration_ms: Date.now() - info.connectedAt,
         read_only: info.readOnly,
         remaining_peers: data.clientsCount,
@@ -374,11 +514,18 @@ export const collabServer: Hocuspocus =
     new Database({
       fetch: async ({ documentName, context }): Promise<Uint8Array | null> => {
         if (!isAuthContext(context)) return null;
-        // Doc names starting with "." are reserved awareness-only
-        // channels (e.g. ".presence", ".graph-state:<groupId>"). They
+        // Defence in depth: `onAuthenticate` already refused any name
+        // whose prefix isn't this connection's group, so a mismatch
+        // here would mean the gate was bypassed. Strip and re-assert
+        // rather than assume.
+        const parsed = parseDocName(documentName);
+        if (!parsed || parsed.groupId !== context.groupId) return null;
+        const path = parsed.path;
+        // Paths starting with "." are reserved awareness-only channels
+        // (e.g. ".presence:<groupId>", ".graph-state:<groupId>"). They
         // don't back onto any row.
-        if (documentName.startsWith('.')) return null;
-        const meta = parseMetaDocName(documentName);
+        if (path.startsWith('.')) return null;
+        const meta = parseMetaDocName(path);
         if (meta) {
           if (meta.groupId !== context.groupId) return null;
           const row = getDb()
@@ -392,14 +539,20 @@ export const collabServer: Hocuspocus =
           .query<{ yjs_state: Uint8Array | null }, [string, string]>(
             'SELECT yjs_state FROM notes WHERE group_id = ? AND path = ?',
           )
-          .get(context.groupId, documentName);
+          .get(context.groupId, path);
         if (!row?.yjs_state) return null;
         return new Uint8Array(row.yjs_state);
       },
       store: async ({ documentName, state, document, context }): Promise<void> => {
         if (!isAuthContext(context)) return;
-        if (documentName.startsWith('.')) return;
-        const meta = parseMetaDocName(documentName);
+        // Same re-assertion as `fetch` above — and here it also guards
+        // the write side, so a name that somehow reached this hook
+        // without matching the connection's group persists nothing.
+        const parsed = parseDocName(documentName);
+        if (!parsed || parsed.groupId !== context.groupId) return;
+        const path = parsed.path;
+        if (path.startsWith('.')) return;
+        const meta = parseMetaDocName(path);
         if (meta) {
           if (meta.groupId !== context.groupId) return;
           getDb()
@@ -415,9 +568,9 @@ export const collabServer: Hocuspocus =
         }
         // See storeNoteDocument() above — this is the exact function
         // Hocuspocus calls, extracted so it's directly unit-testable
-        // without a WebSocket (D1 / H7).
+        // without a WebSocket (D1 / H7). It takes the BARE path.
         storeNoteDocument({
-          documentName,
+          path,
           state,
           document,
           context: { groupId: context.groupId, userId: context.userId },
@@ -749,6 +902,11 @@ async function discardDocumentAfterWrite(documentName: string): Promise<void> {
  *  Two behaviours, selected by whether the caller presents the token
  *  `closeDocumentForWrite()` issued for this same path:
  *
+ *  Token matching is on the QUALIFIED name, so a token issued for the
+ *  same path in a DIFFERENT group is refused exactly like a token for a
+ *  different path — a server write in one world can never authorise
+ *  discarding another world's in-memory document.
+ *
  *    - no token (or a token for a different path) — plain eviction.
  *      Hocuspocus flushes any pending store on the way out, so a user's
  *      last keystrokes are not lost. This is what every caller that did
@@ -786,9 +944,14 @@ async function discardDocumentAfterWrite(documentName: string): Promise<void> {
  *  stating the gap. Closing it means threading a token through those
  *  modules — a separate change; nothing here made them worse. */
 export async function closeDocumentConnections(
-  documentName: string,
+  groupId: string,
+  path: string,
   token?: ServerWriteToken,
 ): Promise<void> {
+  // Everything below addresses Hocuspocus's `documents` map, which is
+  // keyed by the QUALIFIED name — an unqualified key would evict (or
+  // destructively discard) the same path in every world at once.
+  const documentName = qualifiedDocName(groupId, path);
   if (token !== undefined) {
     if (token.documentName !== documentName) {
       // Check the path BEFORE touching `issuedTokens`: a token
@@ -862,8 +1025,14 @@ export function releaseServerWrite(token: ServerWriteToken): void {
  *  keeps well-behaved clients out of the window; the post-write discard
  *  is what makes a badly-behaved one harmless. */
 export async function closeDocumentForWrite(
-  documentName: string,
+  groupId: string,
+  path: string,
 ): Promise<ServerWriteToken> {
+  // The token carries the QUALIFIED name, which is both the map key
+  // used below and what the matching `closeDocumentConnections()`
+  // compares against — so the existing identity guard there scopes
+  // tokens per world for free.
+  const documentName = qualifiedDocName(groupId, path);
   // Issue the token before the early return: even if nothing is loaded
   // right now, a client can attach between here and the caller's
   // UPDATE, and the post-write call still has to discard it.
@@ -892,7 +1061,7 @@ export async function closeDocumentForWrite(
   return token;
 }
 
-/** Tell every client with `documentName` open that its frontmatter
+/** Tell every client with `path` open in `groupId` that its frontmatter
  *  (sheet) changed server-side, so they re-fetch it.
  *
  *  Frontmatter is a plain SQLite column, NOT part of the Y.Doc, so
@@ -904,9 +1073,12 @@ export async function closeDocumentForWrite(
  *  Yjs transaction origin is null. Same mechanism as graphDirty.
  *
  *  No-op when nobody has the note open. */
-export function signalSheetChanged(documentName: string): void {
+export function signalSheetChanged(groupId: string, path: string): void {
   try {
-    const doc = collabServer.documents.get(documentName);
+    // Qualified: the un-prefixed lookup used to bump the `sheetMeta`
+    // rev on whichever world's document happened to be resident under
+    // that path.
+    const doc = collabServer.documents.get(qualifiedDocName(groupId, path));
     if (!doc) return;
     (doc.getMap('sheetMeta') as Y.Map<number>).set('rev', Date.now());
   } catch (err) {

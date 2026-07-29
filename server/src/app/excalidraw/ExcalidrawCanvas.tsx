@@ -47,10 +47,17 @@ const FLUSH_DEBOUNCE_MS = 150;
 
 export function ExcalidrawCanvas({
   path,
+  groupId,
   initialScene,
   canEdit,
 }: {
   path: string;
+  /** Current world/campaign id — `session.currentGroupId` from the
+   *  server page, threaded down as a prop (never refetched
+   *  client-side). Qualifies the Hocuspocus document name as
+   *  `${groupId}:${path}` so two worlds sharing an identical note path
+   *  never collide on the same Y.Doc. See `@/app/notes/provider-cache`. */
+  groupId: string;
   csrfToken: string;
   initialScene: Scene | null;
   canEdit: boolean;
@@ -99,8 +106,13 @@ export function ExcalidrawCanvas({
   // re-run the acquire effect. Re-acquiring any sooner risks the same
   // stale-reload/silent-revert bug D2b fixed for the note editor.
   useEffect(() => {
-    const unsubscribe = onDocumentReset((resetPath) => {
-      if (resetPath !== path) return;
+    // The reset listener receives the QUALIFIED name (see
+    // provider-cache.ts#ResetListener) — compare against our own
+    // qualified name, not the bare path, or resets silently stop
+    // matching for this component.
+    const qualifiedName = `${groupId}:${path}`;
+    const unsubscribe = onDocumentReset((resetName) => {
+      if (resetName !== qualifiedName) return;
       if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
       ydocRef.current = null;
       providerRef.current = null;
@@ -118,10 +130,10 @@ export function ExcalidrawCanvas({
         resetTimerRef.current = null;
       }
     };
-  }, [path]);
+  }, [groupId, path]);
 
   useEffect(() => {
-    const { provider, ydoc } = acquireProvider(path);
+    const { provider, ydoc } = acquireProvider(groupId, path);
     ydocRef.current = ydoc;
     providerRef.current = provider;
     const yElements = ydoc.getArray<unknown>('excalidraw-elements');
@@ -208,13 +220,16 @@ export function ExcalidrawCanvas({
       provider.off('synced', onSynced);
       provider.off('status', onStatus);
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
-      releaseProvider(path);
+      releaseProvider(groupId, path);
     };
     // initialScene is a one-shot seed — don't re-trigger on identity
     // changes. `epoch` IS a real dependency: it's how a server-initiated
     // reset (see the effect above) forces this effect to release the
-    // stale provider/ydoc and acquire a fresh one.
-  }, [path, epoch]);
+    // stale provider/ydoc and acquire a fresh one. `groupId` is
+    // effectively as static as `path` (both come from the same
+    // server-rendered page) — included so the qualified name captured
+    // by acquire/release always matches.
+  }, [path, groupId, epoch]);
 
   const flushLocal = (): void => {
     const ydoc = ydocRef.current;

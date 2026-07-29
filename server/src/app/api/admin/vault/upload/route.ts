@@ -150,7 +150,7 @@ async function handleUpload(req: NextRequest): Promise<Response> {
     // Kick any live editors on paths that existed before so they
     // reconnect and load the fresh server state rather than fighting
     // it with their in-memory doc.
-    await Promise.all(beforePaths.map((p) => closeDocumentConnections(p)));
+    await Promise.all(beforePaths.map((p) => closeDocumentConnections(authed.currentGroupId, p)));
 
     return json({ ok: true, summary }, 200);
   } catch (err) {
