@@ -8,7 +8,6 @@ import {
   loadBacklinks,
   loadNote,
   loadOutgoingLinks,
-  loadPreview,
   loadTags,
   visibilityFor,
 } from './notes';
@@ -327,47 +326,6 @@ describe('canWriteAllSheetFields', () => {
         fmPlayer: 'someone-else',
       }),
     ).toBe(false);
-  });
-});
-
-// ── loadPreview — visibility filtering ──────────────────────────────────
-
-describe('loadPreview — visibility filtering', () => {
-  const dmPath = 'vault/dm-secret.md';
-  const gmPath = 'vault/gm-secret.md';
-  const plainPath = 'vault/plain.md';
-
-  beforeEach(() => {
-    seedNoteWithFlags(DEFAULT_GROUP_ID, dmPath, { dmOnly: true });
-    seedNoteWithFlags(DEFAULT_GROUP_ID, gmPath, { gmOnly: true });
-    seedNoteWithFlags(DEFAULT_GROUP_ID, plainPath, {});
-  });
-
-  // `opts` used to be optional and default to "no filtering" — the exact
-  // footgun that caused the backlinks leak (see loadBacklinks history).
-  // `VisibilityOpts` is now a required parameter, so TypeScript itself
-  // rejects any call site that forgets it; there is no runtime "no opts"
-  // path left to test. See notes.ts#VisibilityOpts.
-
-  it('returns null for a dm_only note when hideDmOnly is set', () => {
-    expect(loadPreview(DEFAULT_GROUP_ID, dmPath, { hideDmOnly: true })).toBeNull();
-  });
-
-  it('still returns a dm_only note when only hideGmOnly is set', () => {
-    expect(loadPreview(DEFAULT_GROUP_ID, dmPath, { hideGmOnly: true })).not.toBeNull();
-  });
-
-  it('returns null for a gm_only note when hideGmOnly is set', () => {
-    expect(loadPreview(DEFAULT_GROUP_ID, gmPath, { hideGmOnly: true })).toBeNull();
-  });
-
-  it('still returns a gm_only note when only hideDmOnly is set', () => {
-    expect(loadPreview(DEFAULT_GROUP_ID, gmPath, { hideDmOnly: true })).not.toBeNull();
-  });
-
-  it('does not lock out a plain note under a full viewer filter', () => {
-    const vis = visibilityFor('viewer');
-    expect(loadPreview(DEFAULT_GROUP_ID, plainPath, vis)).not.toBeNull();
   });
 });
 

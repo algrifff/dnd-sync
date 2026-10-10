@@ -1,16 +1,10 @@
 // Guards against unbounded AI-provider spend from client-controlled input.
 //
-// Two call sites feed free-form, client- or user-authored text straight into
-// a paid model call:
-//   - POST /api/chat replays the ENTIRE client-side conversation on every
-//     turn (the client is the source of truth for history — it reloads it
-//     from localStorage). `stopWhen: stepCountIs(8)` in that route bounds
-//     the tool-call LOOP, not the input, so nothing stops a client sending
-//     thousands of historical messages before a single token streams back.
-//   - POST /api/sessions/end reads a session note's body straight from the
-//     DB and sends it as the prompt for a multi-step extraction pass. That
-//     content is ordinary user-authored note text with no length cap of
-//     its own.
+// POST /api/chat replays the ENTIRE client-side conversation on every turn
+// (the client is the source of truth for history — it reloads it from
+// localStorage). `stopWhen: stepCountIs(8)` in that route bounds the
+// tool-call LOOP, not the input, so nothing stops a client sending
+// thousands of historical messages before a single token streams back.
 //
 // These checks are deliberately a character-length heuristic, not a real
 // tokenizer — pulling in a tokenizer dependency for a cost-guard is not
@@ -43,13 +37,6 @@ export const MAX_CHAT_MESSAGES = 300;
 // context-length limit anyway.
 export const MAX_CHAT_INPUT_CHARS = 400_000;
 
-// Session-note body fed into the session-end extraction prompt. A
-// session log is prose written by one GM/player after one session —
-// realistically a few thousand words (tens of KB). 200,000 characters
-// (~50k tokens) is generous enough to never affect a real write-up
-// while bounding a pathological paste.
-export const MAX_SESSION_NOTE_CHARS = 200_000;
-
 /** Character-length heuristic for a JSON-serializable value. Never
  *  throws — an unserializable value is treated as "too big" so it
  *  fails closed rather than silently passing an unbounded payload
@@ -81,19 +68,6 @@ export function checkChatMessageBudget(messages: unknown[]): InputBudgetResult {
       ok: false,
       error: 'input_too_large',
       reason: `estimated message payload is ${chars} characters, exceeding the ${MAX_CHAT_INPUT_CHARS}-character limit`,
-    };
-  }
-  return { ok: true };
-}
-
-/** Reject a session note body that is implausibly long before it is
- *  sent as the extraction prompt in /api/sessions/end. */
-export function checkSessionNoteBudget(content: string): InputBudgetResult {
-  if (content.length > MAX_SESSION_NOTE_CHARS) {
-    return {
-      ok: false,
-      error: 'session_too_large',
-      reason: `session note body is ${content.length} characters, exceeding the ${MAX_SESSION_NOTE_CHARS}-character limit`,
     };
   }
   return { ok: true };

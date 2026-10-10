@@ -2,9 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   MAX_CHAT_INPUT_CHARS,
   MAX_CHAT_MESSAGES,
-  MAX_SESSION_NOTE_CHARS,
   checkChatMessageBudget,
-  checkSessionNoteBudget,
 } from './input-limits';
 
 describe('checkChatMessageBudget', () => {
@@ -67,32 +65,5 @@ describe('checkChatMessageBudget', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe('input_too_large');
-  });
-});
-
-describe('checkSessionNoteBudget', () => {
-  it('should allow a normal session write-up', () => {
-    const result = checkSessionNoteBudget('The party arrived at the tavern...'.repeat(50));
-
-    expect(result.ok).toBe(true);
-  });
-
-  it('should allow empty content', () => {
-    const result = checkSessionNoteBudget('');
-
-    expect(result.ok).toBe(true);
-  });
-
-  it('should accept content right at the cap', () => {
-    const result = checkSessionNoteBudget('a'.repeat(MAX_SESSION_NOTE_CHARS));
-
-    expect(result.ok).toBe(true);
-  });
-
-  it('should reject content over the cap', () => {
-    const result = checkSessionNoteBudget('a'.repeat(MAX_SESSION_NOTE_CHARS + 1));
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toBe('session_too_large');
   });
 });

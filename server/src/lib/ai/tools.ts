@@ -809,10 +809,9 @@ function entityMove(ctx: ToolContext) {
     execute: async ({ from, to }: z.infer<typeof MoveSchema>) => {
       // GM only — mirrors note_write_section / session_finalize.
       // Guarding here (not just by omission from getToolsForRole)
-      // matters because api/sessions/end/route.ts builds its tool map
-      // by hand-picking from createTools() rather than calling
-      // getToolsForRole(), so any future caller that does the same
-      // gets a real check instead of relying on the filter.
+      // matters because any caller that hand-picks from createTools()
+      // rather than calling getToolsForRole() gets a real check instead
+      // of relying on the filter.
       if (ctx.role !== 'dm') return { ok: false as const, error: 'GM only' };
 
       if (from === to) return { ok: true as const, path: from };

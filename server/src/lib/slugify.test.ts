@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { slugify } from './compendium';
+import { slugify } from './slugify';
 
 // `slugify` is the canonical implementation now imported by every call
 // site that previously carried its own byte-identical copy (sessions,

@@ -12,7 +12,7 @@ import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
 import { deriveFolderIndexesFor } from '@/lib/campaign-index';
-import { slugify } from '@/lib/compendium';
+import { slugify } from '@/lib/slugify';
 
 export const dynamic = 'force-dynamic';
 

@@ -15,7 +15,7 @@
 
 import { getDb } from './db';
 import type { TemplateKind } from './templates';
-import { slugify } from './compendium';
+import { slugify } from './slugify';
 
 /** Character roles we derive today. 'session' isn't here because
  *  sessions get their own index table in Phase 2. */
