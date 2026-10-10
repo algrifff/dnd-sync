@@ -471,8 +471,19 @@ describe('backlink_create — releases its write token on the post-drain no-op b
         path,
         () => {
           getDb()
-            .query('UPDATE notes SET content_md=? WHERE group_id=? AND path=?')
-            .run('Bob is a travelling merchant.\n\n[[Carol]]', groupId, path);
+            .query('UPDATE notes SET content_md=?, content_json=? WHERE group_id=? AND path=?')
+            .run(
+              'Bob is a travelling merchant.\n\n[[Carol]]',
+              JSON.stringify({
+                type: 'doc',
+                content: [
+                  paragraph('Bob is a travelling merchant.'),
+                  { type: 'paragraph', content: [{ type: 'wikilink', attrs: { target: 'Test/Carol.md', label: 'Carol' } }] },
+                ],
+              }),
+              groupId,
+              path,
+            );
         },
         () =>
           tools.backlink_create.execute!(

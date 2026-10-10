@@ -886,14 +886,9 @@ function backlinkCreate(ctx: ToolContext) {
         return { ok: false as const, error: `Not found: ${fromPath}` };
       }
 
-      // Legacy bodies spell the link `[[Basename`; serialised
-      // wikilinks spell it `[[Full/Path.md`.
-      const targetBase = toPath.replace(/\.md$/i, '').split('/').pop() ?? toPath;
-      const alreadyLinked = (md: string): boolean =>
-        md.includes(`[[${targetBase}`) || md.includes(`[[${toPath}`);
       // Cheap pre-drain check: if the link is already there, skip the
       // drain entirely rather than kicking editors for a no-op write.
-      if (alreadyLinked(note0.content_md)) return { ok: true as const };
+      if (hasWikilinkTo(note0.content_json, toPath)) return { ok: true as const };
 
       // Re-checked post-drain: the flush that just landed may already
       // hold this link, and an unchanged edit evicts nobody (N7).
@@ -902,7 +897,7 @@ function backlinkCreate(ctx: ToolContext) {
         path: fromPath,
         userId: ctx.userId,
         edit: (doc, note) => {
-          if (alreadyLinked(note.content_md)) return { status: 'unchanged' };
+          if (hasWikilinkTo(note.content_json, toPath)) return { status: 'unchanged' };
           const wikilinkNode: PmNode = {
             type: 'paragraph',
             content: [{ type: 'wikilink', attrs: { target: toPath, label: label ?? '', anchor: null, orphan: false } }],
@@ -914,6 +909,17 @@ function backlinkCreate(ctx: ToolContext) {
       return { ok: true as const };
     },
   });
+}
+
+/** derive.ts persists a wikilink node's `target` verbatim as `to_path`,
+ *  so "already linked" means a node targeting exactly that path. */
+function hasWikilinkTo(contentJson: string, target: string): boolean {
+  let doc: PmNode;
+  try { doc = JSON.parse(contentJson) as PmNode; }
+  catch { return false; }
+  const walk = (n: PmNode): boolean =>
+    (n.type === 'wikilink' && n.attrs?.target === target) || (n.content ?? []).some(walk);
+  return walk(doc);
 }
 
 // ── inventory_add ─────────────────────────────────────────────────────
