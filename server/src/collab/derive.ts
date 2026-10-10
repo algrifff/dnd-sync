@@ -45,6 +45,27 @@ export function computeDerived(opts: { path: string; doc: Y.Doc }): DerivedNote 
   };
 }
 
+/** Writes a note's new Y state and every cache derived from it as one
+ *  transaction. Derivation runs first, outside the transaction, so the
+ *  SQLite write lock is never held across the CPU work. Throws on
+ *  failure, in which case nothing was written. */
+export function writeNoteState(opts: {
+  groupId: string;
+  path: string;
+  userId: string | null;
+  state: Uint8Array;
+  doc: Y.Doc;
+}): void {
+  const derived = computeDerived({ path: opts.path, doc: opts.doc });
+  const db = getDb();
+  db.transaction(() => {
+    db.query(
+      'UPDATE notes SET yjs_state = ?, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
+    ).run(opts.state, Date.now(), opts.userId, opts.groupId, opts.path);
+    persistDerived({ groupId: opts.groupId, path: opts.path, userId: opts.userId, derived });
+  })();
+}
+
 /** DB-only half. MUST be called from inside a transaction the caller
  *  owns — it deliberately opens none of its own so the yjs_state
  *  UPDATE and these derived rows (and the FTS triggers they fire)
