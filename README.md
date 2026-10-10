@@ -330,22 +330,21 @@ All routes live under `/api/`. ~70 endpoints; grouped:
 | Group | Example routes |
 |-------|---------------|
 | Health | `GET /api/health` |
-| Auth / profile | `POST /api/sessions/create`, `POST /api/sessions/end`, `GET /api/profile`, `POST /api/profile/password`, `POST /api/profile/avatar` |
-| Notes | `GET /api/notes/[...path]`, `POST /api/notes/create`, `DELETE /api/notes/[...path]`, `POST /api/notes/move`, `POST /api/notes/duplicate`, `POST /api/notes/visibility`, `POST /api/notes/sheet`, `POST /api/notes/excalidraw-scene`, `GET /api/preview/[...path]` (hover popover payload) |
-| Search | `GET /api/ui/search`, `GET /api/compendium/search` (cross-world rules library typeahead) |
+| Auth / profile | `POST /api/sessions/create`, `GET /api/profile`, `POST /api/profile/password`, `POST /api/profile/avatar` |
+| Notes | `GET /api/notes/[...path]`, `POST /api/notes/create`, `DELETE /api/notes/[...path]`, `POST /api/notes/move`, `POST /api/notes/duplicate`, `POST /api/notes/visibility`, `POST /api/notes/sheet` |
+| Search | `GET /api/ui/search` |
 | Templates | `GET /api/templates`, `GET /api/templates/[kind]` |
 | Worlds (groups) | `GET /api/worlds`, `POST /api/worlds`, `GET /api/worlds/active`, `PATCH /api/worlds/[id]`, `POST /api/worlds/[id]/invite`, `POST /api/worlds/[id]/transfer`, `GET /api/worlds/[id]/members`, `GET /api/worlds/[id]/personalities` |
 | Campaigns | `POST /api/campaigns/reorder`, `DELETE /api/campaigns/delete`, `POST /api/worlds/[id]/campaigns/[slug]/join` |
 | Folders | `POST /api/folders/create`, `POST /api/folders/move`, `DELETE /api/folders/delete` |
 | Tree | `GET /api/tree` |
-| Characters | `GET /api/characters`, `POST /api/characters/create`, `GET /api/me/characters`, `POST /api/me/characters/import-pdf` |
+| Characters | `GET /api/characters`, `GET /api/me/characters`, `POST /api/me/characters/import-pdf` |
 | Sessions (game) | `POST /api/sessions/mark-closed` |
 | Tags | `GET /api/tags`, `GET /api/note-tags`, `GET /api/asset-tags` |
 | Assets | `POST /api/assets/upload`, `GET /api/assets/[id]`, `GET /api/assets/list`, `GET /api/assets/by-path` |
-| Backlinks | `GET /api/backlinks/[...path]`, `POST /api/notes/backlink` |
+| Backlinks | `POST /api/notes/backlink` |
 | Graph | `GET /api/graph`, `GET /api/graph/neighborhood/[...path]` |
 | Import (AI) | `POST /api/import`, `POST /api/import/[id]/analyse`, `POST /api/import/[id]/apply`, `POST /api/import/[id]/orchestrate` |
 | AI Chat | `POST /api/chat` (streaming, Vercel AI SDK), `POST /api/chat/upload` |
 | UI state | `POST /api/ui/gm-mode` |
 | Admin | `POST /api/admin/login`, `POST /api/admin/vault/upload` |
-| Stats | `GET /api/stats` |

@@ -1,10 +1,7 @@
 'use client';
 
-// Item / loot header. Big icon box on the left to showcase the art;
-// compendium search bar on the right so the GM can attach a canonical
-// item (Longsword, Potion of Healing, …) and autofill category,
-// rarity, weapon damage, armor AC and modifiers in one click. Weapon
-// and armor sub-sheets surface as their own tiles when present.
+// Item / loot header. Big icon box on the left to showcase the art.
+// Weapon and armor sub-sheets surface as their own tiles when present.
 
 import { useState } from 'react';
 import type { HocuspocusProvider } from '@hocuspocus/provider';
@@ -14,7 +11,6 @@ import { InlineNumber } from './InlineNumber';
 import { ChipSelect } from './ChipSelect';
 import { PortraitPicker } from './PortraitPicker';
 import { SaveIndicator } from './SaveIndicator';
-import { CompendiumSearch } from './CompendiumSearch';
 import { usePatchSheet } from './usePatchSheet';
 import { portraitUrl, titleSizeClass, RARITY_COLOR } from './util';
 
@@ -120,28 +116,6 @@ export function ItemHeader({
     ? RARITY_COLOR[rarity]?.replace(/^--/, '')
     : undefined;
 
-  // When a compendium item is picked we autofill the core fields in one
-  // PATCH so the sheet reflects the canonical shape (weapon damage,
-  // armor AC, modifiers etc.) without the GM having to retype anything.
-  const applyCompendium = (data: Record<string, unknown>): void => {
-    const patch: Record<string, unknown> = {};
-    if (typeof data.category === 'string') patch.category = data.category;
-    if (typeof data.rarity === 'string') patch.rarity = data.rarity;
-    if (typeof data.weight === 'number') patch.weight = data.weight;
-    if (data.cost !== undefined) patch.cost = data.cost;
-    if (typeof data.requires_attunement === 'boolean') {
-      patch.requires_attunement = data.requires_attunement;
-    }
-    if (typeof data.attunement_requirements === 'string') {
-      patch.attunement_requirements = data.attunement_requirements;
-    }
-    if (data.weapon !== undefined) patch.weapon = data.weapon;
-    if (data.armor !== undefined) patch.armor = data.armor;
-    if (Array.isArray(data.modifiers)) patch.modifiers = data.modifiers;
-    if (typeof data.description === 'string') patch.description = data.description;
-    if (Array.isArray(data.tags) && data.tags.length > 0) patch.tags = data.tags;
-    patchSheet(patch);
-  };
 
   return (
     <>
@@ -168,19 +142,6 @@ export function ItemHeader({
               />
               <SaveIndicator saving={saving} error={error} />
             </div>
-
-            {canEdit && (
-              <div className="mt-1.5">
-                <CompendiumSearch
-                  kind="item"
-                  placeholder="Link a compendium item (autofills stats)…"
-                  ariaLabel="Link item from compendium"
-                  onPick={(hit) =>
-                    applyCompendium(hit.data as Record<string, unknown>)
-                  }
-                />
-              </div>
-            )}
 
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
               <ChipSelect

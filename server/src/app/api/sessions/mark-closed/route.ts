@@ -37,7 +37,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       return json({ error: 'invalid_body' }, 400);
     }
 
-    // Mirror /api/sessions/end's guard: a note must actually exist at
+    // A note must actually exist at
     // this path and be kind=session before we upsert a session_notes
     // row for it. Without this, any caller can create session_notes
     // rows keyed on a nonexistent path.

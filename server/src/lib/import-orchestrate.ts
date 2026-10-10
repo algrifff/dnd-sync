@@ -48,7 +48,7 @@ import { listCampaigns, ensureCampaignForPath } from './characters';
 import { ensureIndexNote } from './index-notes';
 import { deriveAllIndexes } from './derive-indexes';
 import { deriveFolderIndex, allCampaignFoldersInDb } from './campaign-index';
-import { slugify } from './compendium';
+import { slugify } from './slugify';
 
 // Canonical subfolders created for every new campaign — mirrors CampaignCreateDialog.
 const CAMPAIGN_SUBFOLDERS = [

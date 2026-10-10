@@ -60,10 +60,11 @@ All queries include `group_id` — no table-level tenant isolation, just strict 
 
 ## Auth — two separate layers
 
-**Bearer token** (legacy API / admin scripts)
-- `Authorization: Bearer <token>` or `?token=`
-- `admin` or `player` role; timing-safe comparison
-- Tokens come from env vars or `config` table
+**Super-admin token** (`/admin/*` only)
+- `POST /api/admin/login` timing-safe compares the submitted token against the `ADMIN_TOKEN` env var (rate-limited) and sets the `__sa` cookie; `lib/superadmin.ts#isSuperAdmin` checks that cookie
+- Env var only: the `admin_token` / `player_token` rows that `ensureConfig()` seeds into the `config` table are not read by any auth path
+- `ADMIN_TOKEN` is not a password for the regular `/login` form (that master-password path was removed)
+- No `Authorization: Bearer` / `?token=` API auth remains
 
 **Session-based** (web dashboard)
 - HTTP-only cookie + CSRF token validated on every mutation
@@ -107,8 +108,11 @@ All queries include `group_id` — no table-level tenant isolation, just strict 
 
 A separate manual-review path still exists in the codebase
 (`import-analyse.ts` → `plan_json` → `import-apply.ts` commits, behind
-`POST /api/import/[id]/analyse` / `/apply`) but nothing in the current UI
-calls it — the vault settings page only drives `/orchestrate`.
+`POST /api/import/[id]/analyse` / `/apply`). Nothing in the current UI
+calls `/analyse` — the vault settings page only drives `/orchestrate`.
+`/apply` is still called by the "Apply" button in
+`app/settings/import/[id]/ImportJobPanel.tsx`, reachable from the
+vault page's job list via `/settings/import/<id>`.
 
 **Skill injection** — per-kind markdown prompts (`character.md`, `creature.md`, `session.md`, `item.md`, `location.md`, `lore.md`, `note.md`) are loaded dynamically based on keyword detection in the user's message.
 
@@ -118,7 +122,7 @@ calls it — the vault settings page only drives `/orchestrate`.
 |------|-------------|
 | `server/src/lib/db.ts` | SQLite singleton, dual-runtime adapter |
 | `server/src/lib/migrations.ts` | Append-only migration array — **never edit existing entries** |
-| `server/src/lib/auth.ts` | Bearer token verification |
+| `server/src/lib/superadmin.ts` | `ADMIN_TOKEN` check for the `/admin/*` `__sa` cookie |
 | `server/src/lib/session.ts` | Session CRUD, CSRF, expiry cleanup |
 | `server/src/lib/notes.ts` | Note CRUD, backlink derivation, FTS sync |
 | `server/src/lib/ai/orchestrator.ts` | Chat system prompt builder + skill injection |
@@ -159,12 +163,12 @@ HTTP status usage: 400 bad input, 401 unauthenticated, 403 forbidden, 404 not fo
 
 Bun's native test runner (`bun:test`). Run with `bun test` from root or any workspace.
 
-~28 test files, most (not all) under `server/src/lib/` — a few live
+~31 test files, most (not all) under `server/src/lib/` — a few live
 alongside the code they cover instead, e.g.
 `server/src/collab/derive.test.ts` and
 `server/src/app/notes/sheet-header/util.test.ts`. Representative
 examples:
-- `auth.test.ts`, `session.test.ts`, `sessions.test.ts`, `csrf.test.ts` — auth layer
+- `session.test.ts`, `csrf.test.ts` — auth layer
 - `notes.test.ts`, `users.test.ts`, `groups.test.ts` — core lib
 - `md-to-pm.test.ts` — Markdown → ProseMirror conversion
 - `ratelimit.test.ts` — auth throttling
@@ -225,7 +229,7 @@ unlinks that file once no `assets` row anywhere still points at it.
 
 Railway: `railway.toml` at repo root, Dockerfile at `server/Dockerfile`. Build context is repo root.
 
-Required env vars: `ADMIN_TOKEN`, `PLAYER_TOKEN`, `DATA_DIR=/data` + a volume mounted at `/data`.
+Required env vars: `ADMIN_TOKEN` (the `/admin` super-admin login is disabled without it), `DATA_DIR=/data` + a volume mounted at `/data`. `PLAYER_TOKEN` is no longer read by any auth path; setting it is harmless.
 
 Optional: `OPENAI_API_KEY` (enables AI chat + import), `ANTHROPIC_API_KEY`.
 

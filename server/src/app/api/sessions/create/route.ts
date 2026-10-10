@@ -26,7 +26,7 @@ import { logAudit } from '@/lib/audit';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { getTemplate } from '@/lib/templates';
 import { generateSessionTitle } from '@/lib/session-title';
-import { slugify } from '@/lib/compendium';
+import { slugify } from '@/lib/slugify';
 
 export const dynamic = 'force-dynamic';
 

@@ -25,7 +25,7 @@ import { extractPlaintext, type PmNode } from './md-to-pm';
 import { closeDocumentConnections } from '@/collab/server';
 import { ensureIndexNote } from './index-notes';
 import { rebuildYjsState } from './yjs-rebuild';
-import { slugify } from './compendium';
+import { slugify } from './slugify';
 
 /** Callout title marker — used both as the user-visible heading and as
  *  the detection sentinel when we look for the managed block. */

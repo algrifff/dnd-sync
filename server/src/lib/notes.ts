@@ -1,5 +1,5 @@
 // Note read helpers. Small module that wraps the DB queries used by the
-// notes / backlinks / preview / tree endpoints and the note page.
+// notes / tree endpoints and the note page.
 
 import { getDb } from './db';
 
@@ -69,12 +69,6 @@ export type NoteAuthor = {
   userId: string;
   displayName: string;
   username: string;
-};
-
-export type NotePreview = {
-  path: string;
-  title: string;
-  excerpt: string;
 };
 
 export type BacklinkRow = {
@@ -207,26 +201,6 @@ export function loadUser(userId: string): NoteAuthor | null {
       )
       .get(userId) ?? null
   );
-}
-
-export function loadPreview(
-  groupId: string,
-  path: string,
-  opts: VisibilityOpts,
-): NotePreview | null {
-  // Filtered in SQL so a hidden note is indistinguishable from a
-  // missing one — the caller 404s on null either way.
-  const dmFilter = opts.hideDmOnly ? ' AND dm_only = 0' : '';
-  const gmFilter = opts.hideGmOnly ? ' AND gm_only = 0' : '';
-  const row = getDb()
-    .query<{ title: string; content_text: string }, [string, string]>(
-      `SELECT title, content_text FROM notes
-        WHERE group_id = ? AND path = ?${dmFilter}${gmFilter}`,
-    )
-    .get(groupId, path);
-  if (!row) return null;
-  const excerpt = row.content_text.slice(0, 240).trim();
-  return { path, title: row.title, excerpt };
 }
 
 export function loadBacklinks(

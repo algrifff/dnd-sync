@@ -13,7 +13,7 @@ import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
 import { assertMoveAllowed } from '@/lib/move-policy';
-import { rewriteWikilinksForRenames } from '@/lib/move-rewrite';
+import { findWikilinkLinkers, rewriteWikilinksForLinkers } from '@/lib/move-rewrite';
 import { deriveFolderIndexesFor } from '@/lib/campaign-index';
 
 export const dynamic = 'force-dynamic';
@@ -61,6 +61,10 @@ export async function POST(req: NextRequest): Promise<Response> {
     )
     .get(session.currentGroupId, to);
   if ((collide?.n ?? 0) > 0) return json({ error: 'exists', path: to }, 409);
+
+  // The transaction repoints every incoming edge, so linkers must be
+  // discovered first.
+  const linkers = findWikilinkLinkers(session.currentGroupId, [from]);
 
   db.transaction(() => {
     // Derived-index tables (characters, session_notes, character_campaigns)
@@ -138,18 +142,9 @@ export async function POST(req: NextRequest): Promise<Response> {
   await closeDocumentConnections(session.currentGroupId, from);
 
   // Rewrite wikilink targets in every note that pointed at the old
-  // path, then kick their live editors so they pull the rewritten
-  // body. Done after the move transaction so note_links is already in
-  // its final shape (the linker's edge for `to_path = from` is gone,
-  // but rewriteWikilinksForRenames re-derives from content_json).
-  // Actually no — we need to query note_links BEFORE the transaction
-  // rewrites them. Doing it here works because the move route only
-  // updates note_links rows where the moved note is the from_path or
-  // to_path of an OUTGOING/INCOMING edge owned by the moved note —
-  // edges from OTHER notes pointing at the moved note are untouched
-  // by the route's UPDATE. So linkers are still discoverable here.
+  // path, then kick their live editors so they pull the rewritten body.
   try {
-    const touched = rewriteWikilinksForRenames(session.currentGroupId, [
+    const touched = rewriteWikilinksForLinkers(session.currentGroupId, linkers, [
       { from, to },
     ]);
     for (const linker of touched) await closeDocumentConnections(session.currentGroupId, linker);

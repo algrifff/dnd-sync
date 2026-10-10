@@ -917,10 +917,9 @@ describe('entity_edit_content — gm_only enforcement (C3)', () => {
 //
 // Both tools were previously GM-only ONLY by omission from
 // getToolsForRole's player/viewer maps — there was no check inside
-// execute(). api/sessions/end/route.ts already hand-picks tools from
-// createTools() directly rather than calling getToolsForRole(), so any
-// future caller that does the same (or a bug that mis-wires the
-// filter) would hand a 'player' context these GM tools with zero
+// execute(). Any caller that hand-picks tools from createTools()
+// directly rather than calling getToolsForRole() (or a bug that
+// mis-wires the filter) would hand a 'player' context these GM tools with zero
 // enforcement. These tests call createTools(ctxFor('player')) directly
 // — bypassing getToolsForRole entirely — to prove the guard lives
 // inside execute(), matching the sibling pattern in note_write_section

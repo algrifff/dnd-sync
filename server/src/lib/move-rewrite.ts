@@ -1,7 +1,8 @@
 // Helpers for rewriting wikilink targets inside note bodies after a
-// path rename. Folder + note moves call `rewriteWikilinksForRenames`
-// with the map of {oldPath -> newPath}; we walk every note that points
-// at any old path (per the `note_links` index) and update the wikilink
+// path rename. Folder + note moves call `findWikilinkLinkers` before
+// their transaction and `rewriteWikilinksForLinkers` after it, with the
+// map of {oldPath -> newPath}; we walk every note that pointed at any
+// old path (per the `note_links` index) and update the wikilink
 // node attrs in their content_json + content_md + the Y.Doc state.
 //
 // The yjs_state rewrite replaces the body's CRDT history for that note
@@ -39,26 +40,12 @@ export function findWikilinkLinkers(
   return rows.map((r) => r.from_path);
 }
 
-/** Rewrite every linker note that points at any of the renamed paths.
- *  Returns the set of linker paths that were touched, so the caller
- *  can closeDocumentConnections() on each. */
-export function rewriteWikilinksForRenames(
-  groupId: string,
-  renames: Rename[],
-): string[] {
-  if (renames.length === 0) return [];
-  const linkers = findWikilinkLinkers(
-    groupId,
-    renames.map((r) => r.from),
-  );
-  return rewriteWikilinksForLinkers(groupId, linkers, renames);
-}
-
 /** Walk a pre-computed linker set and rewrite their wikilink targets
- *  per the rename map. Used by the folder-move flow where the linker
- *  discovery has to happen before the transaction (to_path edges get
- *  rewritten in-place by the move) but the body rewrite must run
- *  after, so the new paths are reachable. */
+ *  per the rename map. Linker discovery has to happen before the move
+ *  transaction (to_path edges get rewritten in-place by the move) but
+ *  the body rewrite must run after, so the new paths are reachable.
+ *  Returns the touched linker paths so the caller can
+ *  closeDocumentConnections() on each. */
 export function rewriteWikilinksForLinkers(
   groupId: string,
   linkers: string[],
