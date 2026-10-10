@@ -121,15 +121,6 @@ export function rewriteWikilinksForLinkers(
         WHERE group_id = ? AND path = ?`,
     ).run(newJson, newText, newMd, state, newMd.length, now, groupId, linker);
 
-    // Refresh the FTS mirror so search hits land on the new content.
-    db.query('DELETE FROM notes_fts WHERE path = ? AND group_id = ?').run(
-      linker,
-      groupId,
-    );
-    db.query(
-      'INSERT INTO notes_fts(path, group_id, title, content) VALUES (?, ?, ?, ?)',
-    ).run(linker, groupId, row.title, newText);
-
     // note_links also need rewriting for this linker — the existing
     // route updates note_links for the MOVED rows' own from/to, but
     // a linker's edges (this note → renamed target) still hold the

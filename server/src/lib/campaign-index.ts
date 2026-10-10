@@ -284,14 +284,6 @@ export async function deriveFolderIndex(
     indexPath,
   );
 
-  db.query('DELETE FROM notes_fts WHERE path = ? AND group_id = ?').run(
-    indexPath,
-    groupId,
-  );
-  db.query(
-    'INSERT INTO notes_fts(path, group_id, title, content) VALUES (?, ?, ?, ?)',
-  ).run(indexPath, groupId, indexRow.title, newText);
-
   // Re-seed links in both directions so the graph shows a fully connected
   // hierarchy. Two categories:
   //

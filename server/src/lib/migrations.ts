@@ -10,6 +10,27 @@ type Migration = {
   readonly sql: string;
 };
 
+// v48 trigger body: remove the notes_fts row for `old` via an indexed
+// MATCH instead of scanning the table. The path phrase is cut at any
+// NUL (FTS5's query parser stops there and throws, which would abort
+// the note write). A path with no ASCII letters or digits may yield no
+// tokens, so it falls back to matching the whole world; the exact
+// path/group_id checks find the row either way.
+const DELETE_OLD_FTS_ROW = `
+        DELETE FROM notes_fts
+          WHERE rowid IN (
+                  SELECT rowid FROM notes_fts
+                   WHERE notes_fts MATCH
+                         'group_id : "' || replace(old.group_id, '"', '""') || '"' ||
+                         CASE WHEN substr(old.path, 1, instr(old.path || char(0), char(0)) - 1)
+                                   GLOB '*[A-Za-z0-9]*'
+                              THEN ' AND path : "' || replace(
+                                     substr(old.path, 1, instr(old.path || char(0), char(0)) - 1),
+                                     '"', '""') || '"'
+                              ELSE ''
+                         END)
+            AND path = old.path AND group_id = old.group_id;`;
+
 const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
@@ -871,6 +892,53 @@ const MIGRATIONS: readonly Migration[] = [
       -- the unique index doesn't already serve — pure write
       -- amplification on every notes INSERT/UPDATE/DELETE.
       DROP INDEX IF EXISTS notes_group_path;
+    `,
+  },
+  {
+    version: 48,
+    description: 'notes_fts: index path + group_id so MATCH and reindex are scoped per row/world',
+    sql: `
+      -- v33 stored path and group_id UNINDEXED. FTS5 can't look rows up
+      -- by an unindexed column, so every reindex (each note save, via
+      -- notes_au) ran "DELETE ... WHERE path = ? AND group_id = ?" as a
+      -- scan of the whole index across all worlds, and every search
+      -- ranked hits from every world before filtering to one.
+      --
+      -- Indexing both lets triggers find a row with
+      --   MATCH 'group_id : "<id>" AND path : "<path>"'
+      -- and lets searches scope MATCH to one world. Queries must now
+      -- column-filter to {title content} (see lib/search.ts
+      -- worldFtsMatch) or folder names and world ids would match.
+      -- The exact path = / group_id = checks stay: phrase matching is
+      -- a lookup, not an equality test.
+      --
+      -- notes_au also fires on path/group_id changes now, so moves no
+      -- longer need to reseed the index by hand.
+      DROP TRIGGER IF EXISTS notes_ai;
+      DROP TRIGGER IF EXISTS notes_au;
+      DROP TRIGGER IF EXISTS notes_ad;
+      DROP TABLE IF EXISTS notes_fts;
+
+      CREATE VIRTUAL TABLE notes_fts USING fts5(
+        path, group_id, title, content,
+        tokenize = 'porter unicode61'
+      );
+
+      CREATE TRIGGER notes_ai AFTER INSERT ON notes BEGIN
+        INSERT INTO notes_fts(path, group_id, title, content)
+          VALUES (new.path, new.group_id, new.title, new.content_text);
+      END;
+      CREATE TRIGGER notes_au AFTER UPDATE OF path, group_id, title, content_text ON notes BEGIN
+        ${DELETE_OLD_FTS_ROW}
+        INSERT INTO notes_fts(path, group_id, title, content)
+          VALUES (new.path, new.group_id, new.title, new.content_text);
+      END;
+      CREATE TRIGGER notes_ad AFTER DELETE ON notes BEGIN
+        ${DELETE_OLD_FTS_ROW}
+      END;
+
+      INSERT INTO notes_fts(path, group_id, title, content)
+        SELECT path, group_id, title, content_text FROM notes;
     `,
   },
 ];

@@ -10,6 +10,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { getDb } from '@/lib/db';
+import { worldFtsMatch } from '@/lib/search';
 import { getPmSchema } from '@/lib/pm-schema';
 import { rebuildYjsState } from '@/lib/yjs-rebuild';
 import { loadNote, isAllowedPath } from '@/lib/notes';
@@ -408,26 +409,18 @@ function campaignBrowse(ctx: ToolContext) {
 
 // ── entity_search ─────────────────────────────────────────────────────
 
-function toFtsQuery(raw: string): string {
-  return raw.trim().replace(/['"*]/g, '').split(/\s+/).filter(Boolean).join(' ');
-}
-
 function entitySearch(ctx: ToolContext) {
   return tool({
     description:
       'Search for existing entities by name or keywords. Always call this before entity_create to prevent duplicates.',
     inputSchema: SearchSchema,
     execute: async ({ query, limit }: z.infer<typeof SearchSchema>) => {
-      const fts = toFtsQuery(query);
-      if (!fts) return { ok: true as const, results: [] };
+      const match = worldFtsMatch(ctx.groupId, query);
+      if (!match) return { ok: true as const, results: [] };
 
       type FtsRow = { path: string; title: string; snippet: string };
       const rows = getDb()
         .query<FtsRow, [string, string, number, number, number]>(
-          // group_id moved into notes_fts in migration #33 — scope
-          // MATCH per world directly so the FTS rank is correct and
-          // we don't leak hits across tenants.
-          //
           // Visibility: dm_only rows are withheld from non-GM callers
           // (ctx.role === 'dm' ⟺ session role admin|editor). gm_only is
           // namespace *selection*, not an extra filter — mirrors
@@ -456,7 +449,7 @@ function entitySearch(ctx: ToolContext) {
              ORDER BY notes_fts.rank
              LIMIT ?`,
         )
-        .all(fts, ctx.groupId, ctx.role === 'dm' ? 1 : 0, ctx.gmNamespace ? 1 : 0, limit ?? 10);
+        .all(match, ctx.groupId, ctx.role === 'dm' ? 1 : 0, ctx.gmNamespace ? 1 : 0, limit ?? 10);
 
       return { ok: true as const, results: rows };
     },

@@ -77,7 +77,7 @@ Both backends expose the same `Database` interface, so call sites are runtime-ag
 
 ## Data model
 
-Schema is defined in `server/src/lib/migrations.ts` as an append-only array. Currently at **schema version 46** — never edit existing entries, always append.
+Schema is defined in `server/src/lib/migrations.ts` as an append-only array. Currently at **schema version 48** — never edit existing entries, always append.
 
 Key tables:
 

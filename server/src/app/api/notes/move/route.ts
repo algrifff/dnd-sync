@@ -20,7 +20,7 @@ export const dynamic = 'force-dynamic';
 
 const Body = z.object({
   from: z.string().min(1).max(1024),
-  to: z.string().min(1).max(1024),
+  to: z.string().min(1).max(1024).regex(/^[^\u0000-\u001f\u007f]+$/, 'path must not contain control characters'),
 });
 
 export async function POST(req: NextRequest): Promise<Response> {
@@ -61,13 +61,6 @@ export async function POST(req: NextRequest): Promise<Response> {
     )
     .get(session.currentGroupId, to);
   if ((collide?.n ?? 0) > 0) return json({ error: 'exists', path: to }, 409);
-
-  // Pull content for the FTS reinsert.
-  const row = db
-    .query<{ title: string; content_text: string }, [string, string]>(
-      'SELECT title, content_text FROM notes WHERE group_id = ? AND path = ?',
-    )
-    .get(session.currentGroupId, from);
 
   db.transaction(() => {
     // Derived-index tables (characters, session_notes, character_campaigns)
@@ -140,18 +133,6 @@ export async function POST(req: NextRequest): Promise<Response> {
     db.query(
       'UPDATE users SET active_character_path = ? WHERE active_character_path = ?',
     ).run(to, from);
-    // FTS mirror — triggers fire on title/content_text updates, not on
-    // path, so reseed manually. group_id is part of the FTS row since
-    // migration #33 to keep MATCH queries scoped per world.
-    db.query('DELETE FROM notes_fts WHERE path = ? AND group_id = ?').run(
-      from,
-      session.currentGroupId,
-    );
-    if (row) {
-      db.query(
-        'INSERT INTO notes_fts(path, group_id, title, content) VALUES (?, ?, ?, ?)',
-      ).run(to, session.currentGroupId, row.title, row.content_text);
-    }
   })();
 
   await closeDocumentConnections(session.currentGroupId, from);

@@ -23,6 +23,9 @@ export function isAllowedPath(
   path: string,
 ): { ok: true } | { ok: false; reason: string } {
   if (!path) return { ok: false, reason: 'empty_path' };
+  if (/[\u0000-\u001f\u007f]/.test(path)) {
+    return { ok: false, reason: 'names cannot contain control characters' };
+  }
   const normalised = path.replace(/^\/+|\/+$/g, '').replace(/\\/g, '/');
   if (!normalised) return { ok: false, reason: 'empty_path' };
 

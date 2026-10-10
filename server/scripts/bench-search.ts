@@ -100,4 +100,19 @@ for (const q of queries) {
   );
 }
 console.log(`sum_of_medians_ms\t${total.toFixed(2)}`);
+
+// One note save: the notes_au trigger reindexes that note in notes_fts.
+const savePaths = getDb()
+  .query<{ path: string }, [string]>('SELECT path FROM notes WHERE group_id = ? LIMIT 200')
+  .all(gid)
+  .map((r) => r.path);
+const save = getDb().query<unknown, [string, string, string]>(
+  'UPDATE notes SET content_text = ? WHERE group_id = ? AND path = ?',
+);
+const saves = savePaths.map((path, i) => {
+  const t0 = performance.now();
+  save.run(`edited body ${i}`, gid, path);
+  return performance.now() - t0;
+});
+console.log(`note_save_median_ms\t${median(saves).toFixed(2)}`);
 teardownTestDb();

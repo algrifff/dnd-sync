@@ -15,6 +15,20 @@ export function toFtsQuery(input: string): string {
   return tokens.map((t) => `${t.toLowerCase()}*`).join(' ');
 }
 
+function ftsPhrase(s: string): string {
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+/** MATCH expression for `query` over one world's titles and bodies.
+ *  notes_fts indexes path and group_id too (migration v48), so an
+ *  unfiltered MATCH would hit folder names and world ids. Callers still
+ *  check `notes_fts.group_id = ?`: a phrase match isn't an equality test.
+ *  Returns '' when the query has no searchable tokens. */
+export function worldFtsMatch(groupId: string, query: string): string {
+  const fts = toFtsQuery(query);
+  return fts ? `group_id : ${ftsPhrase(groupId)} AND {title content} : (${fts})` : '';
+}
+
 const TITLE_LIMIT = 12;
 const CONTENT_LIMIT = 8;
 const ASSET_LIMIT = 5;
@@ -105,9 +119,9 @@ export function searchWorld(opts: {
           .map((r) => [r.path, r.note_kind]),
   );
 
-  const fts = q.length >= MIN_CONTENT_QUERY ? toFtsQuery(q) : '';
+  const match = q.length >= MIN_CONTENT_QUERY ? worldFtsMatch(opts.groupId, q) : '';
   const titlePaths = new Set(titleHits.map((r) => r.path));
-  const contentRows = fts
+  const contentRows = match
     ? db
         .query<{ path: string; title: string; note_kind: unknown; snippet: string }, [string, string, number, number]>(
           `SELECT n.path, n.title, ${noteKind('n.frontmatter_json')} AS note_kind,
@@ -122,7 +136,7 @@ export function searchWorld(opts: {
             ORDER BY notes_fts.rank
             LIMIT ${CONTENT_LIMIT + TITLE_LIMIT}`,
         )
-        .all(fts, opts.groupId, showDmOnly, gmOnly)
+        .all(match, opts.groupId, showDmOnly, gmOnly)
         .filter((r) => !titlePaths.has(r.path))
         .slice(0, CONTENT_LIMIT)
     : [];
