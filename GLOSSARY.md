@@ -81,9 +81,22 @@ _Avoid_: Promote, publish
 ## Play
 
 **Session**:
-One sitting of play within exactly one Campaign, together with the log the table writes during it. Anyone at the table can open or close a Session. A Session is either Open (still being recorded) or Closed (wrapped up).
+One sitting of play within exactly one Campaign, together with the log the table writes during it. Anyone at the table can open or close a Session. A Session is either Open (being played) or Closed (wrapped up at least once). A Closed Session's log can still be edited and wrapped up again.
 _Avoid_: Game night, log, episode
 
 **Wrap-up**:
-Folding a Session's log into the rest of the World. Closing a Session triggers a Wrap-up, which proposes changes to People, Creatures, Locations, Items, Quests and Lore, adds to Characters' story and inventory, and links the log to every Note it mentions. A person reviews the proposed changes before they are applied, and running it again only proposes what is new. It never changes a Character's game stats.
+Folding a Session's log into the rest of the World. Closing a Session triggers a Wrap-up, which:
+- proposes additions to People, Creatures, Locations, Items, Quests and Lore;
+- links the log to every Note it mentions;
+- sends Suggestions to Characters.
+
+It only ever adds History entries and never rewrites what people have written. It asks rather than guesses when a mention might match an existing Note. Whoever closed the Session reviews the proposed changes before they are applied, and running it again only proposes what is new.
 _Avoid_: Extraction, processing, end-session pass
+
+**History**:
+The dated, Session-by-Session record on a Note of what happened to or was learned about it. Each entry links to its Session.
+_Avoid_: Timeline, appearances, changelog
+
+**Suggestion**:
+A change that a Wrap-up proposes for a Character, covering its story and inventory and never its game stats. It waits for that Character's Player to accept or dismiss it.
+_Avoid_: Pending edit, proposal
