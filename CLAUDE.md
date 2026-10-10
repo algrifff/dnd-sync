@@ -32,7 +32,7 @@ scripts/    # one-off utilities (e.g. vault deduplication)
 - `server/src/lib/db.ts` switches at runtime: `typeof Bun !== "undefined"`
 - The Dockerfile rebuilds `better-sqlite3` against Node 22's ABI in a separate stage — don't skip this step when changing the Dockerfile
 
-## Data model (45 migrations, versions 1–47 — append only, never edit existing)
+## Data model (46 migrations, versions 1–48 — append only, never edit existing)
 
 Numbering isn't contiguous — a couple of version numbers (21, 22) were
 never shipped, so "latest version" and "migration count" are two
@@ -52,7 +52,7 @@ Key tables:
 | `import_jobs` | AI import pipeline state — `uploaded` → `orchestrating_assets` → `orchestrating_campaign` → `orchestrating_entities` → `orchestrating_quality` → `applied` on the live Smart Import path (can pause at `waiting_for_answer`); `parsing` → `analysing` → `ready` is the legacy manual-review path, still valid statuses but not driven by the current UI |
 | `assets` | Binary files (images etc.) deduplicated by content hash |
 | `note_links` | Graph edges between notes (backlinks) |
-| `notes_fts` | FTS5 full-text search index (auto-synced via triggers) |
+| `notes_fts` | FTS5 full-text search index, auto-synced by triggers on `notes` (including path moves). `path` and `group_id` are indexed (v48), so build every MATCH with `worldFtsMatch()` from `lib/search.ts`, never write to it directly |
 | `group_invite_tokens` | Shareable world join links |
 | `audit_log` | Admin action history |
 

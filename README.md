@@ -239,7 +239,7 @@ Bun workspaces: `shared` and `server`. The `scripts/` folder holds one-off utili
 - **Engine:** SQLite — `bun:sqlite` under Bun (dev / tests), `better-sqlite3` under Node 22 (production). Both expose the same interface; switch happens in `server/src/lib/db.ts`.
 - **File location:** `DATA_DIR/compendium.db` (default `./.data/compendium.db`)
 - **Mode:** WAL (write-ahead logging) for concurrent reads
-- **Migrations:** append-only array in `server/src/lib/migrations.ts`, currently at schema version 46. Auto-applied on boot.
+- **Migrations:** append-only array in `server/src/lib/migrations.ts`, currently at schema version 48. Auto-applied on boot.
 
 Key tables: `notes`, `users`, `groups`, `group_members`, `characters`, `session_notes`, `import_jobs`, `assets`, `note_links`, `notes_fts` (FTS5), `audit_log`, `group_invite_tokens`.
 

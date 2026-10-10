@@ -54,10 +54,10 @@ export async function moveFolder(args: {
 
   const affected = db
     .query<
-      { path: string; title: string; content_text: string },
+      { path: string },
       [string, string, string]
     >(
-      `SELECT path, title, content_text
+      `SELECT path
          FROM notes
         WHERE group_id = ? AND (path = ? OR path LIKE ? || '/%')`,
     )
@@ -75,8 +75,6 @@ export async function moveFolder(args: {
   const moved = affected.map((r) => ({
     from: r.path,
     to: to + r.path.slice(from.length),
-    title: r.title,
-    content: r.content_text,
   }));
 
   for (const m of moved) {
@@ -172,13 +170,6 @@ export async function moveFolder(args: {
       db.query(
         'UPDATE users SET active_character_path = ? WHERE active_character_path = ?',
       ).run(m.to, m.from);
-      db.query('DELETE FROM notes_fts WHERE path = ? AND group_id = ?').run(
-        m.from,
-        groupId,
-      );
-      db.query(
-        'INSERT INTO notes_fts(path, group_id, title, content) VALUES (?, ?, ?, ?)',
-      ).run(m.to, groupId, m.title, m.content);
     }
 
     const markers = db

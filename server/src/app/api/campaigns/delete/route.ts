@@ -111,10 +111,6 @@ export async function POST(req: NextRequest): Promise<Response> {
       // characters / session_notes / items / locations / creatures all
       // have ON DELETE CASCADE off notes(group_id, path).
       db.query('DELETE FROM notes WHERE group_id = ? AND path = ?').run(groupId, n.path);
-      db.query('DELETE FROM notes_fts WHERE path = ? AND group_id = ?').run(
-        n.path,
-        groupId,
-      );
     }
     db.query(
       `DELETE FROM folder_markers
