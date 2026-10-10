@@ -100,6 +100,9 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
     createdBy: note.created_by,
     character,
   });
+  // The whole table co-writes a Session log. Mirrors the collab
+  // server's `canEditDoc`, which accepts the same body writes.
+  const canWriteBody = canEdit || isSessionNote;
 
   // Campaign slug for session end — from frontmatter.campaigns[0] or path
   let sessionCampaignSlug: string | undefined;
@@ -208,7 +211,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                     />
                   </div>
 
-                  {isSessionNote && canEdit && (
+                  {isSessionNote && (
                     <EndSessionButton
                       sessionPath={path}
                       csrfToken={session.csrfToken}
@@ -227,12 +230,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                       cursorMode: session.cursorMode,
                       avatarVersion: session.avatarVersion,
                     }}
-                    canEdit={canEditNote({
-                      role: session.role,
-                      userId: session.userId,
-                      createdBy: note.created_by,
-                      character,
-                    })}
+                    canEdit={canWriteBody}
                     csrfToken={session.csrfToken}
                     character={character}
                     accentColor={accentColor}
