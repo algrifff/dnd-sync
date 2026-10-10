@@ -23,10 +23,10 @@ The whole thing runs as a single Next.js process backed by SQLite — no externa
 │  server.ts  (custom entry — Next.js + Hocuspocus on one    │
 │              port, share the same HTTP upgrade handler)    │
 │                                                            │
-│   App Router            Hocuspocus           AI Chat        │
-│   /api/* routes         server (Yjs)         /api/chat      │
-│      │                     │                    │           │
-│      ▼                     ▼                    ▼           │
+│   App Router            Hocuspocus                         │
+│   /api/* routes         server (Yjs)                       │
+│      │                     │                               │
+│      ▼                     ▼                               │
 │   ┌──────────────────────────────────────────────────────┐ │
 │   │  lib/  — notes, auth, session, ai, import, graph,    │ │
 │   │         campaign-index, characters, assets, audit    │ │
@@ -52,7 +52,7 @@ Bun workspaces at the repo root.
 │   └── src/
 │       ├── app/        # App Router pages + ~70 API route handlers
 │       ├── lib/        # All business logic (notes, auth, ai, import, …)
-│       │   └── ai/     # Orchestrator, tools, per-kind skill prompts
+│       │   └── ai/     # OpenAI client, import skills, tools (unreferenced)
 │       ├── collab/     # Hocuspocus server (web rich-text collaboration)
 │       └── middleware.ts
 ├── shared/         # @compendium/shared — Zod schemas + protocol constants
@@ -124,24 +124,14 @@ Two independent layers:
 
 ## AI features
 
-`POST /api/chat` streams responses via the **Vercel AI SDK v6** (default `gpt-4o-mini` via `@ai-sdk/openai`). Up to 8 agentic tool-call steps per turn. Context injected per request: groupId, campaign slug, active character name, currently open session, role.
+There is no in-app AI chat; players reach Claude through an MCP
+connector built separately. The tool definitions in
+`server/src/lib/ai/tools.ts` (`campaign_list`, `entity_search`,
+`entity_create`, `entity_edit_sheet`, and the rest) are currently
+unreferenced outside their tests, kept for that connector to adopt.
 
-Tools the model can call (defined in `server/src/lib/ai/tools.ts`):
-
-| Tool                  | Effect                                                          |
-|-----------------------|-----------------------------------------------------------------|
-| `campaign_list`       | List registered campaign slugs (constrains `entity_create`)     |
-| `entity_search`       | Search before creating, to prevent duplicates                   |
-| `entity_create`       | Create a note under an existing campaign                        |
-| `entity_edit_sheet`   | Update structured frontmatter fields (HP, AC, level, …)         |
-| `entity_edit_content` | Append prose to a note body                                     |
-| `backlink_create`     | Add a knowledge-graph edge between two notes                    |
-| `inventory_add`       | Add an item to a character sheet (GM only)                      |
-| `entity_move`         | Relocate a note                                                 |
-| `session_close`       | Close an open session note (GM only)                            |
-| `session_apply`       | Apply session outcomes to canonical notes (GM only)             |
-
-**Skill injection** — per-kind Markdown prompts in `server/src/lib/ai/skills/` (`character.md`, `creature.md`, `session.md`, `item.md`, `location.md`, `lore.md`, `note.md`) are loaded dynamically based on keywords in the user's message.
+OpenAI is called directly through `server/src/lib/ai/openai.ts` for
+the import pipeline and PDF character-sheet import.
 
 **Import pipeline** — batch import of an existing Markdown vault:
 
@@ -179,6 +169,6 @@ The Dockerfile is a three-stage build:
 3. **runtime** (`node:22-slim`) — minimal image, runs `server.ts` via `tsx`.
 
 Required env vars: `ADMIN_TOKEN`, `PLAYER_TOKEN`, `DATA_DIR=/data` (with a Railway volume mounted at `/data`).
-Optional: `OPENAI_API_KEY` (enables AI chat + import), `ANTHROPIC_API_KEY`.
+Optional: `OPENAI_API_KEY` (enables Smart Import and PDF character import).
 
 Health check: `GET /api/health`.
