@@ -24,6 +24,7 @@ import { setupTestDb, teardownTestDb } from '@/lib/test-utils';
 import { getPmSchema } from '@/lib/pm-schema';
 import * as collabServer from '@/collab/server';
 import type { ServerWriteToken } from '@/collab/server';
+import { computeDerived, persistDerived } from '@/collab/derive';
 import { createTools, type ToolContext } from './tools';
 
 // Snapshot the REAL exports into a plain object before any test runs
@@ -1027,6 +1028,7 @@ describe('inventory_add — does not touch yjs_state', () => {
   });
 });
 
+<<<<<<< HEAD
 describe('entity_create — canonical kinds', () => {
   function seedCampaign(): void {
     const db = getDb();
@@ -1063,5 +1065,57 @@ describe('entity_create — canonical kinds', () => {
     expect(result).toMatchObject({ ok: true, path: 'Campaigns/mill/People/grell.md' });
     const fm = JSON.parse(readNote('Campaigns/mill/People/grell.md').frontmatter_json);
     expect(fm.kind).toBe('person');
+=======
+describe('backlink_create — link target survives the next collab save', () => {
+  /** Re-run the same derive the Hocuspocus store hook runs on the next
+   *  editor save: decode the stored yjs_state and persist its links. */
+  function resaveFromYjs(path: string): void {
+    const ydoc = new Y.Doc();
+    Y.applyUpdate(ydoc, readNote(path).yjs_state!);
+    const derived = computeDerived({ path, doc: ydoc });
+    const db = getDb();
+    db.transaction(() => persistDerived({ groupId, path, userId, derived }))();
+  }
+
+  function linksFrom(path: string): string[] {
+    return getDb()
+      .query<{ to_path: string }, [string, string]>(
+        'SELECT to_path FROM note_links WHERE group_id = ? AND from_path = ? ORDER BY to_path',
+      )
+      .all(groupId, path)
+      .map((r) => r.to_path);
+  }
+
+  it('should keep the edge pointing at the full target path after a re-derive', async () => {
+    const fromPath = 'Campaigns/Demo/Sessions/One.md';
+    const toPath = 'Campaigns/Demo/People/Aldric.md';
+    seedNote({ path: fromPath, title: 'One', pmDoc: { type: 'doc', content: [paragraph('Session one.')] }, contentMd: 'Session one.' });
+
+    const tools = createTools(ctxFor('dm'));
+    await tools.backlink_create.execute!({ fromPath, toPath, label: undefined }, { toolCallId: 'bl1', messages: [] });
+    resaveFromYjs(fromPath);
+
+    expect(linksFrom(fromPath)).toEqual([toPath]);
+  });
+
+  it('should add the link when the note only links to a target sharing a name prefix', async () => {
+    const fromPath = 'Campaigns/Demo/Sessions/Two.md';
+    const longer = 'Campaigns/Demo/People/Aldricson.md';
+    const toPath = 'Campaigns/Demo/People/Aldric.md';
+    seedNote({
+      path: fromPath,
+      title: 'Two',
+      pmDoc: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'wikilink', attrs: { target: longer, label: 'Aldricson', orphan: false } }] }],
+      },
+      contentMd: '[[Aldricson]]',
+    });
+
+    const tools = createTools(ctxFor('dm'));
+    await tools.backlink_create.execute!({ fromPath, toPath, label: undefined }, { toolCallId: 'bl2', messages: [] });
+    resaveFromYjs(fromPath);
+
+    expect(linksFrom(fromPath)).toEqual([toPath, longer].sort());
   });
 });
