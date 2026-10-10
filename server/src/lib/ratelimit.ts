@@ -114,3 +114,13 @@ export function recordAuthFailure(ip: string, isLocalhost: boolean): boolean {
 export function recordAuthSuccess(ip: string): void {
   wsAuthLimiter.recordSuccess(ip);
 }
+
+// OAuth token endpoint for the MCP connector. Keyed per IP; every
+// rejected exchange (bad code, bad verifier, dead refresh token) counts.
+// 30 fails / 5 min: a real client retries a couple of times at most.
+export const oauthTokenLimiter = createLimiter(30, 5 * 60_000);
+
+// OAuth dynamic client registration. Every call counts, success or not,
+// because each one inserts a row. 20 / hour per IP is far above what
+// one person adding a connector to a few Claude surfaces produces.
+export const oauthRegisterLimiter = createLimiter(20, 60 * 60_000);
