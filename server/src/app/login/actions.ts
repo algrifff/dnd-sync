@@ -54,7 +54,6 @@ import {
   publicAppUrl,
   sendEmail,
 } from '@/lib/email';
-import { verifyToken } from '@/lib/auth';
 import { getPostHogClient } from '@/lib/posthog-server';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
@@ -102,11 +101,8 @@ export async function loginAction(
   }
 
   const user = findUserByUsername(parsed.data.username);
-  // Allow ADMIN_TOKEN as a master password so the token in .env.local can
-  // always be used to log in, even if the original generated password is lost.
-  const isAdminToken = verifyToken(parsed.data.password) === 'admin';
   const pwdOk = user
-    ? (isAdminToken || await verifyPassword(parsed.data.password, user.passwordHash))
+    ? await verifyPassword(parsed.data.password, user.passwordHash)
     : (await verifyPassword(parsed.data.password, await getDummyHash()), false);
 
   if (!user || !pwdOk) {
@@ -126,9 +122,8 @@ export async function loginAction(
 
   // Public-signup accounts have email_verified_at = NULL until the user
   // clicks the emailed link. Admin-created accounts are back-filled on
-  // insert and skip this gate. ADMIN_TOKEN master-password is exempt so
-  // the operator can always recover.
-  if (!isAdminToken && user.emailVerifiedAt == null) {
+  // insert and skip this gate.
+  if (user.emailVerifiedAt == null) {
     void captureServer({
       userId: user.id,
       event: EVENTS.AUTH_LOGIN_FAILED,
