@@ -7,7 +7,7 @@
 // Extracted from the original POST /api/folders/move handler so the
 // "rename a folder via its index.md title" flow can reuse the same
 // logic without duplicating the transaction. The wikilink rewrite
-// pass (rewriteWikilinksForRenames) is deliberately included here so
+// pass (rewriteWikilinksForLinkers) is deliberately included here so
 // every folder-rename codepath updates `[[Characters]]` →
 // `[[Party Members]]` consistently — the previous folders/move route
 // missed that step and was the bug this module was extracted to fix.
