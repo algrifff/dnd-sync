@@ -92,6 +92,29 @@ describe('notes_fts (v48)', () => {
     expect(ftsRows(A)).toEqual([]);
   });
 
+  it('saves, moves and deletes a note whose path contains a NUL byte', () => {
+    const db = getDb();
+    insertNote(A, 'Lore/a\u0000b.md', 'Nul', 'before');
+
+    db.query(`UPDATE notes SET content_text = 'after' WHERE group_id = ? AND path = ?`).run(A, 'Lore/a\u0000b.md');
+    expect(ftsRows(A)).toEqual([{ path: 'Lore/a\u0000b.md', title: 'Nul', content: 'after' }]);
+
+    db.query(`UPDATE notes SET path = 'Lore/fixed.md' WHERE group_id = ? AND path = ?`).run(A, 'Lore/a\u0000b.md');
+    db.query('DELETE FROM notes WHERE group_id = ? AND path = ?').run(A, 'Lore/fixed.md');
+    expect(ftsRows(A)).toEqual([]);
+  });
+
+  it('cleans up paths that have no ASCII letters or digits', () => {
+    const db = getDb();
+    insertNote(A, '🐉', 'Dragon', 'before');
+    insertNote(A, '!!!', 'Bangs', '');
+
+    db.query(`UPDATE notes SET content_text = 'after' WHERE group_id = ? AND path = ?`).run(A, '🐉');
+    db.query('DELETE FROM notes WHERE group_id = ? AND path = ?').run(A, '!!!');
+
+    expect(ftsRows(A)).toEqual([{ path: '🐉', title: 'Dragon', content: 'after' }]);
+  });
+
   it('leaves another world alone when a note with the same path changes', () => {
     insertNote(A, 'Lore/Moon.md', 'Moon', 'world a');
     insertNote(B, 'Lore/Moon.md', 'Moon', 'world b');

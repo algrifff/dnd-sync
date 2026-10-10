@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
 
 const Body = z.object({
   from: z.string().min(1).max(1024),
-  to: z.string().min(1).max(1024),
+  to: z.string().min(1).max(1024).regex(/^[^\u0000-\u001f\u007f]+$/, 'path must not contain control characters'),
 });
 
 export async function POST(req: NextRequest): Promise<Response> {

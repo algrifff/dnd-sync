@@ -284,7 +284,6 @@ export async function deriveFolderIndex(
     indexPath,
   );
 
-
   // Re-seed links in both directions so the graph shows a fully connected
   // hierarchy. Two categories:
   //
