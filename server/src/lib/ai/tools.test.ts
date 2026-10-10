@@ -352,7 +352,7 @@ describe('backlink_create — read-after-drain invariant (D4)', () => {
     // The flushed sentence must survive, and the new wikilink must be
     // appended on top of it — not the stale pre-drain body.
     expect(row.content_md).toContain('Bob got promoted');
-    expect(row.content_md).toContain('[[CarolConcurrent');
+    expect(row.content_md).toContain('[[Test/CarolConcurrent.md]]');
   });
 });
 
@@ -539,10 +539,8 @@ describe('entity_edit_content — evicts reattached editors AFTER the write (D2a
 
 describe('note_write_section — its post-write evict is actually destructive', () => {
   it('cancels the live editor\'s pending store rather than flushing it', async () => {
-    // note_write_section is the only call site that takes the token in
-    // one function and consumes it in another: it owns the
-    // `try/finally`, but `writeFullContent` does the write and the
-    // evict. Dropping the token on the way through that hand-off —
+    // note_write_section writes through applyNoteEdit, which takes the
+    // token, writes, and evicts. Dropping the token on the way —
     // `closeDocumentConnections(groupId, path)` instead of
     // `closeDocumentConnections(groupId, path, token)` — leaves every
     // other test in this file green while silently restoring the

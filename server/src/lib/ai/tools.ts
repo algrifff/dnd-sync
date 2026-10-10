@@ -11,8 +11,6 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { getDb } from '@/lib/db';
 import { worldFtsMatch } from '@/lib/search';
-import { getPmSchema } from '@/lib/pm-schema';
-import { rebuildYjsState } from '@/lib/yjs-rebuild';
 import { loadNote, isAllowedPath } from '@/lib/notes';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
@@ -27,27 +25,11 @@ import {
   parentFolderUnderCampaign,
 } from '@/lib/campaign-index';
 import { validateSheet } from '@/lib/validateSheet';
-import {
-  closeDocumentForWrite,
-  closeDocumentConnections,
-  releaseServerWrite,
-  signalSheetChanged,
-  type ServerWriteToken,
-} from '@/collab/server';
+import { signalSheetChanged } from '@/collab/server';
 import { parseCharacter } from '@/lib/character-parser';
 import { writeNote } from '@/lib/import-apply';
-
-/** `loadNote()` deliberately omits the (large) `yjs_state` blob from
- *  its SELECT — fetch it directly for the rebuild sites that need to
- *  seed from the existing Y.Doc (see `@/lib/yjs-rebuild`). */
-function loadYjsState(groupId: string, path: string): Uint8Array | null {
-  const row = getDb()
-    .query<{ yjs_state: Uint8Array | null }, [string, string]>(
-      'SELECT yjs_state FROM notes WHERE group_id = ? AND path = ?',
-    )
-    .get(groupId, path);
-  return row?.yjs_state ?? null;
-}
+import { applyNoteEdit, type PmDoc } from '@/lib/note-edits';
+import type { PmNode } from '@/lib/md-to-pm';
 
 // ── Context ────────────────────────────────────────────────────────────
 
@@ -703,87 +685,29 @@ function entityEditContent(ctx: ToolContext) {
         return { ok: false as const, error: `Not found: ${path}` };
       }
 
-      // Evict + drain live editors BEFORE computing the new document.
-      // Hocuspocus flushes the client's pending debounced state when
-      // the last connection drops; if we read content first and only
-      // drained afterwards, that flush would land on top of our stale
-      // read and then get clobbered by our own write. Draining first
-      // and re-reading below keeps "content used to build nextDoc/nextMd
-      // is always post-drain" true at this call site (see also
-      // backlink_create and note_write_section).
-      // The token this returns is what makes the post-write evict
-      // DESTRUCTIVE. Everything from here to the matching
-      // `closeDocumentConnections(path, token)` is wrapped so that the
-      // `!note` early return below — and any throw — releases it
-      // instead of stranding it.
-      const token = await closeDocumentForWrite(ctx.groupId, path);
-      try {
-        // Re-read AFTER the drain — this is the copy the flush (if any)
-        // just landed in, so we build on top of it instead of the
-        // pre-drain snapshot.
-        const note = loadNote(ctx.groupId, path);
-        if (!note) return { ok: false as const, error: `Not found: ${path}` };
-
-        let doc: PmDoc;
-        try { doc = JSON.parse(note.content_json) as PmDoc; }
-        catch { doc = { type: 'doc', content: [] }; }
-
-        const newNodes: PmNode[] = [];
-        if (heading) {
-          newNodes.push({
-            type: 'heading', attrs: { level: 3 },
-            content: [{ type: 'text', text: heading }],
-          });
-        }
-        for (const para of content.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)) {
-          newNodes.push({ type: 'paragraph', content: [{ type: 'text', text: para }] });
-        }
-
-        const nextDoc: PmDoc = { ...doc, content: [...(doc.content ?? []), ...newNodes] };
-        const headingMd = heading ? `### ${heading}\n\n` : '';
-        const nextMd = (note.content_md ?? '').trimEnd() +
-          (note.content_md?.trim() ? '\n\n' : '') + headingMd + content.trim();
-
-        // Rebuild yjs_state from the new PM JSON — never NULL it. The
-        // editor binds Tiptap to the Y.Doc alone (NoteSurface.tsx has no
-        // `content` seed), so a NULL state renders the note EMPTY and the
-        // first keystroke persists that emptiness over content_json.
-        // Same pattern as move-rewrite.ts:102-104. Seed from the existing
-        // state first so other Y roots (drawing-strokes-v3,
-        // excalidraw-*) survive the rebuild — see @/lib/yjs-rebuild.
-        const state = rebuildYjsState(
-          getPmSchema(),
-          loadYjsState(ctx.groupId, path),
-          nextDoc as object,
-          note.title || undefined,
-        );
-
-        getDb()
-          .query(
-            `UPDATE notes SET content_json=?, content_text=?, content_md=?,
-                              yjs_state=?, byte_size=?, updated_at=?, updated_by=?
-             WHERE group_id=? AND path=?`,
-          )
-          .run(
-            JSON.stringify(nextDoc), extractText(nextDoc), nextMd,
-            state, nextMd.length,
-            Date.now(), ctx.userId, ctx.groupId, path,
-          );
-
-        // Evict anyone who reconnected DURING the drain window above —
-        // the provider's initial reconnect delay is 0, so a client can
-        // re-attach mid-drain and pull our pre-write state back into
-        // memory. Without this, their next keystroke would silently
-        // revert the append we just persisted. Passing `token` is what
-        // makes this discard the stale doc rather than flush it.
-        await closeDocumentConnections(ctx.groupId, path, token);
-
-        return { ok: true as const };
-      } finally {
-        // No-op when the line above consumed it; the whole point on
-        // every other exit.
-        releaseServerWrite(token);
-      }
+      // applyNoteEdit drains live editors first and hands the edit the
+      // post-drain body, so a flush that lands during the drain is
+      // built on rather than clobbered (D4).
+      const result = await applyNoteEdit({
+        groupId: ctx.groupId,
+        path,
+        userId: ctx.userId,
+        edit: (doc) => {
+          const newNodes: PmNode[] = [];
+          if (heading) {
+            newNodes.push({
+              type: 'heading', attrs: { level: 3 },
+              content: [{ type: 'text', text: heading }],
+            });
+          }
+          for (const para of content.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)) {
+            newNodes.push({ type: 'paragraph', content: [{ type: 'text', text: para }] });
+          }
+          return { status: 'changed', doc: { ...doc, content: [...(doc.content ?? []), ...newNodes] } };
+        },
+      });
+      if (result.status === 'not_found') return { ok: false as const, error: `Not found: ${path}` };
+      return { ok: true as const };
     },
   });
 }
@@ -962,81 +886,32 @@ function backlinkCreate(ctx: ToolContext) {
         return { ok: false as const, error: `Not found: ${fromPath}` };
       }
 
+      // Legacy bodies spell the link `[[Basename`; serialised
+      // wikilinks spell it `[[Full/Path.md`.
       const targetBase = toPath.replace(/\.md$/i, '').split('/').pop() ?? toPath;
+      const alreadyLinked = (md: string): boolean =>
+        md.includes(`[[${targetBase}`) || md.includes(`[[${toPath}`);
       // Cheap pre-drain check: if the link is already there, skip the
       // drain entirely rather than kicking editors for a no-op write.
-      if (note0.content_md.includes(`[[${targetBase}`)) return { ok: true as const };
+      if (alreadyLinked(note0.content_md)) return { ok: true as const };
 
-      // See entity_edit_content for why the drain happens BEFORE we
-      // read the content used to compute the new document, and why
-      // yjs_state is rebuilt rather than nulled.
-      const token = await closeDocumentForWrite(ctx.groupId, fromPath);
-      try {
-        const note = loadNote(ctx.groupId, fromPath);
-        if (!note) return { ok: false as const, error: `Not found: ${fromPath}` };
-
-        // Re-check post-drain: the flush that just landed may already
-        // contain this exact link (e.g. a concurrent call), in which
-        // case there's nothing to write. Return WITHOUT evicting — no
-        // write happened, so there's nothing for a reattached editor to
-        // clobber, and closing the connection here would cost every open
-        // editor a ~1.2s "Reconnecting…" panel for a pure no-op (N7).
-        // The `finally` releases the token, so skipping the evict here
-        // no longer leaves the path armed for someone else's evict to
-        // trip over — which is what used to make N7's "just don't
-        // evict" reasoning load-bearing rather than merely polite.
-        if (note.content_md.includes(`[[${targetBase}`)) {
-          return { ok: true as const };
-        }
-
-        const linkText = label ? `[[${targetBase}|${label}]]` : `[[${targetBase}]]`;
-        const nextMd = (note.content_md ?? '').trimEnd() +
-          (note.content_md?.trim() ? '\n\n' : '') + linkText;
-
-        let doc: PmDoc;
-        try { doc = JSON.parse(note.content_json) as PmDoc; }
-        catch { doc = { type: 'doc', content: [] }; }
-
-        const wikilinkNode: PmNode = {
-          type: 'paragraph',
-          content: [{ type: 'wikilink', attrs: { target: targetBase, label: label ?? null, orphan: false } }],
-        };
-        const nextDoc: PmDoc = { ...doc, content: [...(doc.content ?? []), wikilinkNode] };
-
-        // Seed from the existing state so other Y roots (drawing
-        // strokes, excalidraw layers) survive — see @/lib/yjs-rebuild.
-        const state = rebuildYjsState(
-          getPmSchema(),
-          loadYjsState(ctx.groupId, fromPath),
-          nextDoc as object,
-          note.title || undefined,
-        );
-
-        const db = getDb();
-        // NOTE: this callback is SYNCHRONOUS on both the bun:sqlite and
-        // better-sqlite3 adapters — no `await` may appear inside it. The
-        // AFTER-evict below runs outside the transaction on purpose.
-        db.transaction(() => {
-          db.query(
-              `UPDATE notes SET content_md=?, content_json=?, content_text=?,
-                                yjs_state=?, byte_size=?, updated_at=?, updated_by=?
-               WHERE group_id=? AND path=?`,
-            )
-            .run(nextMd, JSON.stringify(nextDoc), extractText(nextDoc),
-                 state, nextMd.length,
-                 Date.now(), ctx.userId, ctx.groupId, fromPath);
-          db.query(`INSERT OR IGNORE INTO note_links (group_id, from_path, to_path) VALUES (?,?,?)`)
-            .run(ctx.groupId, fromPath, toPath);
-        })();
-
-        // Evict anyone who reconnected DURING the drain window — see
-        // entity_edit_content for the full rationale.
-        await closeDocumentConnections(ctx.groupId, fromPath, token);
-
-        return { ok: true as const };
-      } finally {
-        releaseServerWrite(token);
-      }
+      // Re-checked post-drain: the flush that just landed may already
+      // hold this link, and an unchanged edit evicts nobody (N7).
+      const result = await applyNoteEdit({
+        groupId: ctx.groupId,
+        path: fromPath,
+        userId: ctx.userId,
+        edit: (doc, note) => {
+          if (alreadyLinked(note.content_md)) return { status: 'unchanged' };
+          const wikilinkNode: PmNode = {
+            type: 'paragraph',
+            content: [{ type: 'wikilink', attrs: { target: toPath, label: label ?? '', anchor: null, orphan: false } }],
+          };
+          return { status: 'changed', doc: { ...doc, content: [...(doc.content ?? []), wikilinkNode] } };
+        },
+      });
+      if (result.status === 'not_found') return { ok: false as const, error: `Not found: ${fromPath}` };
+      return { ok: true as const };
     },
   });
 }
@@ -1155,45 +1030,33 @@ function noteWriteSection(ctx: ToolContext) {
         return { ok: false as const, error: `Not found: ${path}` };
       }
 
-      // Drain BEFORE reading the body we splice against. writeFullContent
-      // no longer drains itself — the content it's asked to write must
-      // already be computed from a post-drain read, otherwise a live
-      // editor's flush lands after we've already spliced against a stale
-      // copy and we'd overwrite the flush with content computed from a
-      // section position that may no longer be accurate (see D4 in the
-      // module-level notes; same invariant as entity_edit_content /
-      // backlink_create).
-      const token = await closeDocumentForWrite(ctx.groupId, path);
-      try {
-        const note = loadNote(ctx.groupId, path);
-        if (!note) return { ok: false as const, error: `Not found: ${path}` };
-
-        const existingMd = (note.content_md ?? '').trim();
-
-        // No section target — only allow on empty notes
-        if (!section) {
-          if (existingMd) {
-            return {
-              ok: false as const,
-              error:
-                'Note already has content. Call note_read first, then specify a `section` heading ' +
-                'to replace only that part. Use entity_edit_content to append.',
-            };
+      // The splice runs against the post-drain body applyNoteEdit
+      // hands over, never a pre-drain copy (D4).
+      const result = await applyNoteEdit({
+        groupId: ctx.groupId,
+        path,
+        userId: ctx.userId,
+        edit: (_doc, note) => {
+          const existingMd = (note.content_md ?? '').trim();
+          if (!section) {
+            if (existingMd) {
+              return {
+                status: 'rejected',
+                reason:
+                  'Note already has content. Call note_read first, then specify a `section` heading ' +
+                  'to replace only that part. Use entity_edit_content to append.',
+              };
+            }
+            return { status: 'changed', doc: markdownToDoc(content) };
           }
-          return await writeFullContent(ctx, path, content, note.title, token);
-        }
-
-        // Section-targeted write — splice the section in/out of existing markdown
-        const spliced = spliceSection(existingMd, section, content);
-        if (!spliced.ok) return { ok: false as const, error: spliced.error };
-        return await writeFullContent(ctx, path, spliced.md, note.title, token);
-      } finally {
-        // Covers all three early returns above (`!note`, "already has
-        // content", failed splice) plus any throw; a no-op once
-        // writeFullContent has handed the token back to
-        // closeDocumentConnections.
-        releaseServerWrite(token);
-      }
+          const spliced = spliceSection(existingMd, section, content);
+          if (!spliced.ok) return { status: 'rejected', reason: spliced.error };
+          return { status: 'changed', doc: markdownToDoc(spliced.md) };
+        },
+      });
+      if (result.status === 'not_found') return { ok: false as const, error: `Not found: ${path}` };
+      if (result.status === 'rejected') return { ok: false as const, error: result.reason };
+      return { ok: true as const };
     },
   });
 }
@@ -1236,59 +1099,19 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** `token` is the handle the CALLER took from `closeDocumentForWrite`;
- *  this helper consumes it on the post-write evict. It is required, not
- *  optional, so that a future call site cannot quietly downgrade this
- *  body replacement to a flush-on-evict by forgetting to thread it. The
- *  caller still owns the `finally { releaseServerWrite(token) }`. */
-async function writeFullContent(
-  ctx: ToolContext,
-  path: string,
-  md: string,
-  title: string,
-  token: ServerWriteToken,
-): Promise<{ ok: true }> {
+/** Headings and plain paragraphs only; anything richer stays as
+ *  paragraph text. */
+function markdownToDoc(md: string): PmDoc {
   const newNodes: PmNode[] = [];
   for (const para of md.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)) {
-    if (/^#{1,6}\s/.test(para)) {
-      const m = /^(#{1,6})\s+(.*)$/.exec(para);
-      if (m) {
-        newNodes.push({ type: 'heading', attrs: { level: m[1]!.length }, content: [{ type: 'text', text: m[2] ?? '' }] });
-        continue;
-      }
+    const m = /^(#{1,6})\s+(.*)$/.exec(para);
+    if (m) {
+      newNodes.push({ type: 'heading', attrs: { level: m[1]!.length }, content: [{ type: 'text', text: m[2] ?? '' }] });
+      continue;
     }
     newNodes.push({ type: 'paragraph', content: [{ type: 'text', text: para }] });
   }
-
-  const nextDoc: PmDoc = { type: 'doc', content: newNodes.length ? newNodes : [{ type: 'paragraph' }] };
-
-  // NOTE: the caller (noteWriteSection) has already drained the live
-  // doc and re-read the note AFTER the drain before computing `md` —
-  // do NOT drain again here, and do not call this helper with content
-  // computed from a pre-drain read. Rebuild yjs_state rather than
-  // nulling it (see entity_edit_content), seeded from the existing
-  // state so other Y roots survive — see @/lib/yjs-rebuild.
-  const state = rebuildYjsState(
-    getPmSchema(),
-    loadYjsState(ctx.groupId, path),
-    nextDoc as object,
-    title || undefined,
-  );
-
-  getDb()
-    .query(
-      `UPDATE notes SET content_json=?, content_text=?, content_md=?,
-                        yjs_state=?, byte_size=?, updated_at=?, updated_by=?
-       WHERE group_id=? AND path=?`,
-    )
-    .run(JSON.stringify(nextDoc), extractText(nextDoc), md.trim(), state,
-         md.trim().length, Date.now(), ctx.userId, ctx.groupId, path);
-
-  // Evict anyone who reconnected DURING the drain window in the
-  // caller — see entity_edit_content for the full rationale.
-  await closeDocumentConnections(ctx.groupId, path, token);
-
-  return { ok: true as const };
+  return { type: 'doc', content: newNodes.length ? newNodes : [{ type: 'paragraph' }] };
 }
 
 // ── session_finalize ──────────────────────────────────────────────────
@@ -1436,27 +1259,6 @@ function obj(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v)
     ? (v as Record<string, unknown>)
     : {};
-}
-
-// ── ProseMirror helpers ────────────────────────────────────────────────
-
-type PmNode = {
-  type: string;
-  attrs?: Record<string, unknown>;
-  content?: PmNode[];
-  text?: string;
-};
-
-type PmDoc = { type: 'doc'; content: PmNode[] };
-
-function extractText(doc: PmDoc): string {
-  const parts: string[] = [];
-  function walk(node: PmNode): void {
-    if (node.text) parts.push(node.text);
-    for (const child of node.content ?? []) walk(child);
-  }
-  for (const child of doc.content) walk(child);
-  return parts.join(' ').trim();
 }
 
 // ── Frontmatter builder ────────────────────────────────────────────────
