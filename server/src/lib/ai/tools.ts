@@ -986,17 +986,11 @@ function noteRead(ctx: ToolContext) {
     inputSchema: NoteReadSchema,
     execute: async ({ path }: z.infer<typeof NoteReadSchema>) => {
       const note = loadNote(ctx.groupId, path);
-      if (!note) return { ok: false as const, error: `Not found: ${path}` };
-
-      if (note.dm_only === 1 && ctx.role !== 'dm') {
-        return { ok: false as const, error: 'Access denied: GM-only note' };
-      }
-      // gm_only is a stricter, separate gate — visible only to session
-      // role 'admin' (an 'editor' has ctx.role === 'dm' but must NOT
-      // see this). Return the plain not-found shape, matching the
-      // `!note` branch above, so a hidden note is indistinguishable
-      // from a missing one — see isGmOnlyHiddenFrom.
-      if (isGmOnlyHiddenFrom(ctx, note)) {
+      // Both visibility gates return the plain not-found shape so a
+      // hidden note is indistinguishable from a missing one. gm_only is
+      // stricter than dm_only: an 'editor' has ctx.role === 'dm' but
+      // must not see it — see isGmOnlyHiddenFrom.
+      if (!note || (note.dm_only === 1 && ctx.role !== 'dm') || isGmOnlyHiddenFrom(ctx, note)) {
         return { ok: false as const, error: `Not found: ${path}` };
       }
 
