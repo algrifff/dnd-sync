@@ -252,3 +252,30 @@ Full docs: [`.claude/skills/README.md`](.claude/skills/README.md)
 | [`.claude/rules/testing.md`](.claude/rules/testing.md) | `**/*.test.*`, `**/*.spec.*` |
 
 Language guides (TypeScript + Next.js most relevant for this stack): [`.claude/languages/`](.claude/languages/)
+
+## Pull requests — open them automatically
+
+The user reviews PRs; they don't want to be asked to create them. When a
+piece of work is finished and verified (typecheck/tests pass), ship it as
+a PR without asking:
+
+1. Branch off `main` (`<type>/<short-slug>`, e.g. `fix/search-snippets`) — never commit to `main` directly.
+2. Stage **only the files belonging to this change** — the working tree often holds unrelated in-progress edits; leave them alone.
+3. Commit (conventional style, e.g. `fix(ux): ...`), push with `-u`, and `gh pr create` with a summary + how it was verified.
+4. Report the PR URL. Never merge — merging is the user's call.
+
+One PR per coherent change. If follow-up fixes land on the same work, push to the existing branch instead of opening a new PR.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `algrifff/dnd-sync` (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
