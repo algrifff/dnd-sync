@@ -1,5 +1,5 @@
 // /me — personal overview. Lives outside the (content) route group so
-// it skips the world-scoped chrome (FileTree, AppHeader, ChatPane).
+// it skips the world-scoped chrome (FileTree, AppHeader).
 // Shows the user's worlds, their user-level characters, and recent
 // activity across every world they belong to.
 

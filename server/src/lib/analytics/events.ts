@@ -13,8 +13,7 @@ export const EVENTS = {
   NOTE_CREATED: 'note_created',
   NOTE_EDITED: 'note_edited',
 
-  // ── AI chat ───────────────────────────────────────────────────
-  CHAT_MESSAGE_SENT: 'chat_message_sent',
+  // ── AI tools ──────────────────────────────────────────────────
   CHAT_TOOL_CALLED: 'chat_tool_called',
 
   // ── Import pipeline ───────────────────────────────────────────
