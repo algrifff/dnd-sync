@@ -119,10 +119,11 @@ taste here.
 
 ### Kind dispatch
 - `SheetHeader` is the only switchboard. Canonical kinds are
-  `character | person | creature | item | location`; legacy aliases
-  (`pc`, `npc`, `ally`, `villain`, `monster`) collapse via
-  `normalizeKind()` in `./util`. That mapping **must stay in sync** with
-  `server/src/lib/ai/tools.ts`. Change both at once.
+  `character | person | creature | item | location` (`SHEETED_KINDS`);
+  legacy aliases (`pc`, `npc`, `ally`, `villain`, `monster`) collapse via
+  `normalizeKind()` in `./util`, which is the shared `parseKind()` from
+  `@compendium/shared` narrowed to sheeted kinds. Change the mapping in
+  `shared/src/schemas/kind.ts`, never here.
 - Unknown kinds render `null` — no header, no error. This is what keeps
   lore / session / plain notes unaffected.
 

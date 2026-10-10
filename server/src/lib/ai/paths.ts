@@ -9,39 +9,29 @@
 //
 //   Campaign notes
 //     Campaigns/{slug}/Characters/{name}.md   ← PCs / player characters
-//     Campaigns/{slug}/People/{name}.md       ← NPCs, allies
-//     Campaigns/{slug}/Enemies/{name}.md      ← villains
+//     Campaigns/{slug}/People/{name}.md       ← NPCs, allies, villains
 //     Campaigns/{slug}/Loot/{name}.md         ← items, magic items
 //     Campaigns/{slug}/Places/{name}.md       ← locations
 //     Campaigns/{slug}/Adventure Log/…        ← session logs
 //     Campaigns/{slug}/Creatures/{name}.md    ← monsters
+//     Campaigns/{slug}/Quests/{name}.md       ← quests
 //     Campaigns/{slug}/index.md               ← campaign root note
 //
 //   World-level notes (no campaign)
 //     World Lore/{name}.md                   ← lore, worldbuilding
-//     Characters / People / Enemies / …      ← same sub-folders, campaign-less
+//     Characters / People / …                ← same sub-folders, campaign-less
+//
+//   Legacy vaults may still hold an Enemies/ subfolder; isCanonicalNotePath
+//   accepts it, but nothing new is written there.
 //
 //   Assets
 //     Assets/Portraits/{filename}
 //     Assets/Maps/{filename}
 //     Assets/Tokens/{filename}
 
-export type EntityKind =
-  | 'character'
-  | 'person'
-  | 'creature'
-  | 'item'
-  | 'location'
-  | 'session'
-  | 'quest'
-  | 'lore'
-  | 'note'
-  // legacy aliases kept for back-compat with older tool calls
-  | 'pc'
-  | 'npc'
-  | 'ally'
-  | 'villain'
-  | 'monster';
+import { canonicalKind, type KindInput } from '@compendium/shared';
+
+export type EntityKind = KindInput;
 
 export function canonicalFolder(opts: {
   kind: EntityKind;
@@ -54,21 +44,16 @@ export function canonicalFolder(opts: {
     opts.campaignRoot ??
     (opts.campaignSlug ? `Campaigns/${opts.campaignSlug}` : null);
 
-  switch (opts.kind) {
-    case 'character':
-    case 'pc':       return base ? `${base}/Characters`    : 'Characters';
-    case 'person':
-    case 'npc':
-    case 'ally':     return base ? `${base}/People`        : 'People';
-    case 'villain':  return base ? `${base}/Enemies`       : 'Enemies';
-    case 'item':     return base ? `${base}/Loot`          : 'Loot';
-    case 'location': return base ? `${base}/Places`        : 'Places';
-    case 'session':  return base ? `${base}/Adventure Log` : 'Adventure Log';
-    case 'creature':
-    case 'monster':  return base ? `${base}/Creatures`     : 'Creatures';
-    case 'quest':    return base ? `${base}/Quests`        : 'Quests';
-    case 'lore':     return 'World Lore';
-    case 'note':     return base ?? 'World Lore';
+  switch (canonicalKind(opts.kind)) {
+    case 'character': return base ? `${base}/Characters`    : 'Characters';
+    case 'person':    return base ? `${base}/People`        : 'People';
+    case 'item':      return base ? `${base}/Loot`          : 'Loot';
+    case 'location':  return base ? `${base}/Places`        : 'Places';
+    case 'session':   return base ? `${base}/Adventure Log` : 'Adventure Log';
+    case 'creature':  return base ? `${base}/Creatures`     : 'Creatures';
+    case 'quest':     return base ? `${base}/Quests`        : 'Quests';
+    case 'lore':      return 'World Lore';
+    case 'note':      return base ?? 'World Lore';
   }
 }
 

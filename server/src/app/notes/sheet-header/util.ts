@@ -1,31 +1,11 @@
 // Pure helpers shared by the SheetHeader tree. No React, no fetch.
 
-export type CanonicalKind = 'character' | 'person' | 'creature' | 'item' | 'location';
+import { isSheetedKind, parseKind, type SheetedKind } from '@compendium/shared';
 
-/** Collapse legacy kinds into canonical ones. Mirrors the mapping in
- *  server/src/lib/ai/tools.ts so the header and the AI tools stay in
- *  lock-step. Returns null for kinds we don't render a header for. */
-export function normalizeKind(raw: unknown): CanonicalKind | null {
-  if (typeof raw !== 'string') return null;
-  switch (raw.toLowerCase()) {
-    case 'character':
-    case 'pc':
-    case 'ally':
-      return 'character';
-    case 'person':
-    case 'npc':
-    case 'villain':
-      return 'person';
-    case 'creature':
-    case 'monster':
-      return 'creature';
-    case 'item':
-      return 'item';
-    case 'location':
-      return 'location';
-    default:
-      return null;
-  }
+/** The kind whose sheet header to render, or null for kinds without one. */
+export function normalizeKind(raw: unknown): SheetedKind | null {
+  const kind = parseKind(raw);
+  return isSheetedKind(kind) ? kind : null;
 }
 
 /** Ability modifier: floor((score - 10) / 2). */

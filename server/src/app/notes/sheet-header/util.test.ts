@@ -18,7 +18,7 @@ describe('normalizeKind', () => {
 
   test('maps legacy aliases', () => {
     expect(normalizeKind('pc')).toBe('character');
-    expect(normalizeKind('ally')).toBe('character');
+    expect(normalizeKind('ally')).toBe('person');
     expect(normalizeKind('npc')).toBe('person');
     expect(normalizeKind('villain')).toBe('person');
     expect(normalizeKind('monster')).toBe('creature');
@@ -29,7 +29,9 @@ describe('normalizeKind', () => {
     expect(normalizeKind('MONSTER')).toBe('creature');
   });
 
-  test('returns null for unknown or non-string kinds', () => {
+  test('returns null for kinds without a sheet header, unknown or non-string kinds', () => {
+    expect(normalizeKind('quest')).toBeNull();
+    expect(normalizeKind('enemy')).toBeNull();
     expect(normalizeKind('lore')).toBeNull();
     expect(normalizeKind('session')).toBeNull();
     expect(normalizeKind('note')).toBeNull();

@@ -439,9 +439,8 @@ export function FileTree({
           folder,
           name: name.trim(),
         };
-        // 'quest' is a UI routing hint only — notes land as plain pages.
         // API treats missing kind as "page"; omitting keeps the log clean.
-        if (kind !== 'page' && kind !== 'quest') payload.kind = kind;
+        if (kind !== 'page') payload.kind = kind;
         const res = await fetch('/api/notes/create', {
           method: 'POST',
           headers: {

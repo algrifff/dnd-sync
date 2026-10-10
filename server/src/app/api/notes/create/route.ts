@@ -33,7 +33,7 @@ const Body = z.object({
    *  the matching template so the sheet UI has defaults to render.
    *  "page" (or omitted) creates a plain note with no kind. */
   kind: z
-    .enum(['page', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'monster', 'excalidraw'])
+    .enum(['page', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'monster', 'quest', 'excalidraw'])
     .optional(),
 });
 
@@ -59,14 +59,15 @@ export async function POST(req: NextRequest): Promise<Response> {
   // is invisible to players until promoted via /api/notes/promote.
   const gmOnly = isGmModeOn(req.cookies.get(GM_MODE_COOKIE)?.value, session.role);
 
-  // Viewers can create plain pages (their own creator-owned notes)
-  // and their own PCs; everything else is an admin/editor action.
+  // Viewers can create plain pages and quests (their own creator-owned
+  // notes) and their own PCs; everything else is an admin/editor action.
   if (
     session.role === 'viewer' &&
     requestedKind !== 'page' &&
+    requestedKind !== 'quest' &&
     requestedKind !== 'pc'
   ) {
-    return json({ error: 'forbidden', reason: 'players can create pages or PCs only' }, 403);
+    return json({ error: 'forbidden', reason: 'players can create pages, quests or PCs only' }, 403);
   }
 
   const folder = parsed.folder.replace(/^\/+|\/+$/g, '').replace(/\\/g, '/');
@@ -191,11 +192,12 @@ export async function POST(req: NextRequest): Promise<Response> {
 }
 
 function buildFrontmatter(
-  kind: 'page' | TemplateKind | 'pc' | 'npc' | 'ally' | 'villain' | 'item' | 'location' | 'session' | 'monster' | 'excalidraw',
+  kind: NonNullable<z.infer<typeof Body>['kind']>,
   name: string,
   username: string,
 ): Record<string, unknown> {
   if (kind === 'page') return {};
+  if (kind === 'quest') return { kind: 'quest' };
   if (kind === 'excalidraw') {
     return { kind: 'excalidraw', sheet: { name } };
   }

@@ -17,7 +17,8 @@ import { loadNote, isAllowedPath } from '@/lib/notes';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 import { getCampaignBySlug, listCampaigns } from '@/lib/characters';
-import { canonicalFolder, nameToSlug, type EntityKind } from '@/lib/ai/paths';
+import { canonicalFolder, nameToSlug } from '@/lib/ai/paths';
+import { canonicalKind, KIND_INPUTS, NOTE_KINDS, type NoteKind } from '@compendium/shared';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import {
@@ -195,10 +196,7 @@ const CampaignBrowseSchema = z.object({
   campaignSlug: z.string().optional().describe(
     'Registered campaign slug. Defaults to the active campaign. Required if none is active.',
   ),
-  kind: z.enum([
-    'character', 'person', 'creature',
-    'item', 'location', 'session', 'lore', 'note',
-  ]).optional().describe('Filter by canonical kind.'),
+  kind: z.enum(NOTE_KINDS).optional().describe('Filter by canonical kind.'),
   subfolder: z.string().optional().describe(
     'Relative subfolder inside the campaign (e.g. "Sessions", "Characters"). Case-insensitive.',
   ),
@@ -211,12 +209,7 @@ const SearchSchema = z.object({
 });
 
 const CreateSchema = z.object({
-  kind: z.enum([
-    'character', 'person', 'creature',
-    'item', 'location', 'session', 'quest', 'lore', 'note',
-    // legacy aliases — mapped to canonical kinds in normalizeKind()
-    'pc', 'npc', 'ally', 'villain', 'monster',
-  ]),
+  kind: z.enum(KIND_INPUTS),
   name: z.string().min(1).max(200),
   campaignSlug: z
     .string()
@@ -256,11 +249,7 @@ const MoveSchema = z.object({
 
 const ChangeKindSchema = z.object({
   path: z.string().min(1).max(512).describe('Full path of the existing note'),
-  newKind: z.enum([
-    'character', 'person', 'creature',
-    'item', 'location', 'session', 'lore', 'note',
-    'pc', 'npc', 'ally', 'villain', 'monster',
-  ]).describe('Target entity kind. Legacy aliases (pc/npc/ally/villain/monster) are normalised.'),
+  newKind: z.enum(KIND_INPUTS).describe('Target entity kind. Legacy aliases (pc/npc/ally/villain/monster) are normalised.'),
   campaignSlug: z.string().optional().describe(
     'Move to a different campaign at the same time. Omit to keep the note in its current campaign (or world-level).',
   ),
@@ -374,7 +363,7 @@ function campaignBrowse(ctx: ToolContext) {
         )
         .all(ctx.groupId, base, Math.min(limit ?? 50, 100) * 2);
 
-      const kindFilter = kind ? normalizeKind(kind as EntityKind) : null;
+      const kindFilter = kind ?? null;
 
       const results = rows
         .filter((r) => ctx.role === 'dm' || r.dm_only === 0)
@@ -465,8 +454,7 @@ function entityCreate(ctx: ToolContext) {
     inputSchema: CreateSchema,
     execute: async ({ kind, name, campaignSlug, sheet, body, dmOnly }: z.infer<typeof CreateSchema>) => {
       const slugParam = (campaignSlug?.trim() ?? ctx.campaignSlug?.trim()) || undefined;
-      const k = kind as EntityKind;
-      const canonical = normalizeKind(k);
+      const canonical = canonicalKind(kind);
 
       let campaignRoot: string | undefined;
 
@@ -507,7 +495,7 @@ function entityCreate(ctx: ToolContext) {
       }
 
       const folder = canonicalFolder({
-        kind: k,
+        kind: canonical,
         campaignSlug: slugParam,
         campaignRoot,
       });
@@ -532,7 +520,7 @@ function entityCreate(ctx: ToolContext) {
       }
 
       // Build the seed frontmatter from the AI's structured input.
-      const frontmatter = buildFrontmatter(kind as EntityKind, name, sheet ?? {}, ctx.userId);
+      const frontmatter = buildFrontmatter(canonical, name, sheet ?? {}, ctx.userId);
 
       // For characters with a body, run the structured-sheet extractor
       // over the prose so HP/AC/abilities/class/race in markdown tables
@@ -869,8 +857,7 @@ function entityChangeKind(ctx: ToolContext) {
         return { ok: false as const, error: `Not found: ${path}` };
       }
 
-      const k = newKind as EntityKind;
-      const canonical = normalizeKind(k);
+      const canonical = canonicalKind(newKind);
 
       // Determine target campaign: explicit override, then current campaign
       // by matching the note path against any registered campaign's
@@ -898,7 +885,7 @@ function entityChangeKind(ctx: ToolContext) {
       // file by name still resolve.
       const leaf = path.split('/').pop()?.replace(/\.md$/i, '') ?? note.title;
       const folder = canonicalFolder({
-        kind: k,
+        kind: canonical,
         ...(targetSlug    !== undefined ? { campaignSlug: targetSlug } : {}),
         ...(campaignRoot  !== undefined ? { campaignRoot }              : {}),
       });
@@ -1474,27 +1461,16 @@ function extractText(doc: PmDoc): string {
 
 // ── Frontmatter builder ────────────────────────────────────────────────
 
-function normalizeKind(kind: EntityKind): EntityKind {
-  // Collapse legacy aliases onto the canonical set. Old tool calls
-  // from saved transcripts still use pc/npc/ally/villain/monster; new
-  // calls use character/person/creature.
-  if (kind === 'pc') return 'character';
-  if (kind === 'npc' || kind === 'ally') return 'person';
-  if (kind === 'villain') return 'creature';
-  if (kind === 'monster') return 'creature';
-  return kind;
-}
-
 function buildFrontmatter(
-  kind: EntityKind,
+  canonical: NoteKind,
   name: string,
   extraSheet: Record<string, unknown>,
   username: string,
 ): Record<string, unknown> {
-  const canonical = normalizeKind(kind);
-  const templated: EntityKind[] = [
+  const templated: NoteKind[] = [
     'character', 'person', 'creature', 'item', 'location', 'session',
   ];
+  if (canonical === 'quest') return { kind: 'quest' };
   if (!templated.includes(canonical)) return {};
 
   const template = getTemplate(canonical as TemplateKind);
