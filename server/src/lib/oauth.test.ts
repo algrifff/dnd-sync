@@ -1,0 +1,273 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { createHash, randomBytes } from 'node:crypto';
+import { getDb } from './db';
+import { setupTestDb, teardownTestDb } from './test-utils';
+import { createUser, DEFAULT_GROUP_ID } from './users';
+import {
+  ACCESS_TTL_MS,
+  authenticateAccessToken,
+  CODE_TTL_MS,
+  issueCode,
+  listGrantsForUser,
+  redeemCode,
+  redirectUriAllowed,
+  refreshTokens,
+  registerClient,
+  resolveClient,
+  revokeGrantForUser,
+  revokeToken,
+  type OAuthClient,
+} from './oauth';
+
+const RESOURCE = 'https://compendium.test/api/mcp';
+const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
+
+let userId: string;
+let client: OAuthClient;
+
+function pkce(): { verifier: string; challenge: string } {
+  const verifier = randomBytes(32).toString('base64url');
+  return { verifier, challenge: createHash('sha256').update(verifier).digest('base64url') };
+}
+
+function grantCode(opts: { challenge: string; groupId?: string }): string {
+  return issueCode({
+    clientId: client.clientId,
+    userId,
+    groupId: opts.groupId ?? DEFAULT_GROUP_ID,
+    redirectUri: REDIRECT,
+    codeChallenge: opts.challenge,
+    resource: RESOURCE,
+  });
+}
+
+function redeem(code: string, verifier: string) {
+  return redeemCode({ code, clientId: client.clientId, redirectUri: REDIRECT, codeVerifier: verifier, resource: RESOURCE });
+}
+
+function mustRedeem(code: string, verifier: string) {
+  const r = redeem(code, verifier);
+  if (!r.ok) throw new Error(`redeem failed: ${r.error}`);
+  return r.tokens;
+}
+
+beforeAll(async () => {
+  setupTestDb();
+  const user = await createUser({ username: 'oauth-user', displayName: 'O', password: 'correct-horse-battery', role: 'editor' });
+  userId = user.id;
+});
+afterAll(() => teardownTestDb());
+beforeEach(() => {
+  getDb().exec('DELETE FROM oauth_grants');
+  client = registerClient({ clientName: 'Claude', redirectUris: [REDIRECT] });
+});
+
+describe('authorization code + PKCE', () => {
+  it('issues tokens when the verifier matches the challenge', () => {
+    const { verifier, challenge } = pkce();
+    const code = grantCode({ challenge });
+
+    const r = redeem(code, verifier);
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.tokens.token_type).toBe('Bearer');
+    expect(r.tokens.expires_in).toBe(ACCESS_TTL_MS / 1000);
+    expect(authenticateAccessToken(r.tokens.access_token, RESOURCE)).toMatchObject({ userId, groupId: DEFAULT_GROUP_ID, role: 'editor' });
+  });
+
+  it('rejects a wrong verifier', () => {
+    const code = grantCode({ challenge: pkce().challenge });
+
+    const r = redeem(code, pkce().verifier);
+
+    expect(r).toMatchObject({ ok: false, error: 'invalid_grant' });
+  });
+
+  it('rejects a code the second time, even with the right verifier', () => {
+    const { verifier, challenge } = pkce();
+    const code = grantCode({ challenge });
+    mustRedeem(code, verifier);
+
+    expect(redeem(code, verifier)).toMatchObject({ ok: false, error: 'invalid_grant' });
+  });
+
+  it('burns a code on a failed attempt so the real client cannot redeem it afterwards', () => {
+    const { verifier, challenge } = pkce();
+    const code = grantCode({ challenge });
+    redeem(code, 'attacker-guess');
+
+    expect(redeem(code, verifier)).toMatchObject({ ok: false, error: 'invalid_grant' });
+  });
+
+  it('rejects an expired code', () => {
+    const { verifier, challenge } = pkce();
+    const code = grantCode({ challenge });
+    getDb().query('UPDATE oauth_codes SET expires_at = ?').run(Date.now() - 1);
+
+    expect(redeem(code, verifier)).toMatchObject({ ok: false, error: 'invalid_grant' });
+  });
+
+  it('rejects a code presented by a different client', () => {
+    const { verifier, challenge } = pkce();
+    const code = grantCode({ challenge });
+    const other = registerClient({ clientName: 'Other', redirectUris: [REDIRECT] });
+
+    const r = redeemCode({ code, clientId: other.clientId, redirectUri: REDIRECT, codeVerifier: verifier, resource: RESOURCE });
+
+    expect(r).toMatchObject({ ok: false, error: 'invalid_grant' });
+  });
+
+  it('rejects a code redeemed for a different resource', () => {
+    const { verifier, challenge } = pkce();
+    const code = grantCode({ challenge });
+
+    const r = redeemCode({ code, clientId: client.clientId, redirectUri: REDIRECT, codeVerifier: verifier, resource: 'https://other.test/api/mcp' });
+
+    expect(r).toMatchObject({ ok: false, error: 'invalid_grant' });
+  });
+
+  it(`codes expire after ${CODE_TTL_MS / 60_000} minutes`, () => {
+    const { challenge } = pkce();
+    const before = Date.now();
+    grantCode({ challenge });
+    const row = getDb().query<{ expires_at: number }, []>('SELECT expires_at FROM oauth_codes ORDER BY created_at DESC').get()!;
+    expect(row.expires_at).toBeGreaterThanOrEqual(before + CODE_TTL_MS);
+  });
+});
+
+describe('access tokens', () => {
+  it('rejects an expired access token', () => {
+    const { verifier, challenge } = pkce();
+    const tokens = mustRedeem(grantCode({ challenge }), verifier);
+    getDb().query("UPDATE oauth_tokens SET expires_at = ? WHERE kind = 'access'").run(Date.now() - 1);
+
+    expect(authenticateAccessToken(tokens.access_token, RESOURCE)).toBeNull();
+  });
+
+  it('rejects an access token presented at another resource', () => {
+    const { verifier, challenge } = pkce();
+    const tokens = mustRedeem(grantCode({ challenge }), verifier);
+
+    expect(authenticateAccessToken(tokens.access_token, 'https://evil.test/api/mcp')).toBeNull();
+  });
+
+  it('rejects a refresh token used as an access token', () => {
+    const { verifier, challenge } = pkce();
+    const tokens = mustRedeem(grantCode({ challenge }), verifier);
+
+    expect(authenticateAccessToken(tokens.refresh_token, RESOURCE)).toBeNull();
+  });
+
+  it('cuts off a user removed from the world and drops the grant', () => {
+    const { verifier, challenge } = pkce();
+    const tokens = mustRedeem(grantCode({ challenge }), verifier);
+    getDb().query('DELETE FROM group_members WHERE user_id = ? AND group_id = ?').run(userId, DEFAULT_GROUP_ID);
+    try {
+      expect(authenticateAccessToken(tokens.access_token, RESOURCE)).toBeNull();
+      expect(listGrantsForUser(userId)).toHaveLength(0);
+    } finally {
+      getDb().query("INSERT INTO group_members (group_id, user_id, role, joined_at) VALUES (?, ?, 'editor', ?)").run(DEFAULT_GROUP_ID, userId, Date.now());
+    }
+  });
+
+  it('reports the current role, not the role at consent time', () => {
+    const { verifier, challenge } = pkce();
+    const tokens = mustRedeem(grantCode({ challenge }), verifier);
+    getDb().query("UPDATE group_members SET role = 'viewer' WHERE user_id = ?").run(userId);
+    try {
+      expect(authenticateAccessToken(tokens.access_token, RESOURCE)?.role).toBe('viewer');
+    } finally {
+      getDb().query("UPDATE group_members SET role = 'editor' WHERE user_id = ?").run(userId);
+    }
+  });
+});
+
+describe('refresh rotation', () => {
+  it('issues a new pair and invalidates the old refresh token', () => {
+    const { verifier, challenge } = pkce();
+    const first = mustRedeem(grantCode({ challenge }), verifier);
+
+    const second = refreshTokens({ refreshToken: first.refresh_token, clientId: client.clientId });
+
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.tokens.refresh_token).not.toBe(first.refresh_token);
+    expect(authenticateAccessToken(second.tokens.access_token, RESOURCE)).not.toBeNull();
+    expect(refreshTokens({ refreshToken: first.refresh_token, clientId: client.clientId })).toMatchObject({ ok: false, error: 'invalid_grant' });
+  });
+
+  it('rejects a refresh from a different client', () => {
+    const { verifier, challenge } = pkce();
+    const first = mustRedeem(grantCode({ challenge }), verifier);
+    const other = registerClient({ clientName: 'Other', redirectUris: [REDIRECT] });
+
+    expect(refreshTokens({ refreshToken: first.refresh_token, clientId: other.clientId })).toMatchObject({ ok: false, error: 'invalid_grant' });
+  });
+});
+
+describe('revocation', () => {
+  it('RFC 7009 revoke on either token ends the grant', () => {
+    const { verifier, challenge } = pkce();
+    const tokens = mustRedeem(grantCode({ challenge }), verifier);
+
+    revokeToken(tokens.refresh_token);
+
+    expect(authenticateAccessToken(tokens.access_token, RESOURCE)).toBeNull();
+  });
+
+  it('a user can revoke their own grant but not someone else’s', async () => {
+    const { verifier, challenge } = pkce();
+    const tokens = mustRedeem(grantCode({ challenge }), verifier);
+    const [grant] = listGrantsForUser(userId);
+    const other = await createUser({ username: 'other-user', displayName: 'X', password: 'correct-horse-battery', role: 'viewer' });
+
+    expect(revokeGrantForUser(other.id, grant!.id)).toBe(false);
+    expect(authenticateAccessToken(tokens.access_token, RESOURCE)).not.toBeNull();
+    expect(revokeGrantForUser(userId, grant!.id)).toBe(true);
+    expect(authenticateAccessToken(tokens.access_token, RESOURCE)).toBeNull();
+  });
+});
+
+describe('clients', () => {
+  it('matches loopback redirect URIs with the port ignored', () => {
+    const c: OAuthClient = { clientId: 'x', kind: 'dcr', clientName: 'Claude Code', redirectUris: ['http://localhost/callback', 'http://127.0.0.1/callback'] };
+    expect(redirectUriAllowed(c, 'http://localhost:3118/callback')).toBe(true);
+    expect(redirectUriAllowed(c, 'http://127.0.0.1:5000/callback')).toBe(true);
+    expect(redirectUriAllowed(c, 'http://localhost:3118/other')).toBe(false);
+    expect(redirectUriAllowed(c, 'https://evil.test/callback')).toBe(false);
+  });
+
+  it('does not loosen matching for non-loopback hosts', () => {
+    expect(redirectUriAllowed(client, 'https://claude.ai:8443/api/mcp/auth_callback')).toBe(false);
+  });
+
+  it('resolves a Client ID Metadata Document and rejects a mismatched client_id', async () => {
+    const id = 'https://claude.ai/oauth/mcp-oauth-client-metadata';
+    const doc = { client_id: id, client_name: 'Claude', redirect_uris: [REDIRECT] };
+    const fetcher = async () => Response.json(doc);
+
+    const resolved = await resolveClient(id, fetcher);
+    expect(resolved).toMatchObject({ kind: 'cimd', clientName: 'Claude', redirectUris: [REDIRECT] });
+
+    const bad = await resolveClient('https://evil.test/claude.json', async () => Response.json(doc));
+    expect(bad).toBeNull();
+  });
+
+  it('serves a cached CIMD client without refetching', async () => {
+    const id = 'https://claude.ai/oauth/cached-client';
+    let calls = 0;
+    const fetcher = async () => {
+      calls += 1;
+      return Response.json({ client_id: id, client_name: 'Claude', redirect_uris: [REDIRECT] });
+    };
+    await resolveClient(id, fetcher);
+    await resolveClient(id, fetcher);
+    expect(calls).toBe(1);
+  });
+
+  it('does not resolve a plain-http or path-less client_id as CIMD', async () => {
+    expect(await resolveClient('http://claude.ai/x', async () => Response.json({}))).toBeNull();
+    expect(await resolveClient('https://claude.ai', async () => Response.json({}))).toBeNull();
+  });
+});

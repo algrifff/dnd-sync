@@ -952,6 +952,68 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE session_notes RENAME COLUMN dm_review_json TO wrap_up_json;
     `,
   },
+  {
+    version: 50,
+    description: 'oauth: clients, authorization codes, grants and tokens for the MCP connector',
+    sql: `
+      -- OAuth 2.1 authorization server backing the read-only MCP
+      -- connector (lib/oauth.ts). Claude registers either through
+      -- Dynamic Client Registration (kind='dcr', random client_id) or
+      -- by presenting an HTTPS client_id that points at a Client ID
+      -- Metadata Document (kind='cimd', the URL is the client_id and
+      -- the row caches the fetched document).
+      CREATE TABLE oauth_clients (
+        client_id          TEXT PRIMARY KEY,
+        kind               TEXT NOT NULL CHECK (kind IN ('dcr', 'cimd')),
+        client_name        TEXT NOT NULL,
+        redirect_uris_json TEXT NOT NULL,
+        created_at         INTEGER NOT NULL,
+        fetched_at         INTEGER NOT NULL
+      );
+
+      -- Single-use authorization codes. Only the SHA-256 of the code is
+      -- stored; the row is deleted on first redemption attempt.
+      CREATE TABLE oauth_codes (
+        code_hash      TEXT PRIMARY KEY,
+        client_id      TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+        user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        group_id       TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        redirect_uri   TEXT NOT NULL,
+        code_challenge TEXT NOT NULL,
+        resource       TEXT NOT NULL,
+        scope          TEXT NOT NULL,
+        created_at     INTEGER NOT NULL,
+        expires_at     INTEGER NOT NULL
+      );
+
+      -- One row per consent: user U lets client C read world G at
+      -- resource R. Revoking the grant (settings UI, RFC 7009, or the
+      -- user losing membership) deletes it and cascades every token.
+      CREATE TABLE oauth_grants (
+        id           TEXT PRIMARY KEY,
+        client_id    TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+        user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        group_id     TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        resource     TEXT NOT NULL,
+        scope        TEXT NOT NULL,
+        created_at   INTEGER NOT NULL,
+        last_used_at INTEGER NOT NULL
+      );
+      CREATE INDEX oauth_grants_user ON oauth_grants(user_id);
+
+      -- Access and refresh tokens, stored as SHA-256 hashes. Refresh
+      -- tokens rotate: redeeming one deletes it and inserts a successor.
+      CREATE TABLE oauth_tokens (
+        token_hash TEXT PRIMARY KEY,
+        grant_id   TEXT NOT NULL REFERENCES oauth_grants(id) ON DELETE CASCADE,
+        kind       TEXT NOT NULL CHECK (kind IN ('access', 'refresh')),
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+      CREATE INDEX oauth_tokens_grant ON oauth_tokens(grant_id);
+      CREATE INDEX oauth_tokens_expires ON oauth_tokens(expires_at);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {
