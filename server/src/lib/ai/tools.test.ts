@@ -1039,7 +1039,6 @@ describe('inventory_add — does not touch yjs_state', () => {
   });
 });
 
-<<<<<<< HEAD
 describe('entity_create — canonical kinds', () => {
   function seedCampaign(): void {
     const db = getDb();
@@ -1076,7 +1075,9 @@ describe('entity_create — canonical kinds', () => {
     expect(result).toMatchObject({ ok: true, path: 'Campaigns/mill/People/grell.md' });
     const fm = JSON.parse(readNote('Campaigns/mill/People/grell.md').frontmatter_json);
     expect(fm.kind).toBe('person');
-=======
+  });
+});
+
 describe('backlink_create — link target survives the next collab save', () => {
   /** Re-run the same derive the Hocuspocus store hook runs on the next
    *  editor save: decode the stored yjs_state and persist its links. */
@@ -1128,5 +1129,20 @@ describe('backlink_create — link target survives the next collab save', () => 
     resaveFromYjs(fromPath);
 
     expect(linksFrom(fromPath)).toEqual([toPath, longer].sort());
+  });
+});
+
+describe('note_read — dm_only enforcement', () => {
+  it('should answer for a dm_only note exactly as for a missing one when the caller is a viewer', async () => {
+    const path = 'Test/DmOnlySecret.md';
+    seedNote({ path, title: 'DmOnlySecret', pmDoc: { type: 'doc', content: [paragraph('GM eyes.')] }, contentMd: 'GM eyes.' });
+    getDb().query('UPDATE notes SET dm_only = 1 WHERE group_id = ? AND path = ?').run(groupId, path);
+    const tools = createTools(ctxFor('viewer'));
+
+    const hidden = await tools.note_read.execute!({ path }, { toolCallId: 'dm1', messages: [] });
+    const missing = await tools.note_read.execute!({ path: 'Test/Nope.md' }, { toolCallId: 'dm2', messages: [] });
+
+    expect(hidden).toEqual({ ok: false, error: `Not found: ${path}` });
+    expect(missing).toEqual({ ok: false, error: 'Not found: Test/Nope.md' });
   });
 });
