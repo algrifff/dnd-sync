@@ -2,9 +2,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Check, ScrollText, X } from 'lucide-react';
 import { broadcastTreeChange } from '@/lib/tree-sync';
 import { EVENTS, track } from '@/lib/analytics/client';
 import { WrapUpDialog } from './WrapUpDialog';
+import { WrapUpDoneChips } from './WrapUpDoneChips';
 import { doneMessage, type WrapUpOutcome } from './wrap-up-review';
 
 export function EndSessionButton({
@@ -38,15 +40,23 @@ export function EndSessionButton({
     return (
       <div
         role="status"
-        className="mb-5 rounded-[6px] border border-[var(--wine)]/30 bg-[var(--wine)]/8 px-4 py-3"
+        className="wu-banner mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[10px] border border-[var(--wine)]/30 bg-[rgb(var(--wine-rgb)/0.08)] py-2 pl-3 pr-2"
       >
-        <p className="text-sm text-[var(--ink)]">{doneMessage(done.outcome)}</p>
+        <span className="sr-only">{doneMessage(done.outcome)}</span>
+        <span aria-hidden className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--wine)] text-[var(--wu-on-wine)]">
+          <Check size={15} strokeWidth={3} />
+        </span>
+        <span aria-hidden className="text-sm font-medium text-[var(--ink)]">
+          Session closed
+        </span>
+        <WrapUpDoneChips outcome={done.outcome} />
         <button
           type="button"
           onClick={() => setDone(null)}
-          className="mt-1 text-xs text-[var(--wine)] underline underline-offset-2 hover:opacity-70"
+          aria-label="Dismiss"
+          className="ml-auto grid h-9 w-9 place-items-center rounded-[8px] text-[var(--ink-soft)] transition hover:bg-[rgb(var(--wine-rgb)/0.12)] active:scale-95"
         >
-          Dismiss
+          <X size={15} aria-hidden />
         </button>
       </div>
     );
@@ -64,8 +74,9 @@ export function EndSessionButton({
           });
           setOpen(true);
         }}
-        className="mb-5 rounded-[4px] bg-[var(--wine)] px-4 py-2 text-sm font-medium text-[var(--parchment)] transition-opacity hover:opacity-85 active:opacity-70"
+        className="mb-5 inline-flex items-center gap-2 rounded-[8px] bg-[var(--wine)] px-4 py-2 text-sm font-medium text-[var(--wu-on-wine)] shadow-[0_1px_0_rgb(var(--ink-rgb)/0.2)] transition hover:brightness-110 active:scale-[0.97]"
       >
+        <ScrollText size={15} aria-hidden />
         {isAlreadyClosed ? 'Wrap up again' : 'End of Session'}
       </button>
       {open && (
