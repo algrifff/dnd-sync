@@ -132,7 +132,7 @@ async function main(): Promise<void> {
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
     resource: mcpUrl,
-    scope: 'notes:read',
+    scope: 'notes:read wrapup:submit',
   };
   const page = await fetch(`${asm.authorization_endpoint}?${new URLSearchParams(query)}`, {
     headers: { cookie },
@@ -195,6 +195,13 @@ async function main(): Promise<void> {
     assert(!read.isError, `read_note failed: ${read.content[0]?.text}`);
     step('tools/call read_note', `${read.content[0]?.text.length ?? 0} chars`);
   }
+
+  const wrap = await rpc<ToolCall>(mcpUrl, tokens.access_token, 'tools/call', {
+    name: 'submit_wrap_up',
+    arguments: { session_path: 'Campaigns/smoke/Sessions/Nope.md', mentions: [] },
+  });
+  assert(wrap.isError === true && /not found/i.test(wrap.content[0]?.text ?? ''), `submit_wrap_up on a missing Session: ${wrap.content[0]?.text}`);
+  step('tools/call submit_wrap_up', 'scope accepted; a missing Session reads as not found');
 
   const oldRefresh = tokens.refresh_token;
   const refreshed = await tokenRequest({ grant_type: 'refresh_token', refresh_token: oldRefresh, client_id: clientId });

@@ -9,6 +9,7 @@ import { getDb } from '@/lib/db';
 import { setupTestDb, teardownTestDb } from '@/lib/test-utils';
 import { createUser, DEFAULT_GROUP_ID } from '@/lib/users';
 import { createWorld } from '@/lib/groups';
+import { loadPendingWrapUp } from '@/lib/wrap-up';
 import { buildSessionCookies, createSession, type Session } from '@/lib/session';
 import { POST as register } from '../oauth/register/route';
 import { POST as authorize } from '../oauth/authorize/route';
@@ -28,18 +29,18 @@ function asNext(req: Request): NextRequest {
   return req as unknown as NextRequest;
 }
 
-function seedNote(groupId: string, path: string, body: string): void {
+function seedNote(groupId: string, path: string, body: string, kind = 'person'): void {
   getDb()
     .query(
       `INSERT INTO notes (id, group_id, path, title, content_json, content_text, content_md,
                           yjs_state, frontmatter_json, byte_size, updated_at, updated_by,
                           created_at, created_by, dm_only, gm_only)
-       VALUES (?, ?, ?, ?, '{"type":"doc","content":[]}', ?, ?, NULL, '{"kind":"person"}', 0, ?, NULL, ?, NULL, 0, 0)`,
+       VALUES (?, ?, ?, ?, '{"type":"doc","content":[]}', ?, ?, NULL, ?, 0, ?, NULL, ?, NULL, 0, 0)`,
     )
-    .run(randomUUID(), groupId, path, path.split('/').pop()!.replace(/\.md$/, ''), body, body, Date.now(), Date.now());
+    .run(randomUUID(), groupId, path, path.split('/').pop()!.replace(/\.md$/, ''), body, body, JSON.stringify({ kind }), Date.now(), Date.now());
 }
 
-async function obtainAccessToken(groupId: string): Promise<{ access: string; refresh: string; clientId: string }> {
+async function obtainAccessToken(groupId: string, scope?: string): Promise<{ access: string; refresh: string; clientId: string }> {
   const reg = await register(
     asNext(new Request(`${ORIGIN}/api/oauth/register`, {
       method: 'POST',
@@ -63,6 +64,7 @@ async function obtainAccessToken(groupId: string): Promise<{ access: string; ref
         query: {
           response_type: 'code', client_id: clientId, redirect_uri: REDIRECT, state: 's',
           code_challenge: challenge, code_challenge_method: 'S256', resource: `${ORIGIN}/api/mcp`,
+          ...(scope ? { scope } : {}),
         },
       }),
     })),
@@ -130,7 +132,7 @@ describe('POST /api/mcp without a usable token', () => {
     const res = await rpc(null, 'initialize');
     expect(res.status).toBe(401);
     expect(res.headers.get('www-authenticate')).toBe(
-      `Bearer resource_metadata="${ORIGIN}/.well-known/oauth-protected-resource/api/mcp", scope="notes:read"`,
+      `Bearer resource_metadata="${ORIGIN}/.well-known/oauth-protected-resource/api/mcp", scope="notes:read wrapup:submit"`,
     );
   });
 
@@ -166,15 +168,41 @@ describe('register → authorize → token → MCP', () => {
       await rpc(access, 'tools/list'),
     );
     expect(list.tools.map((t) => t.name).sort()).toEqual(
-      ['browse_notes', 'list_campaigns', 'note_neighbors', 'read_note', 'search_notes'],
+      ['browse_notes', 'list_campaigns', 'note_neighbors', 'read_note', 'search_notes', 'submit_wrap_up', 'wrap_up_context'],
     );
-    expect(list.tools.every((t) => t.annotations?.readOnlyHint === true)).toBe(true);
+    const writes = list.tools.filter((t) => t.annotations?.readOnlyHint !== true).map((t) => t.name);
+    expect(writes).toEqual(['submit_wrap_up']);
 
     const read = await result<ToolCall>(
       await rpc(access, 'tools/call', { name: 'read_note', arguments: { path: NOTE_A } }),
     );
     expect(read.isError).toBeFalsy();
     expect(read.content[0]!.text).toContain('Volothamp Geddarm');
+  });
+
+  it('submits a Wrap-up proposal only with the wrapup:submit scope, and writes no note', async () => {
+    const SESSION = 'Campaigns/Dragon Heist/Sessions/Session 1.md';
+    seedNote(DEFAULT_GROUP_ID, SESSION, 'The party met Volo.', 'session');
+    const before = getDb().query<{ n: number }, []>('SELECT COUNT(*) AS n FROM notes').get()!.n;
+    const args = {
+      session_path: SESSION,
+      mentions: [
+        { name: 'Volo', kind: 'person', match: { type: 'existing', path: NOTE_A, certain: true }, historyEntry: 'Offered the party a job.' },
+      ],
+    };
+
+    const readOnly = await obtainAccessToken(DEFAULT_GROUP_ID, 'notes:read');
+    const denied = await result<ToolCall>(await rpc(readOnly.access, 'tools/call', { name: 'submit_wrap_up', arguments: args }));
+    expect(denied.isError).toBe(true);
+    expect(denied.content[0]!.text).toContain('wrapup:submit');
+    expect(loadPendingWrapUp(DEFAULT_GROUP_ID, 'admin', SESSION)).toBeNull();
+
+    const full = await obtainAccessToken(DEFAULT_GROUP_ID);
+    const ok = await result<ToolCall>(await rpc(full.access, 'tools/call', { name: 'submit_wrap_up', arguments: args }));
+    expect(ok.isError).toBeFalsy();
+    expect(ok.content[0]!.text).toContain('Nothing has been written');
+    expect(loadPendingWrapUp(DEFAULT_GROUP_ID, 'admin', SESSION)?.mentions.map((m) => m.name)).toEqual(['Volo']);
+    expect(getDb().query<{ n: number }, []>('SELECT COUNT(*) AS n FROM notes').get()!.n).toBe(before);
   });
 
   it('a world A token cannot read a world B note, and vice versa', async () => {

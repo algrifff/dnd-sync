@@ -309,9 +309,11 @@ The Dockerfile is a three-stage build:
 
 Claude (claude.ai, the desktop and mobile apps, Claude Code) can read your
 world's notes through a custom connector, using your own Claude
-subscription. Access is read-only, limited to one world you pick, and
-shows you exactly what you can see in the app: Secret and Private notes
-stay hidden from players.
+subscription. It is limited to one world you pick and shows you exactly
+what you can see in the app: Secret and Private notes stay hidden from
+players. Claude cannot edit notes. The one thing it can do beyond reading
+is propose a Session Wrap-up, which does nothing until you review and
+apply it when you end the Session.
 
 Your Compendium must be reachable over HTTPS from the internet (a Railway
 deploy is), and your admin should have set `PUBLIC_APP_URL`.

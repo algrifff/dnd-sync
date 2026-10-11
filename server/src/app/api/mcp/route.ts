@@ -23,7 +23,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!principal) return unauthorizedBearer(req.headers, 'token is invalid, expired or revoked');
 
   try {
-    const res = await handleMcpRequest(req, { groupId: principal.groupId, role: principal.role });
+    const res = await handleMcpRequest(req, { groupId: principal.groupId, role: principal.role, scopes: principal.scopes });
     for (const [k, v] of Object.entries(corsHeaders())) res.headers.set(k, v);
     return res;
   } catch (err) {

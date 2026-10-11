@@ -12,9 +12,10 @@ export const MCP_SERVER_INFO = { name: 'compendium', version: '1.0.0' } as const
 export function createMcpServer(ctx: McpContext): McpServer {
   const server = new McpServer(MCP_SERVER_INFO, {
     instructions:
-      'Read-only access to one Compendium world (a tabletop RPG campaign vault). ' +
+      'Access to one Compendium world (a tabletop RPG campaign vault). Reading never changes anything. ' +
       'Start with list_campaigns or search_notes, then read_note for full text. ' +
-      'Notes you cannot see are reported as not found.',
+      'Notes you cannot see are reported as not found. ' +
+      'To wrap up a Session, call wrap_up_context then submit_wrap_up: that stores a proposal for a Player to review and writes no notes.',
   });
   for (const tool of MCP_TOOLS) {
     server.registerTool(
@@ -28,7 +29,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
         // route test exercises end to end, so only the types need
         // bridging here.
         inputSchema: tool.input as unknown as ZodRawShapeCompat,
-        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        annotations: { readOnlyHint: tool.readOnly ?? true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       },
       async (args: unknown) => {
         const result = runTool(tool.name, ctx, args);

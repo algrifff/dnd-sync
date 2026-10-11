@@ -16,7 +16,9 @@ import {
   registerClient,
   resolveClient,
   revokeGrantForUser,
+  grantedScope,
   revokeToken,
+  SCOPE,
   type OAuthClient,
 } from './oauth';
 
@@ -31,7 +33,7 @@ function pkce(): { verifier: string; challenge: string } {
   return { verifier, challenge: createHash('sha256').update(verifier).digest('base64url') };
 }
 
-function grantCode(opts: { challenge: string; groupId?: string }): string {
+function grantCode(opts: { challenge: string; groupId?: string; scope?: string }): string {
   return issueCode({
     clientId: client.clientId,
     userId,
@@ -39,6 +41,7 @@ function grantCode(opts: { challenge: string; groupId?: string }): string {
     redirectUri: REDIRECT,
     codeChallenge: opts.challenge,
     resource: RESOURCE,
+    scope: opts.scope ?? SCOPE,
   });
 }
 
@@ -204,6 +207,29 @@ describe('refresh rotation', () => {
     const other = registerClient({ clientName: 'Other', redirectUris: [REDIRECT] });
 
     expect(refreshTokens({ refreshToken: first.refresh_token, clientId: other.clientId })).toMatchObject({ ok: false, error: 'invalid_grant' });
+  });
+});
+
+describe('scopes', () => {
+  it('grants every scope when the request names none, and only known ones otherwise', () => {
+    expect(grantedScope(undefined)).toBe('notes:read wrapup:submit');
+    expect(grantedScope('')).toBe('notes:read wrapup:submit');
+    expect(grantedScope('admin:everything')).toBe('notes:read wrapup:submit');
+    expect(grantedScope('notes:read')).toBe('notes:read');
+    expect(grantedScope('wrapup:submit')).toBe('notes:read wrapup:submit');
+  });
+
+  it('carries the granted scope to the token response, the principal and a refreshed token', () => {
+    const { verifier, challenge } = pkce();
+    const first = mustRedeem(grantCode({ challenge, scope: 'notes:read' }), verifier);
+
+    expect(first.scope).toBe('notes:read');
+    expect(authenticateAccessToken(first.access_token, RESOURCE)?.scopes).toEqual(['notes:read']);
+
+    const second = refreshTokens({ refreshToken: first.refresh_token, clientId: client.clientId });
+    if (!second.ok) throw new Error('refresh failed');
+    expect(second.tokens.scope).toBe('notes:read');
+    expect(authenticateAccessToken(second.tokens.access_token, RESOURCE)?.scopes).toEqual(['notes:read']);
   });
 });
 

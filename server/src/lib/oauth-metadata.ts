@@ -2,7 +2,7 @@
 // server metadata, both derived from the public origin so the
 // `resource`, `issuer` and endpoint URLs can never disagree.
 
-import { SCOPE } from './oauth';
+import { SCOPES } from './oauth';
 import { publicUrls } from './public-url';
 
 type HeaderReader = { get(name: string): string | null };
@@ -12,7 +12,7 @@ export function protectedResourceMetadata(headers: HeaderReader): Record<string,
   return {
     resource: urls.mcpResource,
     authorization_servers: [urls.issuer],
-    scopes_supported: [SCOPE],
+    scopes_supported: [...SCOPES],
     bearer_methods_supported: ['header'],
     resource_name: 'Compendium',
   };
@@ -32,7 +32,7 @@ export function authorizationServerMetadata(headers: HeaderReader): Record<strin
     code_challenge_methods_supported: ['S256'],
     token_endpoint_auth_methods_supported: ['none'],
     revocation_endpoint_auth_methods_supported: ['none'],
-    scopes_supported: [SCOPE],
+    scopes_supported: [...SCOPES],
     client_id_metadata_document_supported: true,
     authorization_response_iss_parameter_supported: true,
   };

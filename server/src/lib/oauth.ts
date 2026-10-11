@@ -21,7 +21,19 @@ import { getDb } from './db';
 import { createGuardedFetch } from './ssrf';
 import type { UserRole } from './session';
 
-export const SCOPE = 'notes:read';
+/** notes:read lists, searches and reads the notes the user can see.
+ *  wrapup:submit lets the client store a Session Wrap-up proposal, which
+ *  only takes effect when a person reviews and applies it in the app. */
+export const SCOPES = ['notes:read', 'wrapup:submit'] as const;
+export const SCOPE = SCOPES.join(' ');
+
+/** The scope a grant gets for a request: the recognised scopes it named
+ *  (notes:read is always included), or all of them when it named none. */
+export function grantedScope(requested: string | undefined): string {
+  const asked = (requested ?? '').split(/\s+/).filter((s): s is (typeof SCOPES)[number] => (SCOPES as readonly string[]).includes(s));
+  if (asked.length === 0) return SCOPE;
+  return SCOPES.filter((s) => s === 'notes:read' || asked.includes(s)).join(' ');
+}
 export const CODE_TTL_MS = 5 * 60_000;
 export const ACCESS_TTL_MS = 60 * 60_000;
 export const REFRESH_TTL_MS = 30 * 24 * 60 * 60_000;
@@ -108,6 +120,7 @@ export type TokenPrincipal = {
   userId: string;
   groupId: string;
   role: UserRole;
+  scopes: string[];
 };
 
 export type GrantSummary = {
@@ -297,6 +310,8 @@ export type CodeInput = {
   redirectUri: string;
   codeChallenge: string;
   resource: string;
+  /** Already normalised with grantedScope. */
+  scope: string;
 };
 
 export function issueCode(input: CodeInput): string {
@@ -316,7 +331,7 @@ export function issueCode(input: CodeInput): string {
       input.redirectUri,
       input.codeChallenge,
       input.resource,
-      SCOPE,
+      input.scope,
       now,
       now + CODE_TTL_MS,
     );
@@ -331,6 +346,7 @@ type CodeRow = {
   redirect_uri: string;
   code_challenge: string;
   resource: string;
+  scope: string;
   expires_at: number;
 };
 
@@ -353,7 +369,7 @@ export function redeemCode(input: RedeemInput): TokenResult {
   const db = getDb();
   const row = db
     .query<CodeRow, [string]>(
-      `SELECT code_hash, client_id, user_id, group_id, redirect_uri, code_challenge, resource, expires_at
+      `SELECT code_hash, client_id, user_id, group_id, redirect_uri, code_challenge, resource, scope, expires_at
          FROM oauth_codes WHERE code_hash = ?`,
     )
     .get(sha256(input.code));
@@ -380,9 +396,9 @@ export function redeemCode(input: RedeemInput): TokenResult {
   db.query(
     `INSERT INTO oauth_grants (id, client_id, user_id, group_id, resource, scope, created_at, last_used_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(grantId, row.client_id, row.user_id, row.group_id, row.resource, SCOPE, now, now);
+  ).run(grantId, row.client_id, row.user_id, row.group_id, row.resource, row.scope, now, now);
   recordSpent(row.code_hash, grantId, 'code', now);
-  return { ok: true, tokens: mintTokens(grantId, now) };
+  return { ok: true, tokens: mintTokens(grantId, now, row.scope) };
 }
 
 type SpentRow = { grant_id: string; spent_at: number };
@@ -405,7 +421,7 @@ function fail(error: OAuthErrorCode, description: string): TokenResult {
   return { ok: false, error, description };
 }
 
-function mintTokens(grantId: string, now: number): TokenSet {
+function mintTokens(grantId: string, now: number, scope: string): TokenSet {
   const access = secret();
   const refresh = secret();
   const insert = getDb().query(
@@ -418,7 +434,7 @@ function mintTokens(grantId: string, now: number): TokenSet {
     token_type: 'Bearer',
     expires_in: Math.floor(ACCESS_TTL_MS / 1000),
     refresh_token: refresh,
-    scope: SCOPE,
+    scope,
   };
 }
 
@@ -433,6 +449,7 @@ type TokenRow = {
   user_id: string;
   group_id: string;
   resource: string;
+  scope: string;
 };
 
 function loadToken(token: string): TokenRow | null {
@@ -440,7 +457,7 @@ function loadToken(token: string): TokenRow | null {
     getDb()
       .query<TokenRow, [string]>(
         `SELECT t.token_hash, t.grant_id, t.kind, t.expires_at,
-                g.client_id, g.user_id, g.group_id, g.resource
+                g.client_id, g.user_id, g.group_id, g.resource, g.scope
            FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id
           WHERE t.token_hash = ?`,
       )
@@ -469,7 +486,7 @@ export function refreshTokens(input: { refreshToken: string; clientId: string })
   }
   const now = Date.now();
   db.query('UPDATE oauth_grants SET last_used_at = ? WHERE id = ?').run(now, row.grant_id);
-  return { ok: true, tokens: mintTokens(row.grant_id, now) };
+  return { ok: true, tokens: mintTokens(row.grant_id, now, row.scope) };
 }
 
 // ── Resource-server side ───────────────────────────────────────────────
@@ -498,7 +515,7 @@ export function authenticateAccessToken(token: string, resource: string): TokenP
     return null;
   }
   getDb().query('UPDATE oauth_grants SET last_used_at = ? WHERE id = ?').run(Date.now(), row.grant_id);
-  return { grantId: row.grant_id, userId: row.user_id, groupId: row.group_id, role };
+  return { grantId: row.grant_id, userId: row.user_id, groupId: row.group_id, role, scopes: row.scope.split(' ') };
 }
 
 // ── Revocation + listing ───────────────────────────────────────────────

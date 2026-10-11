@@ -10,6 +10,7 @@ import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { listWorldsForSession } from '@/lib/groups';
 import { checkAuthorizeRequest, isKnownClaudeRedirect } from '@/lib/oauth-authorize';
+import { grantedScope } from '@/lib/oauth';
 import { publicUrls } from '@/lib/public-url';
 import { AuthShell } from '@/app/login/AuthShell';
 import { ConsentForm } from './ConsentForm';
@@ -47,6 +48,7 @@ export default async function AuthorizePage({
 
   const clientName = check.ok ? check.client.clientName : 'this app';
   const redirectHost = new URL(check.query.redirect_uri).host;
+  const canSubmit = grantedScope(check.query.scope).includes('wrapup:submit');
   const worlds = listWorldsForSession(session.userId, session.id).map((w) => ({
     id: w.id,
     name: w.name,
@@ -57,7 +59,7 @@ export default async function AuthorizePage({
   return (
     <AuthShell
       title={`Let ${clientName} (redirects to ${redirectHost}) read your notes?`}
-      subtitle={`Signed in as ${session.displayName}. ${clientName} will be able to list, search and read the notes you can see in one world. It cannot change anything.`}
+      subtitle={`Signed in as ${session.displayName}. ${clientName} will be able to list, search and read the notes you can see in one world. It cannot change any note.${canSubmit ? ' It can also propose a Session Wrap-up, which only takes effect when you review and apply it in Compendium.' : ''}`}
     >
       <ConsentForm
         csrfToken={session.csrfToken}
