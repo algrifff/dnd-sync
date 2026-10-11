@@ -173,16 +173,6 @@ async function main(): Promise<void> {
   );
   step('token', `access expires in ${tokens.expires_in}s, scope ${tokens.scope}`);
 
-  const replay = await tokenRequest({
-    grant_type: 'authorization_code',
-    code,
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    code_verifier: verifier,
-  });
-  assert(replay.status === 400, `code replay returned ${replay.status}, expected 400`);
-  step('code reuse', 'rejected');
-
   const init = await rpc<{ protocolVersion: string; serverInfo: { name: string; version: string } }>(
     mcpUrl,
     tokens.access_token,
@@ -235,6 +225,16 @@ async function main(): Promise<void> {
   });
   assert(after.status === 401, `revoked token still accepted (${after.status})`);
   step('revoke', 'token rejected afterwards');
+
+  const replay = await tokenRequest({
+    grant_type: 'authorization_code',
+    code,
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    code_verifier: verifier,
+  });
+  assert(replay.status === 400, `code replay returned ${replay.status}, expected 400`);
+  step('code reuse', 'rejected (revoking the grant on replay is covered by oauth.test.ts)');
   console.log('\nall good');
 }
 
