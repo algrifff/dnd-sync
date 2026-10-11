@@ -57,7 +57,7 @@ globally (`npm i -g bun@1.4.3`) — don't rely on `npx bun`, which resolves the 
 - `server/src/lib/db.ts` switches at runtime: `typeof Bun !== "undefined"`
 - The Dockerfile rebuilds `better-sqlite3` against Node 22's ABI in a separate stage — don't skip this step when changing the Dockerfile
 
-## Data model (50 migrations, versions 1–52 — append only, never edit existing)
+## Data model (51 migrations, versions 1–53 — append only, never edit existing)
 
 Numbering isn't contiguous — a couple of version numbers (21, 22) were
 never shipped, so "latest version" and "migration count" are two
