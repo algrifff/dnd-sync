@@ -2,10 +2,18 @@
   "name": "compendium-ai",
   "private": true,
   "type": "module",
-  "workspaces": ["shared", "server"],
+  "workspaces": [
+    "shared",
+    "server"
+  ],
   "scripts": {
-    "typecheck": "bun --filter '*' typecheck",
-    "lint": "eslint .",
+    "dev": "bun scripts/gate.ts --pool dev --cost-mb 4500 --cwd server -- bun run server.ts",
+    "test": "bun scripts/gate.ts --cost-mb 1500 -- bun test",
+    "test:changed": "bun scripts/gate.ts --cost-mb 1500 -- bun test --changed=main",
+    "typecheck": "bun scripts/gate.ts --cost-mb 1500 -- bun run raw:typecheck",
+    "lint": "bun scripts/gate.ts --cost-mb 1500 -- bun run raw:lint",
+    "raw:typecheck": "bun --filter '*' typecheck",
+    "raw:lint": "eslint .",
     "format": "prettier --write ."
   },
   "devDependencies": {

@@ -10,6 +10,7 @@ export default tseslint.config(
   {
     ignores: [
       '**/dist/**',
+      '.claude/**',
       '**/.next/**',
       '**/node_modules/**',
       '**/main.js',

@@ -19,11 +19,36 @@ scripts/    # one-off utilities (e.g. vault deduplication)
 | Context | Command |
 |---------|---------|
 | Install deps | `bun install` (from root) |
-| Dev server | `cd server && bun run server.ts` |
+| Dev server | `bun run dev` (gated, see memory rules below) |
 | Type-check all | `bun run typecheck` (from root) |
 | Lint | `bun run lint` |
-| Tests | `bun test` |
+| Tests | `bun run test` (gated; `test:changed` for just your diff) |
 | Production build | `cd server && bun run build` |
+
+## Running many agents in parallel — memory rules
+
+The machine must stay under ~70 GB RAM total (WSL is capped in `~/.wslconfig`).
+Every heavy command goes through `scripts/gate.ts`, which waits for a free slot
+and for RAM headroom before it starts. The gate only limits commands launched
+through it, so use the root scripts, never the raw tools:
+
+- `bun run dev` — dev server, gated (max 3 at once). Sets `PORT` to 3100+slot, so parallel servers never collide. Don't start one unless the task needs a running app.
+- `bun run test` / `bun run typecheck` / `bun run lint` — gated. Plain `bun test` is also safe: root `bunfig.toml` ignores `.claude/**`.
+- `bun run test:changed` — only test files affected by your diff against `main`.
+
+**A worktree is checked once, not continuously.** While working, run only the
+test files you touched (`bun test path/to/file.test.ts`) or `test:changed`.
+Run the full `test` + `typecheck` + `lint` once, right before opening the PR,
+and don't re-run them on a worktree that hasn't changed since.
+
+**Tear the worktree down when its PR is open**: stop any dev server, then
+`git worktree remove <path>` (the branch and PR survive). Each worktree holds
+~1 GB of `node_modules` and up to 1 GB of `.next`.
+
+Tuning: `GATE_CEILING_GB` (default 70), `GATE_MAX_CHECK` (6), `GATE_MAX_DEV` (3).
+Bun is pinned to 1.4 in `mise.toml`; 1.1 leaked badly on Windows and spiked to
+~4.4 GB compiling a single Next route (1.4 stays near 1.3 GB). Install it
+globally (`npm i -g bun@1.4.3`) — don't rely on `npx bun`, which resolves the old pin.
 
 ## Runtime split — critical
 
