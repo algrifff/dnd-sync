@@ -193,6 +193,14 @@ describe('GET /api/sessions/wrap-up', () => {
     expect(forCoGm.proposal.mentions.map((m) => m.name)).toEqual(['the spy', 'Bram', 'Rusted Key']);
   });
 
+  it('names the Notes its existing matches point at, and only those the reader can see', async () => {
+    const forPlayer = (await (await getPending(get(url(''), otherPlayer))).json()) as { existingTitles: Record<string, string> };
+    const forCoGm = (await (await getPending(get(url(''), coGm))).json()) as { existingTitles: Record<string, string> };
+
+    expect(forPlayer.existingTitles).toEqual({ [BRAM]: 'Bram' });
+    expect(forCoGm.existingTitles).toEqual({ [SPY]: 'The Spy', [BRAM]: 'Bram' });
+  });
+
   it('answers 404 for a Secret Session a Player cannot see', async () => {
     const res = await getPending(get(`http://localhost/api/sessions/wrap-up?sessionPath=${encodeURIComponent(SECRET_SESSION)}`, player));
 

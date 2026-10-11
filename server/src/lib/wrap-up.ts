@@ -291,6 +291,19 @@ export function loadPendingWrapUp(
   };
 }
 
+/** Titles of the Notes a proposal's existing matches point at, for the
+ *  review dialog's "Matched to <Title>?". Call it on a proposal from
+ *  `loadPendingWrapUp`, which already dropped what the reader cannot see. */
+export function existingTitles(groupId: string, proposal: WrapUpProposal): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of proposal.mentions) {
+    if (m.match.type !== 'existing') continue;
+    const note = loadNote(groupId, m.match.path);
+    if (note) out[m.match.path] = note.title;
+  }
+  return out;
+}
+
 // ── Apply ──────────────────────────────────────────────────────────────
 
 export type WrapUpDecisions = {
