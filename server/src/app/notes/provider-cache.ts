@@ -36,6 +36,7 @@
 
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import * as Y from 'yjs';
+import { qualifiedDocName } from '@/lib/collab-doc-name';
 
 type Entry = {
   provider: HocuspocusProvider;
@@ -49,15 +50,6 @@ type Entry = {
  *  bare path. See the module banner comment for why. */
 const cache = new Map<string, Entry>();
 const persistent = new Set<string>();
-
-/** Build the qualified document/cache-key name from a group and a bare
- *  note path. Parse the other direction on the FIRST colon only if you
- *  ever need to (note paths may themselves contain colons; group ids
- *  never do) — nothing here currently needs to un-qualify, but keep
- *  that constraint in mind if you add something that does. */
-function qualify(groupId: string, path: string): string {
-  return `${groupId}:${path}`;
-}
 
 /** Grace period before destroying an idle non-persistent entry. Long
  *  enough to absorb a quick tab-flick away and back, short enough that
@@ -218,7 +210,7 @@ export function acquireProvider(
   groupId: string,
   path: string,
 ): { provider: HocuspocusProvider; ydoc: Y.Doc } {
-  const qualifiedName = qualify(groupId, path);
+  const qualifiedName = qualifiedDocName(groupId, path);
   let entry = cache.get(qualifiedName);
   if (!entry) {
     const ydoc = new Y.Doc();
@@ -259,7 +251,7 @@ export function acquireProvider(
  *  qualified name isn't pinned by an open tab, schedule destruction
  *  after the idle grace period. */
 export function releaseProvider(groupId: string, path: string): void {
-  const qualifiedName = qualify(groupId, path);
+  const qualifiedName = qualifiedDocName(groupId, path);
   const entry = cache.get(qualifiedName);
   if (!entry) return;
   entry.refCount = Math.max(0, entry.refCount - 1);
@@ -278,7 +270,7 @@ export function releaseProvider(groupId: string, path: string): void {
  *  tab belongs to that group's session. */
 export function setPersistentPaths(groupId: string, paths: Iterable<string>): void {
   const next = new Set<string>();
-  for (const p of paths) next.add(qualify(groupId, p));
+  for (const p of paths) next.add(qualifiedDocName(groupId, p));
   // Newly-pinned paths: cancel any pending destruction.
   for (const p of next) {
     if (persistent.has(p)) continue;
