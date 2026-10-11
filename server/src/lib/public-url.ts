@@ -25,9 +25,17 @@ export const MCP_PATH = '/api/mcp';
 
 type HeaderReader = { get(name: string): string | null };
 
+let warnedNoPublicUrl = false;
+
 export function publicOrigin(headers: HeaderReader): string {
   const raw = process.env.PUBLIC_APP_URL?.trim();
   if (raw) return raw.replace(/\/+$/, '');
+  if (process.env.NODE_ENV === 'production' && !warnedNoPublicUrl) {
+    warnedNoPublicUrl = true;
+    console.warn(
+      '[oauth] PUBLIC_APP_URL is not set; OAuth metadata is derived from request headers. Set it so a forged Host header cannot change the issuer or MCP resource.',
+    );
+  }
   const host = headers.get('x-forwarded-host') ?? headers.get('host') ?? 'localhost:3000';
   const proto = headers.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
   return `${proto}://${host}`.toLowerCase();

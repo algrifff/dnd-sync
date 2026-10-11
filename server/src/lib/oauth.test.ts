@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { createHash, randomBytes } from 'node:crypto';
 import { getDb } from './db';
 import { setupTestDb, teardownTestDb } from './test-utils';
-import { createUser, DEFAULT_GROUP_ID } from './users';
+import { changePasswordByReset, changeUserPassword, createUser, DEFAULT_GROUP_ID } from './users';
 import {
   ACCESS_TTL_MS,
   authenticateAccessToken,
@@ -243,6 +243,30 @@ describe('reuse detection', () => {
     expect(refreshTokens({ refreshToken: first.refresh_token, clientId: client.clientId })).toMatchObject({ ok: false });
 
     expect(authenticateAccessToken(second.tokens.access_token, RESOURCE)).not.toBeNull();
+  });
+});
+
+describe('password changes', () => {
+  const connect = () => {
+    const { verifier, challenge } = pkce();
+    return mustRedeem(grantCode({ challenge }), verifier);
+  };
+
+  it('a forgot-password reset revokes connected apps', async () => {
+    const tokens = connect();
+
+    await changePasswordByReset(userId, 'a-brand-new-password');
+
+    expect(authenticateAccessToken(tokens.access_token, RESOURCE)).toBeNull();
+    expect(listGrantsForUser(userId)).toHaveLength(0);
+  });
+
+  it('an admin password change revokes connected apps', async () => {
+    const tokens = connect();
+
+    await changeUserPassword(userId, 'another-new-password', userId, DEFAULT_GROUP_ID);
+
+    expect(authenticateAccessToken(tokens.access_token, RESOURCE)).toBeNull();
   });
 });
 
