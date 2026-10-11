@@ -289,3 +289,35 @@ describe('Wrap-up tools', () => {
     expect(r.text).toContain('Invalid arguments');
   });
 });
+
+describe('submit_wrap_up suggestions', () => {
+  const SESSION = 'Campaigns/Dragon Heist/Sessions/Session 2.md';
+  const CHARACTER = 'Campaigns/Dragon Heist/Characters/Brisa.md';
+  const submitter = { ...viewer, scopes: ['notes:read', 'wrapup:submit'] };
+
+  beforeAll(() => {
+    seedNote({ path: CHARACTER, body: 'A rogue.', kind: 'character' });
+  });
+
+  it('stores a suggestion for a Character note', () => {
+    const r = runTool('submit_wrap_up', submitter, {
+      session_path: SESSION,
+      mentions: [],
+      suggestions: [{ characterPath: CHARACTER, story: 'Picked the lock.', items: [{ name: 'Lockpicks', quantity: 1 }] }],
+    });
+
+    expect(r.isError).toBeUndefined();
+    expect(loadPendingWrapUp(DEFAULT_GROUP_ID, 'viewer', SESSION)?.suggestions).toHaveLength(1);
+  });
+
+  it('refuses a suggestion aimed at a note that is not a Character', () => {
+    const r = runTool('submit_wrap_up', submitter, {
+      session_path: SESSION,
+      mentions: [],
+      suggestions: [{ characterPath: PUBLIC, story: 'Hello.', items: [] }],
+    });
+
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('not a Character');
+  });
+});
