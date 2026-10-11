@@ -617,6 +617,9 @@ export type WriteOpts = {
   frontmatter: Record<string, unknown>;
   isUpdate: boolean;
   noteId?: string | undefined;
+  /** Display title, when it should not be derived from the first
+   *  heading or the filename. */
+  title?: string | undefined;
   /** Optional title→path overrides for the wikilink resolver. Used by
    *  bulk-import scripts to bridge cases like `[[The Dancing Demon]]`
    *  → `Campaigns/one-shot-the-dancing-demon/index.md` where basename
@@ -659,6 +662,7 @@ export function writeNote(opts: WriteOpts): void {
   // expects a raw file string with `---\n…\n---\n<body>`.
   const fullRaw = composeMarkdown(opts.frontmatter, stripFrontmatter(opts.markdown));
   const ingest: NoteIngest = ingestMarkdown(opts.path, fullRaw, ctx);
+  if (opts.title) ingest.title = opts.title;
 
   const schema = getPmSchema();
   const ydoc = prosemirrorJSONToYDoc(

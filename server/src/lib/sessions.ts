@@ -57,7 +57,7 @@ function rowToSession(r: DbRow): SessionListRow {
   };
 }
 
-export type SessionStatus = 'open' | 'review' | 'closed';
+export type SessionStatus = 'open' | 'closed';
 
 export function getSessionStatus(groupId: string, notePath: string): SessionStatus {
   const row = getDb()
@@ -65,7 +65,47 @@ export function getSessionStatus(groupId: string, notePath: string): SessionStat
       `SELECT status FROM session_notes WHERE group_id=? AND note_path=?`,
     )
     .get(groupId, notePath);
-  return (row?.status as SessionStatus) ?? 'open';
+  return row?.status === 'closed' ? 'closed' : 'open';
+}
+
+/** The pending Wrap-up proposal stored for a Session, as raw JSON
+ *  text. `lib/wrap-up.ts` owns its shape. */
+export function readPendingWrapUpJson(groupId: string, notePath: string): string | null {
+  const row = getDb()
+    .query<{ wrap_up_json: string | null }, [string, string]>(
+      `SELECT wrap_up_json FROM session_notes WHERE group_id=? AND note_path=?`,
+    )
+    .get(groupId, notePath);
+  return row?.wrap_up_json ?? null;
+}
+
+export function writePendingWrapUpJson(
+  groupId: string,
+  notePath: string,
+  json: string | null,
+): void {
+  getDb()
+    .query(
+      `INSERT INTO session_notes (group_id, note_path, updated_at, wrap_up_json)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT (group_id, note_path) DO UPDATE SET wrap_up_json = excluded.wrap_up_json`,
+    )
+    .run(groupId, notePath, Date.now(), json);
+}
+
+/** Marks the Session Closed and drops any pending proposal. Closing an
+ *  already Closed Session only refreshes closed_at / closed_by. */
+export function closeSession(groupId: string, notePath: string, closedBy: string): void {
+  const now = Date.now();
+  getDb()
+    .query(
+      `INSERT INTO session_notes (group_id, note_path, updated_at, status, closed_at, closed_by, wrap_up_json)
+       VALUES (?, ?, ?, 'closed', ?, ?, NULL)
+       ON CONFLICT (group_id, note_path)
+       DO UPDATE SET status='closed', closed_at=excluded.closed_at,
+                     closed_by=excluded.closed_by, wrap_up_json=NULL`,
+    )
+    .run(groupId, notePath, now, now, closedBy);
 }
 
 export function deriveSessionFromFrontmatter(opts: {
@@ -150,7 +190,7 @@ export function listSessions(
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-function resolveCampaignSlug(
+export function resolveCampaignSlug(
   fm: Record<string, unknown>,
   notePath: string,
 ): string | null {

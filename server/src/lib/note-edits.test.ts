@@ -9,6 +9,7 @@ import type { PmNode } from '@/lib/md-to-pm';
 import {
   addHistoryEntry,
   applyNoteEdit,
+  hasHistoryEntry,
   linkMention,
   type EditResult,
   type PmDoc,
@@ -115,6 +116,18 @@ describe('addHistoryEntry', () => {
     const content = changedDoc(addHistoryEntry(before, { ...SESSION, text: 'Arrived.' }));
 
     expect(content.at(-1)).toEqual(bullets(historyItem('Arrived.')));
+  });
+});
+
+describe('hasHistoryEntry', () => {
+  it('is true only when the History section links the Session', () => {
+    const recorded = doc(paragraph(text('Intro.')), heading(2, 'History'), bullets([link(SESSION.sessionPath, 'Session 12'), text(': Fought.')]));
+    const linkedElsewhere = doc(paragraph(link(SESSION.sessionPath, 'Session 12')), heading(2, 'History'), bullets([text('Nothing yet.')]));
+    const noHistory = doc(paragraph(text('Intro.')));
+
+    expect(hasHistoryEntry(recorded, SESSION.sessionPath)).toBe(true);
+    expect(hasHistoryEntry(linkedElsewhere, SESSION.sessionPath)).toBe(false);
+    expect(hasHistoryEntry(noHistory, SESSION.sessionPath)).toBe(false);
   });
 });
 
