@@ -464,6 +464,8 @@ function listDirectChildren(
   const prefix = folderPath + '/';
 
   // Direct child notes: starts with `<folder>/`, no further slashes.
+  // The index body is one shared document that viewers can read, so a
+  // note hidden from viewers (dm_only or gm_only) is never listed.
   const directNotes = db
     .query<{ path: string; title: string }, [string, string, string, string]>(
       `SELECT path, title FROM notes
@@ -471,6 +473,7 @@ function listDirectChildren(
           AND path LIKE ? || '/%'
           AND path NOT LIKE ? || '/%/%'
           AND path != ?
+          AND dm_only = 0 AND gm_only = 0
         ORDER BY title COLLATE NOCASE`,
     )
     .all(groupId, folderPath, folderPath, indexPath);

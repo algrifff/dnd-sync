@@ -3,7 +3,11 @@
 // silent schema-validation failure leaves the index with an empty
 // Y.Doc, which is exactly the symptom we hit on the first attempt.
 
-import { describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { randomUUID } from 'node:crypto';
+import { getDb } from './db';
+import { setupTestDb, teardownTestDb } from './test-utils';
+import { deriveFolderIndex } from './campaign-index';
 import { prosemirrorJSONToYDoc, yDocToProsemirrorJSON } from 'y-prosemirror';
 import { getPmSchema } from './pm-schema';
 
@@ -98,5 +102,52 @@ describe('campaign-index PM JSON', () => {
       (n) => (n as { type?: string }).type === 'callout',
     );
     expect(calloutNode).toBeDefined();
+  });
+});
+
+describe('deriveFolderIndex — hidden children', () => {
+  const groupId = 'g_test_index_vis';
+  const userId = 'u_test_index_vis';
+  const folder = 'Campaigns/Demo/People';
+
+  beforeAll(() => {
+    setupTestDb();
+    const db = getDb();
+    db.query('INSERT INTO groups (id, name, created_at) VALUES (?, ?, ?)').run(groupId, 'Vis', Date.now());
+    db.query(
+      `INSERT INTO users (id, username, display_name, password_hash, accent_color, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(userId, 'indexer', 'Indexer', 'x', '#000', Date.now());
+  });
+  afterAll(() => teardownTestDb());
+
+  function seedChild(name: string, flags: { dmOnly?: boolean; gmOnly?: boolean } = {}): void {
+    getDb()
+      .query(
+        `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
+                            content_md, yjs_state, frontmatter_json, byte_size,
+                            updated_at, updated_by, created_at, created_by, dm_only, gm_only)
+         VALUES (?, ?, ?, ?, '{"type":"doc","content":[]}', '', '', NULL, '{}', 0, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(randomUUID(), groupId, `${folder}/${name}.md`, name, Date.now(), userId, Date.now(), userId,
+           flags.dmOnly ? 1 : 0, flags.gmOnly ? 1 : 0);
+  }
+
+  it('should list only notes every viewer can see', async () => {
+    seedChild('Visible Villager');
+    seedChild('Secret Traitor', { dmOnly: true });
+    seedChild('Owner Only Patron', { gmOnly: true });
+
+    await deriveFolderIndex(groupId, folder, { userId });
+
+    const index = getDb()
+      .query<{ content_md: string }, [string, string]>(
+        'SELECT content_md FROM notes WHERE group_id = ? AND path = ?',
+      )
+      .get(groupId, `${folder}/index.md`)!;
+    const listed = ['Visible Villager', 'Secret Traitor', 'Owner Only Patron'].filter((t) =>
+      index.content_md.includes(t),
+    );
+    expect(listed).toEqual(['Visible Villager']);
   });
 });

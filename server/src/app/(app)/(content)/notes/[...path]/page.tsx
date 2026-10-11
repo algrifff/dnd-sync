@@ -19,7 +19,6 @@ import { NoteWorkspace } from '../../../../notes/NoteWorkspace';
 import { ExcalidrawCanvas } from '../../../../excalidraw/ExcalidrawCanvas';
 import { TagEditor } from '../../../../notes/TagEditor';
 import { NoteSidebar, extractOutline } from '../../../../notes/NoteSidebar';
-import { ChatPane } from '../../../../ChatPane';
 import { EndSessionButton } from '../../../../notes/EndSessionButton';
 import { getSessionStatus } from '@/lib/sessions';
 import { CollapsibleRightPanel } from '../../../../CollapsibleRightPanel';
@@ -147,7 +146,6 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   }
 
   return (
-    <>
       <div
         id="note-tools-anchor"
         className="relative flex min-h-0 flex-1"
@@ -211,11 +209,10 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                     />
                   </div>
 
-                  {isSessionNote && (
+                  {isSessionNote && sessionStatus !== 'closed' && (
                     <EndSessionButton
                       sessionPath={path}
                       csrfToken={session.csrfToken}
-                      isAlreadyClosed={sessionStatus === 'closed'}
                       campaignSlug={sessionCampaignSlug}
                     />
                   )}
@@ -259,26 +256,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
           />
         </CollapsibleRightPanel>
       </div>
-
-      {/* Fixed-position overlay — DOM location doesn't matter. Kept
-           inside the page so props tied to the current note (activePath,
-           campaignSlug, role) flow through cleanly without a client-side
-           pathname derivation. */}
-      <ChatPane
-        groupId={session.currentGroupId}
-        userId={session.userId}
-        role={session.role === 'viewer' ? 'player' : 'dm'}
-        activePath={path}
-        {...(campaignSlugFromPath(path) !== undefined
-          ? { campaignSlug: campaignSlugFromPath(path) }
-          : {})}
-      />
-    </>
   );
-}
-
-function campaignSlugFromPath(path: string): string | undefined {
-  return /^Campaigns\/([^/]+)\//.exec(path)?.[1];
 }
 
 function formatCreatedAt(ts: number): string {

@@ -8,12 +8,10 @@ type Phase = 'idle' | 'confirming' | 'working' | 'sent' | 'error';
 export function EndSessionButton({
   sessionPath,
   csrfToken,
-  isAlreadyClosed,
   campaignSlug,
 }: {
   sessionPath: string;
   csrfToken: string;
-  isAlreadyClosed: boolean;
   campaignSlug: string | undefined;
 }): React.JSX.Element {
   const [phase, setPhase] = useState<Phase>('idle');
@@ -23,11 +21,9 @@ export function EndSessionButton({
     track(EVENTS.END_SESSION_CONFIRMED, {
       session_path: sessionPath,
       campaign_slug: campaignSlug ?? null,
-      was_already_closed: isAlreadyClosed,
     });
     setPhase('working');
     try {
-      // Mark the session closed in the DB first
       const res = await fetch('/api/sessions/mark-closed', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
@@ -47,18 +43,6 @@ export function EndSessionButton({
       return;
     }
 
-    // Short trigger message — the session.md skill contains the full
-    // extraction instructions; the AI will call note_read to fetch content.
-    const campaignLine = campaignSlug ? ` (campaign: ${campaignSlug})` : '';
-    const message = `End of session: "${sessionPath}"${campaignLine}. Please read the session note and update the compendium.`;
-
-    // Hand off to the chat pane — it will auto-send the message and show streaming progress
-    window.dispatchEvent(
-      new CustomEvent('compendium:open-chat', {
-        detail: { message, autoSend: true },
-      }),
-    );
-
     setPhase('sent');
   }
 
@@ -70,9 +54,7 @@ export function EndSessionButton({
   if (phase === 'sent') {
     return (
       <div className="mb-5 rounded-[6px] border border-[var(--wine)]/30 bg-[var(--wine)]/8 px-4 py-3">
-        <p className="text-sm text-[var(--ink)]">
-          Session closed — the AI is processing your notes in the chat panel.
-        </p>
+        <p className="text-sm text-[var(--ink)]">Session closed.</p>
       </div>
     );
   }
@@ -107,34 +89,18 @@ export function EndSessionButton({
   if (phase === 'confirming') {
     return (
       <div className="mb-5 rounded-[6px] border border-[var(--wine)]/40 bg-[var(--wine)]/8 px-4 py-3">
-        {isAlreadyClosed ? (
-          <>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--wine)]">
-              Already closed
-            </p>
-            <p className="mb-3 text-sm text-[var(--ink)]">
-              This session has already been ended. Running again may add duplicate
-              information to your entity notes. Are you sure?
-            </p>
-          </>
-        ) : (
-          <>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--wine)]">
-              End of session
-            </p>
-            <p className="mb-3 text-sm text-[var(--ink)]">
-              The AI will read your session notes, create or update entity pages for every
-              NPC, location, and creature it finds, and add wikilinks back to this session.
-              Progress will stream in the chat panel.
-            </p>
-          </>
-        )}
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--wine)]">
+          End of session
+        </p>
+        <p className="mb-3 text-sm text-[var(--ink)]">
+          Mark this session as closed.
+        </p>
         <div className="flex items-center gap-3">
           <button
             onClick={() => void handleConfirm()}
             className="rounded-[4px] bg-[var(--wine)] px-3 py-1.5 text-xs font-medium text-[var(--parchment)] hover:bg-[#7a3f47] active:opacity-80"
           >
-            {isAlreadyClosed ? 'Run anyway' : 'End session'}
+            End session
           </button>
           <button
             onClick={handleCancel}
@@ -154,7 +120,6 @@ export function EndSessionButton({
         track(EVENTS.END_SESSION_CLICKED, {
           session_path: sessionPath,
           campaign_slug: campaignSlug ?? null,
-          was_already_closed: isAlreadyClosed,
         });
         setPhase('confirming');
       }}
