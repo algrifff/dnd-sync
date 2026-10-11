@@ -13,6 +13,7 @@ import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { loadNote } from '@/lib/notes';
 import { closeDocumentConnections } from '@/collab/server';
+import { deriveFolderIndexesFor } from '@/lib/campaign-index';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,6 +75,9 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   // re-authenticate against the committed flag. Evicting before the
   // write would just let them straight back in under the old value.
   await closeDocumentConnections(session.currentGroupId, body.path);
+
+  // The parent folder index lists only notes visible to viewers.
+  await deriveFolderIndexesFor(session.currentGroupId, [body.path]);
 
   return json({ ok: true, dmOnly: body.dmOnly });
 }

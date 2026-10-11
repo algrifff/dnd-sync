@@ -36,7 +36,9 @@ const env = getEnv();
 // count across all tenants. A single indexed SELECT against the
 // existing `config` table lets an already-backfilled DB skip both
 // scans entirely instead of moving the work off the critical path.
-const BOOT_BACKFILL_CONFIG_KEY = 'boot_backfill_v1';
+// Bump the suffix when index generation changes in a way existing
+// bodies must pick up (v2: hidden notes left out of folder indexes).
+const BOOT_BACKFILL_CONFIG_KEY = 'boot_backfill_v2';
 
 function hasCompletedBootBackfill(): boolean {
   const row = getDb()

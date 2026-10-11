@@ -2,7 +2,7 @@
 
 ## What we're building
 
-**Compendium** — a self-hosted TTRPG note-taking web app for players and GMs. Think Obsidian, but purpose-built for tabletop campaigns: real-time collaborative notes, character sheets, session logs, knowledge graph, and an AI assistant that understands the game context.
+**Compendium** — a self-hosted TTRPG note-taking web app for players and GMs. Think Obsidian, but purpose-built for tabletop campaigns: real-time collaborative notes, character sheets, session logs, knowledge graph, and AI-assisted import of existing vaults.
 
 Players connect via a web dashboard. Notes sync live across all clients via Yjs CRDTs over WebSocket. Multiple groups (worlds/campaigns) are supported; users can belong to several.
 
@@ -19,11 +19,36 @@ scripts/    # one-off utilities (e.g. vault deduplication)
 | Context | Command |
 |---------|---------|
 | Install deps | `bun install` (from root) |
-| Dev server | `cd server && bun run server.ts` |
+| Dev server | `bun run dev` (gated, see memory rules below) |
 | Type-check all | `bun run typecheck` (from root) |
 | Lint | `bun run lint` |
-| Tests | `bun test` |
+| Tests | `bun run test` (gated; `test:changed` for just your diff) |
 | Production build | `cd server && bun run build` |
+
+## Running many agents in parallel — memory rules
+
+The machine must stay under ~70 GB RAM total (WSL is capped in `~/.wslconfig`).
+Every heavy command goes through `scripts/gate.ts`, which waits for a free slot
+and for RAM headroom before it starts. The gate only limits commands launched
+through it, so use the root scripts, never the raw tools:
+
+- `bun run dev` — dev server, gated (max 3 at once). Sets `PORT` to 3100+slot, so parallel servers never collide. Don't start one unless the task needs a running app.
+- `bun run test` / `bun run typecheck` / `bun run lint` — gated. Plain `bun test` is also safe: root `bunfig.toml` ignores `.claude/**`.
+- `bun run test:changed` — only test files affected by your diff against `main`.
+
+**A worktree is checked once, not continuously.** While working, run only the
+test files you touched (`bun test path/to/file.test.ts`) or `test:changed`.
+Run the full `test` + `typecheck` + `lint` once, right before opening the PR,
+and don't re-run them on a worktree that hasn't changed since.
+
+**Tear the worktree down when its PR is open**: stop any dev server, then
+`git worktree remove <path>` (the branch and PR survive). Each worktree holds
+~1 GB of `node_modules` and up to 1 GB of `.next`.
+
+Tuning: `GATE_CEILING_GB` (default 70), `GATE_MAX_CHECK` (6), `GATE_MAX_DEV` (3).
+Bun is pinned to 1.4 in `mise.toml`; 1.1 leaked badly on Windows and spiked to
+~4.4 GB compiling a single Next route (1.4 stays near 1.3 GB). Install it
+globally (`npm i -g bun@1.4.3`) — don't rely on `npx bun`, which resolves the old pin.
 
 ## Runtime split — critical
 
@@ -69,7 +94,7 @@ All queries include `group_id` — no table-level tenant isolation, just strict 
 **Session-based** (web dashboard)
 - HTTP-only cookie + CSRF token validated on every mutation
 - Roles within a group: `admin`, `editor`, `viewer`
-- Admin/editor = GM privileges in AI; viewer = player
+- Admin/editor = GM privileges; viewer = player
 
 **Middleware** (`server/src/middleware.ts`): redirects unauthenticated to `/login?next=<path>`; also applies the security-header pack to every response. Public paths (no redirect): `/`, `/login`, `/signup`, `/admin/login`, `/api/*`, `/_next/*`, plus static assets. `/admin/*` (except `/admin/login`) is a separate super-admin gate on its own `__sa` cookie, not the regular session.
 
@@ -84,12 +109,16 @@ All queries include `group_id` — no table-level tenant isolation, just strict 
 
 ## AI features
 
-**Chat** (`POST /api/chat`)
-- Vercel AI SDK v6, OpenAI (configurable, default gpt-4o-mini), streaming
-- Up to 8 agentic tool-call steps per turn
-- Context injected: groupId, campaignSlug, activeCharacterName, openSessionPath, role
+There is no in-app AI chat. It was removed so players can reach Claude
+through an MCP connector instead (built separately). `OPENAI_API_KEY`
+still powers the import pipeline and PDF character-sheet import below.
 
-**Tools available to the AI** (defined in `server/src/lib/ai/tools.ts#createTools`; filtered per-role in `getToolsForRole` — `dm` gets all 13, `player` loses the 4 GM-only ones below, `viewer` additionally loses every mutating tool, leaving just `campaign_list` / `campaign_browse` / `entity_search` / `note_read`)
+**AI tools** (`server/src/lib/ai/tools.ts#createTools`) are currently
+unreferenced outside `tools.test.ts`. They are kept for the MCP
+connector to adopt. `getToolsForRole` filters them per role: `dm` gets
+all 13, `player` loses the 4 GM-only ones below, and `viewer`
+additionally loses every mutating tool, leaving just `campaign_list` /
+`campaign_browse` / `entity_search` / `note_read`.
 - `campaign_list` — list registered campaigns (slug + name); `entity_create` only accepts these slugs
 - `campaign_browse` — list notes inside a campaign
 - `entity_search` — search before creating (prevent duplicates)
@@ -116,8 +145,6 @@ calls `/analyse` — the vault settings page only drives `/orchestrate`.
 `app/settings/import/[id]/ImportJobPanel.tsx`, reachable from the
 vault page's job list via `/settings/import/<id>`.
 
-**Skill injection** — per-kind markdown prompts (`character.md`, `creature.md`, `session.md`, `item.md`, `location.md`, `lore.md`, `note.md`) are loaded dynamically based on keyword detection in the user's message.
-
 ## Key files
 
 | File | What it does |
@@ -127,8 +154,7 @@ vault page's job list via `/settings/import/<id>`.
 | `server/src/lib/superadmin.ts` | `ADMIN_TOKEN` check for the `/admin/*` `__sa` cookie |
 | `server/src/lib/session.ts` | Session CRUD, CSRF, expiry cleanup |
 | `server/src/lib/notes.ts` | Note CRUD, backlink derivation, FTS sync |
-| `server/src/lib/ai/orchestrator.ts` | Chat system prompt builder + skill injection |
-| `server/src/lib/ai/tools.ts` | All AI tool definitions |
+| `server/src/lib/ai/tools.ts` | AI tool definitions, unreferenced until the MCP connector adopts them |
 | `server/src/lib/wrap-up.ts` | Wrap-up: proposal shape, submit validation, candidate context, idempotent apply |
 | `server/src/lib/note-edits.ts` | Lossless PM-JSON edits: `addHistoryEntry`, `linkMention`, `applyNoteEdit` |
 | `server/src/lib/import-orchestrate.ts` | "Smart Import" — the multi-phase pipeline the vault UI actually drives (assets → campaign → entities → quality) |
@@ -177,7 +203,7 @@ examples:
 - `md-to-pm.test.ts` — Markdown → ProseMirror conversion
 - `ratelimit.test.ts` — auth throttling
 - `migrations.test.ts` — schema migration invariants
-- `ai/tools.test.ts`, `ai/personalities.test.ts` — AI tool + prompt behaviour
+- `ai/tools.test.ts` — AI tool behaviour
 
 Pattern: AAA (Arrange → Act → Assert). Real in-memory SQLite — no DB mocking. No e2e tests yet.
 
@@ -235,7 +261,7 @@ Railway: `railway.toml` at repo root, Dockerfile at `server/Dockerfile`. Build c
 
 Required env vars: `ADMIN_TOKEN` (the `/admin` super-admin login is disabled without it), `DATA_DIR=/data` + a volume mounted at `/data`. `PLAYER_TOKEN` is no longer read by any auth path; setting it is harmless.
 
-Optional: `OPENAI_API_KEY` (enables AI chat + import), `ANTHROPIC_API_KEY`.
+Optional: `OPENAI_API_KEY` (enables Smart Import and PDF character import).
 
 ## Skills (invoke with `/skill:<name>`)
 

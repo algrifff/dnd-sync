@@ -15,7 +15,6 @@ import { getDb } from '@/lib/db';
 import { recentlyUpdated } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
 import { GM_MODE_COOKIE, treeModeFor } from '@/lib/gm-mode';
-import { HomeChat } from '../../../HomeChat';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,12 +34,6 @@ export default async function HomePage(): Promise<ReactElement> {
          (SELECT COUNT(*) FROM assets WHERE group_id = ?) AS assets`,
     )
     .get(session.currentGroupId, session.currentGroupId) ?? { notes: 0, assets: 0 };
-
-  const activeCampaignSlug = getDb()
-    .query<{ active_campaign_slug: string | null }, [string]>(
-      'SELECT active_campaign_slug FROM groups WHERE id = ?',
-    )
-    .get(session.currentGroupId)?.active_campaign_slug ?? null;
 
   const recent = recentlyUpdated(session.currentGroupId, 12);
   // Tree is also fetched by the parent layout, but the snapshot-
@@ -67,14 +60,6 @@ export default async function HomePage(): Promise<ReactElement> {
               {counts.assets === 1 ? '' : 's'} · signed in as <code>{session.username}</code>
             </p>
           </div>
-        </section>
-
-        <section className="mb-10">
-          <HomeChat
-            groupId={session.currentGroupId}
-            userId={session.userId}
-            campaignSlug={activeCampaignSlug ?? undefined}
-          />
         </section>
 
         {topFolders.length > 0 && (

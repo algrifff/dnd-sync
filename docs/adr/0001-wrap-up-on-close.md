@@ -14,3 +14,7 @@ AI mistakes such as duplicate People, misattributed facts or overwritten prose w
 - **Live linking while typing**: rejected for now. It needs AI calls on every edit against a CRDT document that several people are writing at once, and it gives no moment to review. It may be revisited as an assist layered on top of Wrap-up, not as a replacement for it.
 - **Direct writes with no review** (the original behaviour): rejected. Errors land silently in shared Notes, and re-running creates duplicates.
 - **Letting Wrap-up rewrite Notes to reflect new facts**: rejected. It silently overwrites what people wrote and loses the record of when the table learned what. Correcting older text stays a human job.
+
+## Who may apply
+
+Any Player who can see the Session may submit, review and apply its Wrap-up, not only the GM. This follows from Players running Sessions: whoever closes the table's log has the context to check the proposal, and the proposal is add-only, reviewed and cannot touch what the applier cannot see (hidden Notes read as missing, and a created Note is as hidden as its Session). We chose this over a GM-only gate because that gate would leave a Session unwrapped whenever the GM is absent. A stale review cannot overwrite a newer proposal: apply must echo the proposal's `generatedAt` and is refused with `proposal_changed` otherwise.

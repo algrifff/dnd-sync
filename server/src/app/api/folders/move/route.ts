@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
+import { hasControlChars } from '@/lib/notes';
 import { logAudit } from '@/lib/audit';
 import { assertMoveAllowed } from '@/lib/move-policy';
 import { moveFolder } from '@/lib/move-folder';
@@ -16,7 +17,7 @@ export const dynamic = 'force-dynamic';
 
 const Body = z.object({
   from: z.string().min(1).max(1024),
-  to: z.string().min(1).max(1024).regex(/^[^\u0000-\u001f\u007f]+$/, 'path must not contain control characters'),
+  to: z.string().min(1).max(1024).refine((p) => !hasControlChars(p), 'path must not contain control characters'),
 });
 
 export async function POST(req: NextRequest): Promise<Response> {

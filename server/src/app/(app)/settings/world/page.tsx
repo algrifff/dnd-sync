@@ -4,7 +4,6 @@ import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { getDb } from '@/lib/db';
 import { getInviteToken, getWorldFeatures } from '@/lib/groups';
-import { DEFAULT_PERSONALITY, listPersonalities } from '@/lib/ai/personalities';
 import { listUsersInGroup } from '@/lib/users';
 import { ServerSettingsForm } from '@/app/admin/server/ServerSettingsForm';
 
@@ -26,13 +25,12 @@ export default async function WorldSettingsPage(): Promise<ReactElement> {
       {
         name: string;
         header_color: string | null;
-        active_personality_id: string | null;
         active_campaign_slug: string | null;
         icon_updated_at: number;
       },
       [string]
     >(
-      `SELECT name, header_color, active_personality_id, active_campaign_slug, icon_updated_at
+      `SELECT name, header_color, active_campaign_slug, icon_updated_at
          FROM groups WHERE id = ?`,
     )
     .get(session.currentGroupId);
@@ -45,12 +43,6 @@ export default async function WorldSettingsPage(): Promise<ReactElement> {
 
   const worldName = group?.name ?? 'Unknown';
   const inviteToken = getInviteToken(session.currentGroupId);
-
-  const personalities = listPersonalities(session.currentGroupId).map((p) => ({
-    id: p.id,
-    name: p.name,
-    prompt: p.prompt,
-  }));
 
   const features = getWorldFeatures(session.currentGroupId);
 
@@ -66,13 +58,6 @@ export default async function WorldSettingsPage(): Promise<ReactElement> {
       iconVersion={group?.icon_updated_at ?? 0}
       csrfToken={session.csrfToken}
       initialToken={inviteToken}
-      personalities={personalities}
-      activePersonalityId={group?.active_personality_id ?? DEFAULT_PERSONALITY.id}
-      builtinPersonality={{
-        id: DEFAULT_PERSONALITY.id,
-        name: DEFAULT_PERSONALITY.name,
-        prompt: DEFAULT_PERSONALITY.prompt,
-      }}
       members={members}
       campaigns={campaigns}
       activeCampaignSlug={group?.active_campaign_slug ?? null}
