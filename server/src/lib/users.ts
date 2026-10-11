@@ -413,7 +413,12 @@ export async function changeUserPassword(
 ): Promise<void> {
   if (plain.length < 8) throw new Error('password must be at least 8 characters');
   const hash = await hashPassword(plain);
-  getDb().query('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, userId);
+  const db = getDb();
+  db.transaction(() => {
+    db.query('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, userId);
+    // Connected apps (MCP connector) sign in as this user; a new password cuts them off.
+    db.query('DELETE FROM oauth_grants WHERE user_id = ?').run(userId);
+  })();
   logAudit({
     action: 'user.passwordChange',
     actorId,
@@ -571,6 +576,7 @@ export async function changePasswordByReset(userId: string, newPassword: string)
   db.transaction(() => {
     db.query('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, userId);
     db.query('DELETE FROM sessions WHERE user_id = ?').run(userId);
+    db.query('DELETE FROM oauth_grants WHERE user_id = ?').run(userId);
     // Invalidate any other outstanding reset tokens for this user so the
     // same token can't be replayed and a lingering link can't be used.
     db.query(
