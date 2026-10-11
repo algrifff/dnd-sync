@@ -13,7 +13,7 @@ import { Logger } from '@hocuspocus/extension-logger';
 import { getDb } from '@/lib/db';
 import { readSessionFromIncoming, type Session } from '@/lib/session';
 import { isPcOwnedBy } from '@/lib/characters';
-import { computeDerived, persistDerived, deriveIndexesFor } from './derive';
+import { writeNoteState, deriveIndexesFor } from './derive';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 
@@ -254,28 +254,20 @@ export function storeNoteDocument(opts: {
   const { path, state, document, context } = opts;
 
   try {
-    // CPU-heavy derivation. No DB access, but can throw on malformed
-    // input — see the function comment above for why this must stay
-    // inside the try.
-    const derived = computeDerived({ path, doc: document });
-
     // yjs_state + the derived caches + the FTS triggers they fire
     // commit as ONE unit. Previously yjs_state landed immediately and
     // derive ran in a setImmediate with its own transaction — a crash
     // in between left search unable to find text the user could
-    // already see synced.
-    const db = getDb();
-    db.transaction(() => {
-      db.query(
-        'UPDATE notes SET yjs_state = ?, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
-      ).run(state, Date.now(), context.userId, context.groupId, path);
-      persistDerived({
-        groupId: context.groupId,
-        path,
-        userId: context.userId,
-        derived,
-      });
-    })();
+    // already see synced. The derivation inside can throw on malformed
+    // input — see the function comment above for why this must stay
+    // inside the try.
+    writeNoteState({
+      groupId: context.groupId,
+      path,
+      userId: context.userId,
+      state,
+      doc: document,
+    });
   } catch (err) {
     // Atomic failure: NOTHING was written, including yjs_state. The
     // in-memory Y.Doc is untouched and the next debounce retries.

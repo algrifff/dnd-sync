@@ -1,7 +1,6 @@
 // Shared helper for every write path that rebuilds a note's yjs_state
-// from a freshly-computed ProseMirror document (entity_edit_content,
-// backlink_create, writeFullContent, move-rewrite, campaign-index,
-// userCharacterSync).
+// from a freshly-computed ProseMirror document (note-edits.ts
+// applyNoteEdit, move-rewrite, campaign-index, userCharacterSync).
 //
 // N1 (data loss): `prosemirrorJSONToYDoc(...)` builds a brand new
 // Y.Doc containing ONLY the `default` XmlFragment + a fresh `title`
@@ -41,8 +40,7 @@
 // same as any other string. Callers that want "don't touch the title
 // unless we actually have one" must pass `title || undefined`
 // themselves (see campaign-index.ts, move-rewrite.ts,
-// userCharacterSync.ts, and the three call sites in ai/tools.ts —
-// entity_edit_content, entity_move, writeFullContent).
+// userCharacterSync.ts and note-edits.ts).
 
 import * as Y from 'yjs';
 import { updateYFragment } from 'y-prosemirror';
