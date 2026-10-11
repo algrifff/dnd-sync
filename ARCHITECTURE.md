@@ -117,10 +117,9 @@ Two independent layers:
 - `dm_only` notes are filtered at the API layer — viewers see the path/title but no body.
 - `middleware.ts` redirects unauthenticated requests to `/login`.
 
-**Bearer token (legacy / admin scripts)**
-- `Authorization: Bearer <token>` or `?token=` query param.
-- Two roles: `admin` and `player`. Compared with a timing-safe function.
-- Tokens come from `ADMIN_TOKEN` / `PLAYER_TOKEN` env vars or the `config` SQLite table.
+**Super-admin token (`/admin/*` only)**
+- The `/admin` login compares the submitted token against the `ADMIN_TOKEN` env var with a timing-safe function and sets the `__sa` cookie.
+- No `Authorization: Bearer` / `?token=` API auth remains.
 
 ## AI features
 
@@ -154,7 +153,7 @@ upload .zip → import-parse → import-analyse → user reviews plan → import
 | Real-time editing       | Hocuspocus + Yjs + Tiptap + ProseMirror            |
 | Knowledge graph         | Sigma.js (WebGL) + Graphology                       |
 | Drawings                | Excalidraw                                          |
-| AI                      | Vercel AI SDK v6 + `@ai-sdk/openai`                |
+| AI                      | OpenAI via `lib/ai/openai.ts` (import pipeline)    |
 | Auth                    | Argon2 password hashes, custom session + Bearer     |
 | Styling                 | Tailwind CSS 4, Lucide icons                        |
 | Tooling                 | mise (Bun pin), ESLint, Prettier                    |
@@ -168,7 +167,7 @@ The Dockerfile is a three-stage build:
 2. **build** (`node:22-slim`) — Next.js production build, **rebuild `better-sqlite3` against Node 22**.
 3. **runtime** (`node:22-slim`) — minimal image, runs `server.ts` via `tsx`.
 
-Required env vars: `ADMIN_TOKEN`, `PLAYER_TOKEN`, `DATA_DIR=/data` (with a Railway volume mounted at `/data`).
+Required env vars: `ADMIN_TOKEN`, `DATA_DIR=/data` (with a Railway volume mounted at `/data`).
 Optional: `OPENAI_API_KEY` (enables Smart Import and PDF character import).
 
 Health check: `GET /api/health`.
