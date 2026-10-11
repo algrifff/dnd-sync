@@ -14,6 +14,7 @@ export function ConsentForm({
   query,
   clientName,
   redirectHost,
+  verified,
   worlds,
   invalid,
 }: {
@@ -21,6 +22,7 @@ export function ConsentForm({
   query: Record<string, string>;
   clientName: string;
   redirectHost: string;
+  verified: boolean;
   worlds: World[];
   invalid: string | null;
 }): React.JSX.Element {
@@ -65,6 +67,17 @@ export function ConsentForm({
 
   return (
     <div className="space-y-5">
+      {!verified && (
+        <p
+          role="alert"
+          className="rounded-[8px] border border-[var(--wine)] px-3 py-2 text-sm text-[var(--wine)]"
+        >
+          <span className="font-medium">Unverified app.</span> Anyone can name an app “{clientName}”.
+          This one will send you to {redirectHost}. Only continue if you started this connection yourself
+          and recognise that address.
+        </p>
+      )}
+
       <fieldset className="space-y-2">
         <legend className="mb-1 text-sm font-medium text-[var(--ink-soft)]">World to share</legend>
         {worlds.length === 0 && (

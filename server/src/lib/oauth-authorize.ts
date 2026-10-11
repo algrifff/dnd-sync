@@ -19,6 +19,16 @@ export const AuthorizeQuery = z.object({
 
 export type AuthorizeQuery = z.infer<typeof AuthorizeQuery>;
 
+/** Redirect URIs of Anthropic's hosted Claude apps, from
+ *  https://claude.com/docs/connectors/building/authentication
+ *  ("Callback URLs"). Any client can register under any name, so the
+ *  consent page trusts the redirect URI, never the name. */
+const CLAUDE_REDIRECT_URIS: readonly string[] = ['https://claude.ai/api/mcp/auth_callback'];
+
+export function isKnownClaudeRedirect(redirectUri: string): boolean {
+  return CLAUDE_REDIRECT_URIS.includes(redirectUri);
+}
+
 export type AuthorizeCheck =
   /** Safe to render the consent screen and, later, redirect back. */
   | { ok: true; client: OAuthClient; query: AuthorizeQuery }

@@ -9,7 +9,7 @@ import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { listWorldsForSession } from '@/lib/groups';
-import { checkAuthorizeRequest } from '@/lib/oauth-authorize';
+import { checkAuthorizeRequest, isKnownClaudeRedirect } from '@/lib/oauth-authorize';
 import { publicUrls } from '@/lib/public-url';
 import { AuthShell } from '@/app/login/AuthShell';
 import { ConsentForm } from './ConsentForm';
@@ -56,7 +56,7 @@ export default async function AuthorizePage({
 
   return (
     <AuthShell
-      title={`Let ${clientName} read your notes?`}
+      title={`Let ${clientName} (redirects to ${redirectHost}) read your notes?`}
       subtitle={`Signed in as ${session.displayName}. ${clientName} will be able to list, search and read the notes you can see in one world. It cannot change anything.`}
     >
       <ConsentForm
@@ -64,6 +64,7 @@ export default async function AuthorizePage({
         query={query as Record<string, string>}
         clientName={clientName}
         redirectHost={redirectHost}
+        verified={isKnownClaudeRedirect(check.query.redirect_uri)}
         worlds={worlds}
         invalid={check.ok ? null : check.description}
       />
