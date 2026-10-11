@@ -21,6 +21,7 @@ const tables = [
   'notes',
   'notes_fts',
   'note_links',
+  'note_relations',
   'folder_markers',
   'characters',
   'character_campaigns',

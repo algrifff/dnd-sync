@@ -57,7 +57,7 @@ globally (`npm i -g bun@1.4.3`) — don't rely on `npx bun`, which resolves the 
 - `server/src/lib/db.ts` switches at runtime: `typeof Bun !== "undefined"`
 - The Dockerfile rebuilds `better-sqlite3` against Node 22's ABI in a separate stage — don't skip this step when changing the Dockerfile
 
-## Data model (49 migrations, versions 1–51 — append only, never edit existing)
+## Data model (50 migrations, versions 1–52 — append only, never edit existing)
 
 Numbering isn't contiguous — a couple of version numbers (21, 22) were
 never shipped, so "latest version" and "migration count" are two
@@ -78,6 +78,7 @@ Key tables:
 | `import_jobs` | AI import pipeline state — `uploaded` → `orchestrating_assets` → `orchestrating_campaign` → `orchestrating_entities` → `orchestrating_quality` → `applied` on the live Smart Import path (can pause at `waiting_for_answer`); `parsing` → `analysing` → `ready` is the legacy manual-review path, still valid statuses but not driven by the current UI |
 | `assets` | Binary files (images etc.) deduplicated by content hash |
 | `note_links` | Graph edges between notes (backlinks) |
+| `note_relations` | Typed Relationships (v52): `from_path relation to_path` from the fixed list in `shared/src/schemas/relation.ts`, with the Session that established it. Authored, never derived; only `lib/relations.ts` reads or writes it, and every rename/move/delete carries its rows |
 | `notes_fts` | FTS5 full-text search index, auto-synced by triggers on `notes` (including path moves). `path` and `group_id` are indexed (v48), so build every MATCH with `worldFtsMatch()` from `lib/search.ts`, never write to it directly |
 | `group_invite_tokens` | Shareable world join links |
 | `audit_log` | Admin action history |
@@ -214,6 +215,7 @@ whole flow over HTTP) and the MCP Inspector:
 | `server/src/lib/superadmin.ts` | `ADMIN_TOKEN` check for the `/admin/*` `__sa` cookie |
 | `server/src/lib/session.ts` | Session CRUD, CSRF, expiry cleanup |
 | `server/src/lib/notes.ts` | Note CRUD, backlink derivation, FTS sync |
+| `server/src/lib/relations.ts` | Relationships: `addRelation` (plus its manual link), visibility-gated `listRelations`, and the repoint/delete helpers every move and delete path calls |
 | `server/src/lib/ai/tools.ts` | AI tool definitions, unreferenced until the MCP connector adopts them |
 | `server/src/lib/wrap-up.ts` | Wrap-up: proposal shape, submit validation, candidate context, idempotent apply |
 | `server/src/lib/note-edits.ts` | Lossless PM-JSON edits: `addHistoryEntry`, `linkMention`, `applyNoteEdit` |

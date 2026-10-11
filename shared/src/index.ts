@@ -3,4 +3,5 @@
 export * from './constants';
 export * from './protocol';
 export * from './schemas/kind';
+export * from './schemas/relation';
 export * as dnd5e from './schemas/dnd5e';

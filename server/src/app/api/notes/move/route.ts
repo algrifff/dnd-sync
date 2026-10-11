@@ -17,6 +17,7 @@ import { assertMoveAllowed } from '@/lib/move-policy';
 import { findWikilinkLinkers, rewriteWikilinksForLinkers } from '@/lib/move-rewrite';
 import { deriveFolderIndexesFor } from '@/lib/campaign-index';
 import { repointSuggestionPaths } from '@/lib/suggestion-paths';
+import { repointRelations } from '@/lib/relations';
 
 export const dynamic = 'force-dynamic';
 
@@ -121,6 +122,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     ).run(to, session.currentGroupId, from);
     // Suggestions name the Character and Session by path (no FK).
     repointSuggestionPaths(session.currentGroupId, from, to);
+    repointRelations(session.currentGroupId, from, to);
     db.query(
       'UPDATE items SET note_path = ? WHERE group_id = ? AND note_path = ?',
     ).run(to, session.currentGroupId, from);

@@ -1052,6 +1052,35 @@ const MIGRATIONS: readonly Migration[] = [
         ON character_suggestions(group_id, owner_user_id, status, created_at);
     `,
   },
+  {
+    version: 52,
+    description: 'note_relations: typed Relationships between two Notes',
+    sql: `
+      -- An authored fact, not derived from the body, so it lives apart
+      -- from note_links (rebuilt on every save, one edge per pair). Only
+      -- the forward type is stored; a symmetric type stores its paths in
+      -- sorted order. See docs/adr/0002-typed-relationships.md.
+      --
+      -- The type list is written out rather than built from
+      -- RELATION_TYPES so this migration never changes once applied. A
+      -- new type needs a new migration that rebuilds the CHECK;
+      -- relations.test.ts fails until one exists.
+      CREATE TABLE note_relations (
+        group_id     TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        from_path    TEXT NOT NULL,
+        relation     TEXT NOT NULL CHECK (relation IN (
+                       'ally_of', 'enemy_of', 'member_of', 'leads', 'works_for',
+                       'owns', 'located_in', 'parent_of', 'related_to')),
+        to_path      TEXT NOT NULL,
+        session_path TEXT,
+        created_by   TEXT,
+        created_at   INTEGER NOT NULL,
+        PRIMARY KEY (group_id, from_path, relation, to_path),
+        CHECK (from_path <> to_path)
+      ) WITHOUT ROWID;
+      CREATE INDEX note_relations_to ON note_relations(group_id, to_path);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {
