@@ -184,10 +184,14 @@ token is bound to is always the one `/api/mcp` checks against.
 Tools (`lib/mcp/tools.ts`, a registry the server adapter and tests
 share): `list_campaigns`, `browse_notes` (folder + kind, cursor
 paginated), `search_notes`, `read_note` (frontmatter, Markdown body,
-links both ways), `note_neighbors` (1–2 hops). Every tool applies
+links both ways, a `relationships:` section from `listRelations`, and
+`shares tags with:`, up to 10 visible Notes ranked by shared tags and
+computed on read), `note_neighbors` (1–2 hops; a link that is also a
+Relationship is labelled with its type, and an optional `relation`
+filter keeps only those). Every tool applies
 `visibilityFor(role)` with the role read on this request: a Secret or
-Private note is "not found" and never appears in a list, link, backlink
-or neighbourhood. Output is plain text capped at 24k characters.
+Private note is "not found" and never appears in a list, link, backlink,
+relationship, shared-tag list or neighbourhood. Output is plain text capped at 24k characters.
 
 Wrap-up tools (ADR 0001): `wrap_up_context` returns a Session log plus a
 page of candidate Notes; `submit_wrap_up` stores a proposal via

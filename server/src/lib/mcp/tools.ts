@@ -6,11 +6,13 @@
 // The tools are a registry (name → definition) so the MCP server and
 // the tests drive the same table, and adding a tool is one entry.
 
+import { inverseOf, RelationType } from '@compendium/shared';
 import { z } from 'zod';
 import { getDb } from '../db';
 import { listCampaigns } from '../characters';
 import { buildNeighborhood } from '../graph';
 import { loadBacklinks, loadNote, loadOutgoingLinks, visibilityFor, type NoteRow } from '../notes';
+import { listRelations, type RelationView } from '../relations';
 import { searchWorld, type NoteSearchResult } from '../search';
 import { SNIPPET_MARK_CLOSE, SNIPPET_MARK_OPEN } from '../search-snippet';
 import type { UserRole } from '../session';
@@ -207,13 +209,42 @@ function isNoteHit(r: { kind: string }): r is NoteSearchResult {
   return r.kind === 'note';
 }
 
+const MAX_SHARED_TAG_NOTES = 10;
+
+/** `- works for: Xanathar (path)` for every Relationship the caller may see. */
+function relationshipLines(ctx: McpContext, path: string): string[] {
+  return listRelations({ groupId: ctx.groupId, role: ctx.role, path }).map(
+    (r) => `- ${r.label}: ${r.title || r.path} (${r.path})`,
+  );
+}
+
+/** Visible Notes that share at least one tag with `path`, most shared
+ *  first. Computed on read; nothing about it is stored. */
+function sharedTagLines(ctx: McpContext, path: string): string[] {
+  const rows = getDb()
+    .query<{ path: string; title: string; tags: string }, [string, string, number]>(
+      `SELECT n.path AS path, n.title AS title, group_concat(t.tag, ', ') AS tags
+         FROM tags me
+         JOIN tags t ON t.group_id = me.group_id AND t.tag = me.tag AND t.path <> me.path
+         JOIN notes n ON n.group_id = t.group_id AND n.path = t.path${visibilitySql(ctx.role, 'n.')}
+        WHERE me.group_id = ? AND me.path = ?
+        GROUP BY n.path
+        ORDER BY COUNT(*) DESC, n.path
+        LIMIT ?`,
+    )
+    .all(ctx.groupId, path, MAX_SHARED_TAG_NOTES);
+  return rows.map((r) => `- ${r.title || r.path} (${r.path}) — ${r.tags}`);
+}
+
 const readNoteTool = define({
   name: 'read_note',
   title: 'Read a note',
   description:
     'Read one note by path: title, kind, frontmatter (character sheets, item stats and other structured ' +
-    'fields live here), the Markdown body, the notes it links to and the notes that link to it. Paths come ' +
-    'from browse_notes, search_notes or note_neighbors. Long bodies are truncated.',
+    'fields live here), the Markdown body, the notes it links to and the notes that link to it, the typed ' +
+    'relationships it takes part in (works for, member of, ally of and so on, read from this note\'s side), ' +
+    'and up to 10 notes that share a tag with it. Paths come from browse_notes, search_notes or ' +
+    'note_neighbors. Long bodies are truncated.',
   input: {
     path: z.string().min(1).max(512).describe('Note path, e.g. "Campaigns/dragon-heist/Characters/Aldric.md".'),
   },
@@ -223,6 +254,8 @@ const readNoteTool = define({
     const vis = visibilityFor(ctx.role);
     const out = loadOutgoingLinks(ctx.groupId, note.path, vis);
     const back = loadBacklinks(ctx.groupId, note.path, vis);
+    const relations = relationshipLines(ctx, note.path);
+    const sharedTags = sharedTagLines(ctx, note.path);
 
     let frontmatter = '{}';
     try {
@@ -245,6 +278,8 @@ const readNoteTool = define({
       `## Body\n${body.trim() || '(empty)'}`,
       `## Links to\n${out.length ? out.map((l) => `- ${l.to_path} — ${l.title}`).join('\n') : '(none)'}`,
       `## Linked from\n${back.length ? back.map((l) => `- ${l.from_path} — ${l.title}`).join('\n') : '(none)'}`,
+      `relationships:\n${relations.join('\n') || '(none)'}`,
+      `shares tags with:\n${sharedTags.join('\n') || '(none)'}`,
     ].filter(Boolean);
     return { text: bounded(sections.join('\n\n')) };
   },
@@ -255,11 +290,15 @@ const noteNeighborsTool = define({
   title: 'Note neighbourhood',
   description:
     'The knowledge-graph neighbourhood of one note: every note within 1 or 2 link hops (in either ' +
-    'direction) and the links among them. Use it to find related characters, places and sessions ' +
-    'before reading them.',
+    'direction) and the links among them. A link that is also a typed relationship is labelled with its ' +
+    'type, read from the side it points from (for example "A -> B [works for]"); other links stay ' +
+    'unlabelled. Pass relation to keep only links between notes related by that type, in either direction ' +
+    '(member_of keeps both "A member of B" and "B has member A"), and the notes they reach. Use it to find ' +
+    'related characters, places and sessions before reading them.',
   input: {
     path: z.string().min(1).max(512).describe('Path of the note at the centre.'),
     depth: z.number().int().min(1).max(2).optional().describe('1 (default) or 2 hops.'),
+    relation: RelationType.optional().describe('Only links between notes related by this type.'),
   },
   run(ctx, args) {
     const note = loadVisible(ctx, args.path);
@@ -269,13 +308,36 @@ const noteNeighborsTool = define({
       hideDmOnly: visibilityFor(ctx.role).hideDmOnly,
     });
     if (!graph) return notFound(args.path);
+
+    // Each node's Relationships, read from its side, keyed by "from -> to".
+    const typed = new Map<string, RelationView[]>();
+    for (const n of graph.nodes) {
+      for (const r of listRelations({ groupId: ctx.groupId, role: ctx.role, path: n.id })) {
+        const key = `${n.id}\0${r.path}`;
+        typed.set(key, [...(typed.get(key) ?? []), r]);
+      }
+    }
+    const edgeRelations = (e: { source: string; target: string }): RelationView[] =>
+      typed.get(`${e.source}\0${e.target}`) ?? [];
+
+    // A view is read from the edge's source: the stored type, or its inverse
+    // when the source is the Relationship's `to` end.
+    const wanted = args.relation ? [args.relation, inverseOf(args.relation)] : null;
+    const keptEdges = wanted
+      ? graph.edges.filter((e) => edgeRelations(e).some((r) => wanted.includes(r.relation)))
+      : graph.edges;
+    const reached = new Set(keptEdges.flatMap((e) => [e.source, e.target]));
     const nodes = graph.nodes
-      .filter((n) => n.id !== note.path)
+      .filter((n) => n.id !== note.path && (!args.relation || reached.has(n.id)))
       .sort((a, b) => b.degree - a.degree || a.id.localeCompare(b.id))
       .map((n) => `- ${n.id} — ${n.title}${n.tags.length ? ` (tags: ${n.tags.join(', ')})` : ''}`);
-    const edges = graph.edges.map((e) => `- ${e.source} -> ${e.target}`);
+    const edges = keptEdges.map((e) => {
+      const labels = edgeRelations(e).map((r) => r.label);
+      return `- ${e.source} -> ${e.target}${labels.length ? ` [${labels.join(', ')}]` : ''}`;
+    });
+    const depth = args.depth ?? 1;
     const text = [
-      `Neighbourhood of ${note.path} (${args.depth ?? 1} hop${(args.depth ?? 1) > 1 ? 's' : ''})`,
+      `Neighbourhood of ${note.path} (${depth} hop${depth > 1 ? 's' : ''}${args.relation ? `, only ${args.relation}` : ''})`,
       `## Notes (${nodes.length})\n${nodes.join('\n') || '(no linked notes)'}`,
       `## Links (${edges.length})\n${edges.join('\n') || '(none)'}`,
     ].join('\n\n');
