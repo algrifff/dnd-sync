@@ -85,9 +85,11 @@ Depends on PR 1 (PR 2 is not required, but it is what fills the table).
 - Shared tags, computed on read and stored nowhere: `read_note` adds a `shares tags with:` line listing up to 10 visible Notes that share at least one tag, most shared first. `tags` is queried with `group_id`, and the visibility predicate applies to the other Note.
 - Tests in `lib/mcp/tools.test.ts`; update `scripts/mcp-smoke.ts` only if a new tool is added.
 
-## PR 4 (optional, only if step 0 says tags are in real use): suggest Relationships from tags
+## PR 4: suggest Relationships from frontmatter (`feat/relations-backfill-script`)
 
-A backfill command in `server/scripts/` that, for each Person or Creature with a namespaced tag `<ns>/<name>` where a Lore Note titled `<name>` exists, prints a candidate `member_of` Relationship. It writes nothing. Turning those into proposals goes through a Wrap-up, never directly.
+Step 0 ran against a snapshot of production on 2026-10-11 and dropped the tag-based backfill this step first described: 0 of 872 tags are namespaced, and the rest are mostly noise. The structured data is frontmatter. A `faction:` field is on 44 Person and Creature Notes and a `location:` field on 45, though only 8 of the 34 distinct faction values equal an existing Note title, and many location values are placeholders (`—`, `None`, `Unknown`).
+
+`server/scripts/suggest-relations.ts` prints candidate `member_of` (from `faction`) and `located_in` (from `location`) Relationships. The pure part is `server/src/lib/relation-suggestions.ts`. It opens the database read-only and writes nothing. A value resolves to a Note in the same world by title, then alias. A value that matches several Notes is reported as ambiguous, and a trailing parenthetical falls back to the text before it at lower confidence. The unresolved values are ranked by use, which tells the user which faction and location Notes are worth creating. Turning candidates into proposals still goes through a Wrap-up, never directly.
 
 ## Out of scope for this work
 
