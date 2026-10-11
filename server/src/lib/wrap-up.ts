@@ -53,7 +53,7 @@ export const MAX_MENTIONS = 60;
 // C0/C1 controls, zero-width and word-joiner characters, the BOM, and
 // the bidi embedding/override/isolate marks.
 // eslint-disable-next-line no-control-regex
-const INVISIBLE_CHARS = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
+const INVISIBLE_CHARS = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
 
 /** Prose from a client: whitespace collapsed so a History entry stays
  *  one line, control and zero-width characters removed, then bounded. */
