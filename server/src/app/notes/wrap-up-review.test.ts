@@ -17,6 +17,7 @@ const proposal: WrapUpProposal = {
     { id: 'm2', name: 'the innkeeper', kind: 'person', match: { type: 'existing', path: 'People/marta.md', certain: false }, historyEntry: 'Poured ale.' },
     { id: 'm3', name: 'Rusted Key', kind: 'item', match: { type: 'new', title: 'Rusted Key', summary: 'Iron.' }, historyEntry: 'Found.' },
   ],
+  suggestions: [],
 };
 
 describe('Wrap-up review state', () => {

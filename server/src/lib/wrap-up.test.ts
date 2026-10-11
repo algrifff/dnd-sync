@@ -129,7 +129,7 @@ function fresh(name: string, kind: SubmittedMention['kind'], summary: string, hi
 }
 
 function proposalFrom(sessionPath: string, mentions: SubmittedMention[]): WrapUpProposal {
-  return { sessionPath, generatedAt: 1, mentions: mentions.map((m, i) => ({ ...m, id: `m${i + 1}` })) };
+  return { sessionPath, generatedAt: 1, mentions: mentions.map((m, i) => ({ ...m, id: `m${i + 1}` })), suggestions: [] };
 }
 
 function sessionNote(path: string) {

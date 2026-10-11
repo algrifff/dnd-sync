@@ -6,7 +6,8 @@
 // the Session's pending proposal; the closer reviews it and applies it
 // (`applyWrapUp`). Applying adds a dated History entry to each
 // mentioned Note (creating new Notes where needed), links the log to
-// each Note, then closes the Session. See
+// each Note, holds the Suggestions for each Character's Player
+// (lib/character-suggestions.ts), then closes the Session. See
 // docs/adr/0001-wrap-up-on-close.md.
 //
 // Everything a client sends is parsed at the boundary into
@@ -32,6 +33,10 @@ import {
   writePendingWrapUpJson,
   type SessionStatus,
 } from '@/lib/sessions';
+import {
+  storeSuggestions,
+  type StoredSuggestions,
+} from '@/lib/character-suggestions';
 import {
   addHistoryEntry,
   applyNoteEdit,
@@ -87,10 +92,46 @@ export const SubmittedMention = z
   .strict();
 export type SubmittedMention = z.infer<typeof SubmittedMention>;
 
+export const MAX_SUGGESTIONS = 30;
+
+const SuggestedItem = z
+  .object({
+    name: oneLine(120),
+    quantity: z.number().int().min(1).max(999),
+  })
+  .strict();
+
+const SuggestionShape = z
+  .object({
+    /** The Character Note the Suggestion is for. */
+    characterPath: z.string().min(1).max(512),
+    /** Becomes a History entry on the Character. */
+    story: oneLine(600).nullable().default(null),
+    /** Added to the Character's inventory. Never stats. */
+    items: z.array(SuggestedItem).max(20).default([]),
+  })
+  .strict();
+
+/** What a Character's Player is offered after a Wrap-up, as a client
+ *  proposes it. It has to carry something to accept. */
+export const SubmittedSuggestion = SuggestionShape.refine(
+  (s) => s.story !== null || s.items.length > 0,
+  'a Suggestion needs a story or at least one item',
+);
+export type SubmittedSuggestion = z.infer<typeof SubmittedSuggestion>;
+
 export const WrapUpSubmission = z
   .object({
     sessionPath: z.string().min(1).max(512),
     mentions: z.array(SubmittedMention).max(MAX_MENTIONS),
+    suggestions: z
+      .array(SubmittedSuggestion)
+      .max(MAX_SUGGESTIONS)
+      .default([])
+      .refine(
+        (all) => new Set(all.map((s) => s.characterPath)).size === all.length,
+        'one Suggestion per Character',
+      ),
   })
   .strict();
 export type WrapUpSubmission = z.infer<typeof WrapUpSubmission>;
@@ -100,10 +141,16 @@ export type WrapUpSubmission = z.infer<typeof WrapUpSubmission>;
 export const Mention = SubmittedMention.extend({ id: z.string().min(1) });
 export type Mention = z.infer<typeof Mention>;
 
+/** A submitted Suggestion once stored, with an app-assigned id. */
+export const Suggestion = SuggestionShape.extend({ id: z.string().min(1) });
+export type Suggestion = z.infer<typeof Suggestion>;
+
 export const WrapUpProposal = z.object({
   sessionPath: z.string().min(1),
   generatedAt: z.number(),
   mentions: z.array(Mention),
+  /** Absent in proposals stored before Suggestions existed. */
+  suggestions: z.array(Suggestion).default([]),
 });
 export type WrapUpProposal = z.infer<typeof WrapUpProposal>;
 
@@ -231,7 +278,9 @@ export type SubmitResult =
   | { status: 'not_a_session' }
   /** A mention matches a visible Note that cannot receive History
    *  (a Character, a Session, a plain Note). */
-  | { status: 'invalid_target'; mention: string };
+  | { status: 'invalid_target'; mention: string }
+  /** A Suggestion names a visible Note that is not a Character. */
+  | { status: 'invalid_suggestion_target'; characterPath: string };
 
 /** Stores `mentions` as the Session's pending proposal, replacing any
  *  earlier one. An `existing` match must name a Note `role` may see;
@@ -239,9 +288,10 @@ export type SubmitResult =
 export function submitWrapUp(opts: {
   groupId: string;
   role: Role;
-  submission: WrapUpSubmission;
+  submission: Omit<WrapUpSubmission, 'suggestions'> & { suggestions?: SubmittedSuggestion[] };
 }): SubmitResult {
   const { groupId, role, submission } = opts;
+  const suggestions = submission.suggestions ?? [];
   const lookup = loadVisibleSession(groupId, role, submission.sessionPath);
   if (lookup.status !== 'ok') return lookup;
 
@@ -255,10 +305,19 @@ export function submitWrapUp(opts: {
     }
   }
 
+  for (const suggestion of suggestions) {
+    const target = loadNote(groupId, suggestion.characterPath);
+    if (!target || isHidden(target, vis)) return { status: 'not_found' };
+    if (parseKind(frontmatterKind(target.frontmatter_json)) !== 'character') {
+      return { status: 'invalid_suggestion_target', characterPath: suggestion.characterPath };
+    }
+  }
+
   const proposal: WrapUpProposal = {
     sessionPath: submission.sessionPath,
     generatedAt: Date.now(),
     mentions: submission.mentions.map((m, i) => ({ ...m, id: `m${i + 1}` })),
+    suggestions: suggestions.map((s, i) => ({ ...s, id: `s${i + 1}` })),
   };
   writePendingWrapUpJson(groupId, submission.sessionPath, JSON.stringify(proposal));
   return { status: 'ok', proposal };
@@ -281,25 +340,30 @@ export function loadPendingWrapUp(
     return null;
   }
   const vis = visibilityFor(role);
+  const visible = (path: string): boolean => {
+    const note = loadNote(groupId, path);
+    return note !== null && !isHidden(note, vis);
+  };
   return {
     ...proposal,
-    mentions: proposal.mentions.filter((m) => {
-      if (m.match.type !== 'existing') return true;
-      const note = loadNote(groupId, m.match.path);
-      return note !== null && !isHidden(note, vis);
-    }),
+    mentions: proposal.mentions.filter((m) => m.match.type !== 'existing' || visible(m.match.path)),
+    suggestions: proposal.suggestions.filter((s) => visible(s.characterPath)),
   };
 }
 
-/** Titles of the Notes a proposal's existing matches point at, for the
- *  review dialog's "Matched to <Title>?". Call it on a proposal from
+/** Titles of the Notes a proposal points at (existing matches and
+ *  Suggestion Characters), for the review dialog's "Matched to <Title>?"
+ *  and its Suggestions list. Call it on a proposal from
  *  `loadPendingWrapUp`, which already dropped what the reader cannot see. */
 export function existingTitles(groupId: string, proposal: WrapUpProposal): Record<string, string> {
+  const paths = [
+    ...proposal.mentions.flatMap((m) => (m.match.type === 'existing' ? [m.match.path] : [])),
+    ...proposal.suggestions.map((s) => s.characterPath),
+  ];
   const out: Record<string, string> = {};
-  for (const m of proposal.mentions) {
-    if (m.match.type !== 'existing') continue;
-    const note = loadNote(groupId, m.match.path);
-    if (note) out[m.match.path] = note.title;
+  for (const path of paths) {
+    const note = loadNote(groupId, path);
+    if (note) out[path] = note.title;
   }
   return out;
 }
@@ -319,11 +383,14 @@ export type ApplyResult = {
   applied: AppliedMention[];
   /** Accepted mentions that could not be applied, and why. */
   skipped: Array<{ id: string; reason: 'unknown_mention' | 'not_visible' }>;
+  /** Suggestions held for Characters' Players. */
+  suggestions: StoredSuggestions;
 };
 
-/** Applies the closer's decisions on `proposal`, links the log, closes
- *  the Session and clears its pending proposal. Running it again with
- *  the same proposal writes nothing new. */
+/** Applies the closer's decisions on `proposal`, links the log, holds
+ *  the proposal's Suggestions for their Players, closes the Session and
+ *  clears its pending proposal. Running it again with the same proposal
+ *  writes nothing new. */
 export async function applyWrapUp(opts: {
   groupId: string;
   userId: string;
@@ -375,8 +442,18 @@ export async function applyWrapUp(opts: {
     });
   }
 
+  const suggestions = storeSuggestions({
+    groupId,
+    sessionPath,
+    suggestions: proposal.suggestions,
+    isVisible: (path) => {
+      const note = loadNote(groupId, path);
+      return note !== null && !isHidden(note, vis);
+    },
+  });
+
   closeSession(groupId, sessionPath, userId);
-  return { applied, skipped };
+  return { applied, skipped, suggestions };
 }
 
 function linkAll(doc: PmDoc, links: Array<{ text: string; targetPath: string }>): EditResult {
