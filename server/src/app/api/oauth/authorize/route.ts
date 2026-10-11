@@ -9,7 +9,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { isGroupMember } from '@/lib/groups';
-import { issueCode } from '@/lib/oauth';
+import { grantedScope, issueCode } from '@/lib/oauth';
 import { checkAuthorizeRequest, redirectBack } from '@/lib/oauth-authorize';
 import { publicUrls } from '@/lib/public-url';
 
@@ -59,6 +59,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     redirectUri: query.redirect_uri,
     codeChallenge: query.code_challenge,
     resource: urls.mcpResource,
+    scope: grantedScope(query.scope),
   });
   return Response.json({ redirect: redirectBack(query.redirect_uri, urls.issuer, { code }, query.state) });
 }

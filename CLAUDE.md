@@ -160,7 +160,8 @@ vault page's job list via `/settings/import/<id>`.
 Players add Compendium to claude.ai / Desktop / mobile / Claude Code as
 a custom connector (remote MCP server), so their own Claude subscription
 does the reasoning. Compendium is both the OAuth 2.1 authorization
-server and the resource server. Read-only; nothing here writes notes.
+server and the resource server. Reading never changes anything; the one
+write is a Wrap-up *proposal* that a Player reviews in the app.
 
 Flow (MCP authorization spec 2025-11-25): `POST /api/mcp` without a
 token → `401` with `resource_metadata` → `GET /.well-known/oauth-protected-resource/api/mcp`
@@ -185,7 +186,16 @@ paginated), `search_notes`, `read_note` (frontmatter, Markdown body,
 links both ways), `note_neighbors` (1–2 hops). Every tool applies
 `visibilityFor(role)` with the role read on this request: a Secret or
 Private note is "not found" and never appears in a list, link, backlink
-or neighbourhood. Output is plain text capped at 24k characters. The
+or neighbourhood. Output is plain text capped at 24k characters.
+
+Wrap-up tools (ADR 0001): `wrap_up_context` returns a Session log plus a
+page of candidate Notes; `submit_wrap_up` stores a proposal via
+`lib/wrap-up.ts#submitWrapUp` (the same call as `POST /api/sessions/wrap-up`).
+It writes no Note: a Player reviews and applies it in `WrapUpDialog`.
+Scopes: grants carry `notes:read` and `wrapup:submit` (`lib/oauth.ts#SCOPES`);
+the consent request's `scope` is honoured through `grantedScope`, a request
+naming none gets both, and `runTool` refuses a tool whose scope the grant
+lacks. The grant's scopes travel to tools as `McpContext.scopes`. The
 MCP server (`lib/mcp/server.ts`) is stateless Streamable HTTP with JSON
 responses; `GET`/`DELETE /api/mcp` are 405. The SDK bundles zod 4 while
 the app is on zod 3, hence the one cast at `registerTool`.
@@ -212,7 +222,7 @@ whole flow over HTTP) and the MCP Inspector:
 | `server/src/lib/oauth.ts` | OAuth 2.1 authorization server for the MCP connector — clients (DCR + CIMD), hashed codes/tokens, PKCE, refresh rotation, bearer validation, revocation, prune |
 | `server/src/lib/oauth-authorize.ts` | Validates an authorization request; shared by the consent page and `POST /api/oauth/authorize` |
 | `server/src/lib/public-url.ts` | The one source of the public origin: issuer, `resource`, metadata and endpoint URLs |
-| `server/src/lib/mcp/tools.ts` | The five read-only MCP tools, visibility-gated, as a registry |
+| `server/src/lib/mcp/tools.ts` | The MCP tools (five read-only, two for Wrap-up), visibility-gated, as a registry |
 | `server/src/lib/mcp/server.ts` | Per-request stateless Streamable HTTP MCP server over that registry |
 | `server/src/app/api/mcp/route.ts` | Bearer gate + 401 challenge in front of the MCP server |
 | `server/scripts/mcp-smoke.ts` | Live end-to-end check of the connector over HTTP |

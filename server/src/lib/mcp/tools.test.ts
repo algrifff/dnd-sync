@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { getDb } from '../db';
 import { setupTestDb, teardownTestDb } from '../test-utils';
 import { DEFAULT_GROUP_ID } from '../users';
+import { loadPendingWrapUp } from '../wrap-up';
 import { bounded, MCP_TOOLS, runTool, type McpContext } from './tools';
 
 const viewer: McpContext = { groupId: DEFAULT_GROUP_ID, role: 'viewer' };
@@ -67,13 +68,15 @@ beforeAll(() => {
 afterAll(() => teardownTestDb());
 
 describe('tool registry', () => {
-  it('exposes exactly the five read-only tools', () => {
+  it('exposes the five read tools and the two Wrap-up tools', () => {
     expect(MCP_TOOLS.map((t) => t.name)).toEqual([
       'list_campaigns',
       'browse_notes',
       'search_notes',
       'read_note',
       'note_neighbors',
+      'wrap_up_context',
+      'submit_wrap_up',
     ]);
   });
 
@@ -215,5 +218,74 @@ describe('bounded', () => {
     expect(out).toContain('[truncated]');
     expect(out.endsWith('next_cursor: Campaigns/X/Note 1999.md')).toBe(true);
     expect(out.split('\n').filter((l) => l.startsWith('- ')).every((l) => /Note \d+\.md — Note \d+$/.test(l))).toBe(true);
+  });
+});
+
+describe('Wrap-up tools', () => {
+  const SESSION = 'Campaigns/Dragon Heist/Sessions/Session 2.md';
+  const SECRET_SESSION = 'Campaigns/Dragon Heist/Sessions/GM Prep.md';
+  const submitter = { ...viewer, scopes: ['notes:read', 'wrapup:submit'] };
+  const mention = (path: string) => ({
+    name: 'Volo',
+    kind: 'person',
+    match: { type: 'existing', path, certain: true },
+    historyEntry: 'Offered a job.',
+  });
+
+  beforeAll(() => {
+    seedNote({ path: SESSION, body: 'The party met Volo at the Yawning Portal.', kind: 'session' });
+    seedNote({ path: SECRET_SESSION, body: 'Prep.', kind: 'session', dmOnly: true });
+  });
+
+  it('wrap_up_context returns the log and only the candidates the caller can see', () => {
+    const r = runTool('wrap_up_context', viewer, { session_path: SESSION });
+
+    expect(r.isError).toBeUndefined();
+    expect(r.text).toContain('met Volo at the Yawning Portal');
+    expect(r.text).toContain(`- ${PUBLIC} — Volo [person]`);
+    expect(r.text).not.toContain('Xanathar');
+    expect(runTool('wrap_up_context', admin, { session_path: SESSION }).text).toContain('Xanathar');
+  });
+
+  it('answers not found for a Session the caller cannot see, and says so for a plain note', () => {
+    expect(runTool('wrap_up_context', viewer, { session_path: SECRET_SESSION })).toMatchObject({ isError: true, text: expect.stringContaining('not found') });
+    expect(runTool('wrap_up_context', viewer, { session_path: PUBLIC }).text).toContain('not a Session');
+  });
+
+  it('pages candidates with next_cursor', () => {
+    const first = runTool('wrap_up_context', admin, { session_path: SESSION, limit: 1 }).text;
+    const cursor = /next_cursor: (\d+)/.exec(first)?.[1];
+
+    expect(cursor).toBe('1');
+    expect(runTool('wrap_up_context', admin, { session_path: SESSION, limit: 1, cursor: 1 }).text).not.toBe(first);
+  });
+
+  it('submit_wrap_up stores a pending proposal and edits no note', () => {
+    const before = getDb().query<{ content_json: string }, [string]>('SELECT content_json FROM notes WHERE path = ?').get(PUBLIC)!.content_json;
+
+    const r = runTool('submit_wrap_up', submitter, { session_path: SESSION, mentions: [mention(PUBLIC)] });
+
+    expect(r.isError).toBeUndefined();
+    expect(loadPendingWrapUp(DEFAULT_GROUP_ID, 'viewer', SESSION)?.mentions).toHaveLength(1);
+    expect(getDb().query<{ content_json: string }, [string]>('SELECT content_json FROM notes WHERE path = ?').get(PUBLIC)!.content_json).toBe(before);
+  });
+
+  it('submit_wrap_up refuses without the wrapup:submit scope', () => {
+    const r = runTool('submit_wrap_up', viewer, { session_path: SESSION, mentions: [] });
+
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('wrapup:submit');
+  });
+
+  it('submit_wrap_up reports a hidden target as not found and a Character-like target as invalid', () => {
+    expect(runTool('submit_wrap_up', submitter, { session_path: SESSION, mentions: [mention(SECRET)] })).toMatchObject({ isError: true, text: expect.stringContaining('not found') });
+    expect(runTool('submit_wrap_up', submitter, { session_path: SESSION, mentions: [mention(SESSION)] })).toMatchObject({ isError: true, text: expect.stringContaining('cannot take a History entry') });
+  });
+
+  it('submit_wrap_up rejects a malformed mention without running', () => {
+    const r = runTool('submit_wrap_up', submitter, { session_path: SESSION, mentions: [{ name: 'x', kind: 'person' }] });
+
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('Invalid arguments');
   });
 });
