@@ -24,13 +24,13 @@ import {
   setAsNew,
   setRelationAccepted,
   applyRequestBody,
+  outcomeFromApply,
   type RelationReview,
   type RelationRow,
   type ReviewRow,
   type ReviewState,
+  type WrapUpOutcome,
 } from './wrap-up-review';
-
-export type WrapUpOutcome = { applied: number; created: number };
 
 type Load =
   | { status: 'loading' }
@@ -124,8 +124,7 @@ export function WrapUpDialog({
         return;
       }
       if (!res.ok) throw new Error(await errorText(res));
-      const data = (await res.json()) as { applied: Array<{ created: boolean }> };
-      onDone({ applied: data.applied.length, created: data.applied.filter((a) => a.created).length });
+      onDone(outcomeFromApply(await res.json()));
     } catch (err) {
       trackFailure(sessionPath, err);
       setError(err instanceof Error ? err.message : 'Could not apply the Wrap-up.');
@@ -378,7 +377,7 @@ function ReviewList({
             Relationships ({relations.length})
           </h4>
           <p className="mt-0.5 text-xs text-[var(--ink-muted)]">
-            Records how two Notes relate. Skipped if either Note is not kept above.
+            Records how two Notes relate.
           </p>
           <ul className="mt-2 space-y-1">
             {relations.map((row) => (
@@ -427,9 +426,13 @@ function RelationshipRow({
           {row.relation.note && (
             <span className="block text-xs text-[var(--ink-soft)]">{row.relation.note}</span>
           )}
-          {row.blockedBy !== null && (
+          {row.blockedBy !== null ? (
             <span className="block text-xs text-[var(--ink-muted)]">Needs {row.blockedBy} above.</span>
-          )}
+          ) : row.dependsOn.length > 0 ? (
+            <span className="block text-xs text-[var(--ink-muted)]">
+              Skipped if {row.dependsOn.join(' or ')} is not kept above.
+            </span>
+          ) : null}
         </span>
       </label>
     </li>

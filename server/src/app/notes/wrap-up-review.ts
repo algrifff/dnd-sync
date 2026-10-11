@@ -32,6 +32,18 @@ export type RelationRow = {
   accepted: boolean;
   /** The first unticked mention this Relationship needs, if any. */
   blockedBy: string | null;
+  /** Every mention end, ticked or not. An `existing` end is not a
+   *  dependency: it stays valid whatever the closer does to a mention of
+   *  the same Note. */
+  dependsOn: string[];
+};
+
+/** What the closer is told after an apply, for the banner. */
+export type WrapUpOutcome = {
+  applied: number;
+  created: number;
+  relationsAdded: number;
+  relationsSkipped: number;
 };
 
 export const KIND_LABEL: Record<Mention['kind'], string> = {
@@ -139,6 +151,9 @@ export function relationRows(
 
   return proposal.relations.map((relation) => {
     const blockedBy = unticked(relation.from) ?? unticked(relation.to);
+    const dependsOn = [relation.from, relation.to]
+      .filter((end) => end.type === 'mention')
+      .map(endName);
     return {
       relation,
       from: endName(relation.from),
@@ -146,8 +161,47 @@ export function relationRows(
       label: RELATIONS[relation.relation].label,
       accepted: !off.has(relation.id) && blockedBy === null,
       blockedBy,
+      dependsOn,
     };
   });
+}
+
+/** The outcome the banner reports, from the apply response. */
+export function outcomeFromApply(data: {
+  applied: Array<{ created: boolean }>;
+  relationsAdded: unknown[];
+  relationsSkipped: unknown[];
+}): WrapUpOutcome {
+  return {
+    applied: data.applied.length,
+    created: data.applied.filter((a) => a.created).length,
+    relationsAdded: data.relationsAdded.length,
+    relationsSkipped: data.relationsSkipped.length,
+  };
+}
+
+/** "Session closed. 4 Notes updated, 1 of them new. 3 Relationships
+ *  recorded, 1 skipped." Relationships are mentioned only when there were
+ *  any. */
+export function doneMessage(outcome: WrapUpOutcome | null): string {
+  if (!outcome) return 'Session closed.';
+  const parts = ['Session closed.'];
+  if (outcome.applied > 0) {
+    const notes = `${outcome.applied} ${outcome.applied === 1 ? 'Note' : 'Notes'} updated`;
+    const created = outcome.created > 0 ? `, ${outcome.created} of them new` : '';
+    parts.push(`${notes}${created}.`);
+  }
+  const { relationsAdded: added, relationsSkipped: skipped } = outcome;
+  if (added > 0) {
+    parts.push(`${relationsLabel(added)} recorded${skipped > 0 ? `, ${skipped} skipped` : ''}.`);
+  } else if (skipped > 0) {
+    parts.push(`${relationsLabel(skipped)} skipped.`);
+  }
+  return parts.join(' ');
+}
+
+function relationsLabel(n: number): string {
+  return `${n} ${n === 1 ? 'Relationship' : 'Relationships'}`;
 }
 
 /** Ids of the Relationships in effect, for the apply body. */

@@ -3,9 +3,11 @@ import type { WrapUpProposal } from '@/lib/wrap-up';
 import {
   acceptedCount,
   acceptedRelationIds,
+  doneMessage,
   groupRows,
   initialReview,
   itemsLabel,
+  outcomeFromApply,
   relationRows,
   setAccepted,
   setAsNew,
@@ -131,6 +133,14 @@ describe('Relationships in the Wrap-up review', () => {
     expect(rows(setAccepted(unticked, 'm1', true), setRelationAccepted(off, 'r1', true))[0]!.accepted).toBe(true);
   });
 
+  it('lists only the mention ends as dependencies, so an existing end claims no skip rule', () => {
+    const state = setAccepted(initialReview(withRelations), 'm1', false);
+
+    expect(rows().map((r) => r.dependsOn)).toEqual([['Bram the Miller'], ['the innkeeper', 'Rusted Key'], []]);
+    // Bram is both a mention (m1) and the existing end of r3: unticking m1 leaves r3 intact.
+    expect(rows(state).map((r) => [r.dependsOn.length > 0, r.accepted])).toEqual([[true, false], [true, true], [false, true]]);
+  });
+
   it('lets the closer untick a relation that depends on no mention', () => {
     const off = setRelationAccepted(none, 'r3', false);
 
@@ -149,5 +159,39 @@ describe('Relationships in the Wrap-up review', () => {
       asNew: [],
       acceptedRelations: ['r2'],
     });
+  });
+});
+
+describe('Wrap-up banner', () => {
+  const out = (applied: number, created: number, relationsAdded: number, relationsSkipped: number) => ({
+    applied, created, relationsAdded, relationsSkipped,
+  });
+
+  it('keeps the existing wording when there were no Relationships', () => {
+    expect(doneMessage(null)).toBe('Session closed.');
+    expect(doneMessage(out(0, 0, 0, 0))).toBe('Session closed.');
+    expect(doneMessage(out(1, 0, 0, 0))).toBe('Session closed. 1 Note updated.');
+    expect(doneMessage(out(4, 1, 0, 0))).toBe('Session closed. 4 Notes updated, 1 of them new.');
+  });
+
+  it('reports Relationships recorded, and skipped only when some were', () => {
+    expect(doneMessage(out(4, 1, 3, 0))).toBe('Session closed. 4 Notes updated, 1 of them new. 3 Relationships recorded.');
+    expect(doneMessage(out(4, 1, 3, 1))).toBe('Session closed. 4 Notes updated, 1 of them new. 3 Relationships recorded, 1 skipped.');
+    expect(doneMessage(out(2, 0, 1, 0))).toBe('Session closed. 2 Notes updated. 1 Relationship recorded.');
+  });
+
+  it('reports Relationships even when no History entry landed', () => {
+    expect(doneMessage(out(0, 0, 2, 0))).toBe('Session closed. 2 Relationships recorded.');
+    expect(doneMessage(out(0, 0, 0, 1))).toBe('Session closed. 1 Relationship skipped.');
+  });
+
+  it('carries the Relationship counts from the apply response', () => {
+    const data = {
+      applied: [{ created: true }, { created: false }],
+      relationsAdded: [{ id: 'r1' }, { id: 'r2' }, { id: 'r3' }],
+      relationsSkipped: [{ id: 'r4' }],
+    };
+
+    expect(outcomeFromApply(data)).toEqual(out(2, 1, 3, 1));
   });
 });
