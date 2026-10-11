@@ -16,6 +16,7 @@ import { isPcOwnedBy } from '@/lib/characters';
 import { writeNoteState, deriveIndexesFor } from './derive';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
+import { graphStateDocName, parseDocName, qualifiedDocName } from '@/lib/collab-doc-name';
 
 /** Per-connection bookkeeping so disconnect events can report a duration
  *  without hitting the DB. Entries are dropped in the onDisconnect hook.
@@ -113,34 +114,9 @@ function isAuthContext(x: unknown): x is AuthContext {
 // it a boundary. Nothing downstream trusts the prefix for anything
 // except as a map key.
 
-/** Wire + `documents`-map name for a document. Group ids are
- *  `randomUUID()` or the literal `'default'`, so they never contain a
- *  colon. */
-export function qualifiedDocName(groupId: string, path: string): string {
-  return `${groupId}:${path}`;
-}
-
-/** Split a wire name back into its group id and BARE path.
- *
- *  Splits on the FIRST colon only. Note paths may legitimately contain
- *  colons (`isAllowedPath` constrains only the first segment) and the
- *  meta docs embed one by design (`graph-groups:<id>`,
- *  `.graph-state:<id>`), so `split(':')` would silently corrupt them.
- *
- *  Returns null for anything without a colon, with an empty group id,
- *  or with an empty path — including a pre-deploy client still sending
- *  a bare path. That is deliberate: a fallback to the bare name would
- *  keep the collision reachable for as long as one stale tab lives, so
- *  an unparseable name is a clean rejection instead. */
-export function parseDocName(
-  documentName: string,
-): { groupId: string; path: string } | null {
-  const sep = documentName.indexOf(':');
-  if (sep <= 0) return null;
-  const path = documentName.slice(sep + 1);
-  if (path.length === 0) return null;
-  return { groupId: documentName.slice(0, sep), path };
-}
+// `qualifiedDocName` / `parseDocName` and the meta-doc name builders
+// live in `@/lib/collab-doc-name` so browser clients build the same
+// wire names this file checks.
 
 /** True for the two doc families that do NOT back onto a `notes` row:
  *  ephemeral `.`-channels (`.presence:<id>`, `.graph-state:<id>`) and
@@ -301,7 +277,7 @@ export function storeNoteDocument(opts: {
   // channel carries its own suffix (`.graph-state:<id>`).
   try {
     const graphStateDoc = collabServer.documents.get(
-      qualifiedDocName(context.groupId, `.graph-state:${context.groupId}`),
+      graphStateDocName(context.groupId),
     );
     if (graphStateDoc) {
       (graphStateDoc.getMap('meta') as Y.Map<number>).set(

@@ -15,6 +15,7 @@ import { EVENTS, track } from '@/lib/analytics/client';
 import { usePathname, useRouter } from 'next/navigation';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import * as Y from 'yjs';
+import { presenceDocName } from '@/lib/collab-doc-name';
 import { PresencePanel, type PresencePeer } from './PresencePanel';
 import { TREE_CHANGE_EVENT, TREE_CHANGE_REMOTE_EVENT } from '@/lib/tree-sync';
 import {
@@ -56,7 +57,7 @@ export function PresenceClient({
         url: buildCollabUrl(),
         // Scope presence per group so users from different worlds
         // don't appear in each other's avatar rows.
-        name: `.presence:${groupId}`,
+        name: presenceDocName(groupId),
         document: ydoc,
       }),
     [ydoc, groupId],

@@ -39,6 +39,7 @@ import Sigma from 'sigma';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
 import { clusterSeedPositions, colorForTags, nodeRenderRadius } from './graphStyle';
 import { NotePicker } from '../notes/NotePicker';
+import { graphGroupsDocName, graphStateDocName } from '@/lib/collab-doc-name';
 
 // Sigma's WebGL renderer can't read CSS variables, so we snapshot the
 // matching `--<name>-rgb` triplet at render time and rebuild `rgba()`
@@ -259,7 +260,7 @@ export function GraphCanvas({
     () =>
       new HocuspocusProvider({
         url: buildCollabUrl(),
-        name: `.graph-state:${groupId}`,
+        name: graphStateDocName(groupId),
         document: ydoc,
       }),
     [ydoc, groupId],
@@ -269,7 +270,7 @@ export function GraphCanvas({
     () =>
       new HocuspocusProvider({
         url: buildCollabUrl(),
-        name: `graph-groups:${groupId}`,
+        name: graphGroupsDocName(groupId),
         document: groupsYdoc,
       }),
     [groupsYdoc, groupId],

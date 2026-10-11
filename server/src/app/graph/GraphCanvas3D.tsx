@@ -19,6 +19,7 @@ import {
   radiusForDegree,
 } from './graphStyle';
 import { GroupEditor, buildCollabUrl, type Group } from './GraphCanvas';
+import { graphGroupsDocName } from '@/lib/collab-doc-name';
 
 type GraphPayload = {
   nodes: Array<{ id: string; title: string; tags: string[]; degree: number }>;
@@ -1038,7 +1039,7 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
     () =>
       new HocuspocusProvider({
         url: buildCollabUrl(),
-        name: `graph-groups:${groupId}`,
+        name: graphGroupsDocName(groupId),
         document: groupsYdoc,
       }),
     [groupsYdoc, groupId],
