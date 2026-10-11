@@ -189,11 +189,11 @@ describe('submitting Suggestions', () => {
   const submit = (suggestions: Array<{ characterPath: string; story: string | null; items: Array<{ name: string; quantity: number }> }>, role: 'admin' | 'viewer' = 'viewer') =>
     submitWrapUp({ groupId, role, submission: { sessionPath: SESSION, mentions: [], suggestions } });
 
-  it('stores Suggestions on the pending proposal with stable ids', () => {
+  it('stores Suggestions on the pending proposal with opaque ids', () => {
     const result = submit([{ characterPath: KARA, story: 'Saved Bram.', items: [] }]);
 
     expect(result.status).toBe('ok');
-    expect(loadPendingWrapUp(groupId, 'viewer', SESSION)!.suggestions.map((s) => s.id)).toEqual(['s1']);
+    expect(loadPendingWrapUp(groupId, 'viewer', SESSION)!.suggestions.map((s) => s.id)).toEqual([expect.stringMatching(/^s_[0-9a-f]{8}$/)]);
   });
 
   it('rejects a Suggestion for a Note that is not a Character', () => {

@@ -19,7 +19,7 @@ import {
   itemsLabel,
   setAccepted,
   setAsNew,
-  toDecisions,
+  applyRequestBody,
   type ReviewRow,
   type ReviewState,
 } from './wrap-up-review';
@@ -55,7 +55,7 @@ export function WrapUpDialog({
 
   useModalA11y(containerRef);
 
-  const fetchProposal = useCallback(async (): Promise<void> => {
+  const fetchProposal = useCallback(async (notice?: string): Promise<void> => {
     setLoad({ status: 'loading' });
     setError(null);
     try {
@@ -68,12 +68,13 @@ export function WrapUpDialog({
         proposal: WrapUpProposal | null;
         existingTitles: Record<string, string>;
       };
-      if (!data.proposal) {
+      if (data.proposal) {
+        setReview(initialReview(data.proposal));
+        setLoad({ status: 'ready', proposal: data.proposal, titles: data.existingTitles });
+      } else {
         setLoad({ status: 'empty' });
-        return;
       }
-      setReview(initialReview(data.proposal));
-      setLoad({ status: 'ready', proposal: data.proposal, titles: data.existingTitles });
+      if (notice) setError(notice);
     } catch (err) {
       setLoad({ status: 'error', message: err instanceof Error ? err.message : 'Could not load the proposal.' });
     }
@@ -101,10 +102,19 @@ export function WrapUpDialog({
   }
 
   async function apply(): Promise<void> {
+    if (load.status !== 'ready') return;
     setBusy(true);
     setError(null);
     try {
-      const res = await post('/api/sessions/wrap-up/apply', { sessionPath, ...toDecisions(review) });
+      const res = await post(
+        '/api/sessions/wrap-up/apply',
+        applyRequestBody(sessionPath, load.proposal, review),
+      );
+      if (res.status === 409 && (await isProposalChanged(res))) {
+        await fetchProposal('The proposal changed while you were reviewing it, so it has been reloaded. Review it again.');
+        setBusy(false);
+        return;
+      }
       if (!res.ok) throw new Error(await errorText(res));
       const data = (await res.json()) as { applied: Array<{ created: boolean }> };
       onDone({ applied: data.applied.length, created: data.applied.filter((a) => a.created).length });
@@ -276,6 +286,11 @@ function applyLabel(busy: boolean, selected: number, isClosed: boolean, suggesti
   if (selected > 0) return `Apply ${selected} selected`;
   if (suggestions > 0) return 'Send Suggestions';
   return isClosed ? 'Discard proposal' : 'Close without changes';
+}
+
+async function isProposalChanged(res: Response): Promise<boolean> {
+  const data = (await res.clone().json().catch(() => ({}))) as { error?: string };
+  return data.error === 'proposal_changed';
 }
 
 async function errorText(res: Response): Promise<string> {

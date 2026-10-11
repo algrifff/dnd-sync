@@ -8,6 +8,7 @@ import {
   setAccepted,
   setAsNew,
   toDecisions,
+  applyRequestBody,
 } from './wrap-up-review';
 
 const proposal: WrapUpProposal = {
@@ -48,6 +49,18 @@ describe('Wrap-up review state', () => {
     state = setAccepted(state, 'm3', false);
 
     expect(toDecisions(state)).toEqual({ accepted: ['m2'], asNew: ['m2'] });
+  });
+
+  it('stamps the apply body with the generatedAt of the proposal that was reviewed', () => {
+    const reviewed = { ...proposal, generatedAt: 1234 };
+    const state = setAccepted(initialReview(reviewed), 'm1', false);
+
+    expect(applyRequestBody(reviewed.sessionPath, reviewed, state)).toEqual({
+      sessionPath: reviewed.sessionPath,
+      generatedAt: 1234,
+      accepted: ['m2', 'm3'],
+      asNew: [],
+    });
   });
 
   it('ignores a change for a mention the proposal does not hold', () => {

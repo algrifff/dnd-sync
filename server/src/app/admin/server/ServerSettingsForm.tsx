@@ -1,15 +1,11 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Copy,
   Check,
   RefreshCw,
-  Pencil,
-  Trash2,
-  Plus,
-  X,
   Upload,
 } from 'lucide-react';
 
@@ -18,12 +14,6 @@ import {
 const ICON_MAX_DIM = 128;
 const ICON_MIME = 'image/webp';
 const ICON_QUALITY = 0.85;
-
-export type PersonalityItem = {
-  id: string;
-  name: string;
-  prompt: string;
-};
 
 export type MemberItem = {
   id: string;
@@ -43,9 +33,6 @@ export function ServerSettingsForm({
   iconVersion,
   csrfToken,
   initialToken,
-  personalities,
-  activePersonalityId,
-  builtinPersonality,
   members,
   campaigns,
   activeCampaignSlug,
@@ -57,9 +44,6 @@ export function ServerSettingsForm({
   iconVersion: number;
   csrfToken: string;
   initialToken: string | null;
-  personalities: PersonalityItem[];
-  activePersonalityId: string;
-  builtinPersonality: PersonalityItem;
   members: MemberItem[];
   campaigns: CampaignItem[];
   activeCampaignSlug: string | null;
@@ -83,13 +67,6 @@ export function ServerSettingsForm({
         csrfToken={csrfToken}
       />
       <HeaderColorSection worldId={worldId} initialColor={headerColor} csrfToken={csrfToken} />
-      <AIPersonalitySection
-        worldId={worldId}
-        csrfToken={csrfToken}
-        initialPersonalities={personalities}
-        initialActiveId={activePersonalityId}
-        builtin={builtinPersonality}
-      />
       <FeaturesSection
         worldId={worldId}
         csrfToken={csrfToken}
@@ -669,376 +646,6 @@ async function resizeImage(file: File, maxDim: number): Promise<Blob> {
       ICON_QUALITY,
     );
   });
-}
-
-// ── AI personality section ─────────────────────────────────────────────
-//
-// Admins can pick an active voice for the world's AI, edit/delete the
-// ones they've authored, and save new named personalities. The built-in
-// "Grizzled Scribe" is always present as a fallback and can't be
-// deleted; it lives in code (DEFAULT_PERSONALITY) and is surfaced here
-// as a non-editable row.
-
-const PLACEHOLDER_PROMPT = `Describe how the AI should speak.
-
-Example:
-You speak as a cheerful tavern bard — warm, a little dramatic, always ready with a pun. Short and friendly. You celebrate the players' victories and tease them kindly when things go sideways.
-
-Good: "A new hero joins the tale! Fenwick the rogue, three levels of mischief."
-Good: "Sword inscribed. Someone's going to regret that."
-Bad: "I have successfully created the entity with the following fields..." (too clinical)`;
-
-function AIPersonalitySection({
-  worldId,
-  csrfToken,
-  initialPersonalities,
-  initialActiveId,
-  builtin,
-}: {
-  worldId: string;
-  csrfToken: string;
-  initialPersonalities: PersonalityItem[];
-  initialActiveId: string;
-  builtin: PersonalityItem;
-}): React.JSX.Element {
-  const [items, setItems] = useState<PersonalityItem[]>(initialPersonalities);
-  const [activeId, setActiveId] = useState<string>(initialActiveId);
-  const [editing, setEditing] = useState<PersonalityItem | 'new' | null>(null);
-  const [pendingActivate, setPendingActivate] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const all = useMemo<PersonalityItem[]>(
-    () => [builtin, ...items],
-    [builtin, items],
-  );
-
-  const active = useMemo(
-    () => all.find((p) => p.id === activeId) ?? builtin,
-    [all, activeId, builtin],
-  );
-
-  const activate = async (id: string): Promise<void> => {
-    if (id === activeId) return;
-    setPendingActivate(id);
-    setError(null);
-    try {
-      const res = await fetch(`/api/worlds/${encodeURIComponent(worldId)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-        // The built-in sentinel and explicit null both mean "default".
-        body: JSON.stringify({
-          activePersonalityId: id === builtin.id ? null : id,
-        }),
-      });
-      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; detail?: string };
-      if (!res.ok || !body.ok) {
-        setError(body.detail ?? `HTTP ${res.status}`);
-        return;
-      }
-      setActiveId(id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'network error');
-    } finally {
-      setPendingActivate(null);
-    }
-  };
-
-  const remove = async (id: string): Promise<void> => {
-    if (!confirm('Delete this personality? This cannot be undone.')) return;
-    setError(null);
-    try {
-      const res = await fetch(
-        `/api/worlds/${encodeURIComponent(worldId)}/personalities/${encodeURIComponent(id)}`,
-        { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken } },
-      );
-      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; detail?: string };
-      if (!res.ok || !body.ok) {
-        setError(body.detail ?? `HTTP ${res.status}`);
-        return;
-      }
-      setItems((prev) => prev.filter((p) => p.id !== id));
-      if (activeId === id) setActiveId(builtin.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'network error');
-    }
-  };
-
-  const onSaved = (saved: PersonalityItem, isNew: boolean): void => {
-    setItems((prev) =>
-      isNew
-        ? [...prev, saved].sort((a, b) => a.name.localeCompare(b.name))
-        : prev
-            .map((p) => (p.id === saved.id ? saved : p))
-            .sort((a, b) => a.name.localeCompare(b.name)),
-    );
-    setEditing(null);
-  };
-
-  return (
-    <section className="rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-5">
-      <h2 className="mb-1 text-base font-semibold text-[var(--ink)]">AI personality</h2>
-      <p className="mb-4 text-sm text-[var(--ink-soft)]">
-        The voice the world's AI uses for its replies. Pick one of your saved
-        personalities or craft a new one — the built-in scribe is always
-        available as a fallback.
-      </p>
-
-      {/* Active preview */}
-      <div className="mb-4 rounded-[8px] border border-[var(--rule)] bg-[var(--parchment-sunk)] px-3 py-2">
-        <div className="mb-1 flex items-center justify-between gap-2">
-          <span className="text-xs font-medium text-[var(--ink-soft)]">
-            Active: <span className="text-[var(--ink)]">{active.name}</span>
-          </span>
-          {active.id !== builtin.id && (
-            <button
-              type="button"
-              onClick={() => void activate(builtin.id)}
-              className="text-xs text-[var(--ink-soft)] underline-offset-2 hover:text-[var(--ink)] hover:underline"
-            >
-              Reset to default
-            </button>
-          )}
-        </div>
-        <pre className="max-h-28 overflow-y-auto whitespace-pre-wrap text-xs text-[var(--ink)]">
-          {active.prompt}
-        </pre>
-      </div>
-
-      {/* Personality list */}
-      <ul className="mb-3 divide-y divide-[var(--rule)] overflow-hidden rounded-[8px] border border-[var(--rule)] bg-[var(--parchment)]">
-        {all.map((p) => {
-          const isActive = p.id === activeId;
-          const isBuiltin = p.id === builtin.id;
-          return (
-            <li
-              key={p.id}
-              className="flex items-center gap-2 px-3 py-2 text-sm"
-            >
-              <input
-                type="radio"
-                name={`personality-${worldId}`}
-                checked={isActive}
-                onChange={() => void activate(p.id)}
-                disabled={pendingActivate !== null}
-                className="h-3.5 w-3.5 accent-[var(--ink)]"
-                aria-label={`Use ${p.name}`}
-              />
-              <button
-                type="button"
-                onClick={() => void activate(p.id)}
-                className="flex-1 truncate text-left text-[var(--ink)] hover:text-[var(--ink-soft)]"
-              >
-                {p.name}
-                {isBuiltin && (
-                  <span className="ml-2 text-xs text-[var(--ink-muted)]">built-in</span>
-                )}
-              </button>
-              {!isBuiltin && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setEditing(p)}
-                    title="Edit"
-                    className="rounded-[4px] p-1 text-[var(--ink-soft)] transition hover:bg-[var(--candlelight)]/20 hover:text-[var(--ink)]"
-                  >
-                    <Pencil size={13} aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void remove(p.id)}
-                    title="Delete"
-                    className="rounded-[4px] p-1 text-[var(--ink-soft)] transition hover:bg-[var(--wine)]/15 hover:text-[var(--wine)]"
-                  >
-                    <Trash2 size={13} aria-hidden />
-                  </button>
-                </>
-              )}
-              {isBuiltin && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setEditing({
-                      id: '',
-                      name: `${builtin.name.replace(/ \(default\)$/, '')} (copy)`,
-                      prompt: builtin.prompt,
-                    })
-                  }
-                  title="Duplicate to edit"
-                  className="rounded-[4px] p-1 text-[var(--ink-soft)] transition hover:bg-[var(--candlelight)]/20 hover:text-[var(--ink)]"
-                >
-                  <Copy size={13} aria-hidden />
-                </button>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-
-      <button
-        type="button"
-        onClick={() => setEditing('new')}
-        className="flex items-center gap-1.5 rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-1.5 text-xs font-medium text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)]"
-      >
-        <Plus size={12} aria-hidden />
-        New personality
-      </button>
-
-      {error && <p className="mt-2 text-xs text-[var(--wine)]">{error}</p>}
-
-      {editing && (
-        <PersonalityEditor
-          worldId={worldId}
-          csrfToken={csrfToken}
-          initial={editing === 'new' ? null : editing}
-          onClose={() => setEditing(null)}
-          onSaved={onSaved}
-        />
-      )}
-    </section>
-  );
-}
-
-function PersonalityEditor({
-  worldId,
-  csrfToken,
-  initial,
-  onClose,
-  onSaved,
-}: {
-  worldId: string;
-  csrfToken: string;
-  /** null = creating new. When cloning the built-in, pass { id: '', ... }. */
-  initial: PersonalityItem | null;
-  onClose: () => void;
-  onSaved: (saved: PersonalityItem, isNew: boolean) => void;
-}): React.JSX.Element {
-  const isEdit = !!initial?.id;
-  const [name, setName] = useState(initial?.name ?? '');
-  const [prompt, setPrompt] = useState(initial?.prompt ?? '');
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async (e: React.FormEvent): Promise<void> => {
-    e.preventDefault();
-    const cleanName = name.trim();
-    const cleanPrompt = prompt.trim();
-    if (!cleanName || !cleanPrompt || pending) return;
-    setPending(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        isEdit
-          ? `/api/worlds/${encodeURIComponent(worldId)}/personalities/${encodeURIComponent(initial!.id)}`
-          : `/api/worlds/${encodeURIComponent(worldId)}/personalities`,
-        {
-          method: isEdit ? 'PATCH' : 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': csrfToken,
-          },
-          body: JSON.stringify({ name: cleanName, prompt: cleanPrompt }),
-        },
-      );
-      const body = (await res.json().catch(() => ({}))) as {
-        ok?: boolean;
-        detail?: string;
-        personality?: PersonalityItem;
-      };
-      if (!res.ok || !body.ok || !body.personality) {
-        setError(body.detail ?? `HTTP ${res.status}`);
-        return;
-      }
-      onSaved(body.personality, !isEdit);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'network error');
-    } finally {
-      setPending(false);
-    }
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={isEdit ? 'Edit personality' : 'New personality'}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <form
-        onSubmit={save}
-        className="flex max-h-[90vh] w-full max-w-xl flex-col rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] shadow-lg"
-      >
-        <header className="flex items-center justify-between border-b border-[var(--rule)] px-5 py-3">
-          <h3 className="text-sm font-semibold text-[var(--ink)]">
-            {isEdit ? 'Edit personality' : 'New personality'}
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-[4px] p-1 text-[var(--ink-soft)] transition hover:bg-[var(--parchment-sunk)] hover:text-[var(--ink)]"
-            aria-label="Close"
-          >
-            <X size={14} aria-hidden />
-          </button>
-        </header>
-
-        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-[var(--ink-soft)]">Name</span>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={60}
-              placeholder="e.g. Cheerful Bard"
-              className="w-full rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-1.5 text-sm text-[var(--ink)] outline-none focus:border-[var(--candlelight)]"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-[var(--ink-soft)]">
-              Voice prompt
-            </span>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              maxLength={4000}
-              rows={14}
-              placeholder={PLACEHOLDER_PROMPT}
-              className="w-full resize-y rounded-[6px] border border-[var(--rule)] bg-[var(--parchment)] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--ink)] outline-none focus:border-[var(--candlelight)]"
-            />
-            <span className="mt-1 block text-[11px] text-[var(--ink-muted)]">
-              {prompt.length} / 4000 characters
-            </span>
-          </label>
-          <p className="text-xs text-[var(--ink-muted)]">
-            This is injected under <code className="text-[var(--ink)]">## Voice</code> in
-            the AI's system prompt. It only affects prose — tool calls,
-            paths, and data are never stylised.
-          </p>
-        </div>
-
-        <footer className="flex items-center justify-end gap-2 border-t border-[var(--rule)] px-5 py-3">
-          {error && <p className="mr-auto text-xs text-[var(--wine)]">{error}</p>}
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-[6px] px-3 py-1.5 text-xs text-[var(--ink-soft)] transition hover:text-[var(--ink)]"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={pending || !name.trim() || !prompt.trim()}
-            className="rounded-[6px] bg-[var(--ink)] px-4 py-1.5 text-sm font-medium text-[var(--parchment)] transition hover:bg-[var(--vellum)] disabled:opacity-40"
-          >
-            {pending ? 'Saving…' : isEdit ? 'Save changes' : 'Create personality'}
-          </button>
-        </footer>
-      </form>
-    </div>
-  );
 }
 
 function InviteSection({

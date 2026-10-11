@@ -29,6 +29,7 @@ const PRIVATE = 'World Lore/owner-notes.md';
 const MILL = 'Campaigns/Ashfall/Places/the-mill.md';
 const MENTIONED_ONLY = 'Campaigns/Ashfall/Places/the-pond.md';
 const KARA = 'Campaigns/Ashfall/Characters/kara.md';
+const LANTERN = 'Campaigns/Ashfall/Loot/lantern.md';
 
 let userId: string;
 
@@ -86,6 +87,12 @@ function row(path: string): { content_json: string; frontmatter_json: string; dm
 
 function contentOf(path: string): PmDoc {
   return JSON.parse(row(path).content_json) as PmDoc;
+}
+
+function titleOf(path: string): string {
+  return getDb()
+    .query<{ title: string }, [string, string]>('SELECT title FROM notes WHERE group_id = ? AND path = ?')
+    .get(groupId, path)!.title;
 }
 
 function noteExists(path: string): boolean {
@@ -249,12 +256,34 @@ describe('WrapUpSubmission', () => {
     expect(parsed.mentions[0]).toMatchObject({ name: 'the innkeeper', historyEntry: 'Gave the key.' });
   });
 
+  it('strips control, zero-width and bidi characters from prose', () => {
+    const parsed = WrapUpSubmission.parse({
+      ...valid,
+      mentions: [{ ...valid.mentions[0], name: 'Br\u200Bam\u0007', historyEntry: '\u202EGave\u0000 the\ufeff key\u0085.\u2066' }],
+    });
+
+    expect(parsed.mentions[0]).toMatchObject({ name: 'Bram', historyEntry: 'Gave the key.' });
+  });
+
+  it('refuses prose that is nothing but invisible characters', () => {
+    const payload = { ...valid, mentions: [{ ...valid.mentions[0], historyEntry: '\u200B\u0000 \ufeff' }] };
+
+    expect(WrapUpSubmission.safeParse(payload).success).toBe(false);
+  });
+
+  it('accepts a title in a non-Latin script', () => {
+    const payload = { ...valid, mentions: [{ ...valid.mentions[0], match: { type: 'new', title: '\u0411\u0440\u043E\u043C', summary: '' } }] };
+
+    expect(WrapUpSubmission.safeParse(payload).success).toBe(true);
+  });
+
   it.each([
     ['an unknown key', { ...valid, extra: 1 }],
     ['an empty History entry', { ...valid, mentions: [{ ...valid.mentions[0], historyEntry: '   ' }] }],
     ['an unknown kind', { ...valid, mentions: [{ ...valid.mentions[0], kind: 'character' }] }],
     ['an existing match with no certainty', { ...valid, mentions: [{ ...valid.mentions[0], match: { type: 'existing', path: BRAM } }] }],
     ['a new match with no title', { ...valid, mentions: [{ ...valid.mentions[0], match: { type: 'new', summary: '' } }] }],
+    ['a mention whose name has no letters or digits', { ...valid, mentions: [{ ...valid.mentions[0], name: '???' }] }],
     ['a new match whose title has no letters or digits', { ...valid, mentions: [{ ...valid.mentions[0], match: { type: 'new', title: '???', summary: '' } }] }],
     ['a match carrying both shapes', { ...valid, mentions: [{ ...valid.mentions[0], match: { type: 'existing', path: BRAM, certain: true, title: 'x' } }] }],
     ['more than 60 mentions', { ...valid, mentions: Array.from({ length: 61 }, () => valid.mentions[0]) }],
@@ -270,7 +299,8 @@ describe('submitWrapUp', () => {
       submission: { sessionPath: SESSION, mentions: [existing('Bram', BRAM, 'person', 'Gave the key.'), fresh('wight', 'creature', '', 'Rose.')] },
     });
     expect(first.status).toBe('ok');
-    expect(loadPendingWrapUp(groupId, 'viewer', SESSION)!.mentions.map((m) => m.id)).toEqual(['m1', 'm2']);
+    const ids = loadPendingWrapUp(groupId, 'viewer', SESSION)!.mentions.map((m) => m.id);
+    expect(new Set(ids).size).toBe(2);
 
     submitWrapUp({
       groupId, role: 'viewer',
@@ -343,6 +373,35 @@ describe('loadPendingWrapUp', () => {
     expect(loadPendingWrapUp(groupId, 'viewer', SESSION)!.mentions.map((m) => m.name)).toEqual(['Bram']);
     expect(loadPendingWrapUp(groupId, 'admin', SESSION)!.mentions.map((m) => m.name)).toEqual(['the spy', 'Bram']);
   });
+
+  it('leaves no gap in the ids a Player sees where a hidden mention was, and applies by those ids', async () => {
+    submitWrapUp({
+      groupId, role: 'admin',
+      submission: {
+        sessionPath: SESSION,
+        mentions: [
+          existing('Bram', BRAM, 'person', 'Was there.'),
+          existing('the spy', SECRET, 'person', 'Was seen.'),
+          fresh('Lantern', 'item', 'A lamp.', 'Was lit.'),
+        ],
+      },
+    });
+
+    const player = loadPendingWrapUp(groupId, 'viewer', SESSION)!;
+    const owner = loadPendingWrapUp(groupId, 'admin', SESSION)!;
+
+    expect(player.mentions.map((m) => m.name)).toEqual(['Bram', 'Lantern']);
+    expect(player.mentions.map((m) => m.id)).toEqual([owner.mentions[0]!.id, owner.mentions[2]!.id]);
+    expect(player.mentions.every((m) => !/^m\d+$/.test(m.id))).toBe(true);
+
+    const result = await applyWrapUp({
+      groupId, userId, role: 'viewer', sessionPath: SESSION, proposal: player,
+      decisions: { accepted: [player.mentions[1]!.id], asNew: [] },
+    });
+
+    expect(result.applied.map((a) => a.path)).toEqual([LANTERN]);
+    expect(historyEntries(contentOf(SECRET))).toEqual([]);
+  });
 });
 
 describe('applyWrapUp', () => {
@@ -372,6 +431,8 @@ describe('applyWrapUp', () => {
     expect(historyEntries(contentOf(wight))).toEqual(['The Mill: Rose from the millpond.']);
     expect(historyEntries(contentOf(key))).toEqual(['The Mill: Given to the party by Bram.']);
     expect(plain(contentOf(key).content![0]!)).toBe('An old iron key from Bram.');
+    expect(titleOf(key)).toBe('Rusted Key');
+    expect(titleOf(wight)).toBe('wight');
     expect(JSON.parse(row(wight).frontmatter_json).kind).toBe('creature');
     expect(wikilinkTargets(contentOf(SESSION))).toEqual([BRAM, wight, key]);
     expect(historyEntries(contentOf(MILL))).toEqual(['The Mill: Where the party met Bram.']);
@@ -400,7 +461,7 @@ describe('applyWrapUp', () => {
 
   it('on a re-run, marks what is recorded so a client proposes only new things', async () => {
     const recorded = contextFor('viewer').candidates.filter((c) => c.recorded).map((c) => c.path);
-    expect(recorded.sort()).toEqual([BRAM, MILL, key, wight].sort());
+    expect(recorded.sort()).toEqual([BRAM, MILL, key, wight, LANTERN].sort());
 
     const secondRun = proposalFrom(SESSION, [
       existing('Bram', BRAM, 'person', 'Gave the party the Rusted Key.'),
@@ -466,5 +527,79 @@ describe('applyWrapUp', () => {
     expect(row(zed).dm_only).toBe(1);
     expect(JSON.parse(row(zed).frontmatter_json).dm_only).toBe(true);
     expect(wikilinkTargets(contentOf(SECRET_SESSION))).toEqual([zed]);
+  });
+});
+
+describe('applyWrapUp edge cases', () => {
+  const apply = (role: 'admin' | 'editor' | 'viewer', mentions: SubmittedMention[], asNew: string[] = []) =>
+    applyWrapUp({
+      groupId, userId, role, sessionPath: SESSION, proposal: proposalFrom(SESSION, mentions),
+      decisions: { accepted: mentions.map((_, i) => `m${i + 1}`), asNew },
+    });
+
+  it('does not tell a Player a Secret Note holds a new mention path: it is created beside it and the result looks like any other creation', async () => {
+    const before = allNotes().find((n) => n.path === SECRET)!;
+
+    const hiddenCollision = await apply('viewer', [fresh('The Spy', 'person', 'A rumour.', 'Heard of.')]);
+    const absent = await apply('viewer', [fresh('The Baker', 'person', 'Makes bread.', 'Sold bread.')]);
+
+    expect(hiddenCollision.skipped).toEqual([]);
+    expect(absent.skipped).toEqual([]);
+    expect(Object.keys(hiddenCollision.applied[0]!)).toEqual(Object.keys(absent.applied[0]!));
+    expect(hiddenCollision.applied[0]).toEqual({ id: 'm1', path: 'Campaigns/Ashfall/People/the-spy-2.md', created: true });
+    expect(titleOf('Campaigns/Ashfall/People/the-spy-2.md')).toBe('The Spy');
+    expect(allNotes().find((n) => n.path === SECRET)).toEqual(before);
+    expect(row(SECRET).dm_only).toBe(1);
+  });
+
+  it('lands a repeated mention on the Note it created beside the Secret one', async () => {
+    const again = await apply('viewer', [fresh('The Spy', 'person', 'A rumour.', 'Heard of.')]);
+
+    expect(again.applied).toEqual([{ id: 'm1', path: 'Campaigns/Ashfall/People/the-spy-2.md', created: false }]);
+    expect(historyEntries(contentOf(SECRET))).toEqual([]);
+  });
+
+  it('lets the Owner, who can see the Secret Note, land on it', async () => {
+    const result = await apply('admin', [fresh('The Spy', 'person', 'A rumour.', 'Heard of.')]);
+
+    expect(result.applied).toEqual([{ id: 'm1', path: SECRET, created: false }]);
+  });
+
+  it('skips an uncertain match switched to new when its name has no letters or digits to build a path from, without writing <Folder>/.md', async () => {
+    const before = allNotes().length;
+
+    const result = await apply('viewer', [existing('???', BRAM, 'person', 'Seen.', false)], ['m1']);
+
+    expect(result.applied).toEqual([]);
+    expect(result.skipped).toEqual([{ id: 'm1', reason: 'invalid_title' }]);
+    expect(allNotes()).toHaveLength(before);
+    expect(allNotes().some((n) => n.path.endsWith('/.md'))).toBe(false);
+  });
+
+  it('creates a non-Latin Note under a hash-based path, titled as proposed, and finds it again next time', async () => {
+    const mention = existing('\u0411\u0440\u043E\u043C', BRAM, 'person', 'Seen.', false);
+
+    const first = await apply('viewer', [mention], ['m1']);
+    const second = await apply('viewer', [mention], ['m1']);
+
+    const path = first.applied[0]!.path;
+    expect(path).toMatch(/^Campaigns\/Ashfall\/People\/note-[0-9a-f]{8}\.md$/);
+    expect(first.applied[0]!.created).toBe(true);
+    expect(titleOf(path)).toBe('\u0411\u0440\u043E\u043C');
+    expect(second.applied).toEqual([{ id: 'm1', path, created: false }]);
+  });
+
+  it('reports a mention whose Note vanished before the edit as skipped, not applied or linked', async () => {
+    const gone = 'Campaigns/Ashfall/People/vanishing-act.md';
+    seed({ path: gone, title: 'Vanishing Act', frontmatter: { kind: 'person' } });
+    const mentions = [existing('Vanishing Act', gone, 'person', 'Disappeared.'), existing('Bram', BRAM, 'person', 'Was there.')];
+
+    const pending = apply('viewer', mentions);
+    getDb().query('DELETE FROM notes WHERE group_id = ? AND path = ?').run(groupId, gone);
+    const result = await pending;
+
+    expect(result.skipped).toEqual([{ id: 'm1', reason: 'edit_failed' }]);
+    expect(result.applied.map((a) => a.id)).toEqual(['m2']);
+    expect(wikilinkTargets(contentOf(SESSION))).not.toContain(gone);
   });
 });
