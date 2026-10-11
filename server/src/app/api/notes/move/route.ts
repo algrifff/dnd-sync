@@ -88,16 +88,19 @@ export async function POST(req: NextRequest): Promise<Response> {
         session.currentGroupId,
         from,
       );
-      db.query('UPDATE note_links SET from_path = ? WHERE group_id = ? AND from_path = ?').run(
-        to,
-        session.currentGroupId,
-        from,
-      );
-      db.query('UPDATE note_links SET to_path = ? WHERE group_id = ? AND to_path = ?').run(
-        to,
-        session.currentGroupId,
-        from,
-      );
+      // note_links is keyed (group_id, from_path, to_path), and a stale
+      // edge to or from `to` can exist even with no note there (derive
+      // re-adds orphan edges). OR IGNORE leaves the colliding rows behind
+      // and the DELETE drops them, merging instead of failing the move.
+      for (const col of ['from_path', 'to_path'] as const) {
+        db.query(
+          `UPDATE OR IGNORE note_links SET ${col} = ? WHERE group_id = ? AND ${col} = ?`,
+        ).run(to, session.currentGroupId, from);
+        db.query(`DELETE FROM note_links WHERE group_id = ? AND ${col} = ?`).run(
+          session.currentGroupId,
+          from,
+        );
+      }
       db.query('UPDATE tags SET path = ? WHERE group_id = ? AND path = ?').run(
         to,
         session.currentGroupId,
@@ -148,7 +151,11 @@ export async function POST(req: NextRequest): Promise<Response> {
   } catch (err) {
     // The collide check above is a fast path; a concurrent move or
     // create onto `to` lands here, and the transaction has rolled back.
-    if (isUniqueConstraintError(err)) return json({ error: 'exists', path: to }, 409);
+    // Only a note really sitting at `to` is a name conflict; any other
+    // constraint failure is a bug and must surface, not read as "exists".
+    if (isUniqueConstraintError(err) && noteExists(session.currentGroupId, to)) {
+      return json({ error: 'exists', path: to }, 409);
+    }
     throw err;
   }
 
@@ -189,6 +196,16 @@ function normalizePath(p: string): string {
   const clean = p.replace(/^\/+|\/+$/g, '').replace(/\\/g, '/');
   if (clean.split('/').some((s) => s === '..' || s === '.' || s === '')) return '';
   return clean;
+}
+
+function noteExists(groupId: string, path: string): boolean {
+  return (
+    getDb()
+      .query<{ n: number }, [string, string]>(
+        'SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path = ?',
+      )
+      .get(groupId, path)?.n === 1
+  );
 }
 
 function json(body: unknown, status = 200): Response {

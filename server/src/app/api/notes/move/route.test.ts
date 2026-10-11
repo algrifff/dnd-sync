@@ -1,8 +1,9 @@
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db';
-import { clearNoteRace, setupTestDb, simulateNoteRace, teardownTestDb } from '@/lib/test-utils';
+import * as moveRewrite from '@/lib/move-rewrite';
+import { setupTestDb, teardownTestDb } from '@/lib/test-utils';
 import { createUser, DEFAULT_GROUP_ID } from '@/lib/users';
 import { buildSessionCookies, createSession, type Session } from '@/lib/session';
 import { POST } from './route';
@@ -88,19 +89,47 @@ describe('POST /api/notes/move', () => {
     expect(await res.json()).toEqual({ error: 'exists', path: 'World Lore/Taken/To.md' });
   });
 
+  it('merges note_links instead of failing when a stale edge to the destination already exists', async () => {
+    seedNote('World Lore/Dup/From.md', []);
+    seedNote('World Lore/Dup/Linker.md', []);
+    const insertLink = getDb().query(
+      'INSERT INTO note_links (group_id, from_path, to_path) VALUES (?, ?, ?)',
+    );
+    // X has no note (it was deleted) but derive re-added the edge to it.
+    insertLink.run(DEFAULT_GROUP_ID, 'World Lore/Dup/Linker.md', 'World Lore/Dup/X.md');
+    insertLink.run(DEFAULT_GROUP_ID, 'World Lore/Dup/Linker.md', 'World Lore/Dup/From.md');
+
+    const res = await POST(moveRequest('World Lore/Dup/From.md', 'World Lore/Dup/X.md'));
+
+    expect(res.status).toBe(200);
+    const targets = getDb()
+      .query<{ to_path: string }, [string, string]>(
+        'SELECT to_path FROM note_links WHERE group_id = ? AND from_path = ?',
+      )
+      .all(DEFAULT_GROUP_ID, 'World Lore/Dup/Linker.md')
+      .map((r) => r.to_path);
+    expect(targets).toEqual(['World Lore/Dup/X.md']);
+  });
+
   it('answers 409 exists, not a 500, when a concurrent write wins the destination after the pre-check', async () => {
     seedNote('World Lore/Race/From.md', []);
     getDb()
       .query('INSERT INTO note_links (group_id, from_path, to_path) VALUES (?, ?, ?)')
       .run(DEFAULT_GROUP_ID, 'World Lore/Race/From.md', 'World Lore/Race/Elsewhere.md');
-    simulateNoteRace('World Lore/Race/To.md', 'rename');
+    // The route reads linkers after its pre-check and before the write;
+    // a concurrent create committing in that window is what we simulate.
+    const realFind = moveRewrite.findWikilinkLinkers;
+    const spy = spyOn(moveRewrite, 'findWikilinkLinkers').mockImplementation((...args) => {
+      seedNote('World Lore/Race/To.md', []);
+      return realFind(...args);
+    });
     try {
       const res = await POST(moveRequest('World Lore/Race/From.md', 'World Lore/Race/To.md'));
 
       expect(res.status).toBe(409);
       expect(await res.json()).toEqual({ error: 'exists', path: 'World Lore/Race/To.md' });
     } finally {
-      clearNoteRace('rename');
+      spy.mockRestore();
     }
 
     const paths = getDb()
@@ -108,7 +137,7 @@ describe('POST /api/notes/move', () => {
       .all(DEFAULT_GROUP_ID)
       .map((r) => r.path);
     expect(paths).toContain('World Lore/Race/From.md');
-    expect(paths).not.toContain('World Lore/Race/To.md');
+    expect(paths).toContain('World Lore/Race/To.md'); // the concurrent winner
     const link = getDb()
       .query<{ from_path: string }, [string]>(
         "SELECT from_path FROM note_links WHERE group_id = ? AND to_path = 'World Lore/Race/Elsewhere.md'",

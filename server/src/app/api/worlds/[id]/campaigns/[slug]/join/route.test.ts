@@ -79,14 +79,14 @@ describe('POST /api/worlds/[id]/campaigns/[slug]/join', () => {
   it('answers 409 exists and leaves no binding when a concurrent join wins the path', async () => {
     const uc = createUserCharacter(session.userId, { name: 'Racer' });
     const bindingsBefore = countRows('user_character_bindings');
-    simulateNoteRace(`${FOLDER}/Characters/PCs/Racer.md`, 'insert');
+    simulateNoteRace(`${FOLDER}/Characters/PCs/Racer.md`);
     try {
       const res = await join(uc.id);
 
       expect(res.status).toBe(409);
       expect(await res.json()).toEqual({ error: 'exists', path: `${FOLDER}/Characters/PCs/Racer.md` });
     } finally {
-      clearNoteRace('insert');
+      clearNoteRace();
     }
 
     expect(countRows('user_character_bindings')).toBe(bindingsBefore);

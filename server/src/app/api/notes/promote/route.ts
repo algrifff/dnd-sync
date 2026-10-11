@@ -181,10 +181,17 @@ export async function POST(req: NextRequest): Promise<Response> {
           ).run(toPath, now, session.userId, session.currentGroupId, body.fromPath);
           // Rewire backlinks pointing at the old path so the graph stays
           // consistent. Outgoing links (from_path) follow the rename too.
-          db.query('UPDATE note_links SET to_path = ? WHERE group_id = ? AND to_path = ?')
-            .run(toPath, session.currentGroupId, body.fromPath);
-          db.query('UPDATE note_links SET from_path = ? WHERE group_id = ? AND from_path = ?')
-            .run(toPath, session.currentGroupId, body.fromPath);
+          // OR IGNORE + DELETE merges edges that would collide on the
+          // (group_id, from_path, to_path) key with stale ones at toPath.
+          for (const col of ['to_path', 'from_path'] as const) {
+            db.query(
+              `UPDATE OR IGNORE note_links SET ${col} = ? WHERE group_id = ? AND ${col} = ?`,
+            ).run(toPath, session.currentGroupId, body.fromPath);
+            db.query(`DELETE FROM note_links WHERE group_id = ? AND ${col} = ?`).run(
+              session.currentGroupId,
+              body.fromPath,
+            );
+          }
           db.query('UPDATE tags SET path = ? WHERE group_id = ? AND path = ?')
             .run(toPath, session.currentGroupId, body.fromPath);
           repointRelations(session.currentGroupId, body.fromPath, toPath);
@@ -192,8 +199,10 @@ export async function POST(req: NextRequest): Promise<Response> {
       })();
     } catch (err) {
       // Same race as the copy branch; the transaction has rolled back,
-      // so the source is untouched. Falls through to the finally.
-      if (isUniqueConstraintError(err)) {
+      // so the source is untouched. Falls through to the finally. Only a
+      // note really sitting at toPath is a name conflict; any other
+      // constraint failure must surface.
+      if (isUniqueConstraintError(err) && noteExists(session.currentGroupId, toPath)) {
         return json({ error: 'exists', path: toPath }, 409);
       }
       throw err;
@@ -225,6 +234,16 @@ export async function POST(req: NextRequest): Promise<Response> {
     // any throw. No-op once the move branch consumed it.
     releaseServerWrite(token);
   }
+}
+
+function noteExists(groupId: string, path: string): boolean {
+  return (
+    getDb()
+      .query<{ n: number }, [string, string]>(
+        'SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path = ?',
+      )
+      .get(groupId, path)?.n === 1
+  );
 }
 
 function json(body: unknown, status = 200): Response {
