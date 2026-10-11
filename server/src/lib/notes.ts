@@ -13,6 +13,14 @@ export const TOP_LEVEL_ALLOWED: ReadonlySet<string> = new Set([
   'Excalidraw',
 ]);
 
+// Matching control characters is the point of this regex.
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+
+export function hasControlChars(s: string): boolean {
+  return CONTROL_CHARS.test(s);
+}
+
 /** Validate a folder or note path against the two invariants the UI
  *  relies on:
  *    - first segment must be a sanctioned top-level folder
@@ -23,7 +31,7 @@ export function isAllowedPath(
   path: string,
 ): { ok: true } | { ok: false; reason: string } {
   if (!path) return { ok: false, reason: 'empty_path' };
-  if (/[\u0000-\u001f\u007f]/.test(path)) {
+  if (hasControlChars(path)) {
     return { ok: false, reason: 'names cannot contain control characters' };
   }
   const normalised = path.replace(/^\/+|\/+$/g, '').replace(/\\/g, '/');

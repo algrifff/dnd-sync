@@ -224,7 +224,7 @@ Bun workspaces: `shared` and `server`. The `scripts/` folder holds one-off utili
 | `bun run server.ts` | Dev server with HMR on port 3000 |
 | `bun run build` | Next.js production build |
 | `bun run start` | Start compiled Next.js output |
-| `bun test` | Run unit tests (`bun:test`, real in-memory SQLite) |
+| `bun run test` | Run unit tests (`bun:test`, real in-memory SQLite), memory-gated; `test:changed` runs only tests affected by your diff |
 
 ### Adding a database migration
 
