@@ -100,10 +100,15 @@ export function WrapUpDialog({
   }
 
   async function apply(): Promise<void> {
+    if (load.status !== 'ready') return;
     setBusy(true);
     setError(null);
     try {
-      const res = await post('/api/sessions/wrap-up/apply', { sessionPath, ...toDecisions(review) });
+      const res = await post('/api/sessions/wrap-up/apply', {
+        sessionPath,
+        generatedAt: load.proposal.generatedAt,
+        ...toDecisions(review),
+      });
       if (!res.ok) throw new Error(await errorText(res));
       const data = (await res.json()) as { applied: Array<{ created: boolean }> };
       onDone({ applied: data.applied.length, created: data.applied.filter((a) => a.created).length });
@@ -274,6 +279,9 @@ function applyLabel(busy: boolean, selected: number, isClosed: boolean): string 
 
 async function errorText(res: Response): Promise<string> {
   const data = (await res.json().catch(() => ({}))) as { error?: string; reason?: string };
+  if (data.error === 'proposal_changed') {
+    return 'A newer proposal was submitted while you were reviewing. Close this and open it again to review the new one.';
+  }
   if (data.error === 'no_pending_proposal') {
     return 'This proposal was already applied or replaced. Check again.';
   }
