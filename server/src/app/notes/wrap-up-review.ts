@@ -80,6 +80,11 @@ export function groupRows(
   return { fresh, history };
 }
 
+/** "Rusted Key ×2, Rope": the items a Suggestion offers, one line. */
+export function itemsLabel(items: ReadonlyArray<{ name: string; quantity: number }>): string {
+  return items.map((i) => (i.quantity > 1 ? `${i.name} ×${i.quantity}` : i.name)).join(', ');
+}
+
 export function acceptedCount(state: ReviewState): number {
   let n = 0;
   for (const c of state.values()) if (c.accepted) n++;

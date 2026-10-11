@@ -16,6 +16,7 @@ import {
   acceptedCount,
   groupRows,
   initialReview,
+  itemsLabel,
   setAccepted,
   setAsNew,
   toDecisions,
@@ -187,7 +188,7 @@ export function WrapUpDialog({
             </div>
           )}
 
-          {ready && ready.proposal.mentions.length === 0 && (
+          {ready && ready.proposal.mentions.length === 0 && ready.proposal.suggestions.length === 0 && (
             <p className="text-[var(--ink-soft)]">
               Claude found nothing new to add to your Notes from this Session.
             </p>
@@ -201,6 +202,10 @@ export function WrapUpDialog({
               disabled={busy}
               onChange={setReview}
             />
+          )}
+
+          {ready && ready.proposal.suggestions.length > 0 && (
+            <SuggestionsNotice proposal={ready.proposal} titles={ready.titles} />
           )}
 
           {error && (
@@ -250,7 +255,7 @@ export function WrapUpDialog({
               className="inline-flex items-center gap-1.5 rounded-[6px] bg-[var(--wine)] px-3 py-2 text-xs font-semibold text-[var(--vellum)] transition hover:opacity-90 disabled:opacity-50"
             >
               {busy && <Loader2 size={12} className="animate-spin" aria-hidden />}
-              {applyLabel(busy, selected, isClosed)}
+              {applyLabel(busy, selected, isClosed, ready.proposal.suggestions.length)}
             </button>
           )}
         </div>
@@ -266,9 +271,10 @@ function trackFailure(sessionPath: string, err: unknown): void {
   });
 }
 
-function applyLabel(busy: boolean, selected: number, isClosed: boolean): string {
+function applyLabel(busy: boolean, selected: number, isClosed: boolean, suggestions: number): string {
   if (busy) return 'Applying…';
   if (selected > 0) return `Apply ${selected} selected`;
+  if (suggestions > 0) return 'Send Suggestions';
   return isClosed ? 'Discard proposal' : 'Close without changes';
 }
 
@@ -330,6 +336,39 @@ function ReviewList({
         </section>
       )}
     </div>
+  );
+}
+
+/** Read-only: Suggestions are not the closer's to accept. Each goes to
+ *  its Character's Player, who accepts or dismisses it. */
+function SuggestionsNotice({
+  proposal,
+  titles,
+}: {
+  proposal: WrapUpProposal;
+  titles: Record<string, string>;
+}): React.JSX.Element {
+  const headingId = useId();
+  return (
+    <section aria-labelledby={headingId} className="mt-5">
+      <h4 id={headingId} className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
+        Suggestions ({proposal.suggestions.length})
+      </h4>
+      <p className="mt-0.5 text-xs text-[var(--ink-muted)]">
+        Sent to each Character&rsquo;s Player to accept or dismiss. They never change game stats.
+      </p>
+      <ul className="mt-2 space-y-1">
+        {proposal.suggestions.map((s) => (
+          <li key={s.id} className="rounded-[6px] px-1 py-1.5">
+            <span className="block font-medium text-[var(--ink)]">{titles[s.characterPath] ?? s.characterPath}</span>
+            {s.story && <span className="block text-xs text-[var(--ink-soft)]">{s.story}</span>}
+            {s.items.length > 0 && (
+              <span className="block text-xs text-[var(--ink-soft)]">Items: {itemsLabel(s.items)}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

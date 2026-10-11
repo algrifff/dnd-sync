@@ -4,6 +4,7 @@ import {
   acceptedCount,
   groupRows,
   initialReview,
+  itemsLabel,
   setAccepted,
   setAsNew,
   toDecisions,
@@ -53,5 +54,13 @@ describe('Wrap-up review state', () => {
     const state = initialReview(proposal);
 
     expect(setAccepted(state, 'nope', false)).toBe(state);
+  });
+});
+
+describe('itemsLabel', () => {
+  it('lists items on one line and shows a quantity only above one', () => {
+    const items = [{ name: 'Rusted Key', quantity: 2 }, { name: 'Rope', quantity: 1 }];
+
+    expect(itemsLabel(items)).toBe('Rusted Key ×2, Rope');
   });
 });
