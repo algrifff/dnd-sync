@@ -1146,3 +1146,269 @@ describe('note_read — dm_only enforcement', () => {
     expect(missing).toEqual({ ok: false, error: 'Not found: Test/Nope.md' });
   });
 });
+
+// ── C3 follow-ups: the remaining tools an editor could use on gm_only ──
+//
+// ctxFor('dm', 'editor') is the GM-tools-allowed, not-the-world-owner
+// caller from the C3 block above.
+
+function noteExists(path: string): boolean {
+  return getDb()
+    .query<{ n: number }, [string, string]>('SELECT COUNT(*) AS n FROM notes WHERE group_id=? AND path=?')
+    .get(groupId, path)!.n > 0;
+}
+
+function sessionStatus(path: string): string | null {
+  return getDb()
+    .query<{ status: string }, [string, string]>(
+      'SELECT status FROM session_notes WHERE group_id=? AND note_path=?',
+    )
+    .get(groupId, path)?.status ?? null;
+}
+
+describe('session_finalize — gm_only enforcement', () => {
+  const path = 'Adventure Log/gm-prep.md';
+
+  beforeEach(() => {
+    seedNote({
+      path,
+      title: 'GM prep',
+      pmDoc: { type: 'doc', content: [paragraph('Secret session.')] },
+      contentMd: 'Secret session.',
+      gmOnly: true,
+    });
+  });
+
+  it('should answer an editor as if the gm_only session did not exist, and leave it open', async () => {
+    const tools = createTools(ctxFor('dm', 'editor'));
+
+    const hidden = await tools.session_finalize.execute!({ sessionPath: path }, { toolCallId: 'sf1', messages: [] });
+    const missing = await tools.session_finalize.execute!(
+      { sessionPath: 'Adventure Log/nope.md' },
+      { toolCallId: 'sf2', messages: [] },
+    );
+
+    expect(hidden).toEqual({ ok: false, error: `Not found: ${path}` });
+    expect(missing).toEqual({ ok: false, error: 'Not found: Adventure Log/nope.md' });
+    expect(sessionStatus(path)).not.toBe('closed');
+  });
+
+  it('should let an admin close the same gm_only session', async () => {
+    const tools = createTools(ctxFor('dm', 'admin'));
+
+    const result = await tools.session_finalize.execute!({ sessionPath: path }, { toolCallId: 'sf3', messages: [] });
+
+    expect(result).toEqual({ ok: true, sessionPath: path });
+    expect(sessionStatus(path)).toBe('closed');
+  });
+});
+
+describe('entity_move — a gm_only destination is not an existence oracle', () => {
+  const from = 'Test/Visible.md';
+  const hiddenTo = 'Test/GmSecret.md';
+  const visibleTo = 'Test/Taken.md';
+
+  beforeEach(() => {
+    seedNote({ path: from, title: 'Visible', pmDoc: { type: 'doc', content: [paragraph('Mine.')] }, contentMd: 'Mine.' });
+    seedNote({
+      path: hiddenTo,
+      title: 'GmSecret',
+      pmDoc: { type: 'doc', content: [paragraph('Hidden.')] },
+      contentMd: 'Hidden.',
+      gmOnly: true,
+    });
+    seedNote({ path: visibleTo, title: 'Taken', pmDoc: { type: 'doc', content: [paragraph('Taken.')] }, contentMd: 'Taken.' });
+  });
+
+  it('should answer an editor with the not-found shape a gm_only note gets from note_read', async () => {
+    const tools = createTools(ctxFor('dm', 'editor'));
+
+    const move = await tools.entity_move.execute!({ from, to: hiddenTo }, { toolCallId: 'mo1', messages: [] });
+    const read = await tools.note_read.execute!({ path: hiddenTo }, { toolCallId: 'mo2', messages: [] });
+
+    expect(move).toEqual(read);
+    expect(noteExists(from)).toBe(true);
+  });
+
+  it('should still report a collision with a note the editor can see', async () => {
+    const tools = createTools(ctxFor('dm', 'editor'));
+
+    const move = await tools.entity_move.execute!({ from, to: visibleTo }, { toolCallId: 'mo3', messages: [] });
+
+    expect(move).toEqual({ ok: false, error: `Path exists: ${visibleTo}` });
+  });
+
+  it('should report the collision to an admin, who can see the gm_only note', async () => {
+    const tools = createTools(ctxFor('dm', 'admin'));
+
+    const move = await tools.entity_move.execute!({ from, to: hiddenTo }, { toolCallId: 'mo4', messages: [] });
+
+    expect(move).toEqual({ ok: false, error: `Path exists: ${hiddenTo}` });
+  });
+});
+
+describe('entity_change_kind — a gm_only destination is not an existence oracle', () => {
+  it('should answer an editor with the not-found shape when the new canonical path is gm_only', async () => {
+    const path = 'People/goblin.md';
+    const hiddenTo = 'Creatures/goblin.md';
+    seedNote({
+      path,
+      title: 'Goblin',
+      pmDoc: { type: 'doc', content: [paragraph('A goblin.')] },
+      contentMd: 'A goblin.',
+      frontmatterJson: JSON.stringify({ kind: 'person', template: 'person' }),
+    });
+    seedNote({
+      path: hiddenTo,
+      title: 'Goblin',
+      pmDoc: { type: 'doc', content: [paragraph('GM goblin.')] },
+      contentMd: 'GM goblin.',
+      gmOnly: true,
+    });
+    const tools = createTools(ctxFor('dm', 'editor'));
+
+    const result = await tools.entity_change_kind.execute!(
+      { path, newKind: 'creature', campaignSlug: undefined },
+      { toolCallId: 'ck2', messages: [] },
+    );
+
+    expect(result).toEqual({ ok: false, error: `Not found: ${hiddenTo}` });
+    expect(JSON.parse(readNote(path).frontmatter_json).kind).toBe('person');
+  });
+});
+
+// A rename changes notes.path under an open editor. Its document, still
+// loaded under the old name, would store() into a row that no longer
+// exists, so the tool must take it out of memory after the write, and
+// discard rather than flush it, as every other server write does.
+
+/** Plants a loaded document with a pending store on `path`, runs `fn`,
+ *  and reports whether the document and its pending store survived. */
+async function withOpenEditor(
+  path: string,
+  fn: () => Promise<unknown>,
+): Promise<{ result: unknown; stillLoaded: boolean; storePending: boolean }> {
+  const documentName = `${groupId}:${path}`;
+  const hocuspocus = ORIGINAL_COLLAB_SERVER.collabServer;
+  const storeId = `onStoreDocument-${documentName}`;
+  hocuspocus.documents.set(documentName, new Document(documentName));
+  void hocuspocus.debouncer.debounce(storeId, () => undefined, 5_000, 10_000);
+  try {
+    const result = await fn();
+    return {
+      result,
+      stillLoaded: hocuspocus.documents.has(documentName),
+      storePending: hocuspocus.debouncer.isDebounced(storeId),
+    };
+  } finally {
+    hocuspocus.documents.delete(documentName);
+    void hocuspocus.debouncer.debounce(storeId, () => undefined, 0, 0);
+  }
+}
+
+describe('entity_move — evicts the open editor of the renamed note', () => {
+  it('should discard the document left open under the old path', async () => {
+    const from = 'Test/OpenWhileMoved.md';
+    seedNote({ path: from, title: 'Open', pmDoc: { type: 'doc', content: [paragraph('Open.')] }, contentMd: 'Open.' });
+    const tools = createTools(ctxFor('dm'));
+
+    const outcome = await withOpenEditor(from, () =>
+      tools.entity_move.execute!({ from, to: 'Test/MovedWhileOpen.md' }, { toolCallId: 'ev1', messages: [] }),
+    );
+
+    expect(outcome.result).toEqual({ ok: true, path: 'Test/MovedWhileOpen.md' });
+    expect(outcome.stillLoaded).toBe(false);
+    expect(outcome.storePending).toBe(false);
+  });
+});
+
+describe('entity_change_kind — evicts the open editor of the renamed note', () => {
+  it('should discard the document left open under the old path', async () => {
+    const path = 'People/open-npc.md';
+    seedNote({
+      path,
+      title: 'Open NPC',
+      pmDoc: { type: 'doc', content: [paragraph('Open.')] },
+      contentMd: 'Open.',
+      frontmatterJson: JSON.stringify({ kind: 'person', template: 'person' }),
+    });
+    const tools = createTools(ctxFor('dm'));
+
+    const outcome = await withOpenEditor(path, () =>
+      tools.entity_change_kind.execute!(
+        { path, newKind: 'creature', campaignSlug: undefined },
+        { toolCallId: 'ev2', messages: [] },
+      ),
+    );
+
+    expect(outcome.result).toEqual({ ok: true, path: 'Creatures/open-npc.md', kind: 'creature' });
+    expect(outcome.stillLoaded).toBe(false);
+    expect(outcome.storePending).toBe(false);
+  });
+});
+
+describe('inventory_add — cannot write the name of an item the caller cannot see', () => {
+  const characterPath = 'Characters/hero.md';
+
+  beforeEach(() => {
+    seedNote({
+      path: characterPath,
+      title: 'Hero',
+      pmDoc: { type: 'doc', content: [paragraph('A hero.')] },
+      contentMd: 'A hero.',
+      frontmatterJson: JSON.stringify({ kind: 'character', sheet: { items: [] } }),
+    });
+  });
+
+  function items(): string[] {
+    return (JSON.parse(readNote(characterPath).frontmatter_json) as { sheet: { items: string[] } }).sheet.items;
+  }
+
+  it('should answer an editor as if a gm_only item did not exist, and leave the sheet alone', async () => {
+    const itemPath = 'Loot/vorpal-blade.md';
+    seedNote({ path: itemPath, title: 'Vorpal Blade', pmDoc: { type: 'doc', content: [] }, contentMd: '', gmOnly: true });
+    const tools = createTools(ctxFor('dm', 'editor'));
+
+    const hidden = await tools.inventory_add.execute!(
+      { characterPath, itemPath, freeformName: undefined, quantity: 1 },
+      { toolCallId: 'ia1', messages: [] },
+    );
+    const missing = await tools.inventory_add.execute!(
+      { characterPath, itemPath: 'Loot/nope.md', freeformName: undefined, quantity: 1 },
+      { toolCallId: 'ia2', messages: [] },
+    );
+
+    expect(hidden).toEqual({ ok: false, error: `Not found: ${itemPath}` });
+    expect(missing).toEqual({ ok: false, error: 'Not found: Loot/nope.md' });
+    expect(items()).toEqual([]);
+  });
+
+  it('should refuse a dm_only item to a player', async () => {
+    const itemPath = 'Loot/cursed-ring.md';
+    seedNote({ path: itemPath, title: 'Cursed Ring', pmDoc: { type: 'doc', content: [] }, contentMd: '' });
+    getDb().query('UPDATE notes SET dm_only = 1 WHERE group_id = ? AND path = ?').run(groupId, itemPath);
+    const tools = createTools(ctxFor('player'));
+
+    const result = await tools.inventory_add.execute!(
+      { characterPath, itemPath, freeformName: undefined, quantity: 1 },
+      { toolCallId: 'ia3', messages: [] },
+    );
+
+    expect(result).toEqual({ ok: false, error: `Not found: ${itemPath}` });
+    expect(items()).toEqual([]);
+  });
+
+  it('should link an item the caller can see', async () => {
+    const itemPath = 'Loot/rope.md';
+    seedNote({ path: itemPath, title: 'Rope', pmDoc: { type: 'doc', content: [] }, contentMd: '' });
+    const tools = createTools(ctxFor('dm', 'editor'));
+
+    const result = await tools.inventory_add.execute!(
+      { characterPath, itemPath, freeformName: undefined, quantity: 2 },
+      { toolCallId: 'ia4', messages: [] },
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(items()).toEqual(['[[rope]] ×2']);
+  });
+});
