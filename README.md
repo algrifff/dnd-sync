@@ -1,12 +1,11 @@
 # Compendium
 
-Self-hosted TTRPG note-taking web app for players and GMs — real-time collaborative notes, character sheets, session logs, knowledge graph, and an AI assistant that understands the campaign. Single Next.js 15 process backed by SQLite. See [ARCHITECTURE.md](./ARCHITECTURE.md) for how the system fits together.
+Self-hosted TTRPG note-taking web app for players and GMs — real-time collaborative notes, character sheets, session logs, knowledge graph, and AI-assisted vault import. Single Next.js 15 process backed by SQLite. See [ARCHITECTURE.md](./ARCHITECTURE.md) for how the system fits together.
 
 ## Key features
 
 - Real-time collaborative notes (Yjs + Hocuspocus, ProseMirror state)
 - Character sheets with inline-editable headers (per-kind: character / person / creature / item / location)
-- AI chat with agentic tool calls (Vercel AI SDK v6, ~10 tools, per-kind skill injection)
 - AI-assisted Markdown vault import (upload → analyse → review → apply)
 - 3D knowledge graph (Sigma.js + Graphology) with hierarchical layout
 - Auto-managed campaign index (per-world TOC, bidirectional backlinks)
@@ -148,16 +147,14 @@ DATA_DIR=./.data
 ADMIN_TOKEN=replace-with-a-long-random-string
 PLAYER_TOKEN=replace-with-a-long-random-string
 
-# AI features (optional — enables /api/chat and the import-analyse pipeline)
-# ANTHROPIC_API_KEY=
+# AI import (optional — enables Smart Import and PDF character import)
 # OPENAI_API_KEY=
 ```
 
 **Notes:**
 - `ADMIN_TOKEN` and `PLAYER_TOKEN` are required. The server will refuse to start without them.
 - On first boot the server auto-creates the SQLite database, runs all migrations, seeds default templates, and creates a default admin user.
-- AI keys are optional. Without them the chat and AI-import features are disabled; everything else works normally.
-- The default AI provider is OpenAI (`gpt-4o-mini`). Anthropic is supported but optional.
+- `OPENAI_API_KEY` is optional. Without it the AI import features are disabled; everything else works normally. There is no in-app AI chat; players use Claude through an MCP connector.
 - In production (Railway/Docker) set these as environment variables — never commit `.env.local`.
 
 ---
@@ -195,7 +192,7 @@ Bun workspaces: `shared` and `server`. The `scripts/` folder holds one-off utili
 │       │   ├── campaign-index.ts
 │       │   ├── graph.ts
 │       │   ├── import-*.ts # Parse / analyse / apply pipeline
-│       │   └── ai/         # Orchestrator, tools, per-kind skill prompts
+│       │   └── ai/         # OpenAI client, import skills, tools (unreferenced until the MCP connector)
 │       ├── collab/         # Hocuspocus server (web rich-text collab)
 │       └── middleware.ts
 │
@@ -224,7 +221,7 @@ Bun workspaces: `shared` and `server`. The `scripts/` folder holds one-off utili
 | `bun run server.ts` | Dev server with HMR on port 3000 |
 | `bun run build` | Next.js production build |
 | `bun run start` | Start compiled Next.js output |
-| `bun test` | Run unit tests (`bun:test`, real in-memory SQLite) |
+| `bun run test` | Run unit tests (`bun:test`, real in-memory SQLite), memory-gated; `test:changed` runs only tests affected by your diff |
 
 ### Adding a database migration
 
@@ -255,7 +252,7 @@ Key tables: `notes`, `users`, `groups`, `group_members`, `characters`, `session_
 4. Set environment variables:
    - `ADMIN_TOKEN` — generate with `openssl rand -hex 32`
    - `PLAYER_TOKEN` — generate with `openssl rand -hex 32`
-   - `OPENAI_API_KEY` — optional, for AI features
+   - `OPENAI_API_KEY` — optional, for AI import
    - `DATA_DIR=/data`
 5. Deploy. Health check at `GET /api/health`.
 
@@ -294,7 +291,7 @@ The Dockerfile is a three-stage build:
 | Editor | Tiptap + ProseMirror |
 | Knowledge graph | Sigma.js (WebGL) + Graphology |
 | Drawings | Excalidraw |
-| AI | Vercel AI SDK v6, `@ai-sdk/openai` (default `gpt-4o-mini`) |
+| AI | OpenAI via `lib/ai/openai.ts` for import (model from `OPENAI_MODEL`, default `gpt-5-mini`) |
 | Auth | Argon2 (passwords), custom Bearer tokens, HTTP-only session cookies |
 | Styling | Tailwind CSS 4, Lucide React |
 | Language | TypeScript 5.6 (strict) |
@@ -318,7 +315,7 @@ Two independent layers.
 ### Bearer token (legacy / admin scripts)
 
 - `Authorization: Bearer <token>` or `?token=<token>` query parameter.
-- Two roles: `admin` (full access, AI chat) and `player` (read-write notes).
+- Two roles: `admin` (full access) and `player` (read-write notes).
 - Tokens come from `ADMIN_TOKEN` / `PLAYER_TOKEN` env vars or the `config` SQLite table. Compared with a timing-safe function.
 
 ---
@@ -334,7 +331,7 @@ All routes live under `/api/`. ~70 endpoints; grouped:
 | Notes | `GET /api/notes/[...path]`, `POST /api/notes/create`, `DELETE /api/notes/[...path]`, `POST /api/notes/move`, `POST /api/notes/duplicate`, `POST /api/notes/visibility`, `POST /api/notes/sheet` |
 | Search | `GET /api/ui/search` |
 | Templates | `GET /api/templates`, `GET /api/templates/[kind]` |
-| Worlds (groups) | `GET /api/worlds`, `POST /api/worlds`, `GET /api/worlds/active`, `PATCH /api/worlds/[id]`, `POST /api/worlds/[id]/invite`, `POST /api/worlds/[id]/transfer`, `GET /api/worlds/[id]/members`, `GET /api/worlds/[id]/personalities` |
+| Worlds (groups) | `GET /api/worlds`, `POST /api/worlds`, `GET /api/worlds/active`, `PATCH /api/worlds/[id]`, `POST /api/worlds/[id]/invite`, `POST /api/worlds/[id]/transfer`, `GET /api/worlds/[id]/members` |
 | Campaigns | `POST /api/campaigns/reorder`, `DELETE /api/campaigns/delete`, `POST /api/worlds/[id]/campaigns/[slug]/join` |
 | Folders | `POST /api/folders/create`, `POST /api/folders/move`, `DELETE /api/folders/delete` |
 | Tree | `GET /api/tree` |
@@ -345,6 +342,5 @@ All routes live under `/api/`. ~70 endpoints; grouped:
 | Backlinks | `POST /api/notes/backlink` |
 | Graph | `GET /api/graph`, `GET /api/graph/neighborhood/[...path]` |
 | Import (AI) | `POST /api/import`, `POST /api/import/[id]/analyse`, `POST /api/import/[id]/apply`, `POST /api/import/[id]/orchestrate` |
-| AI Chat | `POST /api/chat` (streaming, Vercel AI SDK), `POST /api/chat/upload` |
 | UI state | `POST /api/ui/gm-mode` |
 | Admin | `POST /api/admin/login`, `POST /api/admin/vault/upload` |

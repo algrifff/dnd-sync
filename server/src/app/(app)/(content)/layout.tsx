@@ -6,7 +6,7 @@
 // because each page re-rendered its own copy of these components.
 //
 // Settings has its own parallel layout (`../settings/layout.tsx`)
-// because its UX is different enough — no ChatPane, no right panel,
+// because its UX is different enough — no right panel,
 // and a settings-tab strip instead of the main content area. Crossing
 // into settings does re-mount the shell, but that navigation is rare.
 //

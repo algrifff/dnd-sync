@@ -1,4 +1,6 @@
 <wizard-report>
+
+> Historical record of the original PostHog setup. The in-app chat it instruments (`ChatPane`, `HomeChat`, `/api/chat`) has since been removed, so the `ai_*` and `session_review_submitted` events no longer fire.
 # PostHog post-wizard report
 
 The wizard has completed a deep integration of PostHog into Compendium, covering both product analytics and LLM analytics. Here's a summary of all changes made:

@@ -76,10 +76,25 @@ function bodyOf(path: string): string {
     .get(groupId, path)!.content_json;
 }
 
+function titleOf(path: string): string {
+  return getDb()
+    .query<{ title: string }, [string, string]>('SELECT title FROM notes WHERE group_id = ? AND path = ?')
+    .get(groupId, path)!.title;
+}
+
 function snapshot(): Array<{ path: string; content_json: string }> {
   return getDb()
     .query<{ path: string; content_json: string }, [string]>('SELECT path, content_json FROM notes WHERE group_id = ? ORDER BY path')
     .all(groupId);
+}
+
+type Stored = { generatedAt: number; mentions: Array<{ id: string; name: string }> };
+
+/** Submits as `as` and returns the stored proposal, as a client would see it. */
+async function submitOk(as: Session, body: unknown): Promise<Stored> {
+  const res = await submit(post(url(''), as, body));
+  if (res.status !== 201) throw new Error(`submit failed: ${res.status}`);
+  return ((await res.json()) as { proposal: Stored }).proposal;
 }
 
 const proposal = (sessionPath = SESSION) => ({
@@ -112,12 +127,12 @@ describe('Wrap-up routes require a session and a CSRF token', () => {
     expect((await getPending(get(url(''), null))).status).toBe(401);
     expect((await getContext(get(url('/context'), null))).status).toBe(401);
     expect((await submit(post(url(''), null, proposal()))).status).toBe(401);
-    expect((await apply(post(url('/apply'), null, { sessionPath: SESSION, accepted: [] }))).status).toBe(401);
+    expect((await apply(post(url('/apply'), null, { sessionPath: SESSION, generatedAt: 1, accepted: [] }))).status).toBe(401);
   });
 
   it('rejects a mutation without the CSRF token', async () => {
     expect((await submit(post(url(''), player, proposal(), false))).status).toBe(403);
-    expect((await apply(post(url('/apply'), player, { sessionPath: SESSION, accepted: [] }, false))).status).toBe(403);
+    expect((await apply(post(url('/apply'), player, { sessionPath: SESSION, generatedAt: 1, accepted: [] }, false))).status).toBe(403);
   });
 });
 
@@ -131,7 +146,9 @@ describe('POST /api/sessions/wrap-up', () => {
 
     expect(res.status).toBe(201);
     const { proposal: stored } = (await res.json()) as { proposal: { mentions: Array<{ id: string }> } };
-    expect(stored.mentions.map((m) => m.id)).toEqual(['m1', 'm2']);
+    const ids = stored.mentions.map((m) => m.id);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids.every((id) => !/^m\d+$/.test(id))).toBe(true);
   });
 
   it('rejects a malformed proposal with a snake_case error and the first problem', async () => {
@@ -201,6 +218,26 @@ describe('GET /api/sessions/wrap-up', () => {
     expect(forCoGm.existingTitles).toEqual({ [SPY]: 'The Spy', [BRAM]: 'Bram' });
   });
 
+  it('echoes the proposal generatedAt, which apply requires back', async () => {
+    const stored = await submitOk(player, proposal());
+
+    const fetched = (await (await getPending(get(url(''), otherPlayer))).json()) as { proposal: Stored };
+
+    expect(fetched.proposal.generatedAt).toBe(stored.generatedAt);
+  });
+
+  it('shows a Player ids with no gaps where a Secret Note was dropped from the middle', async () => {
+    const stored = await submitOk(coGm, {
+      sessionPath: SESSION,
+      mentions: [proposal().mentions[0], { name: 'the spy', kind: 'person', match: { type: 'existing', path: SPY, certain: true }, historyEntry: 'Watched.' }, proposal().mentions[1]],
+    });
+
+    const forPlayer = (await (await getPending(get(url(''), otherPlayer))).json()) as { proposal: Stored };
+
+    expect(forPlayer.proposal.mentions.map((m) => m.id)).toEqual([stored.mentions[0]!.id, stored.mentions[2]!.id]);
+    expect(forPlayer.proposal.mentions.map((m) => m.id).every((id) => !/^m\d+$/.test(id))).toBe(true);
+  });
+
   it('answers 404 for a Secret Session a Player cannot see', async () => {
     const res = await getPending(get(`http://localhost/api/sessions/wrap-up?sessionPath=${encodeURIComponent(SECRET_SESSION)}`, player));
 
@@ -231,17 +268,19 @@ describe('GET /api/sessions/wrap-up/context', () => {
 
 describe('POST /api/sessions/wrap-up/apply', () => {
   it('has a Player apply the ticked mentions, which closes the Session, and a second apply changes nothing', async () => {
-    await submit(post(url(''), player, proposal()));
+    const stored = await submitOk(player, proposal());
+    const body = { sessionPath: SESSION, generatedAt: stored.generatedAt, accepted: stored.mentions.map((m) => m.id) };
 
-    const first = await apply(post(url('/apply'), otherPlayer, { sessionPath: SESSION, accepted: ['m1', 'm2'] }));
+    const first = await apply(post(url('/apply'), otherPlayer, body));
     const afterFirst = snapshot();
-    const second = await apply(post(url('/apply'), otherPlayer, { sessionPath: SESSION, accepted: ['m1', 'm2'] }));
+    const second = await apply(post(url('/apply'), otherPlayer, body));
 
     expect(first.status).toBe(200);
     expect(((await first.json()) as { applied: unknown[] }).applied).toHaveLength(2);
     expect(getSessionStatus(groupId, SESSION)).toBe('closed');
     expect(bodyOf(BRAM)).toContain('Gave the party the Rusted Key.');
     expect(bodyOf('Campaigns/Ashfall/Loot/rusted-key.md')).toContain('Handed over by Bram.');
+    expect(titleOf('Campaigns/Ashfall/Loot/rusted-key.md')).toBe('Rusted Key');
     expect(bodyOf(SESSION)).toContain('"type":"wikilink"');
     expect(second.status).toBe(409);
     expect(await second.json()).toEqual({ error: 'no_pending_proposal' });
@@ -262,24 +301,50 @@ describe('POST /api/sessions/wrap-up/apply', () => {
   });
 
   it('answers 409 when there is no pending proposal', async () => {
-    const res = await apply(post(url('/apply'), coGm, { sessionPath: EMPTY_SESSION, accepted: [] }));
+    const res = await apply(post(url('/apply'), coGm, { sessionPath: EMPTY_SESSION, generatedAt: 1, accepted: [] }));
 
     expect(res.status).toBe(409);
     expect(getSessionStatus(groupId, EMPTY_SESSION)).toBe('open');
   });
 
   it('answers 404 to a Player applying on a Secret Session', async () => {
-    await submit(post(url(''), coGm, proposal(SECRET_SESSION)));
+    const stored = await submitOk(coGm, proposal(SECRET_SESSION));
 
-    const res = await apply(post(url('/apply'), player, { sessionPath: SECRET_SESSION, accepted: ['m1'] }));
+    const res = await apply(post(url('/apply'), player, { sessionPath: SECRET_SESSION, generatedAt: stored.generatedAt, accepted: [stored.mentions[0]!.id] }));
 
     expect(res.status).toBe(404);
     expect(getSessionStatus(groupId, SECRET_SESSION)).toBe('open');
   });
 
-  it('rejects a body with no accepted list', async () => {
-    const res = await apply(post(url('/apply'), player, { sessionPath: SESSION }));
+  it('rejects a body with no accepted list, or with no generatedAt', async () => {
+    const stored = await submitOk(player, proposal(EMPTY_SESSION));
 
-    expect(res.status).toBe(400);
+    const noList = await apply(post(url('/apply'), player, { sessionPath: EMPTY_SESSION, generatedAt: stored.generatedAt }));
+    const noStamp = await apply(post(url('/apply'), player, { sessionPath: EMPTY_SESSION, accepted: [] }));
+
+    expect(noList.status).toBe(400);
+    expect(noStamp.status).toBe(400);
+  });
+
+  it('answers 409 proposal_changed and writes nothing when the proposal was resubmitted after the closer fetched it', async () => {
+    const reviewed = await submitOk(player, proposal(EMPTY_SESSION));
+    await new Promise((r) => setTimeout(r, 2));
+    const resubmitted = await submitOk(otherPlayer, proposal(EMPTY_SESSION));
+    const before = snapshot();
+
+    const stale = await apply(post(url('/apply'), player, {
+      sessionPath: EMPTY_SESSION, generatedAt: reviewed.generatedAt, accepted: reviewed.mentions.map((m) => m.id),
+    }));
+
+    expect(resubmitted.generatedAt).not.toBe(reviewed.generatedAt);
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({ error: 'proposal_changed' });
+    expect(snapshot()).toEqual(before);
+    expect(getSessionStatus(groupId, EMPTY_SESSION)).toBe('open');
+
+    const fresh = await apply(post(url('/apply'), player, {
+      sessionPath: EMPTY_SESSION, generatedAt: resubmitted.generatedAt, accepted: [],
+    }));
+    expect(fresh.status).toBe(200);
   });
 });

@@ -80,18 +80,3 @@ export const EmailVerifyConsumeSchema = z.object({
   token: z.string().length(64).regex(/^[a-f0-9]+$/),
 });
 export type EmailVerifyConsume = z.infer<typeof EmailVerifyConsumeSchema>;
-
-// ── Chat ─────────────────────────────────────────────────────────────────────
-
-export const ChatMessageSchema = z.object({
-  role: z.enum(['user', 'assistant', 'system']),
-  content: z.string(),
-  timestamp: z.number().int(),
-});
-export type ChatMessage = z.infer<typeof ChatMessageSchema>;
-
-export const ChatRequestSchema = z.object({
-  messages: z.array(ChatMessageSchema).min(1),
-  sessionId: z.string().uuid().optional(),
-});
-export type ChatRequest = z.infer<typeof ChatRequestSchema>;

@@ -1,22 +1,25 @@
 // POST   /api/notes/backlink — create a manual backlink edge.
-// DELETE /api/notes/backlink — remove a manual backlink edge.
+// DELETE /api/notes/backlink — remove a backlink edge.
 //
-// Both operate only on the note_links table (is_manual = 1) and never
-// touch note content. This avoids corrupting the Y.Doc / title field
+// Both operate only on the note_links table and never touch note
+// content. This avoids corrupting the Y.Doc / title field
 // which lives only in yjs_state and is NOT reflected in content_json.
 //
 // Body: { fromPath, toPath }
 //
 // POST:   INSERT OR IGNORE into note_links with is_manual=1. Idempotent.
-// DELETE: DELETE WHERE is_manual=1. Body-derived links (is_manual=0) are
-//         managed exclusively by derive.ts; the UI hides × on those.
+// DELETE: removes the edge whether manual or body-derived; the backlink
+//         and outgoing-link panels offer × on both kinds.
+//
+// Viewers get 403. A note hidden from the caller by visibilityFor() gets
+// the same 404 as a missing one, so neither verb discloses it exists.
 
 import { z } from 'zod';
 import type { NextRequest } from 'next/server';
-import { requireSession } from '@/lib/session';
+import { requireSession, type Session } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
-import { loadNote } from '@/lib/notes';
+import { loadNote, visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +33,9 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (session instanceof Response) return session;
   const csrf = verifyCsrf(req, session);
   if (csrf) return csrf;
+  if (session.role === 'viewer') {
+    return json({ error: 'forbidden', reason: 'viewers cannot edit links' }, 403);
+  }
 
   let body: z.infer<typeof Body>;
   try {
@@ -45,8 +51,8 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (fromPath === toPath) return json({ error: 'self_link' }, 400);
 
   // Verify both notes exist in this group.
-  if (!loadNote(session.currentGroupId, fromPath)) return json({ error: 'from_not_found' }, 404);
-  if (!loadNote(session.currentGroupId, toPath)) return json({ error: 'to_not_found' }, 404);
+  if (!isVisible(session, fromPath)) return json({ error: 'from_not_found' }, 404);
+  if (!isVisible(session, toPath)) return json({ error: 'to_not_found' }, 404);
 
   getDb()
     .query(
@@ -63,6 +69,9 @@ export async function DELETE(req: NextRequest): Promise<Response> {
   if (session instanceof Response) return session;
   const csrf = verifyCsrf(req, session);
   if (csrf) return csrf;
+  if (session.role === 'viewer') {
+    return json({ error: 'forbidden', reason: 'viewers cannot edit links' }, 403);
+  }
 
   let body: z.infer<typeof Body>;
   try {
@@ -75,6 +84,8 @@ export async function DELETE(req: NextRequest): Promise<Response> {
   }
 
   const { fromPath, toPath } = body;
+  if (!isVisible(session, fromPath)) return json({ error: 'from_not_found' }, 404);
+  if (!isVisible(session, toPath)) return json({ error: 'to_not_found' }, 404);
 
   // Removes both manual and body-derived links. Body-derived links will
   // be re-created on the next save of the source note if the [[wikilink]]
@@ -88,6 +99,13 @@ export async function DELETE(req: NextRequest): Promise<Response> {
     .run(session.currentGroupId, fromPath, toPath);
 
   return json({ ok: true });
+}
+
+function isVisible(session: Session, path: string): boolean {
+  const note = loadNote(session.currentGroupId, path);
+  if (!note) return false;
+  const vis = visibilityFor(session.role);
+  return !((note.gm_only === 1 && vis.hideGmOnly) || (note.dm_only === 1 && vis.hideDmOnly));
 }
 
 function json(body: unknown, status = 200): Response {

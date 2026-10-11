@@ -86,7 +86,18 @@ export function acceptedCount(state: ReviewState): number {
   return n;
 }
 
-/** The body for /api/sessions/wrap-up/apply. */
+/** The body for /api/sessions/wrap-up/apply. `generatedAt` names the
+ *  proposal the closer reviewed; the server refuses it if the pending
+ *  proposal has since been replaced. */
+export function applyRequestBody(
+  sessionPath: string,
+  proposal: WrapUpProposal,
+  state: ReviewState,
+): { sessionPath: string; generatedAt: number; accepted: string[]; asNew: string[] } {
+  return { sessionPath, generatedAt: proposal.generatedAt, ...toDecisions(state) };
+}
+
+/** The decisions half of the apply body. */
 export function toDecisions(state: ReviewState): { accepted: string[]; asNew: string[] } {
   const accepted: string[] = [];
   const asNew: string[] = [];
