@@ -37,7 +37,8 @@ export const MAX_RESULT_CHARS = 24_000;
 const MAX_BODY_CHARS = 20_000;
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 100;
-const MAX_SEARCH = 50;
+// searchWorld never returns more than 12 title + 8 body hits.
+const MAX_SEARCH = 20;
 
 function define<Shape extends z.ZodRawShape>(def: ToolDef<Shape>): ToolDef<Shape> {
   return def;
@@ -47,9 +48,14 @@ function notFound(path: string): ToolResult {
   return { text: `Note not found: ${path}`, isError: true };
 }
 
-function bounded(text: string): string {
+/** Cut an oversized result at a line boundary, keeping a trailing
+ *  `next_cursor:` line so the caller can still page on. */
+export function bounded(text: string): string {
   if (text.length <= MAX_RESULT_CHARS) return text;
-  return text.slice(0, MAX_RESULT_CHARS) + '\n\n[truncated]';
+  const cursor = text.match(/\n\nnext_cursor: [^\n]*$/)?.[0] ?? '';
+  const room = MAX_RESULT_CHARS - cursor.length;
+  const cut = text.lastIndexOf('\n', room);
+  return text.slice(0, cut > 0 ? cut : room) + '\n\n[truncated]' + cursor;
 }
 
 function visibilitySql(role: UserRole, col = ''): string {

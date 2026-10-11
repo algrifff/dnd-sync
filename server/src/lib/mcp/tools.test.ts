@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { getDb } from '../db';
 import { setupTestDb, teardownTestDb } from '../test-utils';
 import { DEFAULT_GROUP_ID } from '../users';
-import { MCP_TOOLS, runTool, type McpContext } from './tools';
+import { bounded, MCP_TOOLS, runTool, type McpContext } from './tools';
 
 const viewer: McpContext = { groupId: DEFAULT_GROUP_ID, role: 'viewer' };
 const editor: McpContext = { groupId: DEFAULT_GROUP_ID, role: 'editor' };
@@ -201,5 +201,19 @@ describe('note_neighbors', () => {
     const asEditor = runTool('note_neighbors', editor, { path: PUBLIC }).text;
     expect(asEditor).toContain('Xanathar');
     expect(asEditor).not.toContain('Owner Plans');
+  });
+});
+
+describe('bounded', () => {
+  it('cuts at a line boundary and keeps the next_cursor line', () => {
+    const lines = Array.from({ length: 2000 }, (_, i) => `- Campaigns/X/Note ${i}.md — Note ${i}`);
+    const text = lines.join('\n') + '\n\nnext_cursor: Campaigns/X/Note 1999.md';
+
+    const out = bounded(text);
+
+    expect(out.length).toBeLessThanOrEqual(24_100);
+    expect(out).toContain('[truncated]');
+    expect(out.endsWith('next_cursor: Campaigns/X/Note 1999.md')).toBe(true);
+    expect(out.split('\n').filter((l) => l.startsWith('- ')).every((l) => /Note \d+\.md — Note \d+$/.test(l))).toBe(true);
   });
 });
