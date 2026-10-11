@@ -110,6 +110,11 @@ const config: NextConfig = {
     'sigma',
     'graphology',
     'graphology-layout-forceatlas2',
+
+    // MCP SDK — pulls in its own zod and a long tail of optional
+    // server adapters (express, hono); load it from node_modules so
+    // the route chunk doesn't bundle any of that.
+    '@modelcontextprotocol/sdk',
   ],
   webpack: (cfg) => {
     cfg.externals = cfg.externals ?? [];
