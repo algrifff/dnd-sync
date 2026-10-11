@@ -5,6 +5,7 @@
 // so a wildcard CORS policy exposes nothing: every call is either
 // public metadata or authenticated by a bearer token the caller holds.
 
+import { SCOPE } from './oauth';
 import { publicUrls } from './public-url';
 
 const CORS = {
@@ -36,10 +37,12 @@ export function oauthError(error: string, description: string, status = 400): Re
   return jsonNoStore({ error, error_description: description }, status);
 }
 
-/** The 401 that starts Claude's sign-in flow (RFC 9728 §5.1). */
+/** The 401 that starts Claude's sign-in flow (RFC 9728 §5.1). The
+ *  scope parameter is what Claude requests at the authorization
+ *  endpoint (MCP authorization spec, "Scope Selection Strategy"). */
 export function unauthorizedBearer(headers: Headers, description?: string): Response {
   const urls = publicUrls(headers);
-  const params = [`resource_metadata="${urls.protectedResourceMetadata}"`];
+  const params = [`resource_metadata="${urls.protectedResourceMetadata}"`, `scope="${SCOPE}"`];
   if (description) params.push('error="invalid_token"', `error_description="${description}"`);
   return jsonNoStore({ error: 'unauthorized' }, 401, { 'WWW-Authenticate': `Bearer ${params.join(', ')}` });
 }

@@ -9,6 +9,7 @@ import {
   CODE_TTL_MS,
   issueCode,
   listGrantsForUser,
+  pruneExpiredOauthRows,
   redeemCode,
   redirectUriAllowed,
   refreshTokens,
@@ -226,6 +227,26 @@ describe('revocation', () => {
     expect(authenticateAccessToken(tokens.access_token, RESOURCE)).not.toBeNull();
     expect(revokeGrantForUser(userId, grant!.id)).toBe(true);
     expect(authenticateAccessToken(tokens.access_token, RESOURCE)).toBeNull();
+  });
+});
+
+describe('pruning', () => {
+  it('drops a grant once its last token has expired, and a day-old DCR client that never reached consent', () => {
+    const { verifier, challenge } = pkce();
+    mustRedeem(grantCode({ challenge }), verifier);
+    const live = listGrantsForUser(userId);
+    expect(live).toHaveLength(1);
+    const stale = registerClient({ clientName: 'abandoned', redirectUris: [REDIRECT] });
+    getDb().query("UPDATE oauth_clients SET created_at = ? WHERE client_id = ?").run(Date.now() - 2 * 24 * 60 * 60_000, stale.clientId);
+
+    pruneExpiredOauthRows();
+    expect(listGrantsForUser(userId)).toHaveLength(1);
+    expect(getDb().query('SELECT 1 FROM oauth_clients WHERE client_id = ?').get(stale.clientId)).toBeFalsy();
+    expect(getDb().query('SELECT 1 FROM oauth_clients WHERE client_id = ?').get(client.clientId)).toBeTruthy();
+
+    getDb().query('UPDATE oauth_tokens SET expires_at = ?').run(Date.now() - 1);
+    pruneExpiredOauthRows();
+    expect(listGrantsForUser(userId)).toHaveLength(0);
   });
 });
 

@@ -463,10 +463,25 @@ export function revokeGrantForUser(userId: string, grantId: string): boolean {
   return Number(res.changes) > 0;
 }
 
-/** Drop expired codes and tokens. Called from boot. */
+const STALE_CLIENT_MS = 24 * 60 * 60_000;
+
+/** Drop expired codes and tokens, then what they leave behind: a grant
+ *  whose last refresh token expired can never be used again, so it
+ *  leaves the Connected apps list; and a DCR client that never reached
+ *  consent (Claude registers afresh on every connection attempt) is
+ *  dropped after a day. Called from boot and hourly. */
 export function pruneExpiredOauthRows(): void {
   const now = Date.now();
   const db = getDb();
   db.query('DELETE FROM oauth_codes WHERE expires_at <= ?').run(now);
   db.query('DELETE FROM oauth_tokens WHERE expires_at <= ?').run(now);
+  db.query(
+    'DELETE FROM oauth_grants WHERE NOT EXISTS (SELECT 1 FROM oauth_tokens t WHERE t.grant_id = oauth_grants.id)',
+  ).run();
+  db.query(
+    `DELETE FROM oauth_clients
+      WHERE kind = 'dcr' AND created_at <= ?
+        AND NOT EXISTS (SELECT 1 FROM oauth_grants g WHERE g.client_id = oauth_clients.client_id)
+        AND NOT EXISTS (SELECT 1 FROM oauth_codes c WHERE c.client_id = oauth_clients.client_id)`,
+  ).run(now - STALE_CLIENT_MS);
 }
