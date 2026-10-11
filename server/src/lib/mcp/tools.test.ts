@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { getDb } from '../db';
 import { setupTestDb, teardownTestDb } from '../test-utils';
 import { DEFAULT_GROUP_ID } from '../users';
+import { addRelation } from '../relations';
 import { loadPendingWrapUp } from '../wrap-up';
 import { bounded, MCP_TOOLS, runTool, type McpContext } from './tools';
 
@@ -319,5 +320,143 @@ describe('submit_wrap_up suggestions', () => {
 
     expect(r.isError).toBe(true);
     expect(r.text).toContain('not a Character');
+  });
+});
+
+describe('Relationships in read_note and note_neighbors', () => {
+  const ZHENT = 'Campaigns/Dragon Heist/Lore/Zhentarim.md';
+  const STONE = 'Campaigns/Dragon Heist/Items/Stone of Golorr.md';
+
+  beforeAll(() => {
+    seedNote({ path: ZHENT, body: 'A black network.', kind: 'lore' });
+    const base = { groupId: DEFAULT_GROUP_ID, sessionPath: null, userId: null };
+    addRelation({ ...base, from: PUBLIC, relation: 'member_of', to: ZHENT });
+    addRelation({ ...base, from: PUBLIC, relation: 'works_for', to: SECRET });
+    addRelation({ ...base, from: PUBLIC, relation: 'related_to', to: PRIVATE });
+  });
+
+  it('read_note lists a Relationship from each end, read from that note\'s side', () => {
+    expect(runTool('read_note', viewer, { path: PUBLIC }).text).toContain(`relationships:\n- member of: Zhentarim (${ZHENT})`);
+    expect(runTool('read_note', viewer, { path: ZHENT }).text).toContain(`relationships:\n- has member: Volo (${PUBLIC})`);
+  });
+
+  it('read_note says (none) for a note with no Relationships', () => {
+    expect(runTool('read_note', viewer, { path: STONE }).text).toContain('relationships:\n(none)');
+  });
+
+  it('read_note shows a Relationship to a Secret note to a Co-GM only, and to a Private note to the owner only', () => {
+    const asViewer = runTool('read_note', viewer, { path: PUBLIC }).text;
+    expect(asViewer).not.toContain('works for');
+    expect(asViewer).not.toContain('Xanathar');
+    expect(asViewer).not.toContain('related to');
+    expect(asViewer).not.toContain('Owner Plans');
+
+    const asEditor = runTool('read_note', editor, { path: PUBLIC }).text;
+    expect(asEditor).toContain(`- works for: Xanathar (${SECRET})`);
+    expect(asEditor).not.toContain('Owner Plans');
+
+    expect(runTool('read_note', admin, { path: PUBLIC }).text).toContain(`- related to: Owner Plans (${PRIVATE})`);
+  });
+
+  it('note_neighbors labels a typed link with its type and leaves an untyped link alone', () => {
+    const r = runTool('note_neighbors', editor, { path: PUBLIC }).text;
+
+    expect(r).toContain(`- ${PUBLIC} -> ${ZHENT} [member of]`);
+    expect(r).toContain(`- ${PUBLIC} -> ${SECRET} [works for]`);
+    expect(r).toContain(`- ${SECRET} -> ${PUBLIC} [employs]`);
+    expect(r.split('\n')).toContain(`- ${PUBLIC} -> ${STONE}`);
+  });
+
+  it('note_neighbors never labels a link to a note the caller cannot see', () => {
+    const asViewer = runTool('note_neighbors', viewer, { path: PUBLIC }).text;
+
+    expect(asViewer).toContain('[member of]');
+    expect(asViewer).not.toContain('works for');
+    expect(asViewer).not.toContain('Xanathar');
+    expect(asViewer).not.toContain('Owner Plans');
+  });
+
+  it('note_neighbors filters to one type and the notes it reaches', () => {
+    const r = runTool('note_neighbors', editor, { path: PUBLIC, relation: 'works_for' }).text;
+
+    expect(r).toContain(`- ${PUBLIC} -> ${SECRET} [works for]`);
+    expect(r).not.toContain('Zhentarim');
+    expect(r).not.toContain('Stone of Golorr');
+    expect(r).toContain('## Notes (1)');
+  });
+
+  it('note_neighbors matches a type from either end', () => {
+    const fromTheGroup = runTool('note_neighbors', viewer, { path: ZHENT, relation: 'member_of' }).text;
+    const fromTheEmployer = runTool('note_neighbors', editor, { path: SECRET, relation: 'works_for' }).text;
+
+    expect(fromTheGroup).toContain(`- ${PUBLIC} -> ${ZHENT} [member of]`);
+    expect(fromTheEmployer).toContain(`- ${SECRET} -> ${PUBLIC} [employs]`);
+  });
+
+  it('note_neighbors with a type nothing uses is empty, and an unknown type is refused', () => {
+    expect(runTool('note_neighbors', editor, { path: PUBLIC, relation: 'owns' }).text).toContain('(no linked notes)');
+    expect(runTool('note_neighbors', editor, { path: PUBLIC, relation: 'friends_with' }).isError).toBe(true);
+  });
+});
+
+describe('read_note shares tags with', () => {
+  const dir = 'Campaigns/Dragon Heist/Tag Test';
+  const HUB = `${dir}/Hub.md`;
+  const tag = (path: string, tags: string[], groupId = DEFAULT_GROUP_ID): void => {
+    for (const t of tags) getDb().query('INSERT INTO tags (group_id, path, tag) VALUES (?, ?, ?)').run(groupId, path, t);
+  };
+
+  beforeAll(() => {
+    for (const [name, tags, flags] of [
+      ['Hub', ['a', 'b', 'c'], {}],
+      ['Three', ['a', 'b', 'c'], {}],
+      ['Two', ['a', 'b'], {}],
+      ['One', ['c'], {}],
+      ['Unrelated', ['zzz'], {}],
+      ['Secret Twin', ['a', 'b', 'c'], { dmOnly: true }],
+      ['Private Twin', ['a', 'b', 'c'], { gmOnly: true }],
+    ] as const) {
+      seedNote({ path: `${dir}/${name}.md`, body: name, ...flags });
+      tag(`${dir}/${name}.md`, [...tags]);
+    }
+    getDb().query('INSERT INTO groups (id, name, created_at) VALUES (?, ?, ?)').run('tag-other-world', 'Other', Date.now());
+    seedNote({ path: HUB, body: 'x', groupId: 'tag-other-world' });
+    tag(HUB, ['a'], 'tag-other-world');
+    for (let i = 0; i < 12; i++) {
+      seedNote({ path: `${dir}/Bulk ${i}.md`, body: 'b' });
+      tag(`${dir}/Bulk ${i}.md`, ['bulk']);
+    }
+    tag(HUB, ['bulk']);
+  });
+
+  const section = (ctx: McpContext): string[] => {
+    const text = runTool('read_note', ctx, { path: HUB }).text;
+    return text.slice(text.indexOf('shares tags with:')).split('\n').slice(1).filter((l) => l.startsWith('- '));
+  };
+
+  it('lists notes by how many tags they share, never the note itself', () => {
+    const lines = section(viewer);
+
+    expect(lines.slice(0, 2).map((l) => l.split(' (')[0])).toEqual(['- Three', '- Two']);
+    expect(lines.some((l) => l.includes('Hub'))).toBe(false);
+    expect(lines.some((l) => l.includes('Unrelated'))).toBe(false);
+    expect(lines[0]).toContain(`(${dir}/Three.md)`);
+  });
+
+  it('caps the list at 10', () => {
+    expect(section(admin)).toHaveLength(10);
+  });
+
+  it('leaves out Secret notes for a Player and Private notes for a Co-GM', () => {
+    expect(section(viewer).join('\n')).not.toContain('Twin');
+    expect(section(editor).join('\n')).toContain('Secret Twin');
+    expect(section(editor).join('\n')).not.toContain('Private Twin');
+    expect(section(admin).join('\n')).toContain('Private Twin');
+  });
+
+  it('only looks inside the caller\'s world', () => {
+    const asOther = runTool('read_note', { groupId: 'tag-other-world', role: 'admin' }, { path: HUB }).text;
+
+    expect(asOther).toContain('shares tags with:\n(none)');
   });
 });
