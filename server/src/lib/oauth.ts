@@ -18,6 +18,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { getDb } from './db';
+import { createGuardedFetch } from './ssrf';
 import type { UserRole } from './session';
 
 export const SCOPE = 'notes:read';
@@ -26,6 +27,53 @@ export const ACCESS_TTL_MS = 60 * 60_000;
 export const REFRESH_TTL_MS = 30 * 24 * 60 * 60_000;
 const CIMD_CACHE_MS = 60 * 60_000;
 const CIMD_FETCH_TIMEOUT_MS = 5_000;
+const CIMD_MAX_BYTES = 64 * 1024;
+const CIMD_FAILURE_TTL_MS = 60_000;
+const CIMD_UNUSED_MS = 30 * 24 * 60 * 60_000;
+
+// Recently failed CIMD urls, so the authorize page cannot be used to make
+// the server hammer an arbitrary host. Bounded by the sweep below.
+const cimdFailures = new Map<string, number>();
+
+function recentlyFailed(url: string, now: number): boolean {
+  const at = cimdFailures.get(url);
+  if (at === undefined) return false;
+  if (now - at < CIMD_FAILURE_TTL_MS) return true;
+  cimdFailures.delete(url);
+  return false;
+}
+
+function noteFailure(url: string, now: number): void {
+  if (cimdFailures.size >= 1000) {
+    for (const [u, at] of cimdFailures) if (now - at >= CIMD_FAILURE_TTL_MS) cimdFailures.delete(u);
+    if (cimdFailures.size >= 1000) cimdFailures.clear();
+  }
+  cimdFailures.set(url, now);
+}
+
+async function readCappedJson(res: Response): Promise<unknown> {
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('empty body');
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > CIMD_MAX_BYTES) {
+      await reader.cancel();
+      throw new Error('client metadata document too large');
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    bytes.set(c, off);
+    off += c.byteLength;
+  }
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
 
 export type OAuthClient = {
   clientId: string;
@@ -196,17 +244,21 @@ export function isCimdClientId(clientId: string): boolean {
 
 export type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 
+// Production fetches refuse hosts that resolve to non-public addresses.
+const defaultFetcher: Fetcher = createGuardedFetch();
+
 /** Resolve a client_id to a client: a DCR row, or a CIMD document
  *  fetched (and cached for an hour) from the client_id URL. Null when
  *  unknown, unreachable or malformed. */
 export async function resolveClient(
   clientId: string,
-  fetcher: Fetcher = fetch,
+  fetcher: Fetcher = defaultFetcher,
 ): Promise<OAuthClient | null> {
   const row = loadClientRow(clientId);
   const now = Date.now();
   if (row && (row.kind === 'dcr' || now - row.fetched_at < CIMD_CACHE_MS)) return rowToClient(row);
   if (!isCimdClientId(clientId)) return null;
+  if (recentlyFailed(clientId, now)) return row ? rowToClient(row) : null;
 
   try {
     const res = await fetcher(clientId, {
@@ -214,8 +266,8 @@ export async function resolveClient(
       signal: AbortSignal.timeout(CIMD_FETCH_TIMEOUT_MS),
       redirect: 'error',
     });
-    if (!res.ok) return row ? rowToClient(row) : null;
-    const doc = CimdDocument.parse(await res.json());
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const doc = CimdDocument.parse(await readCappedJson(res));
     if (doc.client_id !== clientId) return null;
     if (!doc.redirect_uris.every(isAcceptableRedirectUri)) return null;
     const client: OAuthClient = {
@@ -227,6 +279,7 @@ export async function resolveClient(
     upsertClient(client, now);
     return client;
   } catch (err) {
+    noteFailure(clientId, now);
     console.error('[oauth] cimd fetch failed', clientId, err instanceof Error ? err.message : err);
     return row ? rowToClient(row) : null;
   }
@@ -480,8 +533,8 @@ export function pruneExpiredOauthRows(): void {
   ).run();
   db.query(
     `DELETE FROM oauth_clients
-      WHERE kind = 'dcr' AND created_at <= ?
+      WHERE ((kind = 'dcr' AND created_at <= ?) OR (kind = 'cimd' AND fetched_at <= ?))
         AND NOT EXISTS (SELECT 1 FROM oauth_grants g WHERE g.client_id = oauth_clients.client_id)
         AND NOT EXISTS (SELECT 1 FROM oauth_codes c WHERE c.client_id = oauth_clients.client_id)`,
-  ).run(now - STALE_CLIENT_MS);
+  ).run(now - STALE_CLIENT_MS, now - CIMD_UNUSED_MS);
 }
