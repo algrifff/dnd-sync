@@ -3,11 +3,13 @@
 // GET  ?sessionPath=…  { proposal, existingTitles }: the pending proposal
 //                      (null when none is waiting for review) and the
 //                      titles of the Notes its existing matches name.
-// POST { sessionPath, mentions }
+// POST { sessionPath, mentions, suggestions? }
 //                      Submit a proposal (a Player's Claude calls this).
 //                      Replaces any earlier pending proposal. Any role
 //                      that can see the Session may submit; a mention
-//                      of a Note the caller cannot see is a 404.
+//                      or Suggestion naming a Note the caller cannot
+//                      see is a 404. Suggestions are { characterPath,
+//                      story, items: [{ name, quantity }] }.
 
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
@@ -69,6 +71,11 @@ export async function POST(req: NextRequest): Promise<Response> {
       case 'invalid_target':
         return json(
           { error: 'invalid_mention_target', reason: `"${result.mention}" must match a Person, Creature, Location, Item, Quest or Lore Note` },
+          400,
+        );
+      case 'invalid_suggestion_target':
+        return json(
+          { error: 'invalid_suggestion_target', reason: `"${result.characterPath}" must be a Character Note` },
           400,
         );
       case 'ok':

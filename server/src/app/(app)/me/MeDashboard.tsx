@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation';
 import { Plus, UserRound } from 'lucide-react';
 import { NewWorldDialog } from '../../NewWorldDialog';
 import { NewCharacterDialog } from './NewCharacterDialog';
+import { SuggestionsPanel } from './SuggestionsPanel';
 import { useWorldSwitch } from '../WorldSwitch';
 import type { WorldRow } from '@/lib/groups';
 import type { UserCharacter } from '@/lib/userCharacters';
@@ -50,6 +51,8 @@ export function MeDashboard({
       </header>
 
       <main className="flex-1 px-8 py-6">
+        <SuggestionsPanel csrfToken={csrfToken} />
+
         <section className="mb-10">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-serif text-lg text-[var(--ink)]">

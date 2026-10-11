@@ -18,3 +18,11 @@ AI mistakes such as duplicate People, misattributed facts or overwritten prose w
 ## Who may apply
 
 Any Player who can see the Session may submit, review and apply its Wrap-up, not only the GM. This follows from Players running Sessions: whoever closes the table's log has the context to check the proposal, and the proposal is add-only, reviewed and cannot touch what the applier cannot see (hidden Notes read as missing, and a created Note is as hidden as its Session). We chose this over a GM-only gate because that gate would leave a Session unwrapped whenever the GM is absent. A stale review cannot overwrite a newer proposal: apply must echo the proposal's `generatedAt` and is refused with `proposal_changed` otherwise.
+
+## Who a Suggestion is for
+
+A Suggestion is addressed to the Character's Player at the moment the Wrap-up is applied (`owner_user_id`). It is not re-addressed if the Character is later reassigned to another Player: it then reads as not found to the old Player (the Character is no longer theirs) and is never shown to the new one. It stays held but unreachable, and re-applying the Wrap-up does not replace it, since there is one Suggestion per (Session, Character).
+
+`/me` lists the current World's Suggestions only. A Player who belongs to several Worlds sees each World's Suggestions after switching to it.
+
+Accepting is all or nothing: the Sheet with the new items is validated before any write, so a Sheet that does not validate leaves the Character, including its History, untouched.

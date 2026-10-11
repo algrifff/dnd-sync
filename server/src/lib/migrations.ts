@@ -1025,6 +1025,33 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX oauth_spent_grant ON oauth_spent(grant_id);
     `,
   },
+  {
+    version: 51,
+    description: "character_suggestions: Wrap-up Suggestions held for a Character's Player",
+    sql: `
+      -- A Suggestion is never applied by the Wrap-up. It waits here for
+      -- the Character's Player (owner_user_id, resolved when the Wrap-up
+      -- was applied) to accept or dismiss it. One row per (Session,
+      -- Character): re-applying a Wrap-up never adds a second one, so
+      -- a resolved Suggestion is never offered again.
+      CREATE TABLE character_suggestions (
+        id             TEXT PRIMARY KEY,
+        group_id       TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        session_path   TEXT NOT NULL,
+        character_path TEXT NOT NULL,
+        owner_user_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        story          TEXT,
+        items_json     TEXT NOT NULL DEFAULT '[]',
+        status         TEXT NOT NULL DEFAULT 'pending'
+                         CHECK (status IN ('pending', 'accepted', 'dismissed')),
+        created_at     INTEGER NOT NULL,
+        resolved_at    INTEGER,
+        UNIQUE (group_id, session_path, character_path)
+      );
+      CREATE INDEX character_suggestions_owner
+        ON character_suggestions(group_id, owner_user_id, status, created_at);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

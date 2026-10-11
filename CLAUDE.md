@@ -57,7 +57,7 @@ globally (`npm i -g bun@1.4.3`) — don't rely on `npx bun`, which resolves the 
 - `server/src/lib/db.ts` switches at runtime: `typeof Bun !== "undefined"`
 - The Dockerfile rebuilds `better-sqlite3` against Node 22's ABI in a separate stage — don't skip this step when changing the Dockerfile
 
-## Data model (48 migrations, versions 1–50 — append only, never edit existing)
+## Data model (49 migrations, versions 1–51 — append only, never edit existing)
 
 Numbering isn't contiguous — a couple of version numbers (21, 22) were
 never shipped, so "latest version" and "migration count" are two
@@ -74,6 +74,7 @@ Key tables:
 | `sessions` | HTTP-only session cookies + CSRF tokens |
 | `characters` | Derived index from note frontmatter — re-derived on every save |
 | `session_notes` | Session status (open → closed) and the pending Wrap-up proposal (`wrap_up_json`) |
+| `character_suggestions` | Wrap-up Suggestions (story + inventory) held for a Character's Player until they accept or dismiss — never applied directly |
 | `import_jobs` | AI import pipeline state — `uploaded` → `orchestrating_assets` → `orchestrating_campaign` → `orchestrating_entities` → `orchestrating_quality` → `applied` on the live Smart Import path (can pause at `waiting_for_answer`); `parsing` → `analysing` → `ready` is the legacy manual-review path, still valid statuses but not driven by the current UI |
 | `assets` | Binary files (images etc.) deduplicated by content hash |
 | `note_links` | Graph edges between notes (backlinks) |

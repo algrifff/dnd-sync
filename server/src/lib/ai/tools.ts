@@ -29,6 +29,7 @@ import { signalSheetChanged } from '@/collab/server';
 import { parseCharacter } from '@/lib/character-parser';
 import { writeNote } from '@/lib/import-apply';
 import { applyNoteEdit, type PmDoc } from '@/lib/note-edits';
+import { repointSuggestionPaths } from '@/lib/suggestion-paths';
 import type { PmNode } from '@/lib/md-to-pm';
 
 // ── Context ────────────────────────────────────────────────────────────
@@ -739,6 +740,9 @@ function entityMove(ctx: ToolContext) {
       if ((conflict?.n ?? 0) > 0) return { ok: false as const, error: `Path exists: ${to}` };
 
       db.transaction(() => {
+        // Derived-index tables hold FKs on notes(group_id, path) with no
+        // ON UPDATE CASCADE; check them at COMMIT, after the rewrites below.
+        db.exec('PRAGMA defer_foreign_keys = 1');
         db.query(`UPDATE notes SET path=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
           .run(to, Date.now(), ctx.userId, ctx.groupId, from);
         for (const tbl of ['note_links', 'tags', 'aliases', 'characters', 'character_campaigns', 'session_notes']) {
@@ -746,6 +750,7 @@ function entityMove(ctx: ToolContext) {
           db.query(`UPDATE ${tbl} SET ${col}=? WHERE group_id=? AND ${col}=?`).run(to, ctx.groupId, from);
         }
         db.query(`UPDATE note_links SET to_path=? WHERE group_id=? AND to_path=?`).run(to, ctx.groupId, from);
+        repointSuggestionPaths(ctx.groupId, from, to);
       })();
 
       void deriveFolderIndexesFor(ctx.groupId, [from, to], {
@@ -833,6 +838,7 @@ function entityChangeKind(ctx: ToolContext) {
 
       db.transaction(() => {
         if (newPath !== path) {
+          db.exec('PRAGMA defer_foreign_keys = 1');
           db.query(`UPDATE notes SET path=?, frontmatter_json=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
             .run(newPath, JSON.stringify(nextFm), Date.now(), ctx.userId, ctx.groupId, path);
           for (const tbl of ['note_links', 'tags', 'aliases', 'characters', 'character_campaigns', 'session_notes']) {
@@ -842,6 +848,7 @@ function entityChangeKind(ctx: ToolContext) {
             db.query(`UPDATE ${tbl} SET ${col}=? WHERE group_id=? AND ${col}=?`).run(newPath, ctx.groupId, path);
           }
           db.query(`UPDATE note_links SET to_path=? WHERE group_id=? AND to_path=?`).run(newPath, ctx.groupId, path);
+          repointSuggestionPaths(ctx.groupId, path, newPath);
         } else {
           db.query(`UPDATE notes SET frontmatter_json=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
             .run(JSON.stringify(nextFm), Date.now(), ctx.userId, ctx.groupId, path);

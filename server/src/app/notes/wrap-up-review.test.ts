@@ -4,6 +4,7 @@ import {
   acceptedCount,
   groupRows,
   initialReview,
+  itemsLabel,
   setAccepted,
   setAsNew,
   toDecisions,
@@ -18,6 +19,7 @@ const proposal: WrapUpProposal = {
     { id: 'm2', name: 'the innkeeper', kind: 'person', match: { type: 'existing', path: 'People/marta.md', certain: false }, historyEntry: 'Poured ale.' },
     { id: 'm3', name: 'Rusted Key', kind: 'item', match: { type: 'new', title: 'Rusted Key', summary: 'Iron.' }, historyEntry: 'Found.' },
   ],
+  suggestions: [],
 };
 
 describe('Wrap-up review state', () => {
@@ -65,5 +67,13 @@ describe('Wrap-up review state', () => {
     const state = initialReview(proposal);
 
     expect(setAccepted(state, 'nope', false)).toBe(state);
+  });
+});
+
+describe('itemsLabel', () => {
+  it('lists items on one line and shows a quantity only above one', () => {
+    const items = [{ name: 'Rusted Key', quantity: 2 }, { name: 'Rope', quantity: 1 }];
+
+    expect(itemsLabel(items)).toBe('Rusted Key ×2, Rope');
   });
 });

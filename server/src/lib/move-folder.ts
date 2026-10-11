@@ -20,6 +20,7 @@ import {
   type Rename,
 } from './move-rewrite';
 import { deriveFolderIndexesFor } from './campaign-index';
+import { repointSuggestionPaths } from './suggestion-paths';
 
 export type MoveFolderResult =
   | { ok: true; movedCount: number; renames: Rename[] }
@@ -155,6 +156,7 @@ export async function moveFolder(args: {
       db.query(
         'UPDATE session_notes SET note_path = ? WHERE group_id = ? AND note_path = ?',
       ).run(m.to, groupId, m.from);
+      repointSuggestionPaths(groupId, m.from, m.to);
       db.query(
         'UPDATE items SET note_path = ? WHERE group_id = ? AND note_path = ?',
       ).run(m.to, groupId, m.from);
