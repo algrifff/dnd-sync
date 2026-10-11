@@ -3,19 +3,24 @@
 // GET  ?sessionPath=…  { proposal, existingTitles }: the pending proposal
 //                      (null when none is waiting for review) and the
 //                      titles of the Notes its existing matches name.
-// POST { sessionPath, mentions, suggestions? }
+// POST { sessionPath, mentions, relations?, suggestions? }
 //                      Submit a proposal (a Player's Claude calls this).
 //                      Replaces any earlier pending proposal. Any role
-//                      that can see the Session may submit; a mention
-//                      or Suggestion naming a Note the caller cannot
-//                      see is a 404. Suggestions are { characterPath,
-//                      story, items: [{ name, quantity }] }.
+//                      that can see the Session may submit; a mention,
+//                      Relationship end or Suggestion naming a Note the
+//                      caller cannot see is a 404. Suggestions are
+//                      { characterPath, story, items: [{ name, quantity }] }.
+//                      Relationships are { from, relation, to, note? },
+//                      each end { type: 'mention', name } (a mention of
+//                      this proposal) or { type: 'existing', path };
+//                      one that cannot be resolved is 400 invalid_relation.
 
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { apiErrorResponse } from '@/lib/analytics/api-error';
 import {
+  describeRelationProblem,
   existingTitles,
   loadPendingWrapUp,
   loadVisibleSession,
@@ -76,6 +81,11 @@ export async function POST(req: NextRequest): Promise<Response> {
       case 'invalid_suggestion_target':
         return json(
           { error: 'invalid_suggestion_target', reason: `"${result.characterPath}" must be a Character Note` },
+          400,
+        );
+      case 'invalid_relation':
+        return json(
+          { error: 'invalid_relation', reason: describeRelationProblem(result.index, result.problem) },
           400,
         );
       case 'ok':

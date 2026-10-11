@@ -10,6 +10,7 @@ import { getSessionStatus } from '@/lib/sessions';
 import { validateSheet } from '@/lib/validateSheet';
 import type { PmNode } from '@/lib/md-to-pm';
 import type { PmDoc } from '@/lib/note-edits';
+import { listRelations } from '@/lib/relations';
 import {
   applyWrapUp,
   loadPendingWrapUp,
@@ -17,7 +18,9 @@ import {
   submitWrapUp,
   WrapUpSubmission,
   wrapUpContext,
+  type Relation,
   type SubmittedMention,
+  type SubmittedRelation,
   type WrapUpProposal,
 } from './wrap-up';
 
@@ -136,7 +139,7 @@ function fresh(name: string, kind: SubmittedMention['kind'], summary: string, hi
 }
 
 function proposalFrom(sessionPath: string, mentions: SubmittedMention[]): WrapUpProposal {
-  return { sessionPath, generatedAt: 1, mentions: mentions.map((m, i) => ({ ...m, id: `m${i + 1}` })), suggestions: [] };
+  return { sessionPath, generatedAt: 1, mentions: mentions.map((m, i) => ({ ...m, id: `m${i + 1}` })), relations: [], suggestions: [] };
 }
 
 function sessionNote(path: string) {
@@ -601,5 +604,230 @@ describe('applyWrapUp edge cases', () => {
     expect(result.skipped).toEqual([{ id: 'm1', reason: 'edit_failed' }]);
     expect(result.applied.map((a) => a.id)).toEqual(['m2']);
     expect(wikilinkTargets(contentOf(SESSION))).not.toContain(gone);
+  });
+});
+
+describe('Relationships in a Wrap-up', () => {
+  const REL_SESSION = 'Campaigns/Ashfall/Adventure Log/2026-10-14-the-bridge.md';
+  const GUILD = 'Campaigns/Ashfall/Lore/the-guild.md';
+  // The flag lives in the frontmatter too, or the next save of the Note un-hides it.
+  const INFORMANT = 'Campaigns/Ashfall/People/the-informant.md';
+  const mention = (name: string): SubmittedRelation['from'] => ({ type: 'mention', name });
+  const at = (path: string): SubmittedRelation['from'] => ({ type: 'existing', path });
+  const relate = (from: SubmittedRelation['from'], relation: SubmittedRelation['relation'], to: SubmittedRelation['from'], note?: string): SubmittedRelation =>
+    ({ from, relation, to, ...(note ? { note } : {}) });
+  const submit = (role: 'admin' | 'viewer', mentions: SubmittedMention[], relations: SubmittedRelation[]) =>
+    submitWrapUp({ groupId, role, submission: { sessionPath: REL_SESSION, mentions, relations } });
+  const relationsOf = (path: string) => listRelations({ groupId, role: 'admin', path });
+
+  beforeAll(() => {
+    seed({
+      path: REL_SESSION,
+      title: 'The Bridge',
+      frontmatter: { kind: 'session', campaigns: ['ashfall'] },
+      body: { type: 'doc', content: [paragraph(text('Volo said he works for Bram. Kara swore to the guild.'))] },
+    });
+    seed({ path: GUILD, title: 'The Guild', frontmatter: { kind: 'lore' } });
+    seed({ path: INFORMANT, title: 'The Informant', frontmatter: { kind: 'person', dm_only: true }, dmOnly: true });
+  });
+
+  describe('submitting', () => {
+    it('stores each relation against the mention ids, matching names without regard to case', () => {
+      const result = submit('viewer', [fresh('Volo', 'person', 'A chronicler.', 'Offered a job.')], [
+        relate(mention('volo'), 'works_for', at(BRAM), 'Volo said so.'),
+        relate(at(KARA), 'member_of', at(GUILD)),
+      ]);
+
+      expect(result.status).toBe('ok');
+      const stored = loadPendingWrapUp(groupId, 'viewer', REL_SESSION)!;
+      const volo = stored.mentions[0]!;
+      expect(stored.relations.map(({ id: _id, ...rest }) => rest)).toEqual([
+        { from: { type: 'mention', mentionId: volo.id }, relation: 'works_for', to: { type: 'existing', path: BRAM }, note: 'Volo said so.' },
+        { from: { type: 'existing', path: KARA }, relation: 'member_of', to: { type: 'existing', path: GUILD } },
+      ]);
+      expect(new Set(stored.relations.map((r) => r.id)).size).toBe(2);
+    });
+
+    it.each([
+      ['names no mention of the submission', [relate(mention('Nobody'), 'ally_of', at(BRAM))], 'unknown_mention'],
+      ['names two mentions', [relate(mention('Volo'), 'ally_of', at(BRAM))], 'ambiguous_mention'],
+      ['has the same Note at both ends', [relate(at(BRAM), 'ally_of', at(BRAM))], 'same_note'],
+      ['has one mention at both ends', [relate(mention('Marta'), 'ally_of', mention('MARTA'))], 'same_note'],
+      ['joins a mention to the existing Note it matched', [relate(mention('the miller'), 'ally_of', at(BRAM))], 'same_note'],
+    ] as const)('refuses a relation that %s, naming its position', (_why, relations, problem) => {
+      const mentions = [
+        fresh('Volo', 'person', '', 'Seen.'),
+        fresh('volo', 'creature', '', 'Seen too.'),
+        fresh('Marta', 'person', '', 'Poured.'),
+        existing('the miller', BRAM, 'person', 'Was there.'),
+      ];
+
+      expect(submit('viewer', mentions, [relate(at(KARA), 'ally_of', at(GUILD)), ...relations])).toEqual({
+        status: 'invalid_relation', index: 1, problem,
+      });
+    });
+
+    it('reads an existing end the submitter cannot see as not found, as for a hidden mention', () => {
+      const relations = (path: string) => [relate(at(KARA), 'enemy_of', at(path))];
+
+      expect(submit('viewer', [], relations(INFORMANT))).toEqual({ status: 'not_found' });
+      expect(submit('viewer', [], relations('Campaigns/Ashfall/People/ghost.md'))).toEqual({ status: 'not_found' });
+      expect(submit('admin', [], relations(INFORMANT)).status).toBe('ok');
+    });
+
+    it('leaves the earlier pending proposal alone when a relation is refused', () => {
+      submit('viewer', [], [relate(at(KARA), 'ally_of', at(GUILD))]);
+      const before = loadPendingWrapUp(groupId, 'admin', REL_SESSION);
+
+      submit('viewer', [], [relate(mention('Nobody'), 'ally_of', at(GUILD))]);
+
+      expect(loadPendingWrapUp(groupId, 'admin', REL_SESSION)).toEqual(before);
+    });
+
+    it('accepts only the shared types, at most 60, with strict ends', () => {
+      const base = { sessionPath: REL_SESSION, mentions: [] };
+      const good = { from: { type: 'existing', path: KARA }, relation: 'ally_of', to: { type: 'existing', path: GUILD } };
+
+      expect(WrapUpSubmission.safeParse({ ...base, relations: [good] }).success).toBe(true);
+      expect(WrapUpSubmission.parse(base).relations).toEqual([]);
+      expect(WrapUpSubmission.safeParse({ ...base, relations: [{ ...good, relation: 'has_member' }] }).success).toBe(false);
+      expect(WrapUpSubmission.safeParse({ ...base, relations: [{ ...good, relation: 'friends with' }] }).success).toBe(false);
+      expect(WrapUpSubmission.safeParse({ ...base, relations: [{ ...good, to: { type: 'existing', path: GUILD, extra: 1 } }] }).success).toBe(false);
+      expect(WrapUpSubmission.safeParse({ ...base, relations: Array.from({ length: 61 }, () => good) }).success).toBe(false);
+      expect(WrapUpSubmission.safeParse({ ...base, relations: Array.from({ length: 60 }, () => good) }).success).toBe(true);
+    });
+  });
+
+  describe('a stored proposal read back', () => {
+    it('drops a relation that ends at a Note the reader cannot see, or at a mention that was dropped for them', () => {
+      submit('admin', [existing('the informant', INFORMANT, 'person', 'Seen.'), existing('Bram', BRAM, 'person', 'Was there.')], [
+        relate(at(KARA), 'enemy_of', at(INFORMANT)),
+        relate(mention('the informant'), 'works_for', at(GUILD)),
+        relate(mention('Bram'), 'member_of', at(GUILD)),
+      ]);
+
+      expect(loadPendingWrapUp(groupId, 'admin', REL_SESSION)!.relations).toHaveLength(3);
+      const forPlayer = loadPendingWrapUp(groupId, 'viewer', REL_SESSION)!;
+      expect(forPlayer.relations.map((r) => r.relation)).toEqual(['member_of']);
+    });
+  });
+
+  describe('applying', () => {
+    const rel = (id: string, from: Relation['from'], relation: Relation['relation'], to: Relation['from']): Relation => ({ id, from, relation, to });
+    const m = (mentionId: string): Relation['from'] => ({ type: 'mention', mentionId });
+    const p = (path: string): Relation['from'] => ({ type: 'existing', path });
+    const volo = 'Campaigns/Ashfall/People/volo.md';
+
+    const run = (
+      proposal: WrapUpProposal,
+      decisions: { accepted: string[]; acceptedRelations?: string[]; asNew?: string[] },
+      role: 'admin' | 'viewer' = 'viewer',
+    ) =>
+      applyWrapUp({ groupId, userId, role, sessionPath: REL_SESSION, proposal, decisions: { asNew: [], ...decisions } });
+
+    const proposal = (): WrapUpProposal => ({
+      ...proposalFrom(REL_SESSION, [fresh('Volo', 'person', 'A chronicler.', 'Offered a job.'), existing('Bram', BRAM, 'person', 'Was there.')]),
+      relations: [
+        rel('r1', m('m1'), 'works_for', p(BRAM)),
+        rel('r2', p(KARA), 'member_of', p(GUILD)),
+        rel('r3', m('m2'), 'ally_of', m('m1')),
+      ],
+    });
+
+    it('records a relation to a Note the Wrap-up creates, a relation between existing Notes, and links the pair', async () => {
+      const result = await run(proposal(), { accepted: ['m1', 'm2'], acceptedRelations: ['r1', 'r2'] });
+
+      expect(result.relationsAdded).toEqual([{ id: 'r1', status: 'added' }, { id: 'r2', status: 'added' }]);
+      expect(result.relationsSkipped).toEqual([]);
+      expect(relationsOf(volo).map((r) => [r.relation, r.path, r.sessionPath])).toEqual([['works_for', BRAM, REL_SESSION]]);
+      expect(relationsOf(GUILD).map((r) => [r.relation, r.path])).toEqual([['has_member', KARA]]);
+      const manual = getDb()
+        .query<{ is_manual: number }, [string, string, string]>('SELECT is_manual FROM note_links WHERE group_id = ? AND from_path = ? AND to_path = ?')
+        .get(groupId, volo, BRAM);
+      expect(manual?.is_manual).toBe(1);
+    });
+
+    it('records a repeated apply as unchanged and writes no second row', async () => {
+      const count = (): number => getDb().query<{ n: number }, []>('SELECT COUNT(*) AS n FROM note_relations').get()!.n;
+      const before = count();
+
+      const result = await run(proposal(), { accepted: ['m1', 'm2'], acceptedRelations: ['r1', 'r2'] });
+
+      expect(result.relationsAdded).toEqual([{ id: 'r1', status: 'unchanged' }, { id: 'r2', status: 'unchanged' }]);
+      expect(count()).toBe(before);
+    });
+
+    it('records only the relations that were ticked', async () => {
+      const unticked = { ...proposal(), relations: [rel('r9', p(KARA), 'enemy_of', p(MILL))] };
+
+      const result = await run(unticked, { accepted: [], acceptedRelations: [] });
+
+      expect(result.relationsAdded).toEqual([]);
+      expect(result.relationsSkipped).toEqual([]);
+      expect(relationsOf(KARA).map((r) => r.relation)).not.toContain('enemy_of');
+    });
+
+    it('skips a relation whose mention was not ticked, and reports it rather than failing', async () => {
+      const pond = { ...proposal(), relations: [rel('r4', m('m2'), 'located_in', p(MENTIONED_ONLY))] };
+
+      const result = await run(pond, { accepted: ['m1'], acceptedRelations: ['r4'] });
+
+      expect(result.relationsAdded).toEqual([]);
+      expect(result.relationsSkipped).toEqual([{ id: 'r4', reason: 'mention_not_applied' }]);
+      expect(relationsOf(MENTIONED_ONLY)).toEqual([]);
+      expect(getSessionStatus(groupId, REL_SESSION)).toBe('closed');
+    });
+
+    it('skips a relation whose mention could not land', async () => {
+      const gone = 'Campaigns/Ashfall/People/vanishing-act-2.md';
+      seed({ path: gone, title: 'Vanishing Act 2', frontmatter: { kind: 'person' } });
+      const vanishing = {
+        ...proposalFrom(REL_SESSION, [existing('Vanishing Act 2', gone, 'person', 'Disappeared.')]),
+        relations: [rel('r5', m('m1'), 'ally_of', p(BRAM))],
+      };
+
+      const pending = run(vanishing, { accepted: ['m1'], acceptedRelations: ['r5'] });
+      getDb().query('DELETE FROM notes WHERE group_id = ? AND path = ?').run(groupId, gone);
+      const result = await pending;
+
+      expect(result.relationsSkipped).toEqual([{ id: 'r5', reason: 'mention_not_applied' }]);
+      expect(relationsOf(BRAM).map((r) => r.path)).not.toContain(gone);
+    });
+
+    it('skips a relation to an existing Note the closer cannot see, but not for the Owner', async () => {
+      const hidden = { ...proposal(), relations: [rel('r6', p(KARA), 'enemy_of', p(INFORMANT))] };
+
+      const asPlayer = await run(hidden, { accepted: [], acceptedRelations: ['r6'] });
+      const asOwner = await run(hidden, { accepted: [], acceptedRelations: ['r6'] }, 'admin');
+
+      expect(asPlayer.relationsSkipped).toEqual([{ id: 'r6', reason: 'not_visible' }]);
+      expect(asOwner.relationsAdded).toEqual([{ id: 'r6', status: 'added' }]);
+    });
+
+    it('skips an id the proposal does not hold, and a relation whose two mentions landed on one Note', async () => {
+      const bell = 'Campaigns/Ashfall/Loot/old-bell.md';
+      const twins = {
+        ...proposalFrom(REL_SESSION, [
+          fresh('Old Bell', 'item', '', 'Rang.'),
+          existing('old bell', 'Campaigns/Ashfall/Loot/the-other-bell.md', 'item', 'Rang again.', false),
+        ]),
+        relations: [rel('r7', m('m1'), 'related_to', m('m2'))],
+      };
+
+      const result = await run(twins, { accepted: ['m1', 'm2'], asNew: ['m2'], acceptedRelations: ['r7', 'r404'] });
+
+      expect(result.applied.map((a) => a.path)).toEqual([bell, bell]);
+      expect(result.relationsSkipped).toEqual([{ id: 'r7', reason: 'same_note' }, { id: 'r404', reason: 'unknown_relation' }]);
+      expect(relationsOf(bell)).toEqual([]);
+    });
+
+    it('applies relations after the mentions, so one to a Note created in the same Wrap-up has a path', async () => {
+      const lonely = { ...proposalFrom(REL_SESSION, [fresh('Marta', 'person', '', 'Poured ale.')]), relations: [rel('r8', p(GUILD), 'leads', m('m1'))] };
+
+      const result = await run(lonely, { accepted: ['m1'], acceptedRelations: ['r8'] });
+
+      expect(result.relationsAdded).toEqual([{ id: 'r8', status: 'added' }]);
+      expect(relationsOf('Campaigns/Ashfall/People/marta.md').map((r) => [r.relation, r.path])).toEqual([['led_by', GUILD]]);
+    });
   });
 });

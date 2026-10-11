@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { NextRequest } from 'next/server';
+import { RELATION_TYPES } from '@compendium/shared';
 import { getDb } from '@/lib/db';
 import { setupTestDb, teardownTestDb } from '@/lib/test-utils';
 import { createUser, DEFAULT_GROUP_ID } from '@/lib/users';
@@ -19,6 +20,7 @@ import { POST as mcp } from './route';
 const ORIGIN = 'https://compendium.test';
 const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
 const NOTE_A = 'Campaigns/Dragon Heist/People/Volo.md';
+const GANG = 'Campaigns/Dragon Heist/Lore/Xanathar Guild.md';
 const NOTE_B = 'Campaigns/Other/People/Stranger.md';
 
 let session: Session;
@@ -172,6 +174,8 @@ describe('register → authorize → token → MCP', () => {
     );
     const writes = list.tools.filter((t) => t.annotations?.readOnlyHint !== true).map((t) => t.name);
     expect(writes).toEqual(['submit_wrap_up']);
+    const submitSchema = JSON.stringify(list.tools.find((t) => t.name === 'submit_wrap_up'));
+    for (const type of RELATION_TYPES) expect(submitSchema).toContain(`"${type}"`);
 
     const read = await result<ToolCall>(
       await rpc(access, 'tools/call', { name: 'read_note', arguments: { path: NOTE_A } }),
@@ -183,11 +187,15 @@ describe('register → authorize → token → MCP', () => {
   it('submits a Wrap-up proposal only with the wrapup:submit scope, and writes no note', async () => {
     const SESSION = 'Campaigns/Dragon Heist/Sessions/Session 1.md';
     seedNote(DEFAULT_GROUP_ID, SESSION, 'The party met Volo.', 'session');
+    seedNote(DEFAULT_GROUP_ID, GANG, 'Spies of the Xanathar.', 'lore');
     const before = getDb().query<{ n: number }, []>('SELECT COUNT(*) AS n FROM notes').get()!.n;
     const args = {
       session_path: SESSION,
       mentions: [
         { name: 'Volo', kind: 'person', match: { type: 'existing', path: NOTE_A, certain: true }, historyEntry: 'Offered the party a job.' },
+      ],
+      relations: [
+        { from: { type: 'mention', name: 'Volo' }, relation: 'works_for', to: { type: 'existing', path: GANG } },
       ],
     };
 
@@ -201,7 +209,10 @@ describe('register → authorize → token → MCP', () => {
     const ok = await result<ToolCall>(await rpc(full.access, 'tools/call', { name: 'submit_wrap_up', arguments: args }));
     expect(ok.isError).toBeFalsy();
     expect(ok.content[0]!.text).toContain('Nothing has been written');
-    expect(loadPendingWrapUp(DEFAULT_GROUP_ID, 'admin', SESSION)?.mentions.map((m) => m.name)).toEqual(['Volo']);
+    const pending = loadPendingWrapUp(DEFAULT_GROUP_ID, 'admin', SESSION);
+    expect(pending?.mentions.map((m) => m.name)).toEqual(['Volo']);
+    expect(pending?.relations).toMatchObject([{ relation: 'works_for', to: { type: 'existing', path: GANG } }]);
+    expect(getDb().query<{ n: number }, []>('SELECT COUNT(*) AS n FROM note_relations').get()!.n).toBe(0);
     expect(getDb().query<{ n: number }, []>('SELECT COUNT(*) AS n FROM notes').get()!.n).toBe(before);
   });
 

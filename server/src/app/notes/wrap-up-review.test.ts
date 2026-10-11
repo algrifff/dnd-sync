@@ -2,11 +2,14 @@ import { describe, expect, it } from 'bun:test';
 import type { WrapUpProposal } from '@/lib/wrap-up';
 import {
   acceptedCount,
+  acceptedRelationIds,
   groupRows,
   initialReview,
   itemsLabel,
+  relationRows,
   setAccepted,
   setAsNew,
+  setRelationAccepted,
   toDecisions,
   applyRequestBody,
 } from './wrap-up-review';
@@ -19,6 +22,7 @@ const proposal: WrapUpProposal = {
     { id: 'm2', name: 'the innkeeper', kind: 'person', match: { type: 'existing', path: 'People/marta.md', certain: false }, historyEntry: 'Poured ale.' },
     { id: 'm3', name: 'Rusted Key', kind: 'item', match: { type: 'new', title: 'Rusted Key', summary: 'Iron.' }, historyEntry: 'Found.' },
   ],
+  relations: [],
   suggestions: [],
 };
 
@@ -60,6 +64,7 @@ describe('Wrap-up review state', () => {
       generatedAt: 1234,
       accepted: ['m2', 'm3'],
       asNew: [],
+      acceptedRelations: [],
     });
   });
 
@@ -75,5 +80,74 @@ describe('itemsLabel', () => {
     const items = [{ name: 'Rusted Key', quantity: 2 }, { name: 'Rope', quantity: 1 }];
 
     expect(itemsLabel(items)).toBe('Rusted Key ×2, Rope');
+  });
+});
+
+describe('Relationships in the Wrap-up review', () => {
+  const withRelations: WrapUpProposal = {
+    ...proposal,
+    relations: [
+      { id: 'r1', from: { type: 'mention', mentionId: 'm1' }, relation: 'works_for', to: { type: 'existing', path: 'Lore/guild.md' }, note: 'Said so.' },
+      { id: 'r2', from: { type: 'mention', mentionId: 'm2' }, relation: 'owns', to: { type: 'mention', mentionId: 'm3' } },
+      { id: 'r3', from: { type: 'existing', path: 'People/bram.md' }, relation: 'ally_of', to: { type: 'existing', path: 'Lore/guild.md' } },
+    ],
+  };
+  const titles = { 'Lore/guild.md': 'The Guild', 'People/bram.md': 'Bram the Miller' };
+  const none = new Set<string>();
+  const rows = (state = initialReview(withRelations), off: ReadonlySet<string> = none) =>
+    relationRows(withRelations, state, off, titles);
+
+  it('lists one ticked row per relation, naming each end as its mention row does', () => {
+    expect(rows().map((r) => [r.from, r.label, r.to, r.accepted])).toEqual([
+      ['Bram the Miller', 'works for', 'The Guild', true],
+      ['the innkeeper', 'owns', 'Rusted Key', true],
+      ['Bram the Miller', 'ally of', 'The Guild', true],
+    ]);
+    expect(rows()[0]!.relation.note).toBe('Said so.');
+  });
+
+  it('names a switched-to-new match by the name in the log, and a certain match by its title', () => {
+    const switched = setAsNew(initialReview(withRelations), 'm1', true);
+
+    expect(rows(switched)[0]!.from).toBe('Bram');
+    expect(rows(setAsNew(switched, 'm2', true))[1]!.from).toBe('the innkeeper');
+    expect(relationRows(withRelations, initialReview(withRelations), none, {})[0]!.from).toBe('Bram');
+  });
+
+  it('unticks and blocks the relations that depend on an unticked mention, whichever end it is', () => {
+    const state = setAccepted(initialReview(withRelations), 'm2', false);
+
+    const after = rows(state);
+
+    expect(after.map((r) => [r.accepted, r.blockedBy])).toEqual([[true, null], [false, 'the innkeeper'], [true, null]]);
+    expect(acceptedRelationIds(withRelations, state, none)).toEqual(['r1', 'r3']);
+  });
+
+  it('brings a relation back, with its own tick, when the mention is ticked again', () => {
+    const unticked = setAccepted(initialReview(withRelations), 'm1', false);
+    const off = setRelationAccepted(none, 'r1', false);
+
+    expect(rows(setAccepted(unticked, 'm1', true), off)[0]!.accepted).toBe(false);
+    expect(rows(setAccepted(unticked, 'm1', true), setRelationAccepted(off, 'r1', true))[0]!.accepted).toBe(true);
+  });
+
+  it('lets the closer untick a relation that depends on no mention', () => {
+    const off = setRelationAccepted(none, 'r3', false);
+
+    expect(rows(initialReview(withRelations), off).map((r) => r.accepted)).toEqual([true, true, false]);
+    expect(none.size).toBe(0);
+  });
+
+  it('sends the ids of the relations in effect in the apply body', () => {
+    const state = setAccepted(initialReview(withRelations), 'm1', false);
+    const off = setRelationAccepted(none, 'r3', false);
+
+    expect(applyRequestBody(withRelations.sessionPath, withRelations, state, off)).toEqual({
+      sessionPath: withRelations.sessionPath,
+      generatedAt: 1,
+      accepted: ['m2', 'm3'],
+      asNew: [],
+      acceptedRelations: ['r2'],
+    });
   });
 });

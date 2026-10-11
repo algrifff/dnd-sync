@@ -76,7 +76,7 @@ beforeAll(async () => {
   await applyWrapUp({
     groupId, userId: owner.userId, role: 'admin', sessionPath: SESSION,
     proposal: {
-      sessionPath: SESSION, generatedAt: 1, mentions: [],
+      sessionPath: SESSION, generatedAt: 1, mentions: [], relations: [],
       suggestions: [{ id: 's1', characterPath: KARA, story: 'Saved Bram.', items: [{ name: 'Rusted Key', quantity: 1 }] }],
     },
     decisions: { accepted: [], asNew: [] },

@@ -321,3 +321,53 @@ describe('submit_wrap_up suggestions', () => {
     expect(r.text).toContain('not a Character');
   });
 });
+
+describe('submit_wrap_up relations', () => {
+  const SESSION = 'Campaigns/Dragon Heist/Sessions/Session 2.md';
+  const STONE = 'Campaigns/Dragon Heist/Items/Stone of Golorr.md';
+  const submitter = { ...viewer, scopes: ['notes:read', 'wrapup:submit'] };
+  const mentions = [
+    { name: 'Volo', kind: 'person', match: { type: 'existing', path: PUBLIC, certain: true }, historyEntry: 'Offered a job.' },
+  ];
+  const relation = { from: { type: 'mention', name: 'Volo' }, relation: 'owns', to: { type: 'existing', path: STONE }, note: 'He carries it.' };
+
+  it('stores a relation between a mention and an existing note, and says nothing was written', () => {
+    const r = runTool('submit_wrap_up', submitter, { session_path: SESSION, mentions, relations: [relation] });
+
+    expect(r.isError).toBeUndefined();
+    expect(r.text).toContain('1 relation(s)');
+    expect(r.text).toContain('Nothing has been written');
+    expect(loadPendingWrapUp(DEFAULT_GROUP_ID, 'viewer', SESSION)?.relations).toMatchObject([
+      { relation: 'owns', to: { type: 'existing', path: STONE }, note: 'He carries it.' },
+    ]);
+    expect(getDb().query<{ n: number }, []>('SELECT COUNT(*) AS n FROM note_relations').get()!.n).toBe(0);
+  });
+
+  it('refuses a relation naming a hidden note as not found, and one naming no mention as an error to fix', () => {
+    const hidden = runTool('submit_wrap_up', submitter, {
+      session_path: SESSION, mentions, relations: [{ ...relation, to: { type: 'existing', path: SECRET } }],
+    });
+    const nobody = runTool('submit_wrap_up', submitter, {
+      session_path: SESSION, mentions, relations: [{ ...relation, from: { type: 'mention', name: 'Nobody' } }],
+    });
+
+    expect(hidden).toMatchObject({ isError: true, text: expect.stringContaining('not found') });
+    expect(nobody).toMatchObject({ isError: true, text: expect.stringContaining('relations.0') });
+  });
+
+  it('rejects a type outside the shared list without running', () => {
+    const r = runTool('submit_wrap_up', submitter, {
+      session_path: SESSION, mentions, relations: [{ ...relation, relation: 'friends_with' }],
+    });
+
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('Invalid arguments');
+  });
+
+  it('tells the agent that related_to is the fallback and to propose only what the log states', () => {
+    const tool = MCP_TOOLS.find((t) => t.name === 'submit_wrap_up')!;
+
+    expect(tool.description).toContain('related_to is the fallback');
+    expect(tool.description).toContain('only when the log itself states it');
+  });
+});

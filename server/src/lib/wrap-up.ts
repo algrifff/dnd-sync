@@ -6,9 +6,11 @@
 // the Session's pending proposal; the closer reviews it and applies it
 // (`applyWrapUp`). Applying adds a dated History entry to each
 // mentioned Note (creating new Notes where needed), links the log to
-// each Note, holds the Suggestions for each Character's Player
-// (lib/character-suggestions.ts), then closes the Session. See
-// docs/adr/0001-wrap-up-on-close.md.
+// each Note, records the ticked Relationships (lib/relations.ts, after
+// the mentions so created Notes have paths), holds the Suggestions for
+// each Character's Player (lib/character-suggestions.ts), then closes the
+// Session. See docs/adr/0001-wrap-up-on-close.md and
+// docs/adr/0002-typed-relationships.md.
 //
 // Everything a client sends is parsed at the boundary into
 // `SubmittedMention`, whose `match` union is the only place an
@@ -18,8 +20,9 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { parseKind } from '@compendium/shared';
+import { parseKind, RelationType } from '@compendium/shared';
 import { getDb } from '@/lib/db';
+import { addRelation } from '@/lib/relations';
 import { loadNote, visibilityFor, type NoteRow } from '@/lib/notes';
 import { getCampaignBySlug } from '@/lib/characters';
 import { canonicalPath, nameToSlug } from '@/lib/ai/paths';
@@ -129,10 +132,34 @@ export const SubmittedSuggestion = SuggestionShape.refine(
 );
 export type SubmittedSuggestion = z.infer<typeof SubmittedSuggestion>;
 
+export const MAX_RELATIONS = 60;
+
+/** One end of a proposed Relationship: a mention in the same submission
+ *  (matched by its `name`, so a Note the Wrap-up is about to create can
+ *  take part) or a Note that already exists, of any kind. */
+const SubmittedEndpoint = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('mention'), name: oneLine(200) }).strict(),
+  z.object({ type: z.literal('existing'), path: z.string().min(1).max(512) }).strict(),
+]);
+
+/** How two Notes stand to each other, as a client proposes it. The type
+ *  comes from the shared list (docs/adr/0002-typed-relationships.md). */
+export const SubmittedRelation = z
+  .object({
+    from: SubmittedEndpoint,
+    relation: RelationType,
+    to: SubmittedEndpoint,
+    /** Why the log says so; shown to the reviewer, never stored on a Note. */
+    note: oneLine(300).optional(),
+  })
+  .strict();
+export type SubmittedRelation = z.infer<typeof SubmittedRelation>;
+
 export const WrapUpSubmission = z
   .object({
     sessionPath: z.string().min(1).max(512),
     mentions: z.array(SubmittedMention).max(MAX_MENTIONS),
+    relations: z.array(SubmittedRelation).max(MAX_RELATIONS).default([]),
     suggestions: z
       .array(SubmittedSuggestion)
       .max(MAX_SUGGESTIONS)
@@ -156,10 +183,28 @@ export type Mention = z.infer<typeof Mention>;
 export const Suggestion = SuggestionShape.extend({ id: z.string().min(1) });
 export type Suggestion = z.infer<typeof Suggestion>;
 
+/** A stored end: a mention names the Mention by its id, resolved at
+ *  submit time, so it cannot go ambiguous later. */
+const StoredEndpoint = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('mention'), mentionId: z.string().min(1) }),
+  z.object({ type: z.literal('existing'), path: z.string().min(1) }),
+]);
+export type StoredEndpoint = z.infer<typeof StoredEndpoint>;
+
+/** A submitted Relationship once stored, with an app-assigned id. */
+export const Relation = SubmittedRelation.omit({ from: true, to: true }).extend({
+  id: z.string().min(1),
+  from: StoredEndpoint,
+  to: StoredEndpoint,
+});
+export type Relation = z.infer<typeof Relation>;
+
 export const WrapUpProposal = z.object({
   sessionPath: z.string().min(1),
   generatedAt: z.number(),
   mentions: z.array(Mention),
+  /** Absent in proposals stored before Relationships existed. */
+  relations: z.array(Relation).default([]),
   /** Absent in proposals stored before Suggestions existed. */
   suggestions: z.array(Suggestion).default([]),
 });
@@ -291,15 +336,36 @@ export type SubmitResult =
    *  (a Character, a Session, a plain Note). */
   | { status: 'invalid_target'; mention: string }
   /** A Suggestion names a visible Note that is not a Character. */
-  | { status: 'invalid_suggestion_target'; characterPath: string };
+  | { status: 'invalid_suggestion_target'; characterPath: string }
+  /** The Relationship at `index` cannot be resolved: a mention end that
+   *  names nothing or two Mentions, or the same Note at both ends. (An
+   *  existing end the caller cannot see is `not_found`.) */
+  | { status: 'invalid_relation'; index: number; problem: RelationProblem };
+
+export type RelationProblem = 'unknown_mention' | 'ambiguous_mention' | 'same_note';
+
+const RELATION_PROBLEMS: Record<RelationProblem, string> = {
+  unknown_mention: 'an end names a mention that is not in this submission',
+  ambiguous_mention: 'an end names a mention that matches more than one mention',
+  same_note: 'both ends are the same Note',
+};
+
+/** What to tell a client whose Relationship was refused, by position. */
+export function describeRelationProblem(index: number, problem: RelationProblem): string {
+  return `relations.${index}: ${RELATION_PROBLEMS[problem]}`;
+}
 
 /** Stores `mentions` as the Session's pending proposal, replacing any
  *  earlier one. An `existing` match must name a Note `role` may see;
- *  one that is missing or hidden reads as `not_found`. */
+ *  one that is missing or hidden reads as `not_found`, and so does an
+ *  `existing` end of a Relationship. */
 export function submitWrapUp(opts: {
   groupId: string;
   role: Role;
-  submission: Omit<WrapUpSubmission, 'suggestions'> & { suggestions?: SubmittedSuggestion[] };
+  submission: Omit<WrapUpSubmission, 'suggestions' | 'relations'> & {
+    suggestions?: SubmittedSuggestion[];
+    relations?: SubmittedRelation[];
+  };
 }): SubmitResult {
   const { groupId, role, submission } = opts;
   const suggestions = submission.suggestions ?? [];
@@ -324,14 +390,76 @@ export function submitWrapUp(opts: {
     }
   }
 
+  const mentions = submission.mentions.map((m) => ({ ...m, id: newMentionId() }));
+  const relations = resolveRelations(groupId, vis, mentions, submission.relations ?? []);
+  if (!Array.isArray(relations)) return relations;
+
   const proposal: WrapUpProposal = {
     sessionPath: submission.sessionPath,
     generatedAt: Date.now(),
-    mentions: submission.mentions.map((m) => ({ ...m, id: newMentionId() })),
+    mentions,
+    relations,
     suggestions: suggestions.map((s) => ({ ...s, id: newSuggestionId() })),
   };
   writePendingWrapUpJson(groupId, submission.sessionPath, JSON.stringify(proposal));
   return { status: 'ok', proposal };
+}
+
+type ResolvedEnd =
+  | { status: 'ok'; end: StoredEndpoint; identity: string }
+  | { status: 'not_found' }
+  | { status: 'invalid'; problem: RelationProblem };
+
+/** Turns each submitted Relationship into its stored form, or the first
+ *  reason it cannot be. A mention end is matched to a Mention of this
+ *  submission by name, ignoring case. */
+function resolveRelations(
+  groupId: string,
+  vis: Visibility,
+  mentions: Mention[],
+  submitted: SubmittedRelation[],
+): Relation[] | { status: 'not_found' } | Extract<SubmitResult, { status: 'invalid_relation' }> {
+  const resolveEnd = (end: SubmittedRelation['from']): ResolvedEnd => {
+    if (end.type === 'existing') {
+      const note = loadNote(groupId, end.path);
+      if (!note || isHidden(note, vis)) return { status: 'not_found' };
+      return { status: 'ok', end, identity: end.path };
+    }
+    const wanted = end.name.toLowerCase();
+    const named = mentions.filter((m) => m.name.toLowerCase() === wanted);
+    if (named.length === 0) return { status: 'invalid', problem: 'unknown_mention' };
+    if (named.length > 1) return { status: 'invalid', problem: 'ambiguous_mention' };
+    const mention = named[0]!;
+    return {
+      status: 'ok',
+      end: { type: 'mention', mentionId: mention.id },
+      // A mention that matched an existing Note is that Note.
+      identity: mention.match.type === 'existing' ? mention.match.path : mention.id,
+    };
+  };
+
+  const out: Relation[] = [];
+  for (const [index, r] of submitted.entries()) {
+    const from = resolveEnd(r.from);
+    if (from.status === 'not_found') return from;
+    if (from.status === 'invalid') return { status: 'invalid_relation', index, problem: from.problem };
+    const to = resolveEnd(r.to);
+    if (to.status === 'not_found') return to;
+    if (to.status === 'invalid') return { status: 'invalid_relation', index, problem: to.problem };
+    if (from.identity === to.identity) return { status: 'invalid_relation', index, problem: 'same_note' };
+    out.push({
+      id: newRelationId(),
+      from: from.end,
+      relation: r.relation,
+      to: to.end,
+      ...(r.note ? { note: r.note } : {}),
+    });
+  }
+  return out;
+}
+
+function newRelationId(): string {
+  return `r_${randomUUID().slice(0, 8)}`;
 }
 
 function newMentionId(): string {
@@ -343,8 +471,9 @@ function newSuggestionId(): string {
 }
 
 /** The stored proposal, with any existing-Note mentions `role` may not
- *  see removed, so a GM's proposal never reveals a hidden Note to a
- *  Player who resumes it. */
+ *  see removed, and with them every Relationship that depends on one or
+ *  names a Note `role` may not see, so a GM's proposal never reveals a
+ *  hidden Note to a Player who resumes it. */
 export function loadPendingWrapUp(
   groupId: string,
   role: Role,
@@ -363,20 +492,28 @@ export function loadPendingWrapUp(
     const note = loadNote(groupId, path);
     return note !== null && !isHidden(note, vis);
   };
+  const mentions = proposal.mentions.filter((m) => m.match.type !== 'existing' || visible(m.match.path));
+  const kept = new Set(mentions.map((m) => m.id));
+  const endVisible = (end: StoredEndpoint): boolean =>
+    end.type === 'mention' ? kept.has(end.mentionId) : visible(end.path);
   return {
     ...proposal,
-    mentions: proposal.mentions.filter((m) => m.match.type !== 'existing' || visible(m.match.path)),
+    mentions,
+    relations: proposal.relations.filter((r) => endVisible(r.from) && endVisible(r.to)),
     suggestions: proposal.suggestions.filter((s) => visible(s.characterPath)),
   };
 }
 
-/** Titles of the Notes a proposal points at (existing matches and
- *  Suggestion Characters), for the review dialog's "Matched to <Title>?"
- *  and its Suggestions list. Call it on a proposal from
+/** Titles of the Notes a proposal points at (existing matches, existing
+ *  Relationship ends and Suggestion Characters), for the review dialog's
+ *  "Matched to <Title>?", its Relationships and its Suggestions list. Call it on a proposal from
  *  `loadPendingWrapUp`, which already dropped what the reader cannot see. */
 export function existingTitles(groupId: string, proposal: WrapUpProposal): Record<string, string> {
   const paths = [
     ...proposal.mentions.flatMap((m) => (m.match.type === 'existing' ? [m.match.path] : [])),
+    ...proposal.relations.flatMap((r) =>
+      [r.from, r.to].flatMap((end) => (end.type === 'existing' ? [end.path] : [])),
+    ),
     ...proposal.suggestions.map((s) => s.characterPath),
   ];
   const out: Record<string, string> = {};
@@ -394,6 +531,9 @@ export type WrapUpDecisions = {
   accepted: string[];
   /** Accepted mention ids whose uncertain match the closer switched to a new Note. */
   asNew: string[];
+  /** Relationship ids the closer ticked. A Relationship also needs both
+   *  of its ends to have landed. Absent means none. */
+  acceptedRelations?: string[];
 };
 
 /** `edit_failed`: the Note could not take the History entry (it vanished
@@ -402,17 +542,30 @@ export type SkipReason = 'unknown_mention' | 'not_visible' | 'edit_failed' | 'in
 
 export type AppliedMention = { id: string; path: string; created: boolean };
 
+/** `mention_not_applied`: a mention end was unticked or could not land.
+ *  `not_visible`: an existing end is hidden from the closer or gone.
+ *  `same_note`: both ends landed on one Note. */
+export type RelationSkipReason =
+  | 'unknown_relation'
+  | 'mention_not_applied'
+  | 'not_visible'
+  | 'same_note';
+
 export type ApplyResult = {
   applied: AppliedMention[];
   /** Accepted mentions that could not be applied, and why. */
   skipped: Array<{ id: string; reason: SkipReason }>;
+  /** Relationships recorded; `unchanged` when one was already there. */
+  relationsAdded: Array<{ id: string; status: 'added' | 'unchanged' }>;
+  /** Ticked Relationships that could not be recorded, and why. */
+  relationsSkipped: Array<{ id: string; reason: RelationSkipReason }>;
   /** Suggestions held for Characters' Players. */
   suggestions: StoredSuggestions;
 };
 
-/** Applies the closer's decisions on `proposal`, links the log, holds
- *  the proposal's Suggestions for their Players, closes the Session and
- *  clears its pending proposal. Running it again with the same proposal
+/** Applies the closer's decisions on `proposal`, links the log, records
+ *  the ticked Relationships, holds the proposal's Suggestions for their
+ *  Players, closes the Session and clears its pending proposal. Running it again with the same proposal
  *  writes nothing new. */
 export async function applyWrapUp(opts: {
   groupId: string;
@@ -469,18 +622,87 @@ export async function applyWrapUp(opts: {
     });
   }
 
+  const isVisible = (path: string): boolean => {
+    const note = loadNote(groupId, path);
+    return note !== null && !isHidden(note, vis);
+  };
+
+  const { relationsAdded, relationsSkipped } = applyRelations({
+    groupId,
+    userId,
+    sessionPath,
+    proposal,
+    accepted: opts.decisions.acceptedRelations ?? [],
+    landed: new Map(applied.map((a) => [a.id, a.path])),
+    isVisible,
+  });
+
   const suggestions = storeSuggestions({
     groupId,
     sessionPath,
     suggestions: proposal.suggestions,
-    isVisible: (path) => {
-      const note = loadNote(groupId, path);
-      return note !== null && !isHidden(note, vis);
-    },
+    isVisible,
   });
 
   closeSession(groupId, sessionPath, userId);
-  return { applied, skipped, suggestions };
+  return { applied, skipped, relationsAdded, relationsSkipped, suggestions };
+}
+
+/** Records each ticked Relationship whose two ends both landed: a mention
+ *  end on the path its Mention was applied to, an existing end still
+ *  visible. Anything else is skipped, never an error. */
+function applyRelations(opts: {
+  groupId: string;
+  userId: string;
+  sessionPath: string;
+  proposal: WrapUpProposal;
+  accepted: string[];
+  /** Mention id to the path its History entry landed on. */
+  landed: Map<string, string>;
+  isVisible: (path: string) => boolean;
+}): Pick<ApplyResult, 'relationsAdded' | 'relationsSkipped'> {
+  const byId = new Map(opts.proposal.relations.map((r) => [r.id, r]));
+  const relationsAdded: ApplyResult['relationsAdded'] = [];
+  const relationsSkipped: ApplyResult['relationsSkipped'] = [];
+  const resolve = (end: StoredEndpoint): { path: string } | { reason: RelationSkipReason } => {
+    if (end.type === 'mention') {
+      const path = opts.landed.get(end.mentionId);
+      return path ? { path } : { reason: 'mention_not_applied' };
+    }
+    return opts.isVisible(end.path) ? { path: end.path } : { reason: 'not_visible' };
+  };
+
+  for (const id of new Set(opts.accepted)) {
+    const relation = byId.get(id);
+    if (!relation) {
+      relationsSkipped.push({ id, reason: 'unknown_relation' });
+      continue;
+    }
+    const from = resolve(relation.from);
+    const to = resolve(relation.to);
+    if ('reason' in from) {
+      relationsSkipped.push({ id, reason: from.reason });
+      continue;
+    }
+    if ('reason' in to) {
+      relationsSkipped.push({ id, reason: to.reason });
+      continue;
+    }
+    if (from.path === to.path) {
+      relationsSkipped.push({ id, reason: 'same_note' });
+      continue;
+    }
+    const { status } = addRelation({
+      groupId: opts.groupId,
+      from: from.path,
+      relation: relation.relation,
+      to: to.path,
+      sessionPath: opts.sessionPath,
+      userId: opts.userId,
+    });
+    relationsAdded.push({ id, status });
+  }
+  return { relationsAdded, relationsSkipped };
 }
 
 function linkAll(doc: PmDoc, links: Array<{ text: string; targetPath: string }>): EditResult {

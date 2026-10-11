@@ -100,7 +100,7 @@ function suggestion(id: string, characterPath: string, over: Partial<Suggestion>
 }
 
 function proposalOf(suggestions: Suggestion[]): WrapUpProposal {
-  return { sessionPath: SESSION, generatedAt: 1, mentions: [], suggestions };
+  return { sessionPath: SESSION, generatedAt: 1, mentions: [], relations: [], suggestions };
 }
 
 async function wrapUp(suggestions: Suggestion[]): Promise<Awaited<ReturnType<typeof applyWrapUp>>> {
