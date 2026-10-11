@@ -57,7 +57,7 @@ globally (`npm i -g bun@1.4.3`) — don't rely on `npx bun`, which resolves the 
 - `server/src/lib/db.ts` switches at runtime: `typeof Bun !== "undefined"`
 - The Dockerfile rebuilds `better-sqlite3` against Node 22's ABI in a separate stage — don't skip this step when changing the Dockerfile
 
-## Data model (47 migrations, versions 1–49 — append only, never edit existing)
+## Data model (48 migrations, versions 1–50 — append only, never edit existing)
 
 Numbering isn't contiguous — a couple of version numbers (21, 22) were
 never shipped, so "latest version" and "migration count" are two
@@ -80,7 +80,7 @@ Key tables:
 | `notes_fts` | FTS5 full-text search index, auto-synced by triggers on `notes` (including path moves). `path` and `group_id` are indexed (v48), so build every MATCH with `worldFtsMatch()` from `lib/search.ts`, never write to it directly |
 | `group_invite_tokens` | Shareable world join links |
 | `audit_log` | Admin action history |
-| `oauth_clients` | MCP connector clients (v49): `kind='dcr'` rows from `POST /api/oauth/register`, `kind='cimd'` rows caching a fetched Client ID Metadata Document whose URL is the `client_id` |
+| `oauth_clients` | MCP connector clients (v50): `kind='dcr'` rows from `POST /api/oauth/register`, `kind='cimd'` rows caching a fetched Client ID Metadata Document whose URL is the `client_id` |
 | `oauth_codes` | Single-use, 5-minute authorization codes, stored as SHA-256 hashes with the PKCE challenge and the `resource` |
 | `oauth_grants` | One consent: user U lets client C read world G. Deleting it (settings UI, RFC 7009 revoke, lost membership, prune) cascades every token |
 | `oauth_tokens` | Access (1 h) and refresh (30 d, rotated on use) tokens as SHA-256 hashes, `ON DELETE CASCADE` from their grant |
