@@ -15,9 +15,8 @@ is added, or when an existing kind needs a new inline-editable field.
 
 | Category | Item | Required? |
 |---|---|---|
-| Dispatch | `normalizeKind()` returns a canonical label for the new kind | ✅ |
+| Dispatch | Kind added to `NOTE_KINDS` and `SHEETED_KINDS` (aliases to `KIND_ALIASES`) in `shared/src/schemas/kind.ts` | ✅ |
 | Dispatch | `SheetHeader.tsx` switch has a case | ✅ |
-| Dispatch | `server/src/lib/ai/tools.ts` mapping updated in the **same commit** | ✅ |
 | Schema | Zod schema exists under `shared/src/...` (or server-side validator) | ✅ |
 | Schema | `name` field is `z.string().min(1).optional()` | ✅ |
 | Layout | Uses `titleSizeClass(name, tier)` for the title | ✅ |
@@ -45,7 +44,7 @@ When reviewing or producing a sheet-header change, report as:
 <one paragraph: what changed, which kinds touched>
 
 ## Compliance checklist
-- [ ] normalizeKind + ai/tools.ts in sync
+- [ ] Kind and aliases added only in shared/src/schemas/kind.ts
 - [ ] Zod schema allows new fields and keeps name min(1).optional
 - [ ] usePatchSheet is the only write path
 - [ ] Inline editors: bottom-stroke underline only, no input chrome
@@ -94,13 +93,13 @@ export const FactionSheet = z.object({
   portrait: z.string().nullable().optional(),
 });
 
-// 2. util.ts — extend normalizeKind
-case 'faction':
-case 'guild':   // legacy alias
-  return 'faction';
+// 2. shared/src/schemas/kind.ts — add 'faction' to NOTE_KINDS and
+//    SHEETED_KINDS, and the legacy alias to KIND_ALIASES:
+guild: 'faction',
 
-// 3. ai/tools.ts — mirror the alias
-if (kind === 'guild') kind = 'faction';
+// 3. util.ts#normalizeKind and ai/tools.ts read the shared table, so they
+//    need no edit. ai/paths.ts#canonicalFolder needs a folder case; the
+//    typechecker flags the missing return.
 
 // 4. FactionHeader.tsx
 export function FactionHeader(props: HeaderProps): React.JSX.Element {

@@ -1028,3 +1028,42 @@ describe('inventory_add — does not touch yjs_state', () => {
     expect(Buffer.from(after.yjs_state!)).toEqual(Buffer.from(before.yjs_state!));
   });
 });
+
+describe('entity_create — canonical kinds', () => {
+  function seedCampaign(): void {
+    const db = getDb();
+    db.query('DELETE FROM campaigns WHERE group_id = ?').run(groupId);
+    db.query(
+      `INSERT INTO campaigns (group_id, slug, name, folder_path, created_at)
+       VALUES (?, 'mill', 'The Mill', 'Campaigns/mill', ?)`,
+    ).run(groupId, Date.now());
+  }
+
+  it('creates a quest under Quests/ with kind quest', async () => {
+    seedCampaign();
+    const tools = createTools(ctxFor('dm'));
+
+    const result = await tools.entity_create.execute!(
+      { kind: 'quest', name: 'Find the Miller', campaignSlug: 'mill', dmOnly: false },
+      { toolCallId: 'ec1', messages: [] },
+    );
+
+    expect(result).toMatchObject({ ok: true, path: 'Campaigns/mill/Quests/find-the-miller.md' });
+    const fm = JSON.parse(readNote('Campaigns/mill/Quests/find-the-miller.md').frontmatter_json);
+    expect(fm).toEqual({ kind: 'quest' });
+  });
+
+  it('creates a villain as a person under People/', async () => {
+    seedCampaign();
+    const tools = createTools(ctxFor('dm'));
+
+    const result = await tools.entity_create.execute!(
+      { kind: 'villain', name: 'Grell', campaignSlug: 'mill', dmOnly: false },
+      { toolCallId: 'ec2', messages: [] },
+    );
+
+    expect(result).toMatchObject({ ok: true, path: 'Campaigns/mill/People/grell.md' });
+    const fm = JSON.parse(readNote('Campaigns/mill/People/grell.md').frontmatter_json);
+    expect(fm.kind).toBe('person');
+  });
+});

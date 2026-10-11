@@ -86,11 +86,13 @@ endpoint, preserve these invariants:
 
 ## Kind normalisation
 
-The canonical frontmatter kinds are `character | person | creature | item |
-location | session | lore | note`. Legacy aliases (`pc`, `npc`, `ally`,
-`villain`, `monster`) must normalise through the mapping in
-`server/src/lib/ai/tools.ts`. Any new route that branches on `fm.kind`
-should call the shared normaliser — do not grow a third copy of the switch.
-The sheet-header UI mirror is in
-`server/src/app/notes/sheet-header/util.ts#normalizeKind`. If you add a
-kind, update both sites in the same commit.
+The canonical frontmatter kinds are `NOTE_KINDS` in
+`shared/src/schemas/kind.ts`: `character | person | creature | item |
+location | quest | lore | session | note`. Legacy aliases (`pc` →
+character; `npc`, `ally`, `villain` → person; `monster` → creature) live in
+`KIND_ALIASES` beside them. Any route or tool that branches on `fm.kind`
+calls `canonicalKind()` (validated `KindInput`) or `parseKind()` (untrusted
+string) from `@compendium/shared`. Accept kinds with `z.enum(NOTE_KINDS)` or
+`z.enum(KIND_INPUTS)` rather than a hand-written list. Do not write another
+switch; to add a kind or alias, edit the shared table and every consumer
+picks it up.
