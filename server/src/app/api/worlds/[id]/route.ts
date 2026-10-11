@@ -10,16 +10,12 @@ import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { deleteWorld, setWorldFeatures } from '@/lib/groups';
-import { DEFAULT_PERSONALITY, getPersonality, setActivePersonality } from '@/lib/ai/personalities';
 
 export const dynamic = 'force-dynamic';
 
 const Body = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   headerColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
-  // null (or the built-in sentinel) reverts to the default scribe voice;
-  // any other string must be the id of a personality in this world.
-  activePersonalityId: z.string().min(1).nullable().optional(),
   // null clears the pin; any string must be an existing campaign slug.
   activeCampaignSlug: z.string().min(1).nullable().optional(),
   features: z
@@ -62,7 +58,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
   if (
     body.name === undefined &&
     body.headerColor === undefined &&
-    body.activePersonalityId === undefined &&
     body.activeCampaignSlug === undefined &&
     body.features === undefined
   ) {
@@ -71,20 +66,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
 
   // Validate every referenced id BEFORE any write. Previously each
   // field applied its own independent UPDATE statement; if an early
-  // field succeeded and a later one referenced an unknown id
-  // (personality / campaign), the handler returned 404 with the
+  // field succeeded and a later one referenced an unknown campaign
+  // slug, the handler returned 404 with the
   // earlier writes already committed — the client saw an error while
   // the world had, in fact, been partially renamed. Resolving all
   // references up front means a 404 here is returned before anything
   // is written.
-  if (
-    body.activePersonalityId !== undefined &&
-    body.activePersonalityId !== null &&
-    body.activePersonalityId !== DEFAULT_PERSONALITY.id &&
-    !getPersonality(id, body.activePersonalityId)
-  ) {
-    return json({ error: 'not_found', detail: 'Unknown personality for this world.' }, 404);
-  }
   if (body.activeCampaignSlug !== undefined && body.activeCampaignSlug !== null) {
     const campaign = db
       .query<{ slug: string }, [string, string]>(
@@ -107,9 +94,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
     }
     if (body.headerColor !== undefined) {
       db.query('UPDATE groups SET header_color = ? WHERE id = ?').run(body.headerColor, id);
-    }
-    if (body.activePersonalityId !== undefined) {
-      setActivePersonality(id, body.activePersonalityId);
     }
     if (body.activeCampaignSlug !== undefined) {
       db.query('UPDATE groups SET active_campaign_slug = ? WHERE id = ?').run(
@@ -139,7 +123,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
     details: {
       rename: body.name,
       headerColor: body.headerColor,
-      activePersonalityId: body.activePersonalityId,
       activeCampaignSlug: body.activeCampaignSlug,
     },
   });

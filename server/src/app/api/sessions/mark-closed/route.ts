@@ -1,6 +1,6 @@
 // POST /api/sessions/mark-closed — mark a session note as closed.
-// Lightweight — no AI, no entity work. Just flips the status flag so the
-// End of Session button can close the session before handing off to chat.
+// Lightweight — no AI, no entity work. Just flips the status flag for the
+// End of Session button.
 //
 // Body: { sessionPath: string }
 
