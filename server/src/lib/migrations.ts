@@ -941,6 +941,17 @@ const MIGRATIONS: readonly Migration[] = [
         SELECT path, group_id, title, content_text FROM notes;
     `,
   },
+  {
+    version: 49,
+    description: 'session_notes: wrap_up_json holds the pending Wrap-up proposal',
+    sql: `
+      -- v17 added dm_review_json for a review workflow that never
+      -- shipped; no code ever read or wrote it, so every row is NULL.
+      -- The Wrap-up proposal (lib/wrap-up.ts) is the review step that
+      -- did ship: the column is renamed to hold it.
+      ALTER TABLE session_notes RENAME COLUMN dm_review_json TO wrap_up_json;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

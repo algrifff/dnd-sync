@@ -339,7 +339,7 @@ All routes live under `/api/`. ~70 endpoints; grouped:
 | Folders | `POST /api/folders/create`, `POST /api/folders/move`, `DELETE /api/folders/delete` |
 | Tree | `GET /api/tree` |
 | Characters | `GET /api/characters`, `GET /api/me/characters`, `POST /api/me/characters/import-pdf` |
-| Sessions (game) | `POST /api/sessions/mark-closed` |
+| Sessions (game) | `POST /api/sessions/mark-closed`, `GET`/`POST /api/sessions/wrap-up`, `GET /api/sessions/wrap-up/context`, `POST /api/sessions/wrap-up/apply` |
 | Tags | `GET /api/tags`, `GET /api/note-tags`, `GET /api/asset-tags` |
 | Assets | `POST /api/assets/upload`, `GET /api/assets/[id]`, `GET /api/assets/list`, `GET /api/assets/by-path` |
 | Backlinks | `POST /api/notes/backlink` |

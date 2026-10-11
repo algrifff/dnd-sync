@@ -55,10 +55,7 @@ export function addHistoryEntry(
     return changed(doc, [...nodes, heading, bulletList([item])]);
   }
 
-  const level = headingLevel(nodes[headingIndex]!);
-  let end = headingIndex + 1;
-  while (end < nodes.length && !endsSection(nodes[end]!, level)) end++;
-
+  const end = historySectionEnd(nodes, headingIndex);
   const section = nodes.slice(headingIndex + 1, end);
   if (section.some((n) => linksTo(n, entry.sessionPath))) return { status: 'unchanged' };
 
@@ -68,6 +65,25 @@ export function addHistoryEntry(
     return changed(doc, [...nodes.slice(0, end - 1), extended, ...nodes.slice(end)]);
   }
   return changed(doc, [...nodes.slice(0, end), bulletList([item]), ...nodes.slice(end)]);
+}
+
+/** True when the doc's History section already links `sessionPath`. */
+export function hasHistoryEntry(doc: PmDoc, sessionPath: string): boolean {
+  const nodes = doc.content ?? [];
+  const headingIndex = nodes.findIndex(isHistoryHeading);
+  if (headingIndex === -1) return false;
+  return nodes
+    .slice(headingIndex + 1, historySectionEnd(nodes, headingIndex))
+    .some((n) => linksTo(n, sessionPath));
+}
+
+/** Index one past the last node of the section under the heading at
+ *  `headingIndex`. */
+function historySectionEnd(nodes: PmNode[], headingIndex: number): number {
+  const level = headingLevel(nodes[headingIndex]!);
+  let end = headingIndex + 1;
+  while (end < nodes.length && !endsSection(nodes[end]!, level)) end++;
+  return end;
 }
 
 /** Turns the first plain-text occurrence of `text` (case-insensitive,

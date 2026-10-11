@@ -32,7 +32,7 @@ scripts/    # one-off utilities (e.g. vault deduplication)
 - `server/src/lib/db.ts` switches at runtime: `typeof Bun !== "undefined"`
 - The Dockerfile rebuilds `better-sqlite3` against Node 22's ABI in a separate stage — don't skip this step when changing the Dockerfile
 
-## Data model (46 migrations, versions 1–48 — append only, never edit existing)
+## Data model (47 migrations, versions 1–49 — append only, never edit existing)
 
 Numbering isn't contiguous — a couple of version numbers (21, 22) were
 never shipped, so "latest version" and "migration count" are two
@@ -48,7 +48,7 @@ Key tables:
 | `group_members` | User ↔ group with role: `admin`, `editor`, `viewer` |
 | `sessions` | HTTP-only session cookies + CSRF tokens |
 | `characters` | Derived index from note frontmatter — re-derived on every save |
-| `session_notes` | Campaign session logs with GM review workflow (open → closed) |
+| `session_notes` | Session status (open → closed) and the pending Wrap-up proposal (`wrap_up_json`) |
 | `import_jobs` | AI import pipeline state — `uploaded` → `orchestrating_assets` → `orchestrating_campaign` → `orchestrating_entities` → `orchestrating_quality` → `applied` on the live Smart Import path (can pause at `waiting_for_answer`); `parsing` → `analysing` → `ready` is the legacy manual-review path, still valid statuses but not driven by the current UI |
 | `assets` | Binary files (images etc.) deduplicated by content hash |
 | `note_links` | Graph edges between notes (backlinks) |
@@ -101,6 +101,8 @@ All queries include `group_id` — no table-level tenant isolation, just strict 
 - `inventory_add` — add items to character sheet (GM only)
 - `entity_move`, `entity_change_kind`, `note_write_section`, `session_finalize` (GM only)
 
+**Wrap-up** — the app does not generate it. A Player's own Claude reads `GET /api/sessions/wrap-up/context` (log + visible candidate Notes, flagged `recorded` when their History already links the Session) and submits `POST /api/sessions/wrap-up` (strict Zod `WrapUpSubmission`; a mention of a Note the caller cannot see is a 404). The closer reviews the pending proposal in the End of Session dialog; `POST /api/sessions/wrap-up/apply` adds History entries, creates new Notes, links the log and closes the Session. Logic lives in `server/src/lib/wrap-up.ts`.
+
 **Import pipeline** — AI-assisted batch import of Markdown vaults ("Smart Import")
 1. Upload ZIP → `import-parse.ts` (structural parse), job status `uploaded`
 2. `import-orchestrate.ts` runs the pipeline the UI actually drives (`ImportLauncher` calls `POST /api/import/[id]/orchestrate`): assets → campaign → entities → quality (`orchestrating_*` statuses), pausing to ask the DM a question via an in-process chat channel (`waiting_for_answer`, answered through `POST /api/import/[id]/answer`) when something's genuinely ambiguous
@@ -127,6 +129,8 @@ vault page's job list via `/settings/import/<id>`.
 | `server/src/lib/notes.ts` | Note CRUD, backlink derivation, FTS sync |
 | `server/src/lib/ai/orchestrator.ts` | Chat system prompt builder + skill injection |
 | `server/src/lib/ai/tools.ts` | All AI tool definitions |
+| `server/src/lib/wrap-up.ts` | Wrap-up: proposal shape, submit validation, candidate context, idempotent apply |
+| `server/src/lib/note-edits.ts` | Lossless PM-JSON edits: `addHistoryEntry`, `linkMention`, `applyNoteEdit` |
 | `server/src/lib/import-orchestrate.ts` | "Smart Import" — the multi-phase pipeline the vault UI actually drives (assets → campaign → entities → quality) |
 | `server/src/lib/assets.ts` | Content-addressed asset storage — hash/mime dedup, `deleteAsset()` reference-checked delete |
 | `server/src/collab/server.ts` | Hocuspocus server for web editing |

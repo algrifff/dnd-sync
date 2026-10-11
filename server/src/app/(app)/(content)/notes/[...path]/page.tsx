@@ -106,7 +106,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
   // Campaign slug for session end — from frontmatter.campaigns[0] or path
   let sessionCampaignSlug: string | undefined;
-  let sessionStatus: 'open' | 'review' | 'closed' = 'open';
+  let sessionStatus: 'open' | 'closed' = 'open';
   if (isSessionNote) {
     const camps = Array.isArray(frontmatter.campaigns)
       ? frontmatter.campaigns
