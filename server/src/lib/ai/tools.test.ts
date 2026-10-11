@@ -1286,7 +1286,7 @@ describe('entity_change_kind — a gm_only destination is not an existence oracl
  *  and reports whether the document and its pending store survived. */
 async function withOpenEditor(
   path: string,
-  fn: () => Promise<unknown>,
+  fn: () => unknown,
 ): Promise<{ result: unknown; stillLoaded: boolean; storePending: boolean }> {
   const documentName = `${groupId}:${path}`;
   const hocuspocus = ORIGINAL_COLLAB_SERVER.collabServer;
