@@ -224,6 +224,7 @@ export function clearAllData(): void {
       'characters',
       'campaigns',
       'note_links',
+      'note_relations',
       'tags',
       'aliases',
       'folder_markers',

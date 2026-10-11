@@ -77,7 +77,7 @@ Both backends expose the same `Database` interface, so call sites are runtime-ag
 
 ## Data model
 
-Schema is defined in `server/src/lib/migrations.ts` as an append-only array. Currently at **schema version 48** — never edit existing entries, always append.
+Schema is defined in `server/src/lib/migrations.ts` as an append-only array. Currently at **schema version 52** — never edit existing entries, always append.
 
 Key tables:
 
@@ -93,6 +93,7 @@ Key tables:
 | `import_jobs`          | AI import pipeline state (uploaded → parsing → analysing → applied)  |
 | `assets`               | Binary files deduplicated by content hash                            |
 | `note_links`           | Knowledge-graph edges (backlinks, with `is_index` flag for TOCs)     |
+| `note_relations`       | Typed Relationships between two Notes (authored, never derived)      |
 | `notes_fts`            | FTS5 full-text search index — auto-synced via triggers               |
 | `group_invite_tokens`  | Shareable world-join links                                           |
 | `audit_log`            | Admin action history                                                 |

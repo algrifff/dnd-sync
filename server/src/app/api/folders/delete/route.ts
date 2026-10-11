@@ -7,6 +7,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
+import { deleteRelationsOf } from '@/lib/relations';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
 import { deriveFolderIndexesFor } from '@/lib/campaign-index';
@@ -52,6 +53,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       db.query(
         'DELETE FROM note_links WHERE group_id = ? AND (from_path = ? OR to_path = ?)',
       ).run(groupId, n.path, n.path);
+      deleteRelationsOf(groupId, n.path);
       db.query('DELETE FROM tags WHERE group_id = ? AND path = ?').run(groupId, n.path);
       db.query('DELETE FROM aliases WHERE group_id = ? AND path = ?').run(groupId, n.path);
       db.query('DELETE FROM notes WHERE group_id = ? AND path = ?').run(groupId, n.path);

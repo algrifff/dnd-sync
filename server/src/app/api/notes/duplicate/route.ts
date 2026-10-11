@@ -109,7 +109,8 @@ export async function POST(req: NextRequest): Promise<Response> {
         );
         // Copy outgoing links + tags only. Inbound links (note_links
         // where to_path = src.path) shouldn't auto-point at the
-        // duplicate.
+        // duplicate. Relationships are not copied: each is a fact about
+        // the original, recorded by a Session.
         for (const { to_path } of db
           .query<{ to_path: string }, [string, string]>(
             'SELECT to_path FROM note_links WHERE group_id = ? AND from_path = ?',

@@ -30,6 +30,7 @@ import { parseCharacter } from '@/lib/character-parser';
 import { writeNote } from '@/lib/import-apply';
 import { applyNoteEdit, type PmDoc } from '@/lib/note-edits';
 import { repointSuggestionPaths } from '@/lib/suggestion-paths';
+import { repointRelations } from '@/lib/relations';
 import type { PmNode } from '@/lib/md-to-pm';
 
 // ── Context ────────────────────────────────────────────────────────────
@@ -751,6 +752,7 @@ function entityMove(ctx: ToolContext) {
         }
         db.query(`UPDATE note_links SET to_path=? WHERE group_id=? AND to_path=?`).run(to, ctx.groupId, from);
         repointSuggestionPaths(ctx.groupId, from, to);
+        repointRelations(ctx.groupId, from, to);
       })();
 
       void deriveFolderIndexesFor(ctx.groupId, [from, to], {
@@ -849,6 +851,7 @@ function entityChangeKind(ctx: ToolContext) {
           }
           db.query(`UPDATE note_links SET to_path=? WHERE group_id=? AND to_path=?`).run(newPath, ctx.groupId, path);
           repointSuggestionPaths(ctx.groupId, path, newPath);
+          repointRelations(ctx.groupId, path, newPath);
         } else {
           db.query(`UPDATE notes SET frontmatter_json=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
             .run(JSON.stringify(nextFm), Date.now(), ctx.userId, ctx.groupId, path);

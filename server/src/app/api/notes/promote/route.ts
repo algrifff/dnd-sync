@@ -16,6 +16,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
+import { repointRelations } from '@/lib/relations';
 import { logAudit } from '@/lib/audit';
 import { isAllowedPath } from '@/lib/notes';
 import {
@@ -176,6 +177,7 @@ export async function POST(req: NextRequest): Promise<Response> {
           .run(toPath, session.currentGroupId, body.fromPath);
         db.query('UPDATE tags SET path = ? WHERE group_id = ? AND path = ?')
           .run(toPath, session.currentGroupId, body.fromPath);
+        repointRelations(session.currentGroupId, body.fromPath, toPath);
       }
     })();
 

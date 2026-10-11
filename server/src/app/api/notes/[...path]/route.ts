@@ -5,6 +5,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
+import { deleteRelationsOf } from '@/lib/relations';
 import { decodePath, findNearestIndexPath, loadNote, loadTags, visibilityFor } from '@/lib/notes';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
@@ -76,6 +77,7 @@ export async function DELETE(req: NextRequest, ctx: RouteCtx): Promise<Response>
   db.transaction(() => {
     db.query('DELETE FROM note_links WHERE group_id = ? AND (from_path = ? OR to_path = ?)')
       .run(session.currentGroupId, path, path);
+    deleteRelationsOf(session.currentGroupId, path);
     db.query('DELETE FROM tags WHERE group_id = ? AND path = ?').run(session.currentGroupId, path);
     db.query('DELETE FROM aliases WHERE group_id = ? AND path = ?').run(session.currentGroupId, path);
     db.query('DELETE FROM notes WHERE group_id = ? AND path = ?').run(session.currentGroupId, path);
