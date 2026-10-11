@@ -209,10 +209,11 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                     />
                   </div>
 
-                  {isSessionNote && sessionStatus !== 'closed' && (
+                  {isSessionNote && (
                     <EndSessionButton
                       sessionPath={path}
                       csrfToken={session.csrfToken}
+                      isAlreadyClosed={sessionStatus === 'closed'}
                       campaignSlug={sessionCampaignSlug}
                     />
                   )}

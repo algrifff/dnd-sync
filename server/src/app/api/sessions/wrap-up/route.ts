@@ -1,7 +1,8 @@
 // /api/sessions/wrap-up — the Session's pending Wrap-up proposal.
 //
-// GET  ?sessionPath=…  The pending proposal, or { proposal: null } when
-//                      none is waiting for review.
+// GET  ?sessionPath=…  { proposal, existingTitles }: the pending proposal
+//                      (null when none is waiting for review) and the
+//                      titles of the Notes its existing matches name.
 // POST { sessionPath, mentions }
 //                      Submit a proposal (a Player's Claude calls this).
 //                      Replaces any earlier pending proposal. Any role
@@ -13,6 +14,7 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { apiErrorResponse } from '@/lib/analytics/api-error';
 import {
+  existingTitles,
   loadPendingWrapUp,
   loadVisibleSession,
   submitWrapUp,
@@ -34,7 +36,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     if (lookup.status === 'not_a_session') return json({ error: 'not_a_session' }, 400);
 
     const proposal = loadPendingWrapUp(session.currentGroupId, session.role, sessionPath);
-    return json({ proposal }, 200);
+    return json({ proposal, existingTitles: proposal ? existingTitles(session.currentGroupId, proposal) : {} }, 200);
   } catch (err) {
     return apiErrorResponse('api/sessions/wrap-up', err);
   }

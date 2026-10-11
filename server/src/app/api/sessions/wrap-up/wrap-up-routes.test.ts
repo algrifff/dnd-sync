@@ -148,7 +148,7 @@ describe('POST /api/sessions/wrap-up', () => {
     const { proposal: stored } = (await res.json()) as { proposal: { mentions: Array<{ id: string }> } };
     const ids = stored.mentions.map((m) => m.id);
     expect(new Set(ids).size).toBe(2);
-    expect(ids.every((id) => !/^md+$/.test(id))).toBe(true);
+    expect(ids.every((id) => !/^m\d+$/.test(id))).toBe(true);
   });
 
   it('rejects a malformed proposal with a snake_case error and the first problem', async () => {
@@ -210,6 +210,14 @@ describe('GET /api/sessions/wrap-up', () => {
     expect(forCoGm.proposal.mentions.map((m) => m.name)).toEqual(['the spy', 'Bram', 'Rusted Key']);
   });
 
+  it('names the Notes its existing matches point at, and only those the reader can see', async () => {
+    const forPlayer = (await (await getPending(get(url(''), otherPlayer))).json()) as { existingTitles: Record<string, string> };
+    const forCoGm = (await (await getPending(get(url(''), coGm))).json()) as { existingTitles: Record<string, string> };
+
+    expect(forPlayer.existingTitles).toEqual({ [BRAM]: 'Bram' });
+    expect(forCoGm.existingTitles).toEqual({ [SPY]: 'The Spy', [BRAM]: 'Bram' });
+  });
+
   it('echoes the proposal generatedAt, which apply requires back', async () => {
     const stored = await submitOk(player, proposal());
 
@@ -227,7 +235,7 @@ describe('GET /api/sessions/wrap-up', () => {
     const forPlayer = (await (await getPending(get(url(''), otherPlayer))).json()) as { proposal: Stored };
 
     expect(forPlayer.proposal.mentions.map((m) => m.id)).toEqual([stored.mentions[0]!.id, stored.mentions[2]!.id]);
-    expect(forPlayer.proposal.mentions.map((m) => m.id).every((id) => !/^md+$/.test(id))).toBe(true);
+    expect(forPlayer.proposal.mentions.map((m) => m.id).every((id) => !/^m\d+$/.test(id))).toBe(true);
   });
 
   it('answers 404 for a Secret Session a Player cannot see', async () => {
