@@ -3,6 +3,7 @@ import type { WrapUpProposal } from '@/lib/wrap-up';
 import {
   acceptedCount,
   acceptedRelationIds,
+  doneChips,
   doneMessage,
   groupRows,
   initialReview,
@@ -121,7 +122,7 @@ describe('Relationships in the Wrap-up review', () => {
 
     const after = rows(state);
 
-    expect(after.map((r) => [r.accepted, r.blockedBy])).toEqual([[true, null], [false, 'the innkeeper'], [true, null]]);
+    expect(after.map((r) => [r.accepted, r.blocked])).toEqual([[true, false], [false, true], [true, false]]);
     expect(acceptedRelationIds(withRelations, state, none)).toEqual(['r1', 'r3']);
   });
 
@@ -133,12 +134,27 @@ describe('Relationships in the Wrap-up review', () => {
     expect(rows(setAccepted(unticked, 'm1', true), setRelationAccepted(off, 'r1', true))[0]!.accepted).toBe(true);
   });
 
-  it('lists only the mention ends as dependencies, so an existing end claims no skip rule', () => {
+  it('marks the unticked mention end, and never blocks on an existing end', () => {
+    const state = setAccepted(initialReview(withRelations), 'm3', false);
+
+    expect(rows().map((r) => [r.fromOff, r.toOff])).toEqual([[false, false], [false, false], [false, false]]);
+    // r2 owns the new Rusted Key (m3): only its `to` end goes off.
+    expect(rows(state).map((r) => [r.fromOff, r.toOff, r.blocked])).toEqual([
+      [false, false, false],
+      [false, true, true],
+      [false, false, false],
+    ]);
+  });
+
+  it('leaves a relation intact when the Note at its existing end is also an unticked mention', () => {
     const state = setAccepted(initialReview(withRelations), 'm1', false);
 
-    expect(rows().map((r) => r.dependsOn)).toEqual([['Bram the Miller'], ['the innkeeper', 'Rusted Key'], []]);
-    // Bram is both a mention (m1) and the existing end of r3: unticking m1 leaves r3 intact.
-    expect(rows(state).map((r) => [r.dependsOn.length > 0, r.accepted])).toEqual([[true, false], [true, true], [false, true]]);
+    // Bram is both a mention (m1) and the existing end of r3.
+    expect(rows(state).map((r) => [r.blocked, r.accepted])).toEqual([[true, false], [false, true], [false, true]]);
+  });
+
+  it('flags the types that read the same from either end', () => {
+    expect(rows().map((r) => r.symmetric)).toEqual([false, false, true]);
   });
 
   it('lets the closer untick a relation that depends on no mention', () => {
@@ -183,6 +199,18 @@ describe('Wrap-up banner', () => {
   it('reports Relationships even when no History entry landed', () => {
     expect(doneMessage(out(0, 0, 2, 0))).toBe('Session closed. 2 Relationships recorded.');
     expect(doneMessage(out(0, 0, 0, 1))).toBe('Session closed. 1 Relationship skipped.');
+  });
+
+  it('shows a figure for each count above zero, in reading order', () => {
+    expect(doneChips(null)).toEqual([]);
+    expect(doneChips(out(0, 0, 0, 0))).toEqual([]);
+    expect(doneChips(out(4, 1, 3, 1))).toEqual([
+      { key: 'updated', count: 4 },
+      { key: 'created', count: 1 },
+      { key: 'recorded', count: 3 },
+      { key: 'skipped', count: 1 },
+    ]);
+    expect(doneChips(out(0, 0, 2, 0))).toEqual([{ key: 'recorded', count: 2 }]);
   });
 
   it('carries the Relationship counts from the apply response', () => {
