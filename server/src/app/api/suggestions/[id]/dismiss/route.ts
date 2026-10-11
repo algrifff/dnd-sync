@@ -31,8 +31,6 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
         return json({ error: 'not_found' }, 404);
       case 'conflict':
         return json({ error: `already_${result.resolved}` }, 409);
-      case 'invalid_sheet':
-        return json({ error: 'invalid_sheet', reason: 'The Character Sheet is not valid, so the items could not be added.' }, 409);
       case 'ok':
         return json({ ok: true, changed: result.changed }, 200);
     }

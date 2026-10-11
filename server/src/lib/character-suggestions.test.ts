@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import type { NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import * as Y from 'yjs';
 import { prosemirrorJSONToYDoc } from 'y-prosemirror';
@@ -7,6 +8,11 @@ import { getPmSchema } from '@/lib/pm-schema';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { setupTestDb, teardownTestDb } from '@/lib/test-utils';
 import { createUser, DEFAULT_GROUP_ID as groupId } from '@/lib/users';
+import { buildSessionCookies, createSession } from '@/lib/session';
+import { moveFolder } from '@/lib/move-folder';
+import { createTools } from '@/lib/ai/tools';
+import { POST as moveRoute } from '@/app/api/notes/move/route';
+import * as noteEdits from '@/lib/note-edits';
 import type { PmNode } from '@/lib/md-to-pm';
 import type { PmDoc } from '@/lib/note-edits';
 import {
@@ -296,7 +302,20 @@ describe('accepting a Suggestion', () => {
 
     await accept(karaPlayer, mineFor(karaPlayer)[0]!.id);
 
-    expect((sheetOf(KARA).inventory as Array<{ quantity: number }>).map((e) => e.quantity)).toEqual([3]);
+    const sheet = sheetOf(KARA);
+    expect((sheet.inventory as Array<{ quantity: number }>).map((e) => e.quantity)).toEqual([3]);
+    expect(sheet.items).toEqual(['Rope ×3']);
+  });
+
+  it('raises a quantity already written in the flat list, keeping its spelling', async () => {
+    getDb()
+      .query('UPDATE notes SET frontmatter_json = ? WHERE group_id = ? AND path = ?')
+      .run(JSON.stringify({ kind: 'character', player: 'kara-player', sheet: { ...KARA_SHEET, items: ['Rope ×2', 'Lantern'] } }), groupId, KARA);
+    await wrapUp([suggestion('s1', KARA, { story: null, items: [{ name: 'ROPE', quantity: 2 }, { name: 'Lantern', quantity: 1 }] })]);
+
+    await accept(karaPlayer, mineFor(karaPlayer)[0]!.id);
+
+    expect(sheetOf(KARA).items).toEqual(['Rope ×4', 'Lantern ×2']);
   });
 
   it('adds only items when there is no story, and only a story when there are no items', async () => {
@@ -352,6 +371,101 @@ describe('accepting a Suggestion', () => {
 
     expect(result).toEqual({ status: 'invalid_sheet' });
     expect(mineFor(karaPlayer)).toHaveLength(1);
+  });
+
+  it('writes nothing, not even the History entry, when the Sheet would not validate', async () => {
+    await wrapUp([suggestion('s1', KARA)]);
+    getDb()
+      .query('UPDATE notes SET frontmatter_json = ? WHERE group_id = ? AND path = ?')
+      .run(JSON.stringify({ kind: 'character', player: 'kara-player', sheet: { ...KARA_SHEET, xp: 'banana' } }), groupId, KARA);
+    const before = noteRow(KARA);
+
+    const result = await accept(karaPlayer, mineFor(karaPlayer)[0]!.id);
+
+    expect(result).toEqual({ status: 'invalid_sheet' });
+    expect(noteRow(KARA)).toEqual(before);
+    expect(historyEntries(KARA)).toEqual([]);
+    expect(dismiss(karaPlayer, mineFor(karaPlayer)[0]!.id)).toEqual({ status: 'ok', changed: true });
+    expect(historyEntries(KARA)).toEqual([]);
+  });
+
+  it('releases the claim and reports a refused History edit instead of success', async () => {
+    await wrapUp([suggestion('s1', KARA)]);
+    const edit = spyOn(noteEdits, 'applyNoteEdit').mockResolvedValue({ status: 'rejected', reason: 'locked' });
+    const before = noteRow(KARA);
+
+    const result = await accept(karaPlayer, mineFor(karaPlayer)[0]!.id);
+    edit.mockRestore();
+
+    expect(result).toEqual({ status: 'edit_failed', reason: 'locked' });
+    expect(noteRow(KARA)).toEqual(before);
+    expect(mineFor(karaPlayer)).toHaveLength(1);
+  });
+
+  it('releases the claim and reads as not found when the Character Note vanished mid-accept', async () => {
+    await wrapUp([suggestion('s1', KARA)]);
+    const edit = spyOn(noteEdits, 'applyNoteEdit').mockResolvedValue({ status: 'not_found' });
+
+    const result = await accept(karaPlayer, mineFor(karaPlayer)[0]!.id);
+    edit.mockRestore();
+
+    expect(result).toEqual({ status: 'not_found' });
+    expect(mineFor(karaPlayer)).toHaveLength(1);
+  });
+});
+
+describe('moving a Character or Session', () => {
+  const NEW_KARA = 'Campaigns/Ashfall/Characters/kara-the-bold.md';
+  const NEW_SESSION = 'Campaigns/Ashfall/Adventure Log/2026-10-11-the-old-mill.md';
+
+  const moveAs = async (from: string, to: string): Promise<void> => {
+    const owner = createSession({ userId: ownerId, groupId, userAgent: null, ip: null });
+    const cookie = buildSessionCookies(owner).map((c) => `${c.name}=${c.value}`).join('; ');
+    const res = await moveRoute(
+      new Request('http://localhost/api/notes/move', {
+        method: 'POST',
+        headers: { cookie, 'x-csrf-token': owner.csrfToken, 'content-type': 'application/json' },
+        body: JSON.stringify({ from, to }),
+      }) as unknown as NextRequest,
+    );
+    expect(res.status).toBe(200);
+  };
+
+  it('still lists the pending Suggestion after the Character Note is renamed', async () => {
+    await wrapUp([suggestion('s1', KARA)]);
+
+    await moveAs(KARA, NEW_KARA);
+
+    expect(mineFor(karaPlayer).map((s) => s.characterPath)).toEqual([NEW_KARA]);
+  });
+
+  it('still lists the pending Suggestion after the Session Note is renamed', async () => {
+    await wrapUp([suggestion('s1', KARA)]);
+
+    await moveAs(SESSION, NEW_SESSION);
+
+    expect(mineFor(karaPlayer).map((s) => s.sessionPath)).toEqual([NEW_SESSION]);
+  });
+
+  it('keeps the Suggestion when the folder holding the Character is renamed', async () => {
+    await wrapUp([suggestion('s1', KARA)]);
+
+    const moved = await moveFolder({
+      groupId, userId: ownerId, from: 'Campaigns/Ashfall/Characters', to: 'Campaigns/Ashfall/Heroes',
+    });
+
+    expect(moved.ok).toBe(true);
+    expect(mineFor(karaPlayer).map((s) => s.characterPath)).toEqual(['Campaigns/Ashfall/Heroes/kara.md']);
+  });
+
+  it('keeps the Suggestion when the AI renames the Character Note', async () => {
+    await wrapUp([suggestion('s1', KARA)]);
+    const tools = createTools({ groupId, userId: ownerId, role: 'dm', sessionRole: 'admin', gmNamespace: true });
+
+    const result = await tools.entity_move.execute!({ from: KARA, to: NEW_KARA }, { toolCallId: 't1', messages: [] });
+
+    expect((result as { ok: boolean }).ok).toBe(true);
+    expect(mineFor(karaPlayer).map((s) => s.characterPath)).toEqual([NEW_KARA]);
   });
 });
 

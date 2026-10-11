@@ -157,17 +157,23 @@ export function listMySuggestions(opts: {
 
 // ── Resolving ──────────────────────────────────────────────────────────
 
-export type ResolveResult =
+export type DismissResult =
   | { status: 'ok'; changed: boolean }
   | { status: 'not_found' }
   /** Already resolved the other way. */
-  | { status: 'conflict'; resolved: 'accepted' | 'dismissed' }
+  | { status: 'conflict'; resolved: 'accepted' | 'dismissed' };
+
+export type ResolveResult =
+  | DismissResult
   /** The Character's Sheet would no longer validate with the items in it. */
-  | { status: 'invalid_sheet' };
+  | { status: 'invalid_sheet' }
+  /** The Character Note refused the History entry. */
+  | { status: 'edit_failed'; reason: string };
 
 /** Accepts one of `userId`'s Suggestions: a History entry for the story
  *  and the items added to the inventory. Accepting twice changes nothing
- *  the second time. */
+ *  the second time. Nothing is written unless the Sheet with the items
+ *  in it validates, so a refused accept leaves the Character untouched. */
 export async function acceptSuggestion(opts: {
   groupId: string;
   role: Role;
@@ -180,12 +186,21 @@ export async function acceptSuggestion(opts: {
   if (row.status === 'accepted') return { status: 'ok', changed: false };
   if (row.status === 'dismissed') return { status: 'conflict', resolved: 'dismissed' };
 
+  const items = JSON.parse(row.items_json) as SuggestedItem[];
+  // Validate the Sheet before anything is written, so an invalid one
+  // cannot leave a History entry behind.
+  if (items.length) {
+    const plan = planInventory(groupId, row.character_path, items);
+    if (plan === 'not_found') return { status: 'not_found' };
+    if (plan === 'invalid') return { status: 'invalid_sheet' };
+  }
+
   // Claim before writing so a concurrent accept cannot add the items twice.
   if (!resolve(groupId, row.id, 'pending', 'accepted')) return { status: 'ok', changed: false };
 
   try {
     if (row.story) {
-      await applyNoteEdit({
+      const edit = await applyNoteEdit({
         groupId,
         path: row.character_path,
         userId,
@@ -196,11 +211,29 @@ export async function acceptSuggestion(opts: {
             text: row.story!,
           }),
       });
+      if (edit.status === 'not_found') {
+        release(groupId, row.id);
+        return { status: 'not_found' };
+      }
+      if (edit.status === 'rejected') {
+        release(groupId, row.id);
+        return { status: 'edit_failed', reason: edit.reason };
+      }
     }
-    const items = JSON.parse(row.items_json) as SuggestedItem[];
-    if (items.length && !addToInventory(groupId, row.character_path, userId, items)) {
-      release(groupId, row.id);
-      return { status: 'invalid_sheet' };
+    if (items.length) {
+      // Planned again: the Sheet may have been edited while the History
+      // entry was written. A retried accept is safe either way, since a
+      // Session already in the History is not added twice.
+      const plan = planInventory(groupId, row.character_path, items);
+      if (plan === 'not_found') {
+        release(groupId, row.id);
+        return { status: 'not_found' };
+      }
+      if (plan === 'invalid') {
+        release(groupId, row.id);
+        return { status: 'invalid_sheet' };
+      }
+      writeInventory(groupId, row.character_path, userId, plan);
     }
   } catch (err) {
     release(groupId, row.id);
@@ -215,7 +248,7 @@ export function dismissSuggestion(opts: {
   role: Role;
   userId: string;
   id: string;
-}): ResolveResult {
+}): DismissResult {
   const row = mine({ ...opts, limit: 1 })[0];
   if (!row) return { status: 'not_found' };
   if (row.status === 'dismissed') return { status: 'ok', changed: false };
@@ -241,19 +274,26 @@ function release(groupId: string, id: string): void {
 
 // ── Inventory ──────────────────────────────────────────────────────────
 
-/** Adds `items` to the Character's inventory and nothing else. Both
- *  shapes are written, as CharacterHeader does: the nested
- *  `sheet.inventory` entries and the legacy flat `sheet.items` strings
- *  the older CharacterSheet panel renders. False when the Sheet would
- *  not validate, in which case nothing is written. */
-function addToInventory(
+type InventoryPlan = {
+  note: NoteRow;
+  frontmatter: Record<string, unknown>;
+  sheet: Record<string, unknown>;
+};
+
+/** The Character's frontmatter with `items` added to the inventory and
+ *  nothing else changed, or why it cannot be. Both shapes are kept in
+ *  step: the nested `sheet.inventory` entries, and the legacy flat
+ *  `sheet.items` strings that the older CharacterSheet panel lists as
+ *  typed (a quantity above one reads `Name ×N`). An item already
+ *  carried, matched by name without regard to case, has its quantity
+ *  raised in both. Writes nothing. */
+function planInventory(
   groupId: string,
   path: string,
-  userId: string,
   items: readonly SuggestedItem[],
-): boolean {
+): InventoryPlan | 'not_found' | 'invalid' {
   const note: NoteRow | null = loadNote(groupId, path);
-  if (!note) return false;
+  if (!note) return 'not_found';
   let fm: Record<string, unknown>;
   try {
     fm = JSON.parse(note.frontmatter_json) as Record<string, unknown>;
@@ -265,8 +305,17 @@ function addToInventory(
   const flat = Array.isArray(sheet.items) ? [...(sheet.items as unknown[])] : [];
   const nested = Array.isArray(sheet.inventory) ? [...(sheet.inventory as unknown[])] : [];
   for (const item of items) {
-    flat.push(item.quantity > 1 ? `${item.name} ×${item.quantity}` : item.name);
-    const at = nested.findIndex((e) => entryName(e)?.toLowerCase() === item.name.toLowerCase());
+    const key = item.name.trim().toLowerCase();
+
+    const flatAt = flat.findIndex((e) => typeof e === 'string' && parseFlat(e).name.toLowerCase() === key);
+    if (flatAt === -1) {
+      flat.push(flatLabel(item.name, item.quantity));
+    } else {
+      const have = parseFlat(flat[flatAt] as string);
+      flat[flatAt] = flatLabel(have.name, have.quantity + item.quantity);
+    }
+
+    const at = nested.findIndex((e) => entryName(e)?.trim().toLowerCase() === key);
     if (at === -1) {
       nested.push({ ref: { name: item.name }, quantity: item.quantity, equipped: false, attuned: false });
     } else {
@@ -279,9 +328,12 @@ function addToInventory(
 
   // Validation only gates the write: storing its parsed result would
   // fill in default stats on a Sheet that never had them.
-  if (!validateSheet(typeof fm.kind === 'string' ? fm.kind : undefined, sheet).ok) return false;
+  if (!validateSheet(typeof fm.kind === 'string' ? fm.kind : undefined, sheet).ok) return 'invalid';
+  return { note, frontmatter: fm, sheet };
+}
 
-  const nextFm = JSON.stringify({ ...fm, sheet });
+function writeInventory(groupId: string, path: string, userId: string, plan: InventoryPlan): void {
+  const nextFm = JSON.stringify({ ...plan.frontmatter, sheet: plan.sheet });
   getDb()
     .query('UPDATE notes SET frontmatter_json = ?, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?')
     .run(nextFm, Date.now(), userId, groupId, path);
@@ -291,13 +343,22 @@ function addToInventory(
     console.error('[character-suggestions] derive failed:', err);
   }
   try {
-    syncNoteToMaster(note.id);
+    syncNoteToMaster(plan.note.id);
   } catch (err) {
     console.error('[character-suggestions] sync to master failed:', err);
   }
   // Frontmatter is not in the Y.Doc: ping open editors to re-fetch it.
   signalSheetChanged(groupId, path);
-  return true;
+}
+
+/** A legacy flat item as the panel lists it: `Rope` or `Rope ×2`. */
+function parseFlat(label: string): { name: string; quantity: number } {
+  const m = /^(.*?)\s*×\s*(\d+)\s*$/.exec(label);
+  return m?.[1] ? { name: m[1].trim(), quantity: Number(m[2]) } : { name: label.trim(), quantity: 1 };
+}
+
+function flatLabel(name: string, quantity: number): string {
+  return quantity > 1 ? `${name} ×${quantity}` : name;
 }
 
 function entryName(entry: unknown): string | null {
