@@ -1,8 +1,13 @@
 // POST /api/sessions/wrap-up/apply — apply the closer's decisions on
 // the Session's pending proposal, then close the Session.
 //
-// Body: { sessionPath, accepted: mention ids, asNew: accepted ids whose
+// Body: { sessionPath, generatedAt: the proposal's generatedAt as the
+// closer reviewed it, accepted: mention ids, asNew: accepted ids whose
 // uncertain match the closer switched to a new Note }
+//
+// 409 proposal_changed when generatedAt is not the pending proposal's:
+// someone resubmitted while the closer was reviewing, so their ticks
+// belong to a proposal that no longer exists. Re-fetch and review again.
 //
 // 409 no_pending_proposal when there is nothing to apply, which is also
 // what a repeated apply gets: the first one cleared the proposal, so
@@ -22,6 +27,7 @@ export const dynamic = 'force-dynamic';
 
 const Body = z.object({
   sessionPath: z.string().min(1).max(512),
+  generatedAt: z.number(),
   accepted: z.array(z.string().min(1).max(64)).max(200),
   asNew: z.array(z.string().min(1).max(64)).max(200).default([]),
 });
@@ -47,6 +53,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
     const proposal = loadPendingWrapUp(groupId, role, body.sessionPath);
     if (!proposal) return json({ error: 'no_pending_proposal' }, 409);
+    if (proposal.generatedAt !== body.generatedAt) return json({ error: 'proposal_changed' }, 409);
 
     const result = await applyWrapUp({
       groupId,

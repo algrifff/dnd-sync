@@ -15,6 +15,7 @@
 // `addHistoryEntry` and `linkMention` both report `unchanged` when
 // their work is already done.
 
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { parseKind } from '@compendium/shared';
 import { getDb } from '@/lib/db';
@@ -48,13 +49,21 @@ export type MentionKind = (typeof MENTION_KINDS)[number];
 
 export const MAX_MENTIONS = 60;
 
+// Stripping control and invisible characters is the point of this regex:
+// C0/C1 controls, zero-width and word-joiner characters, the BOM, and
+// the bidi embedding/override/isolate marks.
+// eslint-disable-next-line no-control-regex
+const INVISIBLE_CHARS = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
+
 /** Prose from a client: whitespace collapsed so a History entry stays
- *  one line, then bounded. */
+ *  one line, control and zero-width characters removed, then bounded. */
 const oneLine = (max: number): z.ZodType<string> =>
   z
     .string()
-    .transform((s) => s.replace(/\s+/g, ' ').trim())
+    .transform((s) => s.replace(/\s+/g, ' ').replace(INVISIBLE_CHARS, '').trim())
     .pipe(z.string().min(1).max(max));
+
+const hasLetterOrDigit = (s: string): boolean => /[\p{L}\p{N}]/u.test(s);
 
 const MentionMatch = z.discriminatedUnion('type', [
   z
@@ -68,7 +77,7 @@ const MentionMatch = z.discriminatedUnion('type', [
   z
     .object({
       type: z.literal('new'),
-      title: oneLine(200).refine((t) => nameToSlug(t) !== '', 'title needs letters or digits'),
+      title: oneLine(200).refine(hasLetterOrDigit, 'title needs letters or digits'),
       summary: z.string().trim().max(2000),
     })
     .strict(),
@@ -78,7 +87,7 @@ const MentionMatch = z.discriminatedUnion('type', [
 export const SubmittedMention = z
   .object({
     /** As written in the log, e.g. "the innkeeper". */
-    name: oneLine(200),
+    name: oneLine(200).refine(hasLetterOrDigit, 'name needs letters or digits'),
     kind: z.enum(MENTION_KINDS),
     match: MentionMatch,
     /** One or two past-tense sentences for this Session. */
@@ -95,8 +104,10 @@ export const WrapUpSubmission = z
   .strict();
 export type WrapUpSubmission = z.infer<typeof WrapUpSubmission>;
 
-/** A submitted Mention once stored: the id is assigned by the app and
- *  is stable for the life of the proposal. */
+/** A submitted Mention once stored: the id is assigned by the app, is
+ *  opaque and stable for the life of the proposal. It is deliberately
+ *  not a counter: a reader who cannot see some Mentions would otherwise
+ *  see gaps in the numbering. */
 export const Mention = SubmittedMention.extend({ id: z.string().min(1) });
 export type Mention = z.infer<typeof Mention>;
 
@@ -258,10 +269,14 @@ export function submitWrapUp(opts: {
   const proposal: WrapUpProposal = {
     sessionPath: submission.sessionPath,
     generatedAt: Date.now(),
-    mentions: submission.mentions.map((m, i) => ({ ...m, id: `m${i + 1}` })),
+    mentions: submission.mentions.map((m) => ({ ...m, id: newMentionId() })),
   };
   writePendingWrapUpJson(groupId, submission.sessionPath, JSON.stringify(proposal));
   return { status: 'ok', proposal };
+}
+
+function newMentionId(): string {
+  return `m_${randomUUID().slice(0, 8)}`;
 }
 
 /** The stored proposal, with any existing-Note mentions `role` may not
@@ -300,12 +315,16 @@ export type WrapUpDecisions = {
   asNew: string[];
 };
 
+/** `edit_failed`: the Note could not take the History entry (it vanished
+ *  or refused the edit). `invalid_title`: nothing to name a new Note by. */
+export type SkipReason = 'unknown_mention' | 'not_visible' | 'edit_failed' | 'invalid_title';
+
 export type AppliedMention = { id: string; path: string; created: boolean };
 
 export type ApplyResult = {
   applied: AppliedMention[];
   /** Accepted mentions that could not be applied, and why. */
-  skipped: Array<{ id: string; reason: 'unknown_mention' | 'not_visible' }>;
+  skipped: Array<{ id: string; reason: SkipReason }>;
 };
 
 /** Applies the closer's decisions on `proposal`, links the log, closes
@@ -338,17 +357,21 @@ export async function applyWrapUp(opts: {
     const target = await resolveTarget({
       groupId, userId, vis, mention, forceNew: asNew.has(id), campaign, session,
     });
-    if (!target) {
-      skipped.push({ id, reason: 'not_visible' });
+    if (target.status !== 'ok') {
+      skipped.push({ id, reason: target.status });
       continue;
     }
-    await applyNoteEdit({
+    const edit = await applyNoteEdit({
       groupId,
       path: target.path,
       userId,
       edit: (doc) =>
         addHistoryEntry(doc, { sessionPath, sessionTitle: session.title, text: mention.historyEntry }),
     });
+    if (edit.status === 'rejected' || edit.status === 'not_found') {
+      skipped.push({ id, reason: 'edit_failed' });
+      continue;
+    }
     applied.push({ id, path: target.path, created: target.created });
   }
 
@@ -396,10 +419,19 @@ function campaignFor(groupId: string, session: NoteRow): Campaign {
 
 type Visibility = ReturnType<typeof visibilityFor>;
 
+type Target =
+  | { status: 'ok'; path: string; created: boolean }
+  | { status: 'not_visible' | 'invalid_title' };
+
 /** The Note a mention lands on, creating it when it is new and nothing
- *  with that title or canonical path exists yet. Null when the
- *  existing target is hidden from the closer. A created Note is as
- *  hidden as the Session it came from. */
+ *  visible with that title or canonical path exists yet. An existing
+ *  match the closer cannot see is `not_visible`.
+ *
+ *  A hidden Note at a new mention's canonical path is treated as if it
+ *  were not there: the new Note takes the next free path, so neither
+ *  the outcome nor the skip reason tells a Player the hidden Note
+ *  exists. (Only a `-2` style suffix on the path hints at a collision.)
+ *  A created Note is as hidden as the Session it came from. */
 async function resolveTarget(opts: {
   groupId: string;
   userId: string;
@@ -408,34 +440,38 @@ async function resolveTarget(opts: {
   forceNew: boolean;
   campaign: Campaign;
   session: NoteRow;
-}): Promise<{ path: string; created: boolean } | null> {
+}): Promise<Target> {
   const { groupId, userId, vis, mention, session } = opts;
   const match = mention.match;
 
   if (match.type === 'existing' && !opts.forceNew) {
     const note = loadNote(groupId, match.path);
-    return note && !isHidden(note, vis) ? { path: match.path, created: false } : null;
+    return note && !isHidden(note, vis)
+      ? { status: 'ok', path: match.path, created: false }
+      : { status: 'not_visible' };
   }
 
   const title = match.type === 'new' ? match.title : mention.name;
   const summary = match.type === 'new' ? match.summary : '';
-  const path = canonicalPath({
+  if (!hasLetterOrDigit(title)) return { status: 'invalid_title' };
+  const wanted = canonicalPath({
     kind: mention.kind,
     campaignSlug: opts.campaign?.slug,
     campaignRoot: opts.campaign?.folderPath,
-    name: title,
+    name: slugFor(title),
   });
 
-  const existing = loadNote(groupId, path) ?? findVisibleByTitle(groupId, vis, title, mention.kind);
-  if (existing) {
-    return isHidden(existing, vis) ? null : { path: existing.path, created: false };
-  }
+  const atPath = loadNote(groupId, wanted);
+  const landing =
+    atPath && !isHidden(atPath, vis) ? atPath : findVisibleByTitle(groupId, vis, title, mention.kind);
+  if (landing) return { status: 'ok', path: landing.path, created: false };
 
+  const path = atPath ? nextFreePath(groupId, wanted) : wanted;
   const frontmatter = newNoteFrontmatter(mention.kind, title);
   // Every derive recomputes the dm_only column from this flag, so the
   // flag has to be in the frontmatter or the next save un-hides the Note.
   if (session.dm_only === 1) frontmatter.dm_only = true;
-  writeNote({ groupId, userId, path, markdown: summary, frontmatter, isUpdate: false });
+  writeNote({ groupId, userId, path, title, markdown: summary, frontmatter, isUpdate: false });
   if (session.dm_only === 1 || session.gm_only === 1) {
     getDb()
       .query('UPDATE notes SET dm_only = ?, gm_only = ? WHERE group_id = ? AND path = ?')
@@ -447,7 +483,26 @@ async function resolveTarget(opts: {
       console.error('[wrap-up] folder index refresh failed:', err);
     });
   }
-  return { path, created: true };
+  return { status: 'ok', path, created: true };
+}
+
+/** The path slug for a title. Titles with no Latin letters or digits
+ *  (say, Cyrillic) fall back to a short hash of the title, so the same
+ *  title always maps to the same path. */
+function slugFor(title: string): string {
+  const slug = nameToSlug(title);
+  if (slug) return slug;
+  return `note-${createHash('sha1').update(title.trim().toLowerCase()).digest('hex').slice(0, 8)}`;
+}
+
+/** `foo.md` -> `foo-2.md`, `foo-3.md`, ... the first path nothing holds. */
+function nextFreePath(groupId: string, path: string): string {
+  const base = path.replace(/\.md$/, '');
+  for (let n = 2; n < 1000; n++) {
+    const candidate = `${base}-${n}.md`;
+    if (!loadNote(groupId, candidate)) return candidate;
+  }
+  throw new Error(`No free path near ${path}`);
 }
 
 /** Seed frontmatter for a new Note: its kind and, for kinds with a
