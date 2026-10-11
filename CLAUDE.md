@@ -80,23 +80,32 @@ Key tables:
 | `notes_fts` | FTS5 full-text search index, auto-synced by triggers on `notes` (including path moves). `path` and `group_id` are indexed (v48), so build every MATCH with `worldFtsMatch()` from `lib/search.ts`, never write to it directly |
 | `group_invite_tokens` | Shareable world join links |
 | `audit_log` | Admin action history |
+| `oauth_clients` | MCP connector clients (v49): `kind='dcr'` rows from `POST /api/oauth/register`, `kind='cimd'` rows caching a fetched Client ID Metadata Document whose URL is the `client_id` |
+| `oauth_codes` | Single-use, 5-minute authorization codes, stored as SHA-256 hashes with the PKCE challenge and the `resource` |
+| `oauth_grants` | One consent: user U lets client C read world G. Deleting it (settings UI, RFC 7009 revoke, lost membership, prune) cascades every token |
+| `oauth_tokens` | Access (1 h) and refresh (30 d, rotated on use) tokens as SHA-256 hashes, `ON DELETE CASCADE` from their grant |
 
 All queries include `group_id` — no table-level tenant isolation, just strict query filtering.
 
-## Auth — two separate layers
+## Auth — three separate layers
 
 **Super-admin token** (`/admin/*` only)
 - `POST /api/admin/login` timing-safe compares the submitted token against the `ADMIN_TOKEN` env var (rate-limited) and sets the `__sa` cookie; `lib/superadmin.ts#isSuperAdmin` checks that cookie
 - Env var only: the `admin_token` / `player_token` rows that `ensureConfig()` seeds into the `config` table are not read by any auth path
 - `ADMIN_TOKEN` is not a password for the regular `/login` form (that master-password path was removed)
-- No `Authorization: Bearer` / `?token=` API auth remains
+- No `?token=` API auth remains. The only `Authorization: Bearer` surface is `/api/mcp`, below
 
 **Session-based** (web dashboard)
 - HTTP-only cookie + CSRF token validated on every mutation
 - Roles within a group: `admin`, `editor`, `viewer`
 - Admin/editor = GM privileges; viewer = player
 
-**Middleware** (`server/src/middleware.ts`): redirects unauthenticated to `/login?next=<path>`; also applies the security-header pack to every response. Public paths (no redirect): `/`, `/login`, `/signup`, `/admin/login`, `/api/*`, `/_next/*`, plus static assets. `/admin/*` (except `/admin/login`) is a separate super-admin gate on its own `__sa` cookie, not the regular session.
+**MCP connector bearer tokens** (`POST /api/mcp` only, see "MCP connector" below)
+- OAuth 2.1 access tokens issued by Compendium's own authorization server (`lib/oauth.ts`) after the user consents on `/oauth/authorize` with a normal session
+- A token is bound to (user, world, resource); `authenticateAccessToken()` re-reads `group_members` on every request, so losing membership cuts access at once and drops the grant
+- Never cookies, never CSRF on this route; a missing or dead token gets `401` + `WWW-Authenticate: Bearer resource_metadata=…, scope="notes:read"`
+
+**Middleware** (`server/src/middleware.ts`): redirects unauthenticated to `/login?next=<path>`; also applies the security-header pack to every response. Public paths (no redirect): `/`, `/login`, `/signup`, `/admin/login`, `/api/*`, `/.well-known/*`, `/_next/*`, plus static assets. `/oauth/authorize` is deliberately not public: the redirect to `/login?next=` carries its whole query, so the consent page resumes after sign-in. `/admin/*` (except `/admin/login`) is a separate super-admin gate on its own `__sa` cookie, not the regular session.
 
 ## Real-time sync
 
@@ -145,6 +154,46 @@ calls `/analyse` — the vault settings page only drives `/orchestrate`.
 `app/settings/import/[id]/ImportJobPanel.tsx`, reachable from the
 vault page's job list via `/settings/import/<id>`.
 
+## MCP connector (Claude reads a world)
+
+Players add Compendium to claude.ai / Desktop / mobile / Claude Code as
+a custom connector (remote MCP server), so their own Claude subscription
+does the reasoning. Compendium is both the OAuth 2.1 authorization
+server and the resource server. Read-only; nothing here writes notes.
+
+Flow (MCP authorization spec 2025-11-25): `POST /api/mcp` without a
+token → `401` with `resource_metadata` → `GET /.well-known/oauth-protected-resource/api/mcp`
+→ `GET /.well-known/oauth-authorization-server` → client identity by
+Client ID Metadata Document (`client_id` is an HTTPS URL we fetch and
+cache, `lib/oauth.ts#resolveClient`) or Dynamic Client Registration
+(`POST /api/oauth/register`) → `GET /oauth/authorize` (session, world
+picker, `ConsentForm`) → `POST /api/oauth/authorize` (session + CSRF)
+mints a code and returns the redirect → `POST /api/oauth/token`
+(form-encoded, PKCE S256 required, `resource` checked, rate-limited by
+`oauthTokenLimiter`) → bearer token → MCP JSON-RPC. `POST /api/oauth/revoke`
+is RFC 7009; `DELETE /api/oauth/grants/:id` backs the "Connected apps"
+section on `/settings/profile`.
+
+Every URL in the metadata derives from `lib/public-url.ts`
+(`PUBLIC_APP_URL`, else forwarded host headers), so the `resource` a
+token is bound to is always the one `/api/mcp` checks against.
+
+Tools (`lib/mcp/tools.ts`, a registry the server adapter and tests
+share): `list_campaigns`, `browse_notes` (folder + kind, cursor
+paginated), `search_notes`, `read_note` (frontmatter, Markdown body,
+links both ways), `note_neighbors` (1–2 hops). Every tool applies
+`visibilityFor(role)` with the role read on this request: a Secret or
+Private note is "not found" and never appears in a list, link, backlink
+or neighbourhood. Output is plain text capped at 24k characters. The
+MCP server (`lib/mcp/server.ts`) is stateless Streamable HTTP with JSON
+responses; `GET`/`DELETE /api/mcp` are 405. The SDK bundles zod 4 while
+the app is on zod 3, hence the one cast at `registerTool`.
+
+Verify live with `cd server && bun run scripts/mcp-smoke.ts [--base URL] [--user NAME] [--keep]`
+(mints a session straight into the server's SQLite, then drives the
+whole flow over HTTP) and the MCP Inspector:
+`npx @modelcontextprotocol/inspector --cli --transport http --server-url <origin>/api/mcp --method tools/list --header "Authorization: Bearer <token>"`.
+
 ## Key files
 
 | File | What it does |
@@ -159,6 +208,13 @@ vault page's job list via `/settings/import/<id>`.
 | `server/src/lib/note-edits.ts` | Lossless PM-JSON edits: `addHistoryEntry`, `linkMention`, `applyNoteEdit` |
 | `server/src/lib/import-orchestrate.ts` | "Smart Import" — the multi-phase pipeline the vault UI actually drives (assets → campaign → entities → quality) |
 | `server/src/lib/assets.ts` | Content-addressed asset storage — hash/mime dedup, `deleteAsset()` reference-checked delete |
+| `server/src/lib/oauth.ts` | OAuth 2.1 authorization server for the MCP connector — clients (DCR + CIMD), hashed codes/tokens, PKCE, refresh rotation, bearer validation, revocation, prune |
+| `server/src/lib/oauth-authorize.ts` | Validates an authorization request; shared by the consent page and `POST /api/oauth/authorize` |
+| `server/src/lib/public-url.ts` | The one source of the public origin: issuer, `resource`, metadata and endpoint URLs |
+| `server/src/lib/mcp/tools.ts` | The five read-only MCP tools, visibility-gated, as a registry |
+| `server/src/lib/mcp/server.ts` | Per-request stateless Streamable HTTP MCP server over that registry |
+| `server/src/app/api/mcp/route.ts` | Bearer gate + 401 challenge in front of the MCP server |
+| `server/scripts/mcp-smoke.ts` | Live end-to-end check of the connector over HTTP |
 | `server/src/collab/server.ts` | Hocuspocus server for web editing |
 | `server/server.ts` | Entry point — Next.js + WebSocket on the same port |
 | `server/next.config.ts` | `serverExternalPackages` for Yjs/Tiptap/graph libs — touch carefully |
@@ -261,7 +317,7 @@ Railway: `railway.toml` at repo root, Dockerfile at `server/Dockerfile`. Build c
 
 Required env vars: `ADMIN_TOKEN` (the `/admin` super-admin login is disabled without it), `DATA_DIR=/data` + a volume mounted at `/data`. `PLAYER_TOKEN` is no longer read by any auth path; setting it is harmless.
 
-Optional: `OPENAI_API_KEY` (enables Smart Import and PDF character import).
+Optional: `OPENAI_API_KEY` (enables Smart Import and PDF character import), `PUBLIC_APP_URL` (the public `https://` origin; set it on Railway so OAuth metadata and the MCP `resource` do not depend on forwarded headers).
 
 ## Skills (invoke with `/skill:<name>`)
 

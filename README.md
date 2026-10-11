@@ -25,6 +25,7 @@ Self-hosted TTRPG note-taking web app for players and GMs — real-time collabor
 - [Database](#database)
 - [Deployment](#deployment)
 - [Tech Stack](#tech-stack)
+- [Connect Claude to Compendium](#connect-claude-to-compendium)
 - [Authentication](#authentication)
 - [API Overview](#api-overview)
 
@@ -149,6 +150,10 @@ PLAYER_TOKEN=replace-with-a-long-random-string
 
 # AI import (optional — enables Smart Import and PDF character import)
 # OPENAI_API_KEY=
+
+# Public origin (optional, recommended in production). The MCP connector's
+# OAuth metadata and token audience are built from it.
+# PUBLIC_APP_URL=https://compendium.example
 ```
 
 **Notes:**
@@ -300,9 +305,54 @@ The Dockerfile is a three-stage build:
 
 ---
 
+## Connect Claude to Compendium
+
+Claude (claude.ai, the desktop and mobile apps, Claude Code) can read your
+world's notes through a custom connector, using your own Claude
+subscription. Access is read-only, limited to one world you pick, and
+shows you exactly what you can see in the app: Secret and Private notes
+stay hidden from players.
+
+Your Compendium must be reachable over HTTPS from the internet (a Railway
+deploy is), and your admin should have set `PUBLIC_APP_URL`.
+
+**In claude.ai, Claude Desktop or the mobile app** (Free, Pro and Max plans
+add connectors to their own account; on Team and Enterprise an Owner adds
+it under Organization settings > Connectors first):
+
+1. Open **Customize > Connectors** and click **Add custom connector**.
+2. Enter the MCP server URL: `https://<your-compendium>/api/mcp`.
+3. Leave the OAuth client setting on **Use Claude's published identity**
+   (or **Register automatically**; both work, no client ID or secret needed)
+   and click **Add**.
+4. Click **Connect**. A Compendium tab opens: sign in if asked, pick the
+   world to share, and click **Allow read access**.
+5. Back in Claude, turn the connector on in a chat with the **+** menu and
+   ask away ("Who is Volo?", "Summarise last session", "What do we know about
+   the Xanathar?").
+
+**In Claude Code:**
+
+```bash
+claude mcp add --transport http compendium https://<your-compendium>/api/mcp
+```
+
+Then run `/mcp` inside Claude Code to sign in; the same consent page
+opens in your browser.
+
+**To disconnect**, go to **Settings > Profile > Connected apps** in
+Compendium and click **Disconnect** (removing the connector in Claude
+also works, but only Compendium's side revokes the token immediately).
+
+What Claude gets: `list_campaigns`, `browse_notes`, `search_notes`,
+`read_note` and `note_neighbors`. Tokens last an hour and refresh for up
+to 30 days; being removed from a world ends access at once.
+
+---
+
 ## Authentication
 
-Two independent layers.
+Three independent layers.
 
 ### Web dashboard (session-based)
 
@@ -312,11 +362,14 @@ Two independent layers.
 - Sessions are stored in the `sessions` table with expiry, user-agent, and IP tracking.
 - An `audit_log` table records admin actions.
 
-### Bearer token (legacy / admin scripts)
+### Super-admin (`/admin/*`)
 
-- `Authorization: Bearer <token>` or `?token=<token>` query parameter.
-- Two roles: `admin` (full access) and `player` (read-write notes).
-- Tokens come from `ADMIN_TOKEN` / `PLAYER_TOKEN` env vars or the `config` SQLite table. Compared with a timing-safe function.
+- `POST /api/admin/login` compares the submitted token with `ADMIN_TOKEN` (timing-safe, rate-limited) and sets the `__sa` cookie.
+
+### MCP connector (OAuth 2.1 bearer tokens, `/api/mcp` only)
+
+- Compendium is its own authorization server: discovery at `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`, Dynamic Client Registration at `POST /api/oauth/register`, Client ID Metadata Documents accepted as `client_id`, consent at `/oauth/authorize`, token exchange and refresh at `POST /api/oauth/token` (PKCE S256 required), revocation at `POST /api/oauth/revoke`.
+- Codes and tokens are stored hashed. Access tokens live one hour; refresh tokens rotate on every use and live 30 days. A token is bound to one user, one world and the `/api/mcp` resource, and the member's role is re-read on every request.
 
 ---
 
@@ -340,6 +393,7 @@ All routes live under `/api/`. ~70 endpoints; grouped:
 | Tags | `GET /api/tags`, `GET /api/note-tags`, `GET /api/asset-tags` |
 | Assets | `POST /api/assets/upload`, `GET /api/assets/[id]`, `GET /api/assets/list`, `GET /api/assets/by-path` |
 | Backlinks | `POST /api/notes/backlink` |
+| MCP connector | `POST /api/mcp`, `GET /.well-known/oauth-protected-resource`, `GET /.well-known/oauth-authorization-server`, `POST /api/oauth/register`, `POST /api/oauth/authorize`, `POST /api/oauth/token`, `POST /api/oauth/revoke`, `DELETE /api/oauth/grants/[id]` |
 | Graph | `GET /api/graph`, `GET /api/graph/neighborhood/[...path]` |
 | Import (AI) | `POST /api/import`, `POST /api/import/[id]/analyse`, `POST /api/import/[id]/apply`, `POST /api/import/[id]/orchestrate` |
 | UI state | `POST /api/ui/gm-mode` |
