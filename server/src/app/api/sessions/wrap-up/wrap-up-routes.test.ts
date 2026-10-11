@@ -348,3 +348,139 @@ describe('POST /api/sessions/wrap-up/apply', () => {
     expect(fresh.status).toBe(200);
   });
 });
+
+describe('Relationships through the Wrap-up routes', () => {
+  const FERRY = 'Campaigns/Ashfall/Adventure Log/2026-10-15-the-ferry.md';
+  const GUILD = 'Campaigns/Ashfall/Lore/ferry-guild.md';
+  const INFORMER = 'Campaigns/Ashfall/People/the-informer.md';
+  const VOLO = 'Campaigns/Ashfall/People/volo.md';
+  const ferryUrl = (path: string): string =>
+    `http://localhost/api/sessions/wrap-up${path}?sessionPath=${encodeURIComponent(FERRY)}`;
+
+  type Full = { generatedAt: number; mentions: Array<{ id: string }>; relations: Array<{ id: string }> };
+  type Applied = {
+    relationsAdded: Array<{ id: string; status: string }>;
+    relationsSkipped: Array<{ id: string; reason: string }>;
+  };
+
+  const works = {
+    from: { type: 'mention', name: 'Volo' },
+    relation: 'works_for',
+    to: { type: 'existing', path: BRAM },
+    note: 'Volo said so.',
+  };
+  const submission = (relations: unknown[]) => ({
+    sessionPath: FERRY,
+    mentions: [{ name: 'Volo', kind: 'person', match: { type: 'new', title: 'Volo', summary: 'A chronicler.' }, historyEntry: 'Offered a job.' }],
+    relations,
+  });
+  const submitFull = async (as: Session, relations: unknown[]): Promise<Full> => {
+    const res = await submit(post(ferryUrl(''), as, submission(relations)));
+    if (res.status !== 201) throw new Error(`submit failed: ${res.status}`);
+    return ((await res.json()) as { proposal: Full }).proposal;
+  };
+  const relationRows = (path: string) =>
+    getDb()
+      .query<{ relation: string; from_path: string; to_path: string; session_path: string }, [string, string, string]>(
+        'SELECT relation, from_path, to_path, session_path FROM note_relations WHERE group_id = ? AND (from_path = ? OR to_path = ?) ORDER BY relation',
+      )
+      .all(groupId, path, path);
+
+  beforeAll(() => {
+    seed(FERRY, 'The Ferry', { kind: 'session', campaigns: ['ashfall'] }, 'Volo works for Bram. Kara joined the guild.');
+    seed(GUILD, 'The Ferry Guild', { kind: 'lore' }, 'Boatmen.');
+    seed(INFORMER, 'The Informer', { kind: 'person', dm_only: true }, 'Sells secrets.', true);
+  });
+
+  it('lets a Player submit a relation to a Note the Wrap-up creates, and to existing Notes, and a Co-GM apply them', async () => {
+    const stored = await submitFull(player, [
+      works,
+      { from: { type: 'existing', path: BRAM }, relation: 'member_of', to: { type: 'existing', path: GUILD } },
+    ]);
+    expect(stored.relations).toHaveLength(2);
+
+    const res = await apply(post(ferryUrl('/apply'), coGm, {
+      sessionPath: FERRY,
+      generatedAt: stored.generatedAt,
+      accepted: stored.mentions.map((m) => m.id),
+      acceptedRelations: stored.relations.map((r) => r.id),
+    }));
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Applied;
+    expect(body.relationsAdded.map((r) => r.status)).toEqual(['added', 'added']);
+    expect(body.relationsSkipped).toEqual([]);
+    expect(relationRows(VOLO).map((r) => [r.relation, r.from_path, r.to_path, r.session_path])).toEqual([['works_for', VOLO, BRAM, FERRY]]);
+    expect(relationRows(GUILD).map((r) => [r.relation, r.from_path])).toEqual([['member_of', BRAM]]);
+    const again = await apply(post(ferryUrl('/apply'), coGm, { sessionPath: FERRY, generatedAt: stored.generatedAt, accepted: [], acceptedRelations: [] }));
+    expect(again.status).toBe(409);
+  });
+
+  it('records no relation unless the body ticks it', async () => {
+    const stored = await submitFull(player, [{ from: { type: 'existing', path: GUILD }, relation: 'ally_of', to: { type: 'existing', path: BRAM } }]);
+
+    const res = await apply(post(ferryUrl('/apply'), player, {
+      sessionPath: FERRY, generatedAt: stored.generatedAt, accepted: stored.mentions.map((m) => m.id),
+    }));
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Applied).relationsAdded).toEqual([]);
+    expect(relationRows(GUILD).map((r) => r.relation)).toEqual(['member_of']);
+  });
+
+  it('skips, and reports, a relation whose mention the closer unticked', async () => {
+    const stored = await submitFull(player, [
+      { from: { type: 'mention', name: 'Volo' }, relation: 'leads', to: { type: 'existing', path: GUILD } },
+    ]);
+
+    const res = await apply(post(ferryUrl('/apply'), player, {
+      sessionPath: FERRY, generatedAt: stored.generatedAt, accepted: [], acceptedRelations: stored.relations.map((r) => r.id),
+    }));
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Applied).relationsSkipped).toEqual([{ id: stored.relations[0]!.id, reason: 'mention_not_applied' }]);
+    expect(relationRows(GUILD).map((r) => r.relation)).not.toContain('leads');
+    expect(getSessionStatus(groupId, FERRY)).toBe('closed');
+  });
+
+  it('answers 404 to a relation ending at a hidden Note exactly as for one that does not exist, and 201 to the Owner', async () => {
+    const toHidden = await submit(post(ferryUrl(''), player, submission([{ ...works, to: { type: 'existing', path: INFORMER } }])));
+    const toMissing = await submit(post(ferryUrl(''), player, submission([{ ...works, to: { type: 'existing', path: 'Campaigns/Ashfall/People/ghost.md' } }])));
+    const asOwner = await submit(post(ferryUrl(''), owner, submission([{ ...works, to: { type: 'existing', path: INFORMER } }])));
+
+    expect(toHidden.status).toBe(404);
+    expect(await toHidden.json()).toEqual(await toMissing.json());
+    expect(asOwner.status).toBe(201);
+  });
+
+  it('shows another Player the pending proposal without the relation that ends at a hidden Note', async () => {
+    await submitFull(owner, [
+      { ...works, to: { type: 'existing', path: INFORMER } },
+      { from: { type: 'existing', path: BRAM }, relation: 'ally_of', to: { type: 'existing', path: GUILD } },
+    ]);
+
+    const seen = async (as: Session): Promise<number> => {
+      const res = await getPending(get(ferryUrl(''), as));
+      return ((await res.json()) as { proposal: Full }).proposal.relations.length;
+    };
+
+    expect(await seen(owner)).toBe(2);
+    expect(await seen(otherPlayer)).toBe(1);
+    const titles = ((await (await getPending(get(ferryUrl(''), otherPlayer))).json()) as { existingTitles: Record<string, string> }).existingTitles;
+    expect(titles).toEqual({ [BRAM]: 'Bram', [GUILD]: 'The Ferry Guild' });
+  });
+
+  it('rejects a relation naming no mention, two Notes the same, or a type outside the list, with 400', async () => {
+    const attempt = async (relation: unknown) => submit(post(ferryUrl(''), player, submission([relation])));
+    const unknown = await attempt({ ...works, from: { type: 'mention', name: 'Nobody' } });
+    const same = await attempt({ from: { type: 'existing', path: BRAM }, relation: 'ally_of', to: { type: 'existing', path: BRAM } });
+    const badType = await attempt({ ...works, relation: 'has_member' });
+
+    expect(unknown.status).toBe(400);
+    expect(await unknown.json()).toEqual({ error: 'invalid_relation', reason: 'relations.0: an end names a mention that is not in this submission' });
+    expect(same.status).toBe(400);
+    expect(await same.json()).toEqual({ error: 'invalid_relation', reason: 'relations.0: both ends are the same Note' });
+    expect(badType.status).toBe(400);
+    expect(((await badType.json()) as { error: string }).error).toBe('invalid_body');
+  });
+});

@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { broadcastTreeChange } from '@/lib/tree-sync';
 import { EVENTS, track } from '@/lib/analytics/client';
-import { WrapUpDialog, type WrapUpOutcome } from './WrapUpDialog';
+import { WrapUpDialog } from './WrapUpDialog';
+import { doneMessage, type WrapUpOutcome } from './wrap-up-review';
 
 export function EndSessionButton({
   sessionPath,
@@ -78,11 +79,4 @@ export function EndSessionButton({
       )}
     </>
   );
-}
-
-function doneMessage(outcome: WrapUpOutcome | null): string {
-  if (!outcome || outcome.applied === 0) return 'Session closed.';
-  const notes = `${outcome.applied} ${outcome.applied === 1 ? 'Note' : 'Notes'} updated`;
-  const created = outcome.created > 0 ? `, ${outcome.created} of them new` : '';
-  return `Session closed. ${notes}${created}.`;
 }

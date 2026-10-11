@@ -1,8 +1,9 @@
 'use client';
 
 // Review step of a Wrap-up (docs/adr/0001-wrap-up-on-close.md). Loads the
-// Session's pending proposal, lets the closer untick mentions and switch
-// uncertain matches to a new Note, then applies the rest. Nothing is
+// Session's pending proposal, lets the closer untick mentions and
+// Relationships and switch uncertain matches to a new Note, then applies
+// the rest. Nothing is
 // written until "Apply". With no proposal yet it explains where one comes
 // from: the Player's own Claude submits it.
 
@@ -14,17 +15,22 @@ import { useModalA11y } from './dialog/useModalA11y';
 import {
   KIND_LABEL,
   acceptedCount,
+  acceptedRelationIds,
   groupRows,
   initialReview,
   itemsLabel,
+  relationRows,
   setAccepted,
   setAsNew,
+  setRelationAccepted,
   applyRequestBody,
+  outcomeFromApply,
+  type RelationReview,
+  type RelationRow,
   type ReviewRow,
   type ReviewState,
+  type WrapUpOutcome,
 } from './wrap-up-review';
-
-export type WrapUpOutcome = { applied: number; created: number };
 
 type Load =
   | { status: 'loading' }
@@ -50,6 +56,7 @@ export function WrapUpDialog({
   const containerRef = useRef<HTMLDivElement>(null);
   const [load, setLoad] = useState<Load>({ status: 'loading' });
   const [review, setReview] = useState<ReviewState>(new Map());
+  const [relationsOff, setRelationsOff] = useState<RelationReview>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,6 +77,7 @@ export function WrapUpDialog({
       };
       if (data.proposal) {
         setReview(initialReview(data.proposal));
+        setRelationsOff(new Set());
         setLoad({ status: 'ready', proposal: data.proposal, titles: data.existingTitles });
       } else {
         setLoad({ status: 'empty' });
@@ -108,7 +116,7 @@ export function WrapUpDialog({
     try {
       const res = await post(
         '/api/sessions/wrap-up/apply',
-        applyRequestBody(sessionPath, load.proposal, review),
+        applyRequestBody(sessionPath, load.proposal, review, relationsOff),
       );
       if (res.status === 409 && (await isProposalChanged(res))) {
         await fetchProposal('The proposal changed while you were reviewing it, so it has been reloaded. Review it again.');
@@ -116,8 +124,7 @@ export function WrapUpDialog({
         return;
       }
       if (!res.ok) throw new Error(await errorText(res));
-      const data = (await res.json()) as { applied: Array<{ created: boolean }> };
-      onDone({ applied: data.applied.length, created: data.applied.filter((a) => a.created).length });
+      onDone(outcomeFromApply(await res.json()));
     } catch (err) {
       trackFailure(sessionPath, err);
       setError(err instanceof Error ? err.message : 'Could not apply the Wrap-up.');
@@ -140,7 +147,9 @@ export function WrapUpDialog({
   }
 
   const ready = load.status === 'ready' ? load : null;
-  const selected = acceptedCount(review);
+  const selected = ready
+    ? acceptedCount(review) + acceptedRelationIds(ready.proposal, review, relationsOff).length
+    : 0;
 
   return (
     <div
@@ -198,19 +207,21 @@ export function WrapUpDialog({
             </div>
           )}
 
-          {ready && ready.proposal.mentions.length === 0 && ready.proposal.suggestions.length === 0 && (
+          {ready && !hasReviewRows(ready.proposal) && ready.proposal.suggestions.length === 0 && (
             <p className="text-[var(--ink-soft)]">
               Claude found nothing new to add to your Notes from this Session.
             </p>
           )}
 
-          {ready && ready.proposal.mentions.length > 0 && (
+          {ready && hasReviewRows(ready.proposal) && (
             <ReviewList
               proposal={ready.proposal}
               titles={ready.titles}
               review={review}
+              relationsOff={relationsOff}
               disabled={busy}
               onChange={setReview}
+              onRelationsChange={setRelationsOff}
             />
           )}
 
@@ -274,6 +285,10 @@ export function WrapUpDialog({
   );
 }
 
+function hasReviewRows(proposal: WrapUpProposal): boolean {
+  return proposal.mentions.length > 0 || proposal.relations.length > 0;
+}
+
 function trackFailure(sessionPath: string, err: unknown): void {
   track(EVENTS.END_SESSION_FAILED, {
     session_path: sessionPath,
@@ -305,18 +320,24 @@ function ReviewList({
   proposal,
   titles,
   review,
+  relationsOff,
   disabled,
   onChange,
+  onRelationsChange,
 }: {
   proposal: WrapUpProposal;
   titles: Record<string, string>;
   review: ReviewState;
+  relationsOff: RelationReview;
   disabled: boolean;
   onChange: (next: ReviewState) => void;
+  onRelationsChange: (next: RelationReview) => void;
 }): React.JSX.Element {
   const { fresh, history } = groupRows(proposal, review);
+  const relations = relationRows(proposal, review, relationsOff, titles);
   const freshId = useId();
   const historyId = useId();
+  const relationsId = useId();
 
   const renderRow = (row: ReviewRow): React.JSX.Element => (
     <MentionRow
@@ -350,7 +371,71 @@ function ReviewList({
           <ul className="mt-2 space-y-1">{history.map(renderRow)}</ul>
         </section>
       )}
+      {relations.length > 0 && (
+        <section aria-labelledby={relationsId}>
+          <h4 id={relationsId} className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
+            Relationships ({relations.length})
+          </h4>
+          <p className="mt-0.5 text-xs text-[var(--ink-muted)]">
+            Records how two Notes relate.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {relations.map((row) => (
+              <RelationshipRow
+                key={row.relation.id}
+                row={row}
+                disabled={disabled}
+                onToggle={(accepted) =>
+                  onRelationsChange(setRelationAccepted(relationsOff, row.relation.id, accepted))
+                }
+              />
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
+  );
+}
+
+function RelationshipRow({
+  row,
+  disabled,
+  onToggle,
+}: {
+  row: RelationRow;
+  disabled: boolean;
+  onToggle: (accepted: boolean) => void;
+}): React.JSX.Element {
+  const blocked = row.blockedBy !== null;
+  return (
+    <li className="rounded-[6px] px-1 py-1.5 hover:bg-[var(--parchment)]">
+      <label
+        className={`flex min-w-0 items-start gap-3 py-0.5 ${blocked ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+      >
+        <input
+          type="checkbox"
+          checked={row.accepted}
+          disabled={disabled || blocked}
+          onChange={(e) => onToggle(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--wine)]"
+        />
+        <span className="min-w-0">
+          <span className="block font-medium text-[var(--ink)]">
+            {row.from} <span className="font-normal text-[var(--ink-soft)]">→ {row.label} →</span> {row.to}
+          </span>
+          {row.relation.note && (
+            <span className="block text-xs text-[var(--ink-soft)]">{row.relation.note}</span>
+          )}
+          {row.blockedBy !== null ? (
+            <span className="block text-xs text-[var(--ink-muted)]">Needs {row.blockedBy} above.</span>
+          ) : row.dependsOn.length > 0 ? (
+            <span className="block text-xs text-[var(--ink-muted)]">
+              Skipped if {row.dependsOn.join(' or ')} is not kept above.
+            </span>
+          ) : null}
+        </span>
+      </label>
+    </li>
   );
 }
 

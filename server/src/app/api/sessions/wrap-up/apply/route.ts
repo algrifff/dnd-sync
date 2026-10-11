@@ -3,7 +3,11 @@
 //
 // Body: { sessionPath, generatedAt: the proposal's generatedAt as the
 // closer reviewed it, accepted: mention ids, asNew: accepted ids whose
-// uncertain match the closer switched to a new Note }
+// uncertain match the closer switched to a new Note, acceptedRelations:
+// ticked Relationship ids (default none) }
+//
+// A ticked Relationship is recorded only when both of its ends landed;
+// otherwise it comes back in relationsSkipped, not as an error.
 //
 // 409 proposal_changed when generatedAt is not the pending proposal's:
 // someone resubmitted while the closer was reviewing, so their ticks
@@ -30,6 +34,7 @@ const Body = z.object({
   generatedAt: z.number(),
   accepted: z.array(z.string().min(1).max(64)).max(200),
   asNew: z.array(z.string().min(1).max(64)).max(200).default([]),
+  acceptedRelations: z.array(z.string().min(1).max(64)).max(200).default([]),
 });
 
 export async function POST(req: NextRequest): Promise<Response> {
@@ -61,7 +66,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       role,
       sessionPath: body.sessionPath,
       proposal,
-      decisions: { accepted: body.accepted, asNew: body.asNew },
+      decisions: { accepted: body.accepted, asNew: body.asNew, acceptedRelations: body.acceptedRelations },
     });
 
     void captureServer({
