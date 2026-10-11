@@ -250,6 +250,33 @@ describe('pruning', () => {
   });
 });
 
+describe('pruning CIMD clients', () => {
+  const insertCimd = (id: string, fetchedAt: number) =>
+    getDb()
+      .query("INSERT INTO oauth_clients (client_id, kind, client_name, redirect_uris_json, created_at, fetched_at) VALUES (?, 'cimd', 'Claude', ?, ?, ?)")
+      .run(id, JSON.stringify([REDIRECT]), fetchedAt, fetchedAt);
+  const exists = (id: string) => !!getDb().query('SELECT 1 FROM oauth_clients WHERE client_id = ?').get(id);
+
+  it('drops a CIMD client unused for 30 days but keeps a recent one and one with a grant', () => {
+    const old = Date.now() - 31 * 24 * 60 * 60_000;
+    insertCimd('https://old.test/unused', old);
+    insertCimd('https://fresh.test/used', Date.now() - 24 * 60 * 60_000);
+    insertCimd('https://old.test/has-grant', old);
+    getDb()
+      .query("INSERT INTO oauth_grants (id, client_id, user_id, group_id, resource, scope, created_at, last_used_at) VALUES ('g-cimd', 'https://old.test/has-grant', ?, ?, ?, 'notes:read', ?, ?)")
+      .run(userId, DEFAULT_GROUP_ID, RESOURCE, old, old);
+    getDb()
+      .query("INSERT INTO oauth_tokens (token_hash, grant_id, kind, created_at, expires_at) VALUES ('h-cimd', 'g-cimd', 'refresh', ?, ?)")
+      .run(old, Date.now() + 60_000);
+
+    pruneExpiredOauthRows();
+
+    expect(exists('https://old.test/unused')).toBe(false);
+    expect(exists('https://fresh.test/used')).toBe(true);
+    expect(exists('https://old.test/has-grant')).toBe(true);
+  });
+});
+
 describe('clients', () => {
   it('matches loopback redirect URIs with the port ignored', () => {
     const c: OAuthClient = { clientId: 'x', kind: 'dcr', clientName: 'Claude Code', redirectUris: ['http://localhost/callback', 'http://127.0.0.1/callback'] };
@@ -284,6 +311,37 @@ describe('clients', () => {
     };
     await resolveClient(id, fetcher);
     await resolveClient(id, fetcher);
+    expect(calls).toBe(1);
+  });
+
+  it('rejects a CIMD document bigger than 64 KB', async () => {
+    const id = 'https://claude.ai/oauth/huge-client';
+    const doc = { client_id: id, client_name: 'Claude', redirect_uris: [REDIRECT], padding: 'x'.repeat(70_000) };
+    expect(await resolveClient(id, async () => Response.json(doc))).toBeNull();
+  });
+
+  it('stops reading a streamed CIMD body once it passes 64 KB', async () => {
+    const id = 'https://claude.ai/oauth/endless-client';
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(new Uint8Array(16_384).fill(0x20));
+      },
+    });
+    expect(await resolveClient(id, async () => new Response(body))).toBeNull();
+    expect(pulled).toBeLessThan(10);
+  });
+
+  it('does not refetch a failing CIMD url within the minute', async () => {
+    const id = 'https://claude.ai/oauth/flaky-client';
+    let calls = 0;
+    const fetcher = async () => {
+      calls += 1;
+      return new Response('nope', { status: 500 });
+    };
+    expect(await resolveClient(id, fetcher)).toBeNull();
+    expect(await resolveClient(id, fetcher)).toBeNull();
     expect(calls).toBe(1);
   });
 
