@@ -10,7 +10,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { hasControlChars } from '@/lib/notes';
-import { getDb } from '@/lib/db';
+import { getDb, isUniqueConstraintError } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
 import { assertMoveAllowed } from '@/lib/move-policy';
@@ -69,81 +69,88 @@ export async function POST(req: NextRequest): Promise<Response> {
   // discovered first.
   const linkers = findWikilinkLinkers(session.currentGroupId, [from]);
 
-  db.transaction(() => {
-    // Derived-index tables (characters, session_notes, character_campaigns)
-    // hold FKs on notes(group_id, path) with ON DELETE CASCADE but no
-    // ON UPDATE CASCADE — without deferring, the UPDATE on notes below
-    // would trip SQLITE_CONSTRAINT_FOREIGNKEY before we get a chance to
-    // rewrite the dependent rows. Defer until COMMIT so the whole
-    // transaction is checked once everything is consistent.
-    db.exec('PRAGMA defer_foreign_keys = 1');
-    // Bump updated_at so the in-process tree cache snapshot key changes
-    // AND the /api/tree ETag rotates. Without this the client refetches
-    // /api/tree, gets 304, re-renders the stale tree, and the row snaps
-    // back to the old position.
-    db.query('UPDATE notes SET path = ?, updated_at = ? WHERE group_id = ? AND path = ?').run(
-      to,
-      Date.now(),
-      session.currentGroupId,
-      from,
-    );
-    db.query('UPDATE note_links SET from_path = ? WHERE group_id = ? AND from_path = ?').run(
-      to,
-      session.currentGroupId,
-      from,
-    );
-    db.query('UPDATE note_links SET to_path = ? WHERE group_id = ? AND to_path = ?').run(
-      to,
-      session.currentGroupId,
-      from,
-    );
-    db.query('UPDATE tags SET path = ? WHERE group_id = ? AND path = ?').run(
-      to,
-      session.currentGroupId,
-      from,
-    );
-    db.query('UPDATE aliases SET path = ? WHERE group_id = ? AND path = ?').run(
-      to,
-      session.currentGroupId,
-      from,
-    );
-    // Structured-note index tables also use note_path as the key. Each
-    // of these holds an FK on notes(group_id, path); the deferred-FK
-    // pragma above lets us update them in any order, but every table
-    // pointing at the old path must be rewritten before COMMIT.
-    db.query(
-      'UPDATE characters SET note_path = ? WHERE group_id = ? AND note_path = ?',
-    ).run(to, session.currentGroupId, from);
-    db.query(
-      'UPDATE character_campaigns SET note_path = ? WHERE group_id = ? AND note_path = ?',
-    ).run(to, session.currentGroupId, from);
-    db.query(
-      'UPDATE session_notes SET note_path = ? WHERE group_id = ? AND note_path = ?',
-    ).run(to, session.currentGroupId, from);
-    // Suggestions name the Character and Session by path (no FK).
-    repointSuggestionPaths(session.currentGroupId, from, to);
-    repointRelations(session.currentGroupId, from, to);
-    db.query(
-      'UPDATE items SET note_path = ? WHERE group_id = ? AND note_path = ?',
-    ).run(to, session.currentGroupId, from);
-    db.query(
-      'UPDATE locations SET note_path = ? WHERE group_id = ? AND note_path = ?',
-    ).run(to, session.currentGroupId, from);
-    db.query(
-      'UPDATE creatures SET note_path = ? WHERE group_id = ? AND note_path = ?',
-    ).run(to, session.currentGroupId, from);
-    // locations.parent_path is a soft reference (no FK), but rewrite it
-    // anyway so children stay anchored to the renamed parent.
-    db.query(
-      'UPDATE locations SET parent_path = ? WHERE group_id = ? AND parent_path = ?',
-    ).run(to, session.currentGroupId, from);
-    // users.active_character_path is also a soft reference — any user
-    // who pinned this note as their active PC needs the path rewritten
-    // so the party sidebar / chat context don't lose track of them.
-    db.query(
-      'UPDATE users SET active_character_path = ? WHERE active_character_path = ?',
-    ).run(to, from);
-  })();
+  try {
+    db.transaction(() => {
+      // Derived-index tables (characters, session_notes, character_campaigns)
+      // hold FKs on notes(group_id, path) with ON DELETE CASCADE but no
+      // ON UPDATE CASCADE — without deferring, the UPDATE on notes below
+      // would trip SQLITE_CONSTRAINT_FOREIGNKEY before we get a chance to
+      // rewrite the dependent rows. Defer until COMMIT so the whole
+      // transaction is checked once everything is consistent.
+      db.exec('PRAGMA defer_foreign_keys = 1');
+      // Bump updated_at so the in-process tree cache snapshot key changes
+      // AND the /api/tree ETag rotates. Without this the client refetches
+      // /api/tree, gets 304, re-renders the stale tree, and the row snaps
+      // back to the old position.
+      db.query('UPDATE notes SET path = ?, updated_at = ? WHERE group_id = ? AND path = ?').run(
+        to,
+        Date.now(),
+        session.currentGroupId,
+        from,
+      );
+      db.query('UPDATE note_links SET from_path = ? WHERE group_id = ? AND from_path = ?').run(
+        to,
+        session.currentGroupId,
+        from,
+      );
+      db.query('UPDATE note_links SET to_path = ? WHERE group_id = ? AND to_path = ?').run(
+        to,
+        session.currentGroupId,
+        from,
+      );
+      db.query('UPDATE tags SET path = ? WHERE group_id = ? AND path = ?').run(
+        to,
+        session.currentGroupId,
+        from,
+      );
+      db.query('UPDATE aliases SET path = ? WHERE group_id = ? AND path = ?').run(
+        to,
+        session.currentGroupId,
+        from,
+      );
+      // Structured-note index tables also use note_path as the key. Each
+      // of these holds an FK on notes(group_id, path); the deferred-FK
+      // pragma above lets us update them in any order, but every table
+      // pointing at the old path must be rewritten before COMMIT.
+      db.query(
+        'UPDATE characters SET note_path = ? WHERE group_id = ? AND note_path = ?',
+      ).run(to, session.currentGroupId, from);
+      db.query(
+        'UPDATE character_campaigns SET note_path = ? WHERE group_id = ? AND note_path = ?',
+      ).run(to, session.currentGroupId, from);
+      db.query(
+        'UPDATE session_notes SET note_path = ? WHERE group_id = ? AND note_path = ?',
+      ).run(to, session.currentGroupId, from);
+      // Suggestions name the Character and Session by path (no FK).
+      repointSuggestionPaths(session.currentGroupId, from, to);
+      repointRelations(session.currentGroupId, from, to);
+      db.query(
+        'UPDATE items SET note_path = ? WHERE group_id = ? AND note_path = ?',
+      ).run(to, session.currentGroupId, from);
+      db.query(
+        'UPDATE locations SET note_path = ? WHERE group_id = ? AND note_path = ?',
+      ).run(to, session.currentGroupId, from);
+      db.query(
+        'UPDATE creatures SET note_path = ? WHERE group_id = ? AND note_path = ?',
+      ).run(to, session.currentGroupId, from);
+      // locations.parent_path is a soft reference (no FK), but rewrite it
+      // anyway so children stay anchored to the renamed parent.
+      db.query(
+        'UPDATE locations SET parent_path = ? WHERE group_id = ? AND parent_path = ?',
+      ).run(to, session.currentGroupId, from);
+      // users.active_character_path is also a soft reference — any user
+      // who pinned this note as their active PC needs the path rewritten
+      // so the party sidebar / chat context don't lose track of them.
+      db.query(
+        'UPDATE users SET active_character_path = ? WHERE active_character_path = ?',
+      ).run(to, from);
+    })();
+  } catch (err) {
+    // The collide check above is a fast path; a concurrent move or
+    // create onto `to` lands here, and the transaction has rolled back.
+    if (isUniqueConstraintError(err)) return json({ error: 'exists', path: to }, 409);
+    throw err;
+  }
 
   await closeDocumentConnections(session.currentGroupId, from);
 
