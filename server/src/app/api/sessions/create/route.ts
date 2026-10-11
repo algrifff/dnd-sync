@@ -10,8 +10,7 @@
 //   campaigns: [<slug>]
 //   sheet: { date, session_number?, title?, attendees: [...template default], ...rest from template defaults }
 //
-// Viewers can't create sessions (it's a DM / co-DM chore); admins
-// and editors only.
+// Any member of the World can open a Session, Players included.
 
 import { randomUUID } from 'node:crypto';
 import { prosemirrorJSONToYDoc } from 'y-prosemirror';
@@ -40,9 +39,6 @@ const Body = z.object({
 export async function POST(req: NextRequest): Promise<Response> {
   const session = requireSession(req);
   if (session instanceof Response) return session;
-  if (session.role === 'viewer') {
-    return json({ error: 'forbidden', reason: 'players cannot create sessions' }, 403);
-  }
   const csrf = verifyCsrf(req, session);
   if (csrf) return csrf;
 

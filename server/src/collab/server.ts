@@ -169,8 +169,9 @@ function parseMetaDocName(
  *  everyone else's updates without being able to push their own.
  *
  *    - admin / editor: full edit everywhere.
- *    - viewer: edit on notes they created OR on a PC they own
- *      (frontmatter player: matches their username).
+ *    - viewer: edit on notes they created, on a PC they own
+ *      (frontmatter player: matches their username), OR on any
+ *      Session log, which the whole table co-writes.
  *    - ephemeral `.`-docs (presence, graph-state): editor/admin
  *      only so viewers don't write pins/colours. Awareness
  *      (cursors) still broadcasts under read-only.
@@ -197,20 +198,23 @@ function isNoteGmOnly(groupId: string, path: string): boolean {
 
 /** `path` is the BARE note path — the caller has already stripped the
  *  group prefix and asserted it matches the session. */
-function canEditDoc(path: string, session: Session): boolean {
+export function canEditDoc(path: string, session: Session): boolean {
   if (session.role === 'admin' || session.role === 'editor') return true;
 
   // Viewer path below.
   if (isNonNoteDoc(path)) return false;
 
-  // Note path — allow if this user created the note OR owns the PC.
   const db = getDb();
   const note = db
-    .query<{ created_by: string | null }, [string, string]>(
-      'SELECT created_by FROM notes WHERE group_id = ? AND path = ?',
+    .query<{ created_by: string | null; kind: string | null }, [string, string]>(
+      `SELECT created_by,
+              CASE WHEN json_valid(frontmatter_json)
+                   THEN json_extract(frontmatter_json, '$.kind') END AS kind
+         FROM notes WHERE group_id = ? AND path = ?`,
     )
     .get(session.currentGroupId, path);
   if (note && note.created_by === session.userId) return true;
+  if (note && note.kind === 'session') return true;
   if (isPcOwnedBy(session.currentGroupId, path, session.userId)) {
     return true;
   }

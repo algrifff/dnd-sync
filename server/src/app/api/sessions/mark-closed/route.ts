@@ -9,7 +9,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
-import { loadNote } from '@/lib/notes';
+import { loadNote, visibilityFor } from '@/lib/notes';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 import { apiErrorResponse } from '@/lib/analytics/api-error';
@@ -24,9 +24,6 @@ export async function POST(req: NextRequest): Promise<Response> {
   try {
     const session = requireSession(req);
     if (session instanceof Response) return session;
-    if (session.role === 'viewer') {
-      return json({ error: 'forbidden' }, 403);
-    }
     const csrf = verifyCsrf(req, session);
     if (csrf) return csrf;
 
@@ -43,6 +40,10 @@ export async function POST(req: NextRequest): Promise<Response> {
     // rows keyed on a nonexistent path.
     const note = loadNote(session.currentGroupId, body.sessionPath);
     if (!note) return json({ error: 'not_found' }, 404);
+    const vis = visibilityFor(session.role);
+    if ((note.gm_only === 1 && vis.hideGmOnly) || (note.dm_only === 1 && vis.hideDmOnly)) {
+      return json({ error: 'not_found' }, 404);
+    }
     let fm: Record<string, unknown>;
     try {
       fm = JSON.parse(note.frontmatter_json) as Record<string, unknown>;

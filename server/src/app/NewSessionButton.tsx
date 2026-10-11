@@ -13,7 +13,6 @@ type Phase = 'idle' | 'working' | 'error';
 // could hit to plain language; anything else falls back to reason/detail
 // or the HTTP status.
 const ERROR_MESSAGES: Record<string, string> = {
-  forbidden: "You don't have permission to create sessions.",
   unknown_campaign: 'No active campaign found for this world.',
   exists: 'A session for today already exists.',
 };
@@ -21,17 +20,15 @@ const ERROR_MESSAGES: Record<string, string> = {
 export function NewSessionButton({
   campaignSlug,
   csrfToken,
-  canCreate,
 }: {
   campaignSlug: string | null;
   csrfToken: string;
-  canCreate: boolean;
 }): React.JSX.Element | null {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>('idle');
   const [errorMsg, setErrorMsg] = useState('');
 
-  if (!canCreate || !campaignSlug) return null;
+  if (!campaignSlug) return null;
 
   async function handleClick(): Promise<void> {
     if (phase === 'working') return;

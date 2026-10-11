@@ -84,7 +84,6 @@ export default async function ContentLayout({
       <NewSessionButton
         campaignSlug={activeCampaignSlug}
         csrfToken={session.csrfToken}
-        canCreate={session.role !== 'viewer'}
       />
       <div className="shrink-0 px-2 pt-3">
         <ActivePartySection
