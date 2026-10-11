@@ -218,7 +218,8 @@ function toSafeNext(raw: FormDataEntryValue | null): string {
   const value = typeof raw === 'string' ? raw : '';
   // Only allow same-origin, root-relative paths — never redirect to an
   // external host based on a form field.
-  if (!value || !value.startsWith('/') || value.startsWith('//')) return '/home';
+  // Browsers read a backslash as a slash, so `/\evil.com` is protocol-relative.
+  if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/home';
   if (value.startsWith('/login')) return '/home';
   return value;
 }

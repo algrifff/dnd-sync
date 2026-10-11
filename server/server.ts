@@ -11,6 +11,7 @@ import { ensureConfig } from '@/lib/config';
 import { getEnv } from '@/lib/env';
 import { cleanupExpiredSessions } from '@/lib/session';
 import { pruneExpiredAuditLog } from '@/lib/audit';
+import { pruneExpiredOauthRows } from '@/lib/oauth';
 import { recoverImportJobs, startImportJanitor } from '@/lib/import-orchestrate';
 import { ensureDefaultAdmin, printAdminBanner, DEFAULT_GROUP_ID } from '@/lib/users';
 import { ensureDefaultTemplates } from '@/lib/templates';
@@ -87,6 +88,7 @@ ensureConfig();
   if (removed > 0) console.log(`[compendium-server] pruned ${removed} expired session(s)`);
   const removedAudit = pruneExpiredAuditLog();
   if (removedAudit > 0) console.log(`[compendium-server] pruned ${removedAudit} expired audit row(s)`);
+  pruneExpiredOauthRows();
   // Import jobs track their phase in-process, so anything left mid-flight
   // by a crash or redeploy is unreachable — the DM's pending-answer
   // resolver in particular is just a Promise callback that died with the
@@ -195,6 +197,7 @@ const cleanupTimer = setInterval(() => {
     if (removedAudit > 0) {
       console.log(`[compendium-server] pruned ${removedAudit} expired audit row(s)`);
     }
+    pruneExpiredOauthRows();
   } catch (err) {
     console.error('[compendium-server] periodic cleanup failed:', err);
   }

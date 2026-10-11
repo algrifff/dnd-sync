@@ -14,7 +14,12 @@ type Bucket = {
   fails: number;
   lockedUntil: number;
   notified: boolean;
+  touchedAt: number;
 };
+
+// Public endpoints key buckets on attacker-influenced strings, so the map
+// is bounded: past this size, buckets idle for a full lockout are swept.
+const MAX_BUCKETS = 10_000;
 
 export type RateLimitDecision =
   | { allowed: true }
@@ -42,7 +47,12 @@ function createLimiter(maxFails: number, lockoutMs: number): Limiter {
       if (exempt) return false;
       const now = Date.now();
       const existing = buckets.get(key);
-      const b: Bucket = existing ?? { fails: 0, lockedUntil: 0, notified: false };
+      if (!existing && buckets.size >= MAX_BUCKETS) {
+        for (const [k, v] of buckets) if (now - v.touchedAt >= lockoutMs) buckets.delete(k);
+        if (buckets.size >= MAX_BUCKETS) buckets.clear();
+      }
+      const b: Bucket = existing ?? { fails: 0, lockedUntil: 0, notified: false, touchedAt: now };
+      b.touchedAt = now;
       if (b.lockedUntil && b.lockedUntil <= now) {
         b.fails = 0;
         b.lockedUntil = 0;
@@ -114,3 +124,17 @@ export function recordAuthFailure(ip: string, isLocalhost: boolean): boolean {
 export function recordAuthSuccess(ip: string): void {
   wsAuthLimiter.recordSuccess(ip);
 }
+
+// OAuth token endpoint for the MCP connector. Keyed per IP; every
+// rejected exchange (bad code, bad verifier, dead refresh token) counts.
+// 30 fails / 5 min: a real client retries a couple of times at most.
+export const oauthTokenLimiter = createLimiter(30, 5 * 60_000);
+
+// OAuth dynamic client registration. Every call counts, success or not,
+// because each one inserts a row. 20 / hour per IP is far above what
+// one person adding a connector to a few Claude surfaces produces.
+export const oauthRegisterLimiter = createLimiter(20, 60 * 60_000);
+
+// Ceiling across all callers, so rotating source addresses cannot flood
+// oauth_clients. Recorded under one fixed key.
+export const oauthRegisterGlobalLimiter = createLimiter(200, 60 * 60_000);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { adminLoginLimiter, webLoginLimiter, wsAuthLimiter } from './ratelimit';
+import { adminLoginLimiter, oauthRegisterGlobalLimiter, webLoginLimiter, wsAuthLimiter } from './ratelimit';
 
 describe('webLoginLimiter', () => {
   it('allows by default', () => {
@@ -85,5 +85,13 @@ describe('adminLoginLimiter', () => {
     const key = 'ip-admin-e-' + Math.random();
     for (let i = 0; i < 9; i++) adminLoginLimiter.recordFailure(key, false);
     expect(adminLoginLimiter.check(key, false).allowed).toBe(true);
+  });
+});
+
+describe('oauthRegisterGlobalLimiter', () => {
+  it('locks every caller out once 200 registrations are recorded under the one key', () => {
+    for (let i = 0; i < 200; i++) oauthRegisterGlobalLimiter.recordFailure('global-test', false);
+
+    expect(oauthRegisterGlobalLimiter.check('global-test', false).allowed).toBe(false);
   });
 });

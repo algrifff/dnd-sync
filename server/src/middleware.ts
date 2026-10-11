@@ -28,6 +28,10 @@ const PUBLIC_PATTERNS: readonly RegExp[] = [
   /^\/signup(\/|$)/,
   /^\/admin\/login(\/|$)/,
   /^\/api\//,
+  // OAuth discovery for the MCP connector (RFC 9728 / RFC 8414). The
+  // consent page at /oauth/authorize is deliberately NOT here: it needs
+  // the session, and the login redirect carries its full query along.
+  /^\/\.well-known\//,
   /^\/_next\//,
   /^\/public\//,
   /^\/textures\//,

@@ -3,8 +3,10 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { ACCENT_PALETTE } from '@/lib/users';
+import { listGrantsForUser } from '@/lib/oauth';
 import { ProfileForm } from '@/app/settings/profile/ProfileForm';
 import { PasswordForm } from '@/app/settings/profile/PasswordForm';
+import { ConnectedApps } from '@/app/settings/profile/ConnectedApps';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,6 +46,15 @@ export default async function ProfilePage(): Promise<ReactElement> {
           shouldn&rsquo;t be enough to change it.
         </p>
         <PasswordForm csrfToken={session.csrfToken} />
+      </section>
+
+      <section className="rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-5">
+        <h2 className="mb-1 text-lg font-semibold">Connected apps</h2>
+        <p className="mb-4 text-sm text-[var(--ink-soft)]">
+          Apps such as Claude that you have allowed to read one of your worlds. Disconnecting
+          one signs it out everywhere; it will ask for access again next time.
+        </p>
+        <ConnectedApps apps={listGrantsForUser(session.userId)} csrfToken={session.csrfToken} />
       </section>
     </div>
   );
