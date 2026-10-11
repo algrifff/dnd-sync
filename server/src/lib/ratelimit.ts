@@ -14,7 +14,12 @@ type Bucket = {
   fails: number;
   lockedUntil: number;
   notified: boolean;
+  touchedAt: number;
 };
+
+// Public endpoints key buckets on attacker-influenced strings, so the map
+// is bounded: past this size, buckets idle for a full lockout are swept.
+const MAX_BUCKETS = 10_000;
 
 export type RateLimitDecision =
   | { allowed: true }
@@ -42,7 +47,12 @@ function createLimiter(maxFails: number, lockoutMs: number): Limiter {
       if (exempt) return false;
       const now = Date.now();
       const existing = buckets.get(key);
-      const b: Bucket = existing ?? { fails: 0, lockedUntil: 0, notified: false };
+      if (!existing && buckets.size >= MAX_BUCKETS) {
+        for (const [k, v] of buckets) if (now - v.touchedAt >= lockoutMs) buckets.delete(k);
+        if (buckets.size >= MAX_BUCKETS) buckets.clear();
+      }
+      const b: Bucket = existing ?? { fails: 0, lockedUntil: 0, notified: false, touchedAt: now };
+      b.touchedAt = now;
       if (b.lockedUntil && b.lockedUntil <= now) {
         b.fails = 0;
         b.lockedUntil = 0;
@@ -124,3 +134,7 @@ export const oauthTokenLimiter = createLimiter(30, 5 * 60_000);
 // because each one inserts a row. 20 / hour per IP is far above what
 // one person adding a connector to a few Claude surfaces produces.
 export const oauthRegisterLimiter = createLimiter(20, 60 * 60_000);
+
+// Ceiling across all callers, so rotating source addresses cannot flood
+// oauth_clients. Recorded under one fixed key.
+export const oauthRegisterGlobalLimiter = createLimiter(200, 60 * 60_000);

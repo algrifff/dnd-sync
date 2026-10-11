@@ -47,9 +47,12 @@ export function unauthorizedBearer(headers: Headers, description?: string): Resp
   return jsonNoStore({ error: 'unauthorized' }, 401, { 'WWW-Authenticate': `Bearer ${params.join(', ')}` });
 }
 
+/** The proxy appends the address it saw to X-Forwarded-For, so the last
+ *  entry is the one a caller cannot forge; earlier entries are whatever the
+ *  client claimed. */
 export function clientIp(headers: Headers): string {
   const fwd = headers.get('x-forwarded-for');
-  if (fwd) return fwd.split(',')[0]?.trim() || 'unknown';
+  if (fwd) return fwd.split(',').at(-1)?.trim() || 'unknown';
   return headers.get('x-real-ip') ?? 'unknown';
 }
 

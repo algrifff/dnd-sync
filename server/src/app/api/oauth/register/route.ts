@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { isAcceptableRedirectUri, registerClient } from '@/lib/oauth';
 import { clientIp, jsonNoStore, oauthError, preflight } from '@/lib/oauth-http';
-import { oauthRegisterLimiter } from '@/lib/ratelimit';
+import { oauthRegisterGlobalLimiter, oauthRegisterLimiter } from '@/lib/ratelimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +25,11 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!decision.allowed) {
     return oauthError('invalid_client_metadata', 'too many registrations, try again later', 429);
   }
+  if (!oauthRegisterGlobalLimiter.check('global', false).allowed) {
+    return oauthError('invalid_client_metadata', 'too many registrations, try again later', 429);
+  }
   oauthRegisterLimiter.recordFailure(ip, false);
+  oauthRegisterGlobalLimiter.recordFailure('global', false);
 
   let body: z.infer<typeof Body>;
   try {
