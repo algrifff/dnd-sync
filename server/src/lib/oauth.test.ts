@@ -207,6 +207,45 @@ describe('refresh rotation', () => {
   });
 });
 
+describe('reuse detection', () => {
+  const ageSpent = (ms: number) => getDb().query('UPDATE oauth_spent SET spent_at = spent_at - ?').run(ms);
+
+  it('revokes the grant when an authorization code is replayed after a successful exchange', () => {
+    const { verifier, challenge } = pkce();
+    const code = grantCode({ challenge });
+    const tokens = mustRedeem(code, verifier);
+
+    expect(redeem(code, verifier)).toMatchObject({ ok: false, error: 'invalid_grant' });
+
+    expect(authenticateAccessToken(tokens.access_token, RESOURCE)).toBeNull();
+    expect(refreshTokens({ refreshToken: tokens.refresh_token, clientId: client.clientId })).toMatchObject({ ok: false });
+  });
+
+  it('revokes the grant when a rotated refresh token is replayed after the grace window', () => {
+    const { verifier, challenge } = pkce();
+    const first = mustRedeem(grantCode({ challenge }), verifier);
+    const second = refreshTokens({ refreshToken: first.refresh_token, clientId: client.clientId });
+    if (!second.ok) throw new Error('refresh failed');
+    ageSpent(11_000);
+
+    expect(refreshTokens({ refreshToken: first.refresh_token, clientId: client.clientId })).toMatchObject({ ok: false });
+
+    expect(authenticateAccessToken(second.tokens.access_token, RESOURCE)).toBeNull();
+    expect(refreshTokens({ refreshToken: second.tokens.refresh_token, clientId: client.clientId })).toMatchObject({ ok: false });
+  });
+
+  it('leaves the grant alone when a rotated token is retried within the grace window', () => {
+    const { verifier, challenge } = pkce();
+    const first = mustRedeem(grantCode({ challenge }), verifier);
+    const second = refreshTokens({ refreshToken: first.refresh_token, clientId: client.clientId });
+    if (!second.ok) throw new Error('refresh failed');
+
+    expect(refreshTokens({ refreshToken: first.refresh_token, clientId: client.clientId })).toMatchObject({ ok: false });
+
+    expect(authenticateAccessToken(second.tokens.access_token, RESOURCE)).not.toBeNull();
+  });
+});
+
 describe('revocation', () => {
   it('RFC 7009 revoke on either token ends the grant', () => {
     const { verifier, challenge } = pkce();

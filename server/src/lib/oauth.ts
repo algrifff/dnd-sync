@@ -29,6 +29,9 @@ const CIMD_CACHE_MS = 60 * 60_000;
 const CIMD_FETCH_TIMEOUT_MS = 5_000;
 const CIMD_MAX_BYTES = 64 * 1024;
 const CIMD_FAILURE_TTL_MS = 60_000;
+// A rotated refresh token presented again within this window is treated as
+// a client retry (lost response, parallel refresh), not as theft.
+const REUSE_GRACE_MS = 10_000;
 const CIMD_UNUSED_MS = 30 * 24 * 60 * 60_000;
 
 // Recently failed CIMD urls, so the authorize page cannot be used to make
@@ -354,7 +357,11 @@ export function redeemCode(input: RedeemInput): TokenResult {
          FROM oauth_codes WHERE code_hash = ?`,
     )
     .get(sha256(input.code));
-  if (!row) return fail('invalid_grant', 'unknown or already used code');
+  if (!row) {
+    const spent = loadSpent(input.code, 'code');
+    if (spent) revokeGrantById(spent.grant_id);
+    return fail('invalid_grant', 'unknown or already used code');
+  }
   db.query('DELETE FROM oauth_codes WHERE code_hash = ?').run(row.code_hash);
 
   if (row.expires_at <= Date.now()) return fail('invalid_grant', 'code expired');
@@ -374,7 +381,24 @@ export function redeemCode(input: RedeemInput): TokenResult {
     `INSERT INTO oauth_grants (id, client_id, user_id, group_id, resource, scope, created_at, last_used_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(grantId, row.client_id, row.user_id, row.group_id, row.resource, SCOPE, now, now);
+  recordSpent(row.code_hash, grantId, 'code', now);
   return { ok: true, tokens: mintTokens(grantId, now) };
+}
+
+type SpentRow = { grant_id: string; spent_at: number };
+
+function loadSpent(secretValue: string, kind: 'code' | 'refresh'): SpentRow | null {
+  return (
+    getDb()
+      .query<SpentRow, [string, string]>('SELECT grant_id, spent_at FROM oauth_spent WHERE token_hash = ? AND kind = ?')
+      .get(sha256(secretValue), kind) ?? null
+  );
+}
+
+function recordSpent(hash: string, grantId: string, kind: 'code' | 'refresh', now: number): void {
+  getDb()
+    .query('INSERT OR IGNORE INTO oauth_spent (token_hash, grant_id, kind, spent_at) VALUES (?, ?, ?, ?)')
+    .run(hash, grantId, kind, now);
 }
 
 function fail(error: OAuthErrorCode, description: string): TokenResult {
@@ -429,9 +453,14 @@ function loadToken(token: string): TokenRow | null {
  *  which is what Claude expects before it re-prompts the user. */
 export function refreshTokens(input: { refreshToken: string; clientId: string }): TokenResult {
   const row = loadToken(input.refreshToken);
-  if (!row || row.kind !== 'refresh') return fail('invalid_grant', 'unknown refresh token');
+  if (!row || row.kind !== 'refresh') {
+    const spent = row ? null : loadSpent(input.refreshToken, 'refresh');
+    if (spent && Date.now() - spent.spent_at > REUSE_GRACE_MS) revokeGrantById(spent.grant_id);
+    return fail('invalid_grant', 'unknown refresh token');
+  }
   const db = getDb();
   db.query('DELETE FROM oauth_tokens WHERE token_hash = ?').run(row.token_hash);
+  recordSpent(row.token_hash, row.grant_id, 'refresh', Date.now());
   if (row.expires_at <= Date.now()) return fail('invalid_grant', 'refresh token expired');
   if (row.client_id !== input.clientId) return fail('invalid_grant', 'token was issued to another client');
   if (!memberRole(row.user_id, row.group_id)) {
@@ -528,6 +557,7 @@ export function pruneExpiredOauthRows(): void {
   const db = getDb();
   db.query('DELETE FROM oauth_codes WHERE expires_at <= ?').run(now);
   db.query('DELETE FROM oauth_tokens WHERE expires_at <= ?').run(now);
+  db.query('DELETE FROM oauth_spent WHERE spent_at <= ?').run(now - REFRESH_TTL_MS);
   db.query(
     'DELETE FROM oauth_grants WHERE NOT EXISTS (SELECT 1 FROM oauth_tokens t WHERE t.grant_id = oauth_grants.id)',
   ).run();

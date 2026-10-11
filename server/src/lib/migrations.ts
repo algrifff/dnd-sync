@@ -1012,6 +1012,17 @@ const MIGRATIONS: readonly Migration[] = [
       );
       CREATE INDEX oauth_tokens_grant ON oauth_tokens(grant_id);
       CREATE INDEX oauth_tokens_expires ON oauth_tokens(expires_at);
+
+      -- Tombstones for codes and refresh tokens that have been spent. A
+      -- spent credential presented again means it leaked, so the grant it
+      -- belonged to is revoked (OAuth 2.1 reuse detection).
+      CREATE TABLE oauth_spent (
+        token_hash TEXT PRIMARY KEY,
+        grant_id   TEXT NOT NULL REFERENCES oauth_grants(id) ON DELETE CASCADE,
+        kind       TEXT NOT NULL CHECK (kind IN ('code', 'refresh')),
+        spent_at   INTEGER NOT NULL
+      );
+      CREATE INDEX oauth_spent_grant ON oauth_spent(grant_id);
     `,
   },
 ];
