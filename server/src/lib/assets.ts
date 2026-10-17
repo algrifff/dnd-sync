@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, renameSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { getDb } from './db';
+import { hiddenNotesSql, type Visibility } from './notes';
 
 export type AssetRow = {
   id: string;
@@ -407,29 +408,28 @@ export function getAssetByVaultPath(
  *  or as a portrait/path reference in frontmatter (character-parser.ts
  *  stores the vault *path*, not the asset id, in `frontmatter.portrait` /
  *  `sheet.portrait` — see getAssetByVaultPath above). Checked before
- *  delete so we refuse rather than orphan a live reference. */
+ *  delete so we refuse rather than orphan a live reference. `visible`
+ *  counts only the notes `vis` lets the caller see; `total` counts all. */
 export function assetReferenceCount(
   id: string,
   groupId: string,
   originalPath: string | null,
-): number {
-  const db = getDb();
-  const contentHit = db
-    .query<{ n: number }, [string, string]>(
-      `SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND content_json LIKE ?`,
-    )
-    .get(groupId, `%${id}%`);
-  let count = contentHit?.n ?? 0;
-
-  if (originalPath) {
-    const fmHit = db
-      .query<{ n: number }, [string, string]>(
-        `SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND frontmatter_json LIKE ?`,
+  vis: Visibility,
+): { total: number; visible: number } {
+  const count = (column: 'content_json' | 'frontmatter_json', needle: string) => {
+    const row = getDb()
+      .query<{ total: number; visible: number | null }, [string, string]>(
+        `SELECT COUNT(*) AS total,
+                SUM(CASE WHEN 1 = 1${hiddenNotesSql('n', vis)} THEN 1 ELSE 0 END) AS visible
+           FROM notes n WHERE n.group_id = ? AND n.${column} LIKE ?`,
       )
-      .get(groupId, `%${originalPath}%`);
-    count += fmHit?.n ?? 0;
-  }
-  return count;
+      .get(groupId, `%${needle}%`);
+    return { total: row?.total ?? 0, visible: row?.visible ?? 0 };
+  };
+  const content = count('content_json', id);
+  if (!originalPath) return content;
+  const fm = count('frontmatter_json', originalPath);
+  return { total: content.total + fm.total, visible: content.visible + fm.visible };
 }
 
 export type DeleteAssetResult =
@@ -438,12 +438,14 @@ export type DeleteAssetResult =
   | { ok: false; reason: 'in_use'; noteCount: number };
 
 /** Delete an asset row (+ its tags), refusing if any note in the group
- *  still references it (see assetReferenceCount). The on-disk blob is
- *  content-addressed and deduped *per group* (UNIQUE(group_id, hash) —
+ *  still references it (see assetReferenceCount). A reference from a
+ *  note hidden from the caller still refuses the delete, but the
+ *  `noteCount` it reports counts only the notes the caller can see.
+ *  The on-disk blob is content-addressed and deduped *per group* (UNIQUE(group_id, hash) —
  *  see storeAssetFromBuffer), so another group can share the same
  *  hash+mime file; only unlink it from disk once no `assets` row
  *  anywhere still points at it. */
-export function deleteAsset(id: string, groupId: string): DeleteAssetResult {
+export function deleteAsset(id: string, groupId: string, vis: Visibility): DeleteAssetResult {
   const db = getDb();
   const asset = db
     .query<{ hash: string; mime: string; original_path: string | null }, [string, string]>(
@@ -452,8 +454,8 @@ export function deleteAsset(id: string, groupId: string): DeleteAssetResult {
     .get(id, groupId);
   if (!asset) return { ok: false, reason: 'not_found' };
 
-  const noteCount = assetReferenceCount(id, groupId, asset.original_path);
-  if (noteCount > 0) return { ok: false, reason: 'in_use', noteCount };
+  const refs = assetReferenceCount(id, groupId, asset.original_path, vis);
+  if (refs.total > 0) return { ok: false, reason: 'in_use', noteCount: refs.visible };
 
   db.transaction(() => {
     db.query('DELETE FROM asset_tags WHERE group_id = ? AND asset_id = ?').run(groupId, id);

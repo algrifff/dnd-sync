@@ -11,7 +11,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
-import { loadNote } from '@/lib/notes';
+import { loadVisibleNote, visibilityFor } from '@/lib/notes';
 import { closeDocumentConnections } from '@/collab/server';
 import { deriveFolderIndexesFor } from '@/lib/campaign-index';
 
@@ -41,7 +41,8 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  const note = loadNote(session.currentGroupId, body.path);
+  // A note the caller can't see answers exactly like a missing one.
+  const note = loadVisibleNote(session.currentGroupId, body.path, visibilityFor(session.role));
   if (!note) return json({ error: 'not_found' }, 404);
 
   let fm: Record<string, unknown>;

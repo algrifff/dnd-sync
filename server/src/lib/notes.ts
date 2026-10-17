@@ -192,6 +192,21 @@ export function loadNote(groupId: string, path: string): NoteRow | null {
   );
 }
 
+/** `loadNote`, but a note hidden by `vis` comes back as `null`, so the
+ *  caller answers it exactly as it answers a missing one. */
+export function loadVisibleNote(groupId: string, path: string, vis: Visibility): NoteRow | null {
+  const note = loadNote(groupId, path);
+  return note && !isHiddenFrom(note, vis) ? note : null;
+}
+
+/** The single-row form of `hiddenNotesSql`. */
+export function isHiddenFrom(
+  note: { dm_only: number; gm_only: number },
+  vis: Visibility,
+): boolean {
+  return (note.gm_only === 1 && vis.hideGmOnly) || (note.dm_only === 1 && vis.hideDmOnly);
+}
+
 /** Nearest ancestor folder — starting at `folderPath` itself and
  *  walking up toward the root — that has an `index.md` note. Used to
  *  pick a sensible redirect target after a note or folder delete:

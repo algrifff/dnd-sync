@@ -10,6 +10,7 @@ import { setupTestDb, teardownTestDb } from '@/lib/test-utils';
 import { clearAllData, createUser, DEFAULT_GROUP_ID as groupId } from '@/lib/users';
 import { buildSessionCookies, createSession } from '@/lib/session';
 import { moveFolder } from '@/lib/move-folder';
+import { visibilityFor } from '@/lib/notes';
 import { createTools } from '@/lib/ai/tools';
 import { persistDerived } from '@/collab/derive';
 import { POST as moveRoute } from '@/app/api/notes/move/route';
@@ -290,7 +291,7 @@ describe('renaming or moving a Note', () => {
   it('carries them when the folder holding the Note is renamed', async () => {
     relate(VOLO, 'member_of', GUILD);
 
-    const moved = await moveFolder({ groupId, userId: ownerId, from: 'Campaigns/Ashfall/People', to: 'Campaigns/Ashfall/Folk' });
+    const moved = await moveFolder({ groupId, userId: ownerId, from: 'Campaigns/Ashfall/People', to: 'Campaigns/Ashfall/Folk', vis: visibilityFor('admin') });
 
     expect(moved.ok).toBe(true);
     expect(read(GUILD)).toEqual(['has_member Campaigns/Ashfall/Folk/volo.md']);

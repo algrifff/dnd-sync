@@ -23,20 +23,28 @@ import {
 import { deriveFolderIndexesFor } from './campaign-index';
 import { repointSuggestionPaths } from './suggestion-paths';
 import { repointRelations } from './relations';
+import { isHiddenFrom, type Visibility } from './notes';
 
 export type MoveFolderResult =
   | { ok: true; movedCount: number; renames: Rename[] }
   | { ok: false; error: string; reason?: string; path?: string };
 
 /** Rename / reparent a folder. Caller is responsible for permission +
- *  policy checks; this function performs the data move only. */
+ *  policy checks; this function performs the data move only.
+ *
+ *  `vis` is the caller's visibility. The folder moves as one unit, so
+ *  notes hidden from the caller go with it (leaving them behind would
+ *  split the admin's folder in two), but they never count: a folder
+ *  holding only hidden notes is `not_found`, and `movedCount` is the
+ *  visible notes only. */
 export async function moveFolder(args: {
   groupId: string;
   userId: string;
   from: string;
   to: string;
+  vis: Visibility;
 }): Promise<MoveFolderResult> {
-  const { groupId, userId, from, to } = args;
+  const { groupId, userId, from, to, vis } = args;
   if (!from || !to) return { ok: false, error: 'invalid_path' };
   if (from === to) return { ok: true, movedCount: 0, renames: [] };
   if ((to + '/').startsWith(from + '/')) {
@@ -47,16 +55,17 @@ export async function moveFolder(args: {
 
   const affected = db
     .query<
-      { path: string },
+      { path: string; dm_only: number; gm_only: number },
       [string, string, string]
     >(
-      `SELECT path
+      `SELECT path, dm_only, gm_only
          FROM notes
         WHERE group_id = ? AND (path = ? OR path LIKE ? || '/%')`,
     )
     .all(groupId, from, from);
+  const visibleCount = affected.filter((r) => !isHiddenFrom(r, vis)).length;
 
-  if (affected.length === 0) {
+  if (visibleCount === 0) {
     const marker = db
       .query<{ n: number }, [string, string]>(
         'SELECT COUNT(*) AS n FROM folder_markers WHERE group_id = ? AND path = ?',
@@ -256,5 +265,5 @@ export async function moveFolder(args: {
   }
   await deriveFolderIndexesFor(groupId, touchedPaths, { userId });
 
-  return { ok: true, movedCount: moved.length, renames };
+  return { ok: true, movedCount: visibleCount, renames };
 }

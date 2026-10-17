@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { hasControlChars } from '@/lib/notes';
+import { hasControlChars, loadVisibleNote, visibilityFor } from '@/lib/notes';
 import { getDb, isUniqueConstraintError } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
@@ -50,14 +50,13 @@ export async function POST(req: NextRequest): Promise<Response> {
   const policy = assertMoveAllowed({ kind: 'file', from, to });
   if (!policy.ok) return json({ error: policy.error, reason: policy.reason }, 403);
 
-  const db = getDb();
-  const existing = db
-    .query<{ n: number }, [string, string]>(
-      'SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path = ?',
-    )
-    .get(session.currentGroupId, from);
-  if ((existing?.n ?? 0) === 0) return json({ error: 'not_found' }, 404);
+  // A note the caller can't see (an editor and a gm_only note) answers
+  // exactly like a missing one.
+  if (!loadVisibleNote(session.currentGroupId, from, visibilityFor(session.role))) {
+    return json({ error: 'not_found' }, 404);
+  }
 
+  const db = getDb();
   const collide = db
     .query<{ n: number }, [string, string]>(
       'SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path = ?',
