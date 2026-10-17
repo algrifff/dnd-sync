@@ -1,44 +1,49 @@
-// Graph/mind-map view. Shell (header, sidebar, tab bar) comes from
-// the parent (content)/layout; this page just renders the canvas.
+// The Orrery: the graph page. Shell (header, sidebar, tab bar) comes
+// from the parent (content)/layout. The original Sigma view lives at
+// /graph/classic.
 
 import type { ReactElement } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
-import { listAllTags, visibilityFor } from '@/lib/notes';
-// Lazy-loaded (ssr:false) — see GraphCanvasLoader.tsx for why this is a
-// separate Client Component file rather than a plain import, and for
-// the measured bundle-size before/after.
-import { GraphCanvas } from './GraphCanvasLoader';
+import { getWorldHeader } from '@/lib/groups';
+import { listVisibleCampaignNames } from '@/lib/graph';
+import { visibilityFor } from '@/lib/notes';
+import { GM_MODE_COOKIE, treeModeFor } from '@/lib/gm-mode';
+// Lazy-loaded (ssr:false), see OrreryLoader.tsx.
+import { OrreryCanvas } from './OrreryLoader';
 
 export const dynamic = 'force-dynamic';
 
-export default async function GraphPage(): Promise<ReactElement> {
+export default async function GraphPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ focus?: string | string[] }>;
+}): Promise<ReactElement> {
   const jar = await cookies();
   const cookieHeader = jar
     .getAll()
     .map((c) => `${c.name}=${c.value}`)
     .join('; ');
   const session = readSession(cookieHeader);
-  if (!session) redirect('/login?next=/graph');
+  const { focus } = await searchParams;
+  const focusPath = typeof focus === 'string' && focus ? focus : null;
+  if (!session) {
+    const next = focusPath ? `/graph?focus=${encodeURIComponent(focusPath)}` : '/graph';
+    redirect(`/login?next=${encodeURIComponent(next)}`);
+  }
 
-  const allTags = listAllTags(session.currentGroupId, visibilityFor(session.role)).map(
-    (t) => t.tag,
-  );
+  const campNames = listVisibleCampaignNames(session.currentGroupId, {
+    mode: treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role),
+    hideDmOnly: visibilityFor(session.role).hideDmOnly,
+  });
 
   return (
     <div className="relative flex-1 overflow-hidden">
-      <GraphCanvas
-        groupId={session.currentGroupId}
-        allTags={allTags}
-        csrfToken={session.csrfToken}
-        me={{
-          userId: session.userId,
-          displayName: session.displayName,
-          accentColor: session.accentColor,
-          cursorMode: session.cursorMode,
-          avatarVersion: session.avatarVersion,
-        }}
+      <OrreryCanvas
+        worldName={getWorldHeader(session.currentGroupId).name}
+        campNames={campNames}
+        initialFocus={focusPath}
       />
     </div>
   );

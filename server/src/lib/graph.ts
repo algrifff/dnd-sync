@@ -341,7 +341,7 @@ const KIND_SQL_N = kindSql('n.frontmatter_json');
 function nodeMeta(r: { path: string; kind: string | null }): Pick<GraphNode, 'kind' | 'campaign' | 'isIndex'> {
   return {
     kind: parseKind(r.kind) ?? 'note',
-    campaign: /^Campaigns\/([^/]+)/.exec(r.path)?.[1] ?? null,
+    campaign: /^Campaigns\/([^/]+)\//.exec(r.path)?.[1] ?? null,
     isIndex: isAnchorPath(r.path),
   };
 }
@@ -374,4 +374,29 @@ function sha1Short(input: string): string {
 function fallbackTitle(path: string): string {
   const last = path.split('/').pop() ?? path;
   return last.replace(/\.(md|canvas)$/i, '');
+}
+
+/** Display names (slug to name) of the campaigns that have at least one
+ *  note the caller can see, so a campaign holding only hidden notes
+ *  never reaches the client. Uses the same visibility predicate as
+ *  `buildGraph`. */
+export function listVisibleCampaignNames(
+  groupId: string,
+  opts: { mode?: GraphMode; hideDmOnly: boolean },
+): Record<string, string> {
+  const gmFlag = opts.mode === 'gm' ? 1 : 0;
+  const dmClause = opts.hideDmOnly ? ' AND n.dm_only = 0' : '';
+  const rows = getDb()
+    .query<{ slug: string; name: string }, [string, number]>(
+      `SELECT c.slug AS slug, c.name AS name
+         FROM campaigns c
+        WHERE c.group_id = ?
+          AND EXISTS (
+            SELECT 1 FROM notes n
+             WHERE n.group_id = c.group_id AND n.gm_only = ?${dmClause}
+               AND substr(n.path, 1, length(c.folder_path) + 1) = c.folder_path || '/'
+          )`,
+    )
+    .all(groupId, gmFlag);
+  return Object.fromEntries(rows.map((r) => [r.slug, r.name]));
 }
