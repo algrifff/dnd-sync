@@ -15,7 +15,7 @@ import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getDb } from '@/lib/db';
+import { getDb, isUniqueConstraintError } from '@/lib/db';
 import { repointRelations } from '@/lib/relations';
 import { logAudit } from '@/lib/audit';
 import { isAllowedPath } from '@/lib/notes';
@@ -122,27 +122,36 @@ export async function POST(req: NextRequest): Promise<Response> {
 
     if (body.mode === 'copy') {
       const newId = randomUUID();
-      db.query(
-        `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
-                            content_md, yjs_state, frontmatter_json, byte_size,
-                            updated_at, updated_by, created_at, created_by, gm_only)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-      ).run(
-        newId,
-        session.currentGroupId,
-        toPath,
-        src.title,
-        src.content_json,
-        src.content_text,
-        src.content_md,
-        src.yjs_state,
-        src.frontmatter_json,
-        src.byte_size,
-        now,
-        session.userId,
-        now,
-        session.userId,
-      );
+      try {
+        db.query(
+          `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
+                              content_md, yjs_state, frontmatter_json, byte_size,
+                              updated_at, updated_by, created_at, created_by, gm_only)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+        ).run(
+          newId,
+          session.currentGroupId,
+          toPath,
+          src.title,
+          src.content_json,
+          src.content_text,
+          src.content_md,
+          src.yjs_state,
+          src.frontmatter_json,
+          src.byte_size,
+          now,
+          session.userId,
+          now,
+          session.userId,
+        );
+      } catch (err) {
+        // The collide check above is a fast path; the drain gives a
+        // concurrent create time to win. UNIQUE(group_id, path) decides.
+        if (isUniqueConstraintError(err)) {
+          return json({ error: 'exists', path: toPath }, 409);
+        }
+        throw err;
+      }
       logAudit({
         action: 'note.create',
         actorId: session.userId,
@@ -160,26 +169,44 @@ export async function POST(req: NextRequest): Promise<Response> {
     }
 
     // move: flip gm_only and (optionally) rename in one transaction.
-    db.transaction(() => {
-      if (toPath === body.fromPath) {
-        db.query(
-          'UPDATE notes SET gm_only = 0, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
-        ).run(now, session.userId, session.currentGroupId, body.fromPath);
-      } else {
-        db.query(
-          'UPDATE notes SET gm_only = 0, path = ?, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
-        ).run(toPath, now, session.userId, session.currentGroupId, body.fromPath);
-        // Rewire backlinks pointing at the old path so the graph stays
-        // consistent. Outgoing links (from_path) follow the rename too.
-        db.query('UPDATE note_links SET to_path = ? WHERE group_id = ? AND to_path = ?')
-          .run(toPath, session.currentGroupId, body.fromPath);
-        db.query('UPDATE note_links SET from_path = ? WHERE group_id = ? AND from_path = ?')
-          .run(toPath, session.currentGroupId, body.fromPath);
-        db.query('UPDATE tags SET path = ? WHERE group_id = ? AND path = ?')
-          .run(toPath, session.currentGroupId, body.fromPath);
-        repointRelations(session.currentGroupId, body.fromPath, toPath);
+    try {
+      db.transaction(() => {
+        if (toPath === body.fromPath) {
+          db.query(
+            'UPDATE notes SET gm_only = 0, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
+          ).run(now, session.userId, session.currentGroupId, body.fromPath);
+        } else {
+          db.query(
+            'UPDATE notes SET gm_only = 0, path = ?, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
+          ).run(toPath, now, session.userId, session.currentGroupId, body.fromPath);
+          // Rewire backlinks pointing at the old path so the graph stays
+          // consistent. Outgoing links (from_path) follow the rename too.
+          // OR IGNORE + DELETE merges edges that would collide on the
+          // (group_id, from_path, to_path) key with stale ones at toPath.
+          for (const col of ['to_path', 'from_path'] as const) {
+            db.query(
+              `UPDATE OR IGNORE note_links SET ${col} = ? WHERE group_id = ? AND ${col} = ?`,
+            ).run(toPath, session.currentGroupId, body.fromPath);
+            db.query(`DELETE FROM note_links WHERE group_id = ? AND ${col} = ?`).run(
+              session.currentGroupId,
+              body.fromPath,
+            );
+          }
+          db.query('UPDATE tags SET path = ? WHERE group_id = ? AND path = ?')
+            .run(toPath, session.currentGroupId, body.fromPath);
+          repointRelations(session.currentGroupId, body.fromPath, toPath);
+        }
+      })();
+    } catch (err) {
+      // Same race as the copy branch; the transaction has rolled back,
+      // so the source is untouched. Falls through to the finally. Only a
+      // note really sitting at toPath is a name conflict; any other
+      // constraint failure must surface.
+      if (isUniqueConstraintError(err) && noteExists(session.currentGroupId, toPath)) {
+        return json({ error: 'exists', path: toPath }, 409);
       }
-    })();
+      throw err;
+    }
 
     // Evict again AFTER the write so anyone who reattached during the
     // transaction re-authenticates against the new gm_only value (and,
@@ -207,6 +234,16 @@ export async function POST(req: NextRequest): Promise<Response> {
     // any throw. No-op once the move branch consumed it.
     releaseServerWrite(token);
   }
+}
+
+function noteExists(groupId: string, path: string): boolean {
+  return (
+    getDb()
+      .query<{ n: number }, [string, string]>(
+        'SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path = ?',
+      )
+      .get(groupId, path)?.n === 1
+  );
 }
 
 function json(body: unknown, status = 200): Response {

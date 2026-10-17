@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
 import { setupTestDb, teardownTestDb } from './test-utils';
 import { moveFolder } from './move-folder';
+import { visibilityFor } from './notes';
 import { getRenameableFolderForIndex } from './folder-rename';
 
 beforeAll(() => setupTestDb());
@@ -163,6 +164,7 @@ describe('moveFolder — canonical subfolder rename', () => {
       userId,
       from: fromFolder,
       to: toFolder,
+      vis: visibilityFor('admin'),
     });
 
     // Assert: success + paths moved
@@ -229,6 +231,7 @@ describe('moveFolder — canonical subfolder rename', () => {
       userId,
       from: 'Campaigns/Dragon-Heist/Characters',
       to: 'Campaigns/Dragon-Heist/Party Members',
+      vis: visibilityFor('admin'),
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe('exists');

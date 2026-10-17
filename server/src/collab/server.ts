@@ -212,7 +212,7 @@ export function canEditDoc(path: string, session: Session): boolean {
  *  which stalls `closeDocumentForWrite` for the rest of the process —
  *  and since `run()` is invoked from a bare `setTimeout` with nobody
  *  awaiting the promise, the resulting unhandled rejection takes down
- *  the whole Node 22 process. The CPU work still has to run BEFORE the
+ *  the whole server process. The CPU work still has to run BEFORE the
  *  transaction opens (route handlers hold a separate SQLite connection
  *  and a long-held write lock stalls them up to `busy_timeout`) — it
  *  just also has to be caught. */

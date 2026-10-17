@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
 import { superAdminCookie, clearSuperAdminCookie } from '@/lib/superadmin';
 import { adminLoginLimiter } from '@/lib/ratelimit';
+import { clientIp } from '@/lib/oauth-http';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,17 +13,11 @@ function json(body: unknown, status = 200, extraHeaders?: Record<string, string>
   });
 }
 
-function clientIp(req: NextRequest): string {
-  const fwd = req.headers.get('x-forwarded-for');
-  if (fwd) return fwd.split(',')[0]?.trim() || 'unknown';
-  return req.headers.get('x-real-ip') ?? 'unknown';
-}
-
 export async function POST(req: NextRequest): Promise<Response> {
   const token = process.env.ADMIN_TOKEN;
   if (!token) return json({ error: 'admin not configured' }, 503);
 
-  const ip = clientIp(req);
+  const ip = clientIp(req.headers);
   const isLocalhost = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
   const exemptRateLimit = isLocalhost && process.env.NODE_ENV !== 'production';
 

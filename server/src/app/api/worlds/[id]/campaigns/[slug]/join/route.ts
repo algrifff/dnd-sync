@@ -15,7 +15,7 @@ import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getDb } from '@/lib/db';
+import { getDb, isUniqueConstraintError } from '@/lib/db';
 import { getPmSchema } from '@/lib/pm-schema';
 import { logAudit } from '@/lib/audit';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
@@ -133,33 +133,47 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
 
   const noteId = randomUUID();
   const now = Date.now();
-  db.query(
-    `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
-                        content_md, yjs_state, frontmatter_json, byte_size,
-                        updated_at, updated_by, created_at, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    noteId,
-    groupId,
-    path,
-    name,
-    JSON.stringify(emptyDoc),
-    '',
-    '',
-    state,
-    JSON.stringify(frontmatter),
-    0,
-    now,
-    session.userId,
-    now,
-    session.userId,
-  );
+  // The COUNT checks above are only a fast path: two concurrent joins can
+  // both pass them. The note's UNIQUE(group_id, path) and the binding's
+  // primary key are what actually decide the race, so write both in one
+  // transaction (a lost race leaves no orphan note) and turn the
+  // constraint error into a 409 instead of a raw 500.
+  try {
+    db.transaction(() => {
+      db.query(
+        `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
+                            content_md, yjs_state, frontmatter_json, byte_size,
+                            updated_at, updated_by, created_at, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        noteId,
+        groupId,
+        path,
+        name,
+        JSON.stringify(emptyDoc),
+        '',
+        '',
+        state,
+        JSON.stringify(frontmatter),
+        0,
+        now,
+        session.userId,
+        now,
+        session.userId,
+      );
 
-  db.query(
-    `INSERT INTO user_character_bindings
-       (user_character_id, group_id, campaign_slug, note_id, joined_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(uc.id, groupId, slug, noteId, now);
+      db.query(
+        `INSERT INTO user_character_bindings
+           (user_character_id, group_id, campaign_slug, note_id, joined_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).run(uc.id, groupId, slug, noteId, now);
+    })();
+  } catch (err) {
+    if (isUniqueConstraintError(err)) {
+      return json({ error: 'exists', path }, 409);
+    }
+    throw err;
+  }
 
   // Push the master sheet through the sync engine so legacy flat
   // mirror keys (hp_current, ac, str/…) and derived indexes are

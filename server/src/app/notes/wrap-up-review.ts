@@ -28,14 +28,17 @@ export type RelationRow = {
   to: string;
   /** "works for": the type read from `from` to `to`. */
   label: string;
+  /** Reads the same from either end ("ally of"). */
+  symmetric: boolean;
   /** Ticked, and every mention it depends on is ticked. */
   accepted: boolean;
-  /** The first unticked mention this Relationship needs, if any. */
-  blockedBy: string | null;
-  /** Every mention end, ticked or not. An `existing` end is not a
-   *  dependency: it stays valid whatever the closer does to a mention of
-   *  the same Note. */
-  dependsOn: string[];
+  /** A mention it depends on is unticked. An `existing` end never blocks:
+   *  it stays valid whatever the closer does to a mention of the same
+   *  Note. */
+  blocked: boolean;
+  /** Which end is the unticked mention. */
+  fromOff: boolean;
+  toOff: boolean;
 };
 
 /** What the closer is told after an apply, for the banner. */
@@ -143,25 +146,26 @@ export function relationRows(
     if (state.get(mention.id)?.asNew || !match.certain) return mention.name;
     return titles[match.path] ?? mention.name;
   };
-  const unticked = (end: StoredEndpoint): string | null => {
-    if (end.type !== 'mention') return null;
+  const unticked = (end: StoredEndpoint): boolean => {
+    if (end.type !== 'mention') return false;
     const mention = mentions.get(end.mentionId);
-    return !mention || state.get(mention.id)?.accepted === false ? endName(end) : null;
+    return !mention || state.get(mention.id)?.accepted === false;
   };
 
   return proposal.relations.map((relation) => {
-    const blockedBy = unticked(relation.from) ?? unticked(relation.to);
-    const dependsOn = [relation.from, relation.to]
-      .filter((end) => end.type === 'mention')
-      .map(endName);
+    const fromOff = unticked(relation.from);
+    const toOff = unticked(relation.to);
+    const blocked = fromOff || toOff;
     return {
       relation,
       from: endName(relation.from),
       to: endName(relation.to),
       label: RELATIONS[relation.relation].label,
-      accepted: !off.has(relation.id) && blockedBy === null,
-      blockedBy,
-      dependsOn,
+      symmetric: RELATIONS[relation.relation].symmetric,
+      accepted: !off.has(relation.id) && !blocked,
+      blocked,
+      fromOff,
+      toOff,
     };
   });
 }
@@ -182,7 +186,7 @@ export function outcomeFromApply(data: {
 
 /** "Session closed. 4 Notes updated, 1 of them new. 3 Relationships
  *  recorded, 1 skipped." Relationships are mentioned only when there were
- *  any. */
+ *  any. Read aloud by the banner; sighted users get `doneChips`. */
 export function doneMessage(outcome: WrapUpOutcome | null): string {
   if (!outcome) return 'Session closed.';
   const parts = ['Session closed.'];
@@ -198,6 +202,20 @@ export function doneMessage(outcome: WrapUpOutcome | null): string {
     parts.push(`${relationsLabel(skipped)} skipped.`);
   }
   return parts.join(' ');
+}
+
+export type DoneChip = { key: 'updated' | 'created' | 'recorded' | 'skipped'; count: number };
+
+/** The banner's figures, one per non-zero count, in reading order. */
+export function doneChips(outcome: WrapUpOutcome | null): DoneChip[] {
+  if (!outcome) return [];
+  const all: DoneChip[] = [
+    { key: 'updated', count: outcome.applied },
+    { key: 'created', count: outcome.created },
+    { key: 'recorded', count: outcome.relationsAdded },
+    { key: 'skipped', count: outcome.relationsSkipped },
+  ];
+  return all.filter((c) => c.count > 0);
 }
 
 function relationsLabel(n: number): string {

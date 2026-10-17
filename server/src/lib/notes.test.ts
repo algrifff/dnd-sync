@@ -3,14 +3,21 @@ import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
 import {
   canWriteAllSheetFields,
+  countVisibleNotes,
   decodePath,
   findNearestIndexPath,
+  listAllTags,
+  listNotesByTag,
+  listRecentForUser,
   loadBacklinks,
   loadNote,
   loadOutgoingLinks,
   loadTags,
+  recentlyUpdated,
   visibilityFor,
 } from './notes';
+import { listNoteKinds } from './characters';
+import { buildTree, type TreeDir, type TreeFile } from './tree';
 import { setupTestDb, teardownTestDb } from './test-utils';
 import { DEFAULT_GROUP_ID } from './users';
 
@@ -412,6 +419,159 @@ describe('loadOutgoingLinks — visibility filtering', () => {
     seedLink(DEFAULT_GROUP_ID, fromPath, '__deleted-target__.md');
     const rows = loadOutgoingLinks(DEFAULT_GROUP_ID, fromPath, visibilityFor('admin'));
     expect(rows.map((r) => r.to_path)).not.toContain('__deleted-target__.md');
+  });
+});
+
+// ── list surfaces — visibility filtering ────────────────────────────────
+// One World with a viewer, an editor and an admin. A plain, a dm_only and
+// a gm_only note share the tag `shared`; the hidden notes also carry a tag
+// no visible note has, so a leaked tag name shows up in listAllTags.
+
+describe('list surfaces — visibility filtering', () => {
+  const world = 'world-vis-' + randomUUID().slice(0, 8);
+  const otherWorld = 'world-vis-other-' + randomUUID().slice(0, 8);
+  const users = {
+    viewer: 'u-viewer-' + randomUUID().slice(0, 8),
+    editor: 'u-editor-' + randomUUID().slice(0, 8),
+    admin: 'u-admin-' + randomUUID().slice(0, 8),
+  } as const;
+  const roles = ['viewer', 'editor', 'admin'] as const;
+
+  const plain = 'vault/plain.md';
+  const dm = 'vault/dm-secret.md';
+  const gm = 'vault/gm-private.md';
+
+  /** What each role may see, newest first (gm newest, plain oldest). */
+  const visible = {
+    viewer: [plain],
+    editor: [dm, plain],
+    admin: [gm, dm, plain],
+  } as const;
+
+  function seedTitledNote(
+    groupId: string,
+    path: string,
+    title: string,
+    updatedAt: number,
+    flags: { dmOnly?: boolean; gmOnly?: boolean } = {},
+  ): void {
+    getDb()
+      .query(
+        `INSERT INTO notes (id, group_id, path, content_json, title, updated_at, dm_only, gm_only)
+         VALUES (?, ?, ?, '{}', ?, ?, ?, ?)`,
+      )
+      .run(randomUUID(), groupId, path, title, updatedAt, flags.dmOnly ? 1 : 0, flags.gmOnly ? 1 : 0);
+  }
+
+  function treeFilePaths(node: TreeDir | TreeFile): string[] {
+    return node.kind === 'file' ? [node.path] : node.children.flatMap(treeFilePaths);
+  }
+
+  function seedMember(groupId: string, userId: string, role: string): void {
+    getDb()
+      .query(
+        `INSERT OR IGNORE INTO group_members (group_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)`,
+      )
+      .run(groupId, userId, role, Date.now());
+  }
+
+  beforeAll(() => {
+    seedGroup(world, 'Vis World');
+    seedGroup(otherWorld, 'Other World');
+    for (const role of roles) {
+      const id = users[role];
+      getDb()
+        .query(
+          `INSERT INTO users (id, username, password_hash, display_name, accent_color, created_at)
+           VALUES (?, ?, 'x', ?, '#000000', ?)`,
+        )
+        .run(id, id, id, Date.now());
+      seedMember(world, id, role);
+    }
+  });
+
+  beforeEach(() => {
+    const t = 1_700_000_000_000;
+    seedTitledNote(world, plain, 'Plain', t);
+    seedTitledNote(world, dm, 'DM Secret', t + 1000, { dmOnly: true });
+    seedTitledNote(world, gm, 'GM Private', t + 2000, { gmOnly: true });
+    seedTag(world, plain, 'shared');
+    seedTag(world, dm, 'shared');
+    seedTag(world, gm, 'shared');
+    seedTag(world, dm, 'dm-tag');
+    seedTag(world, gm, 'gm-tag');
+  });
+
+  for (const role of roles) {
+    describe(`as ${role}`, () => {
+      const vis = visibilityFor(role);
+
+      it('recentlyUpdated returns only the notes the role may see', () => {
+        const rows = recentlyUpdated(world, 50, vis);
+        expect(rows.map((r) => r.path)).toEqual([...visible[role]]);
+      });
+
+      it('listNotesByTag returns only the notes the role may see', () => {
+        const rows = listNotesByTag(world, 'shared', vis);
+        expect(rows.map((r) => r.path).sort()).toEqual([...visible[role]].sort());
+      });
+
+      it('listAllTags lists only tags and counts from notes the role may see', () => {
+        const expected = {
+          viewer: [{ tag: 'shared', count: 1 }],
+          editor: [
+            { tag: 'shared', count: 2 },
+            { tag: 'dm-tag', count: 1 },
+          ],
+          admin: [
+            { tag: 'shared', count: 3 },
+            { tag: 'dm-tag', count: 1 },
+            { tag: 'gm-tag', count: 1 },
+          ],
+        }[role];
+        expect(listAllTags(world, vis)).toEqual(expected);
+      });
+
+      it('countVisibleNotes counts only the notes the role may see', () => {
+        expect(countVisibleNotes(world, vis)).toBe(visible[role].length);
+      });
+
+      it('listRecentForUser returns only the notes the user may see in that World', () => {
+        const rows = listRecentForUser(users[role], 50).filter((r) => r.groupId === world);
+        expect(rows.map((r) => r.path)).toEqual([...visible[role]]);
+      });
+
+      it('buildTree (player + gm namespaces) holds only the notes the role may see', () => {
+        // Mirrors the sidebar: the gm tree is only built for an admin.
+        const opts = { hideDmOnly: vis.hideDmOnly };
+        const trees = [buildTree(world, { ...opts, mode: 'player' })];
+        if (role === 'admin') trees.push(buildTree(world, { ...opts, mode: 'gm' }));
+        expect(trees.flatMap((t) => treeFilePaths(t.root)).sort()).toEqual(
+          [...visible[role]].sort(),
+        );
+      });
+
+      it('listNoteKinds omits the paths of notes the role may not see', () => {
+        for (const path of [plain, dm, gm]) {
+          getDb()
+            .query(
+              `INSERT OR IGNORE INTO session_notes (group_id, note_path, updated_at) VALUES (?, ?, ?)`,
+            )
+            .run(world, path, Date.now());
+        }
+        expect([...listNoteKinds(world, vis).keys()].sort()).toEqual([...visible[role]].sort());
+      });
+    });
+  }
+
+  it("listRecentForUser applies each World's own role for the same user", () => {
+    // The viewer of `world` is admin of `otherWorld`.
+    seedMember(otherWorld, users.viewer, 'admin');
+    seedTitledNote(otherWorld, 'other/gm.md', 'Other GM', 1_700_000_010_000, { gmOnly: true });
+
+    const rows = listRecentForUser(users.viewer, 50).map((r) => `${r.groupId}:${r.path}`);
+
+    expect(rows).toEqual([`${otherWorld}:other/gm.md`, `${world}:${plain}`]);
   });
 });
 

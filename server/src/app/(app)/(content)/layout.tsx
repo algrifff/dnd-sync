@@ -20,6 +20,7 @@ import { readSession } from '@/lib/session';
 import { buildTree } from '@/lib/tree';
 import { GM_MODE_COOKIE, treeModeFor } from '@/lib/gm-mode';
 import { listNoteKinds } from '@/lib/characters';
+import { visibilityFor } from '@/lib/notes';
 import { getWorldFeatures } from '@/lib/groups';
 import { getDb } from '@/lib/db';
 import { AppHeader } from '../../AppHeader';
@@ -53,9 +54,15 @@ export default async function ContentLayout({
   // In GM mode the world owner sees both namespaces stacked so they
   // can move/promote info between them. Build both trees up front;
   // either is cheap and the cache makes back-to-back calls a no-op.
-  const playerTree = buildTree(session.currentGroupId, { mode: 'player' });
-  const gmTree = gmMode ? buildTree(session.currentGroupId, { mode: 'gm' }) : null;
-  const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
+  const vis = visibilityFor(session.role);
+  const playerTree = buildTree(session.currentGroupId, {
+    mode: 'player',
+    hideDmOnly: vis.hideDmOnly,
+  });
+  const gmTree = gmMode
+    ? buildTree(session.currentGroupId, { mode: 'gm', hideDmOnly: vis.hideDmOnly })
+    : null;
+  const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId, vis));
   const features = getWorldFeatures(session.currentGroupId);
   const sidebarOpen = jar.get('compendium_sidebar_open')?.value !== 'false';
 

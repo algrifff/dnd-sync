@@ -14,6 +14,7 @@
 // `kind: character` frontmatter cleanly drops the index entry.
 
 import { getDb } from './db';
+import { hiddenNotesSql, type Visibility } from './notes';
 import type { TemplateKind } from './templates';
 import { slugify } from './slugify';
 
@@ -250,30 +251,33 @@ function rowToListEntry(
   };
 }
 
-/** All characters in the group. Use for dashboards and pickers. */
+/** Characters in the group whose notes `vis` lets the caller see. Use
+ *  for dashboards and pickers. */
 export function listCharacters(
   groupId: string,
+  vis: Visibility,
   filter?: { playerUserId?: string; kind?: CharacterKind },
 ): CharacterListRow[] {
   const db = getDb();
-  const wheres: string[] = ['group_id = ?'];
+  const wheres: string[] = ['c.group_id = ?'];
   const args: string[] = [groupId];
   if (filter?.playerUserId) {
-    wheres.push('player_user_id = ?');
+    wheres.push('c.player_user_id = ?');
     args.push(filter.playerUserId);
   }
   if (filter?.kind) {
-    wheres.push('kind = ?');
+    wheres.push('c.kind = ?');
     args.push(filter.kind);
   }
   const rows = db
     .query<CharacterDbRow, string[]>(
-      `SELECT note_path, kind, player_user_id, display_name, portrait_path,
-              level, class, race, ac, hp_max, hp_current, hp_temporary,
-              proficiency_bonus, updated_at
-         FROM characters
-        WHERE ${wheres.join(' AND ')}
-        ORDER BY display_name COLLATE NOCASE`,
+      `SELECT c.note_path, c.kind, c.player_user_id, c.display_name, c.portrait_path,
+              c.level, c.class, c.race, c.ac, c.hp_max, c.hp_current, c.hp_temporary,
+              c.proficiency_bonus, c.updated_at
+         FROM characters c
+         JOIN notes n ON n.group_id = c.group_id AND n.path = c.note_path
+        WHERE ${wheres.join(' AND ')}${hiddenNotesSql('n', vis)}
+        ORDER BY c.display_name COLLATE NOCASE`,
     )
     .all(...args);
   if (rows.length === 0) return [];
@@ -296,21 +300,27 @@ export function listCharacters(
 /** Fast lookup of "what kind is the note at this path?" for the
  *  file-tree icon rail. Characters come from the characters table;
  *  sessions come from the sessions table. Anything not indexed
- *  returns no entry — the caller treats it as a plain note. */
+ *  returns no entry — the caller treats it as a plain note. Paths of
+ *  notes `vis` hides are left out: the map ships to the client. */
 export type NoteKind = CharacterKind | 'session';
 
-export function listNoteKinds(groupId: string): Map<string, NoteKind> {
+export function listNoteKinds(groupId: string, vis: Visibility): Map<string, NoteKind> {
   const db = getDb();
   const out = new Map<string, NoteKind>();
+  const hidden = hiddenNotesSql('n', vis);
   const chars = db
     .query<{ note_path: string; kind: string }, [string]>(
-      'SELECT note_path, kind FROM characters WHERE group_id = ?',
+      `SELECT c.note_path, c.kind FROM characters c
+         JOIN notes n ON n.group_id = c.group_id AND n.path = c.note_path
+        WHERE c.group_id = ?${hidden}`,
     )
     .all(groupId);
   for (const r of chars) out.set(r.note_path, r.kind as CharacterKind);
   const sessions = db
     .query<{ note_path: string }, [string]>(
-      'SELECT note_path FROM session_notes WHERE group_id = ?',
+      `SELECT s.note_path FROM session_notes s
+         JOIN notes n ON n.group_id = s.group_id AND n.path = s.note_path
+        WHERE s.group_id = ?${hidden}`,
     )
     .all(groupId);
   for (const r of sessions) out.set(r.note_path, 'session');

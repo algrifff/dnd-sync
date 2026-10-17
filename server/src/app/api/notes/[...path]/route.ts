@@ -6,7 +6,14 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { deleteRelationsOf } from '@/lib/relations';
-import { decodePath, findNearestIndexPath, loadNote, loadTags, visibilityFor } from '@/lib/notes';
+import {
+  decodePath,
+  findNearestIndexPath,
+  loadNote,
+  loadTags,
+  loadVisibleNote,
+  visibilityFor,
+} from '@/lib/notes';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
 import { deriveFolderIndex, parentFolderUnderCampaign } from '@/lib/campaign-index';
@@ -72,6 +79,11 @@ export async function DELETE(req: NextRequest, ctx: RouteCtx): Promise<Response>
   const { path: segments } = await ctx.params;
   const path = decodePath(segments);
   if (!path) return json({ error: 'invalid_path' }, 400);
+  // A note the caller can't see (an editor and a gm_only note) answers
+  // exactly like a missing one, and is left untouched.
+  if (!loadVisibleNote(session.currentGroupId, path, visibilityFor(session.role))) {
+    return json({ error: 'not_found' }, 404);
+  }
 
   const db = getDb();
   db.transaction(() => {

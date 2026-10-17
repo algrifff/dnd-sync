@@ -4,14 +4,16 @@
 // creatures / items). Used by the SheetHeader's NoteAutocomplete for
 // linking a person to their home, a location to its parent, etc.
 //
-// Scoped to the caller's active group and limited to 10 hits to keep
-// the popup quick. Case-insensitive prefix + substring match on name,
-// substring match on path. No FTS — the index tables are small and
-// an ILIKE scan is fine.
+// Scoped to the caller's active group, skipping notes hidden from the
+// caller's role, and limited to 10 hits to keep the popup quick.
+// Case-insensitive prefix + substring match on name, substring match
+// on path. No FTS — the index tables are small and an ILIKE scan is
+// fine.
 
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { getDb } from '@/lib/db';
+import { hiddenNotesSql, visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,12 +47,19 @@ export async function GET(req: NextRequest): Promise<Response> {
     );
   }
 
-  const table = {
-    location: 'locations',
-    character: 'characters',
-    creature: 'creatures',
-    item: 'items',
+  // The characters index calls its name column display_name.
+  const { table, name } = {
+    location: { table: 'locations', name: 'x.name' },
+    character: { table: 'characters', name: 'x.display_name' },
+    creature: { table: 'creatures', name: 'x.name' },
+    item: { table: 'items', name: 'x.name' },
   }[kind]!;
+
+  // A hit would leak a hidden note's name and path, so the index row
+  // is joined to its note and filtered by the caller's role.
+  const from = `FROM ${table} x
+         JOIN notes n ON n.group_id = x.group_id AND n.path = x.note_path
+        WHERE x.group_id = ?${hiddenNotesSql('n', visibilityFor(session.role))}`;
 
   const db = getDb();
   const needle = `%${q}%`;
@@ -62,16 +71,15 @@ export async function GET(req: NextRequest): Promise<Response> {
           { path: string; name: string },
           [string, string, string, string, string]
         >(
-          `SELECT note_path AS path, name
-             FROM ${table}
-            WHERE group_id = ?
-              AND (name LIKE ? COLLATE NOCASE
-                   OR name LIKE ? COLLATE NOCASE
-                   OR note_path LIKE ? COLLATE NOCASE)
+          `SELECT x.note_path AS path, ${name} AS name
+             ${from}
+              AND (${name} LIKE ? COLLATE NOCASE
+                   OR ${name} LIKE ? COLLATE NOCASE
+                   OR x.note_path LIKE ? COLLATE NOCASE)
             ORDER BY CASE
-              WHEN name LIKE ? COLLATE NOCASE THEN 0
+              WHEN ${name} LIKE ? COLLATE NOCASE THEN 0
               ELSE 1
-            END, name COLLATE NOCASE
+            END, ${name} COLLATE NOCASE
             LIMIT ${LIMIT}`,
         )
         .all(
@@ -83,10 +91,9 @@ export async function GET(req: NextRequest): Promise<Response> {
         )
     : db
         .query<{ path: string; name: string }, [string]>(
-          `SELECT note_path AS path, name
-             FROM ${table}
-            WHERE group_id = ?
-            ORDER BY name COLLATE NOCASE
+          `SELECT x.note_path AS path, ${name} AS name
+             ${from}
+            ORDER BY ${name} COLLATE NOCASE
             LIMIT ${LIMIT}`,
         )
         .all(session.currentGroupId);

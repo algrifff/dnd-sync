@@ -3,8 +3,8 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
-import { DEFAULT_GROUP_ID } from '@/lib/users';
 import { getDb } from '@/lib/db';
+import { countVisibleNotes, visibilityFor } from '@/lib/notes';
 import { listOpenJobsForUser } from '@/lib/imports';
 import { ImportLauncher } from '@/app/settings/vault/ImportLauncher';
 
@@ -32,10 +32,7 @@ export default async function SettingsVaultPage(): Promise<ReactElement> {
   if (!session) redirect('/login?next=/settings/vault');
   if (session.role !== 'admin') redirect('/settings/profile');
 
-  const existing = getDb()
-    .query<{ n: number }, [string]>('SELECT COUNT(*) AS n FROM notes WHERE group_id = ?')
-    .get(DEFAULT_GROUP_ID);
-  const noteCount = existing?.n ?? 0;
+  const noteCount = countVisibleNotes(session.currentGroupId, visibilityFor(session.role));
 
   const lastImport = getDb()
     .query<{ at: number }, [string]>(
