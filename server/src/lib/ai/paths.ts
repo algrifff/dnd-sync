@@ -30,6 +30,7 @@
 //     Assets/Tokens/{filename}
 
 import { canonicalKind, type KindInput } from '@compendium/shared';
+import { slugify } from '@/lib/slugify';
 
 export type EntityKind = KindInput;
 
@@ -68,16 +69,8 @@ export function canonicalPath(opts: {
     campaignSlug: opts.campaignSlug,
     campaignRoot: opts.campaignRoot,
   });
-  const slug = nameToSlug(opts.name);
+  const slug = slugify(opts.name);
   return `${folder}/${slug}.md`;
-}
-
-export function nameToSlug(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
 }
 
 // ── Canonical-path schema ──────────────────────────────────────────────

@@ -13,6 +13,7 @@
 // missed that step and was the bug this module was extracted to fix.
 
 import { getDb } from './db';
+import { slugify } from './slugify';
 import { closeDocumentConnections } from '../collab/server';
 import {
   findWikilinkLinkers,
@@ -26,16 +27,6 @@ import { repointRelations } from './relations';
 export type MoveFolderResult =
   | { ok: true; movedCount: number; renames: Rename[] }
   | { ok: false; error: string; reason?: string; path?: string };
-
-/** Slugify a single segment for use as a campaigns.slug. Mirrors the
- *  inline helper that previously lived in /api/folders/move. */
-function slugifySegment(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
 
 /** Rename / reparent a folder. Caller is responsible for permission +
  *  policy checks; this function performs the data move only. */
@@ -203,7 +194,7 @@ export async function moveFolder(args: {
       .all(groupId, from, from);
     for (const c of campaigns) {
       const nextPath = to + c.folder_path.slice(from.length);
-      const nextSlug = slugifySegment(nextPath.split('/').pop() ?? c.slug);
+      const nextSlug = slugify(nextPath.split('/').pop() ?? c.slug);
       db.query(
         'DELETE FROM campaigns WHERE group_id = ? AND slug = ? AND slug != ?',
       ).run(groupId, nextSlug, c.slug);

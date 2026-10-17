@@ -15,7 +15,8 @@
 //   5. Insert + run the full derive pipeline (characters, sessions,
 //      campaigns, note_links, tags, assets_by_path).
 //
-// Per-note transactions so one bad note doesn't kill the batch.
+// Per-note transactions (writeNote commits the note row, its links and
+// its tags atomically) so one bad note doesn't kill the batch.
 // The job's stats_json ends up with running counts + error lines.
 
 import { randomUUID, createHash } from 'node:crypto';
@@ -676,71 +677,80 @@ export function writeNote(opts: WriteOpts): void {
 
   const now = Date.now();
 
-  if (opts.isUpdate && opts.noteId) {
-    db.query(
-      `UPDATE notes SET title = ?, content_json = ?, content_text = ?,
-                         content_md = ?, yjs_state = ?, frontmatter_json = ?,
-                         byte_size = ?, updated_at = ?, updated_by = ?
-         WHERE id = ?`,
-    ).run(
-      ingest.title,
-      JSON.stringify(ingest.contentJson),
-      ingest.contentText,
-      contentMd,
-      yjsState,
-      JSON.stringify(ingest.frontmatter),
-      contentMd.length,
-      now,
-      opts.userId,
-      opts.noteId,
-    );
-  } else {
-    const id = randomUUID();
-    db.query(
-      `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
-                          content_md, yjs_state, frontmatter_json, byte_size,
-                          updated_at, updated_by, created_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      id,
+  // The note row and its link/tag rows commit together, so a failure
+  // part-way (a constraint, a bad link row) leaves neither a bare note
+  // without its edges nor stale edges against a rewritten note. All the
+  // CPU work above stays outside, so the write lock is held only for
+  // these statements.
+  db.transaction(() => {
+    if (opts.isUpdate && opts.noteId) {
+      db.query(
+        `UPDATE notes SET title = ?, content_json = ?, content_text = ?,
+                           content_md = ?, yjs_state = ?, frontmatter_json = ?,
+                           byte_size = ?, updated_at = ?, updated_by = ?
+           WHERE id = ?`,
+      ).run(
+        ingest.title,
+        JSON.stringify(ingest.contentJson),
+        ingest.contentText,
+        contentMd,
+        yjsState,
+        JSON.stringify(ingest.frontmatter),
+        contentMd.length,
+        now,
+        opts.userId,
+        opts.noteId,
+      );
+    } else {
+      const id = randomUUID();
+      db.query(
+        `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
+                            content_md, yjs_state, frontmatter_json, byte_size,
+                            updated_at, updated_by, created_at, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        opts.groupId,
+        opts.path,
+        ingest.title,
+        JSON.stringify(ingest.contentJson),
+        ingest.contentText,
+        contentMd,
+        yjsState,
+        JSON.stringify(ingest.frontmatter),
+        contentMd.length,
+        now,
+        opts.userId,
+        now,
+        opts.userId,
+      );
+    }
+
+    // Replace denormalised tags + links.
+    db.query('DELETE FROM note_links WHERE group_id = ? AND from_path = ?').run(
       opts.groupId,
       opts.path,
-      ingest.title,
-      JSON.stringify(ingest.contentJson),
-      ingest.contentText,
-      contentMd,
-      yjsState,
-      JSON.stringify(ingest.frontmatter),
-      contentMd.length,
-      now,
-      opts.userId,
-      now,
-      opts.userId,
     );
-  }
+    db.query('DELETE FROM tags WHERE group_id = ? AND path = ?').run(
+      opts.groupId,
+      opts.path,
+    );
+    const insertLink = db.query(
+      'INSERT OR IGNORE INTO note_links (group_id, from_path, to_path) VALUES (?, ?, ?)',
+    );
+    for (const link of ingest.wikilinks) {
+      if (link === opts.path) continue; // no self-loops
+      insertLink.run(opts.groupId, opts.path, link);
+    }
+    const insertTag = db.query(
+      'INSERT OR IGNORE INTO tags (group_id, path, tag) VALUES (?, ?, ?)',
+    );
+    for (const tag of ingest.tags) insertTag.run(opts.groupId, opts.path, tag);
+  })();
 
-  // Replace denormalised tags + links.
-  db.query('DELETE FROM note_links WHERE group_id = ? AND from_path = ?').run(
-    opts.groupId,
-    opts.path,
-  );
-  db.query('DELETE FROM tags WHERE group_id = ? AND path = ?').run(
-    opts.groupId,
-    opts.path,
-  );
-  const insertLink = db.query(
-    'INSERT OR IGNORE INTO note_links (group_id, from_path, to_path) VALUES (?, ?, ?)',
-  );
-  for (const link of ingest.wikilinks) {
-    if (link === opts.path) continue; // no self-loops
-    insertLink.run(opts.groupId, opts.path, link);
-  }
-  const insertTag = db.query(
-    'INSERT OR IGNORE INTO tags (group_id, path, tag) VALUES (?, ?, ?)',
-  );
-  for (const tag of ingest.tags) insertTag.run(opts.groupId, opts.path, tag);
-
-  // Structured-note derivation + campaign auto-registration.
+  // Structured-note derivation + campaign auto-registration. Best-effort
+  // and deliberately after the commit: a derive failure is logged, never
+  // allowed to roll back the note.
   try {
     deriveAllIndexes({
       groupId: opts.groupId,
