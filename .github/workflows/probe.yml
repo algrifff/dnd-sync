@@ -1,7 +1,6 @@
 name: claude-token-probe
 on:
-  push:
-    branches: [ci/claude-token-probe]
+  pull_request:
 permissions:
   contents: read
 jobs:
