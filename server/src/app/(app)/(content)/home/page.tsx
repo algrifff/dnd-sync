@@ -46,7 +46,10 @@ export default async function HomePage(): Promise<ReactElement> {
   // second full SELECT. Kept here because topFolders/countFiles are
   // home-specific derived data.
   const gmMode = treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role) === 'gm';
-  const tree = buildTree(session.currentGroupId, { mode: gmMode ? 'gm' : 'player' });
+  const tree = buildTree(session.currentGroupId, {
+    mode: gmMode ? 'gm' : 'player',
+    hideDmOnly: vis.hideDmOnly,
+  });
   const topFolders = tree.root.children.filter((c) => c.kind === 'dir').slice(0, 6);
 
   return (

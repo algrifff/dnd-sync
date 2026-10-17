@@ -14,6 +14,7 @@
 // `kind: character` frontmatter cleanly drops the index entry.
 
 import { getDb } from './db';
+import { hiddenNotesSql, type Visibility } from './notes';
 import type { TemplateKind } from './templates';
 import { slugify } from './slugify';
 
@@ -296,21 +297,27 @@ export function listCharacters(
 /** Fast lookup of "what kind is the note at this path?" for the
  *  file-tree icon rail. Characters come from the characters table;
  *  sessions come from the sessions table. Anything not indexed
- *  returns no entry — the caller treats it as a plain note. */
+ *  returns no entry — the caller treats it as a plain note. Paths of
+ *  notes `vis` hides are left out: the map ships to the client. */
 export type NoteKind = CharacterKind | 'session';
 
-export function listNoteKinds(groupId: string): Map<string, NoteKind> {
+export function listNoteKinds(groupId: string, vis: Visibility): Map<string, NoteKind> {
   const db = getDb();
   const out = new Map<string, NoteKind>();
+  const hidden = hiddenNotesSql('n', vis);
   const chars = db
     .query<{ note_path: string; kind: string }, [string]>(
-      'SELECT note_path, kind FROM characters WHERE group_id = ?',
+      `SELECT c.note_path, c.kind FROM characters c
+         JOIN notes n ON n.group_id = c.group_id AND n.path = c.note_path
+        WHERE c.group_id = ?${hidden}`,
     )
     .all(groupId);
   for (const r of chars) out.set(r.note_path, r.kind as CharacterKind);
   const sessions = db
     .query<{ note_path: string }, [string]>(
-      'SELECT note_path FROM session_notes WHERE group_id = ?',
+      `SELECT s.note_path FROM session_notes s
+         JOIN notes n ON n.group_id = s.group_id AND n.path = s.note_path
+        WHERE s.group_id = ?${hidden}`,
     )
     .all(groupId);
   for (const r of sessions) out.set(r.note_path, 'session');

@@ -119,7 +119,7 @@ export function visibilityFor(role: MemberRole): Visibility {
 
 /** ` AND <alias>.dm_only = 0 AND <alias>.gm_only = 0`, or the parts of
  *  it `vis` asks for. Appended to a WHERE clause over `notes <alias>`. */
-function hiddenNotesSql(alias: string, vis: Visibility): string {
+export function hiddenNotesSql(alias: string, vis: Visibility): string {
   return (
     (vis.hideDmOnly ? ` AND ${alias}.dm_only = 0` : '') +
     (vis.hideGmOnly ? ` AND ${alias}.gm_only = 0` : '')

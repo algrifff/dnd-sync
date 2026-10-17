@@ -16,6 +16,8 @@ import {
   recentlyUpdated,
   visibilityFor,
 } from './notes';
+import { listNoteKinds } from './characters';
+import { buildTree, type TreeDir, type TreeFile } from './tree';
 import { setupTestDb, teardownTestDb } from './test-utils';
 import { DEFAULT_GROUP_ID } from './users';
 
@@ -461,6 +463,10 @@ describe('list surfaces — visibility filtering', () => {
       .run(randomUUID(), groupId, path, title, updatedAt, flags.dmOnly ? 1 : 0, flags.gmOnly ? 1 : 0);
   }
 
+  function treeFilePaths(node: TreeDir | TreeFile): string[] {
+    return node.kind === 'file' ? [node.path] : node.children.flatMap(treeFilePaths);
+  }
+
   function seedMember(groupId: string, userId: string, role: string): void {
     getDb()
       .query(
@@ -533,6 +539,27 @@ describe('list surfaces — visibility filtering', () => {
       it('listRecentForUser returns only the notes the user may see in that World', () => {
         const rows = listRecentForUser(users[role], 50).filter((r) => r.groupId === world);
         expect(rows.map((r) => r.path)).toEqual([...visible[role]]);
+      });
+
+      it('buildTree (player + gm namespaces) holds only the notes the role may see', () => {
+        // Mirrors the sidebar: the gm tree is only built for an admin.
+        const opts = { hideDmOnly: vis.hideDmOnly };
+        const trees = [buildTree(world, { ...opts, mode: 'player' })];
+        if (role === 'admin') trees.push(buildTree(world, { ...opts, mode: 'gm' }));
+        expect(trees.flatMap((t) => treeFilePaths(t.root)).sort()).toEqual(
+          [...visible[role]].sort(),
+        );
+      });
+
+      it('listNoteKinds omits the paths of notes the role may not see', () => {
+        for (const path of [plain, dm, gm]) {
+          getDb()
+            .query(
+              `INSERT OR IGNORE INTO session_notes (group_id, note_path, updated_at) VALUES (?, ?, ?)`,
+            )
+            .run(world, path, Date.now());
+        }
+        expect([...listNoteKinds(world, vis).keys()].sort()).toEqual([...visible[role]].sort());
       });
     });
   }
