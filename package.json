@@ -23,5 +23,10 @@
     "prettier": "^3.3.3",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.8.1"
+  },
+  "overrides": {
+    "@opentelemetry/propagator-jaeger": "^2.9.0",
+    "lodash-es": "^4.18.1",
+    "postcss": "^8.5.30"
   }
 }
