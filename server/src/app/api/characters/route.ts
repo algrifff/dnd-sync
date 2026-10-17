@@ -5,11 +5,13 @@
 //   ?kind=pc|npc|ally|villain
 //   ?campaign=<slug>   filter by campaign membership
 //
-// Any authenticated user can query; the data is already readable on
-// the respective note pages so the listing adds no new exposure.
+// Any authenticated user can query. A character whose note is hidden
+// from the caller (dm_only for viewers, gm_only for non-admins) is left
+// out, the same as on its note page.
 
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
+import { visibilityFor } from '@/lib/notes';
 import {
   listCharacters,
   type CharacterKind,
@@ -35,7 +37,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     filter.kind = kindParam as CharacterKind;
   }
 
-  let rows = listCharacters(session.currentGroupId, filter);
+  let rows = listCharacters(session.currentGroupId, visibilityFor(session.role), filter);
   if (campaignSlug) {
     rows = rows.filter((r) => r.campaigns.includes(campaignSlug));
   }
