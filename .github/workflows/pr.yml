@@ -1,0 +1,38 @@
+# Compendium's PR checks. The checks themselves live in Argus: https://github.com/algrifff/argus
+name: pr
+
+on:
+  pull_request:
+    # ready_for_review: the Claude review skips drafts, so run it when one is marked ready.
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: algrifff/argus/.github/workflows/node-checks.yml@feat/bun-support
+    with:
+      scripts: '["typecheck", "lint", "test"]'
+      bun-version: "1.4"
+
+  security:
+    uses: algrifff/argus/.github/workflows/security.yml@feat/bun-support
+    with:
+      bun-version: "1.4"
+
+  review:
+    uses: algrifff/argus/.github/workflows/agent-review.yml@feat/bun-support
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      agents: security,adversarial,standards
+      argus-ref: feat/bun-support
+      bun-version: "1.4"
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
