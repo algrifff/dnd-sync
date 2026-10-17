@@ -762,10 +762,11 @@ function entityMove(ctx: ToolContext) {
       const taken = destinationTakenError(ctx, to);
       if (taken) return { ok: false as const, error: taken };
 
-      await renameNoteRow(ctx, from, to, () => {
+      const failed = await renameNoteRow(ctx, from, to, () => {
         db.query(`UPDATE notes SET path=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
           .run(to, Date.now(), ctx.userId, ctx.groupId, from);
       });
+      if (failed) return { ok: false as const, error: failed };
 
       void deriveFolderIndexesFor(ctx.groupId, [from, to], {
         userId: ctx.userId,
@@ -782,17 +783,27 @@ function entityMove(ctx: ToolContext) {
  *  and every table keyed by the note's path follows it. Live editors are
  *  drained first so their pending keystrokes land before the path
  *  changes, then whatever reattached is discarded: a document still open
- *  under the old name would store() into a row that no longer exists. */
+ *  under the old name would store() into a row that no longer exists.
+ *  Returns an error string when the source vanished or the destination
+ *  was taken while the editors drained (the callers' checks run before
+ *  that await), otherwise null. */
 async function renameNoteRow(
   ctx: ToolContext,
   from: string,
   to: string,
   updateNote: () => void,
-): Promise<void> {
+): Promise<string | null> {
   const db = getDb();
   const token = await closeDocumentForWrite(ctx.groupId, from);
   try {
+    let failed: string | null = null;
     db.transaction(() => {
+      if (!loadNote(ctx.groupId, from)) {
+        failed = `Not found: ${from}`;
+        return;
+      }
+      failed = destinationTakenError(ctx, to);
+      if (failed) return;
       // Derived-index tables hold FKs on notes(group_id, path) with no
       // ON UPDATE CASCADE; check them at COMMIT, after the rewrites below.
       db.exec('PRAGMA defer_foreign_keys = 1');
@@ -806,8 +817,17 @@ async function renameNoteRow(
       db.query(`UPDATE note_links SET to_path=? WHERE group_id=? AND to_path=?`).run(to, ctx.groupId, from);
       repointSuggestionPaths(ctx.groupId, from, to);
       repointRelations(ctx.groupId, from, to);
+      // Structured-note index tables (same FK as above), plus the two soft
+      // references notes/move also rewrites.
+      for (const tbl of ['items', 'locations', 'creatures']) {
+        db.query(`UPDATE ${tbl} SET note_path=? WHERE group_id=? AND note_path=?`).run(to, ctx.groupId, from);
+      }
+      db.query(`UPDATE locations SET parent_path=? WHERE group_id=? AND parent_path=?`).run(to, ctx.groupId, from);
+      db.query(`UPDATE users SET active_character_path=? WHERE active_character_path=?`).run(to, from);
     })();
+    if (failed) return failed;
     await closeDocumentConnections(ctx.groupId, from, token);
+    return null;
   } finally {
     releaseServerWrite(token);
   }
@@ -879,10 +899,11 @@ function entityChangeKind(ctx: ToolContext) {
       if (newPath !== path) {
         const taken = destinationTakenError(ctx, newPath);
         if (taken) return { ok: false as const, error: taken };
-        await renameNoteRow(ctx, path, newPath, () => {
+        const failed = await renameNoteRow(ctx, path, newPath, () => {
           db.query(`UPDATE notes SET path=?, frontmatter_json=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
             .run(newPath, JSON.stringify(nextFm), Date.now(), ctx.userId, ctx.groupId, path);
         });
+        if (failed) return { ok: false as const, error: failed };
       } else {
         // frontmatter_json is not part of the Y.Doc, so an open editor's
         // next store() cannot clobber it and nobody needs evicting.

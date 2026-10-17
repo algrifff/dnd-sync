@@ -1347,6 +1347,64 @@ describe('entity_change_kind — evicts the open editor of the renamed note', ()
   });
 });
 
+describe('entity_move — structured-note index rows follow the rename', () => {
+  it('should move an item note and carry its items row instead of failing the FK check', async () => {
+    const from = 'Loot/sword.md';
+    const to = 'Loot/blade.md';
+    seedNote({
+      path: from,
+      title: 'Sword',
+      pmDoc: { type: 'doc', content: [paragraph('A sword.')] },
+      contentMd: 'A sword.',
+      frontmatterJson: JSON.stringify({ kind: 'item' }),
+    });
+    const db = getDb();
+    db.query('INSERT INTO items (group_id, note_path, name, updated_at) VALUES (?, ?, ?, ?)')
+      .run(groupId, from, 'Sword', Date.now());
+    const tools = createTools(ctxFor('dm'));
+
+    const result = await tools.entity_move.execute!({ from, to }, { toolCallId: 'ix1', messages: [] });
+
+    expect(result).toEqual({ ok: true, path: to });
+    const row = db.query<{ note_path: string }, [string]>('SELECT note_path FROM items WHERE group_id=?').get(groupId);
+    expect(row?.note_path).toBe(to);
+  });
+});
+
+describe('entity_move — the destination is re-checked after the editors drain', () => {
+  it('should report Path exists when a note appears at the destination during the drain', async () => {
+    const from = 'Test/RaceFrom.md';
+    const to = 'Test/RaceTo.md';
+    seedNote({ path: from, title: 'From', pmDoc: { type: 'doc', content: [paragraph('From.')] }, contentMd: 'From.' });
+    const tools = createTools(ctxFor('dm'));
+
+    const result = await withSimulatedConcurrentFlush(
+      from,
+      () => seedNote({ path: to, title: 'To', pmDoc: { type: 'doc', content: [paragraph('To.')] }, contentMd: 'To.' }),
+      () => tools.entity_move.execute!({ from, to }, { toolCallId: 'rc1', messages: [] }),
+    );
+
+    expect(result).toEqual({ ok: false, error: `Path exists: ${to}` });
+    expect(noteExists(from)).toBe(true);
+  });
+
+  it('should report Not found rather than ok when the source is deleted during the drain', async () => {
+    const from = 'Test/RaceGone.md';
+    const to = 'Test/RaceGoneTo.md';
+    seedNote({ path: from, title: 'Gone', pmDoc: { type: 'doc', content: [paragraph('Gone.')] }, contentMd: 'Gone.' });
+    const tools = createTools(ctxFor('dm'));
+
+    const result = await withSimulatedConcurrentFlush(
+      from,
+      () => { getDb().query('DELETE FROM notes WHERE group_id=? AND path=?').run(groupId, from); },
+      () => tools.entity_move.execute!({ from, to }, { toolCallId: 'rc2', messages: [] }),
+    );
+
+    expect(result).toEqual({ ok: false, error: `Not found: ${from}` });
+    expect(noteExists(to)).toBe(false);
+  });
+});
+
 describe('inventory_add — cannot write the name of an item the caller cannot see', () => {
   const characterPath = 'Characters/hero.md';
 
