@@ -9,13 +9,22 @@
 // in the plan this stays well under a millisecond.
 
 import { createHash } from 'node:crypto';
+import { type NoteKind, parseKind, type RelationType } from '@compendium/shared';
+import { isAnchorPath } from '@/app/graph/graphStyle';
 import { getDb } from './db';
+import { listWorldRelations } from './relations';
 
 export type GraphNode = {
   id: string;          // note path
   title: string;
   tags: string[];
   degree: number;
+  /** Frontmatter `kind`, `'note'` when missing or unrecognised. */
+  kind: NoteKind;
+  /** Slug from `Campaigns/<slug>/…`, else null. */
+  campaign: string | null;
+  /** Folder `index.md` / `_index.md` / `README.md`. */
+  isIndex: boolean;
 };
 
 export type GraphEdge = {
@@ -23,9 +32,18 @@ export type GraphEdge = {
   target: string;
 };
 
+/** A typed Relationship, forward row only (symmetric types appear once,
+ *  as stored). Both ends are in `nodes`. */
+export type GraphRelation = {
+  source: string;
+  target: string;
+  relation: RelationType;
+};
+
 export type GraphPayload = {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  relations: GraphRelation[];
   updatedAt: number;
   etag: string;
 };
@@ -67,19 +85,19 @@ export function buildGraph(
   const dmClauseN = opts.hideDmOnly ? ' AND n.dm_only = 0' : '';
 
   // Fetch the scoped note set first; everything else joins off these.
-  type NoteRow = { path: string; title: string; updatedAt: number };
+  type NoteRow = { path: string; title: string; updatedAt: number; kind: string | null };
   let noteRows: NoteRow[] = [];
   if (scope.kind === 'all') {
     noteRows = db
       .query<NoteRow, [string, number]>(
-        `SELECT path, title, updated_at AS updatedAt
+        `SELECT path, title, updated_at AS updatedAt, ${KIND_SQL} AS kind
            FROM notes WHERE group_id = ? AND gm_only = ?${dmClause}`,
       )
       .all(groupId, gmFlag);
   } else if (scope.kind === 'folder') {
     noteRows = db
       .query<NoteRow, [string, number, string, string]>(
-        `SELECT path, title, updated_at AS updatedAt
+        `SELECT path, title, updated_at AS updatedAt, ${KIND_SQL} AS kind
            FROM notes
           WHERE group_id = ? AND gm_only = ? AND (path = ? OR path LIKE ? || '/%')${dmClause}`,
       )
@@ -87,7 +105,7 @@ export function buildGraph(
   } else {
     noteRows = db
       .query<NoteRow, [string, number, string]>(
-        `SELECT n.path AS path, n.title AS title, n.updated_at AS updatedAt
+        `SELECT n.path AS path, n.title AS title, n.updated_at AS updatedAt, ${KIND_SQL_N} AS kind
            FROM notes n
            JOIN tags t ON t.group_id = n.group_id AND t.path = n.path
           WHERE n.group_id = ? AND n.gm_only = ? AND t.tag = ?${dmClauseN}`,
@@ -137,13 +155,16 @@ export function buildGraph(
     title: r.title || fallbackTitle(r.path),
     tags: tagsByPath.get(r.path) ?? [],
     degree: degree.get(r.path) ?? 0,
+    ...nodeMeta(r),
   }));
+  const relations = scopedRelations(groupId, pathSet);
 
   return {
     nodes,
     edges,
+    relations,
     updatedAt: maxUpdatedAt,
-    etag: `"graph-${opts.mode ?? 'player'}${opts.hideDmOnly ? '-nodm' : ''}-${scope.kind}-${noteRows.length}-${maxUpdatedAt}-${sha1Short(scopeKey(scope))}"`,
+    etag: `"graph-${opts.mode ?? 'player'}${opts.hideDmOnly ? '-nodm' : ''}-${scope.kind}-${noteRows.length}-${maxUpdatedAt}-${sha1Short(scopeKey(scope))}-${relationsKey(relations)}"`,
   };
 }
 
@@ -244,8 +265,8 @@ export function buildNeighborhood(
   // note_links_from/to indexes via the IN (...) predicates.
   const placeholders = [...neighbours].map(() => '?').join(',');
   const noteRows = db
-    .query<{ path: string; title: string; updatedAt: number }, [string, number, ...string[]]>(
-      `SELECT path, title, updated_at AS updatedAt
+    .query<{ path: string; title: string; updatedAt: number; kind: string | null }, [string, number, ...string[]]>(
+      `SELECT path, title, updated_at AS updatedAt, ${KIND_SQL} AS kind
          FROM notes
         WHERE group_id = ? AND gm_only = ? AND path IN (${placeholders})${dmClause}`,
     )
@@ -298,14 +319,46 @@ export function buildNeighborhood(
     title: r.title || fallbackTitle(r.path),
     tags: tagsByPath.get(r.path) ?? [],
     degree: degree.get(r.path) ?? 0,
+    ...nodeMeta(r),
   }));
+  const relations = scopedRelations(groupId, pathSet);
 
   return {
     nodes,
     edges,
+    relations,
     updatedAt: maxUpdatedAt,
-    etag: `"nbhd-${opts.mode ?? 'player'}${opts.hideDmOnly ? '-nodm' : ''}-${depth}-${nodes.length}-${maxUpdatedAt}-${sha1Short(path)}"`,
+    etag: `"nbhd-${opts.mode ?? 'player'}${opts.hideDmOnly ? '-nodm' : ''}-${depth}-${nodes.length}-${maxUpdatedAt}-${sha1Short(path)}-${relationsKey(relations)}"`,
   };
+}
+
+// Guarded so one note with malformed frontmatter can't fail the query.
+const kindSql = (col: string): string =>
+  `CASE WHEN json_valid(${col}) THEN json_extract(${col}, '$.kind') END`;
+const KIND_SQL = kindSql('frontmatter_json');
+const KIND_SQL_N = kindSql('n.frontmatter_json');
+
+function nodeMeta(r: { path: string; kind: string | null }): Pick<GraphNode, 'kind' | 'campaign' | 'isIndex'> {
+  return {
+    kind: parseKind(r.kind) ?? 'note',
+    campaign: /^Campaigns\/([^/]+)/.exec(r.path)?.[1] ?? null,
+    isIndex: isAnchorPath(r.path),
+  };
+}
+
+/** Relationships whose two ends are both in `pathSet`. The set was
+ *  built with the caller's visibility predicate, so a hidden end drops
+ *  the relation. */
+function scopedRelations(groupId: string, pathSet: Set<string>): GraphRelation[] {
+  return listWorldRelations(groupId)
+    .filter((r) => pathSet.has(r.from) && pathSet.has(r.to))
+    .map((r) => ({ source: r.from, target: r.to, relation: r.relation }));
+}
+
+function relationsKey(relations: GraphRelation[]): string {
+  if (relations.length === 0) return '0';
+  const body = relations.map((r) => `${r.source}|${r.relation}|${r.target}`).join(';');
+  return `${relations.length}${sha1Short(body)}`;
 }
 
 function scopeKey(s: GraphScope): string {
