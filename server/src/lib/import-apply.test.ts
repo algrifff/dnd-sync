@@ -104,3 +104,39 @@ describe('writeNote', () => {
     expect(counts('World Lore/Nested.md')).toEqual({ notes: 1, links: 1, tags: 1 });
   });
 });
+
+describe('writeNote wikilink resolution and hidden notes', () => {
+  function seedHidden(path: string, col: 'dm_only' | 'gm_only'): void {
+    write(path, 'Secret.');
+    getDb()
+      .query(`UPDATE notes SET ${col} = 1 WHERE group_id = ? AND path = ?`)
+      .run(DEFAULT_GROUP_ID, path);
+  }
+  function linksOf(path: string): string[] {
+    return getDb()
+      .query<{ to_path: string }, [string, string]>(
+        'SELECT to_path FROM note_links WHERE group_id = ? AND from_path = ?',
+      )
+      .all(DEFAULT_GROUP_ID, path)
+      .map((r) => r.to_path);
+  }
+
+  it('does not resolve a [[Name]] to a gm_only or dm_only note path', () => {
+    seedHidden('NPCs/Shadowbroker.md', 'gm_only');
+    seedHidden('NPCs/Whisper.md', 'dm_only');
+
+    write('World Lore/Rumours.md', 'Hears of [[Shadowbroker]] and [[Whisper]].');
+
+    const links = linksOf('World Lore/Rumours.md');
+    expect(links).not.toContain('NPCs/Shadowbroker.md');
+    expect(links).not.toContain('NPCs/Whisper.md');
+  });
+
+  it('still resolves a [[Name]] to a visible note', () => {
+    write('NPCs/Innkeeper.md', 'Hello.');
+
+    write('World Lore/Pub.md', 'Run by [[Innkeeper]].');
+
+    expect(linksOf('World Lore/Pub.md')).toContain('NPCs/Innkeeper.md');
+  });
+});
