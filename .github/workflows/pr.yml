@@ -15,23 +15,29 @@ permissions:
 
 jobs:
   checks:
-    uses: algrifff/argus/.github/workflows/node-checks.yml@v1
+    uses: algrifff/argus/.github/workflows/node-checks.yml@56650e33376f56a61183d5c916356b74b0be71f2 # v1 + audit-ignore (argus#10)
     with:
       scripts: '["typecheck", "lint", "test"]'
       bun-version: "1.4"
 
   security:
-    uses: algrifff/argus/.github/workflows/security.yml@v1
+    uses: algrifff/argus/.github/workflows/security.yml@56650e33376f56a61183d5c916356b74b0be71f2 # v1 + audit-ignore (argus#10)
     with:
       bun-version: "1.4"
+      # braces <=3.0.3 has no patched release. It is only reached through
+      # @next/eslint-plugin-next (dev) and sass -> chokidar (watch mode),
+      # never with untrusted patterns.
+      audit-ignore: GHSA-vfj7-8cjw-p6xm
 
   review:
-    uses: algrifff/argus/.github/workflows/agent-review.yml@v1
+    uses: algrifff/argus/.github/workflows/agent-review.yml@56650e33376f56a61183d5c916356b74b0be71f2 # v1 + audit-ignore (argus#10)
     permissions:
       contents: read
       pull-requests: write
     with:
       agents: security,adversarial,standards
+      app-client-id: ${{ vars.ARGUS_APP_CLIENT_ID }}
       bun-version: "1.4"
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ARGUS_APP_PRIVATE_KEY: ${{ secrets.ARGUS_APP_PRIVATE_KEY }}
