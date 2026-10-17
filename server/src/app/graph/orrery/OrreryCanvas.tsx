@@ -9,10 +9,10 @@
 // canvas, matchMedia-style browser APIs and getComputedStyle on mount.
 
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { RELATION_TYPES } from '@compendium/shared';
 import type { GraphPayload } from '@/lib/graph';
-import { createEngine, type Engine, type Hover } from './engine';
+import { createEngine, type Engine, type Hover, type HoverAnchor } from './engine';
 import { buildModel, campaignLabel, type Model, type ONode } from './layout';
 import { OrreryChrome } from './OrreryChrome';
 import { kindSingular, kindTextColor, resolveFonts, resolvePalette, type Palette } from './palette';
@@ -82,7 +82,10 @@ function OrreryStage({ model, worldName, campNames, initialFocus }: Props & { mo
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [engine, setEngine] = useState<Engine | null>(null);
   const [palette, setPalette] = useState<Palette | null>(null);
-  const [hover, setHover] = useState<{ h: Hover; x: number; y: number } | null>(null);
+  // The last hover is held until the card has faded out (the engine says when).
+  const [hover, setHover] = useState<{ h: Hover; x: number; y: number; a?: HoverAnchor | undefined } | null>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+  const tipAlpha = useRef(0);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const initialRef = useRef(initialFocus);
 
@@ -97,8 +100,15 @@ function OrreryStage({ model, worldName, campNames, initialFocus }: Props & { mo
       model,
       { worldName, campNames, relationTypes: RELATION_TYPES },
       {
-        onHover: (h, x, y) => setHover(h ? { h, x, y } : null),
+        onHover: (h, x, y, a) => {
+          if (h) setHover({ h, x, y, a });
+        },
         onFocus: syncUrl,
+        onTipFade: (a) => {
+          tipAlpha.current = a;
+          if (tipRef.current) tipRef.current.style.opacity = String(a);
+          if (a <= 0) setHover(null);
+        },
       },
       pal,
       fonts,
@@ -140,6 +150,27 @@ function OrreryStage({ model, worldName, campNames, initialFocus }: Props & { mo
     };
   }, [model, worldName, campNames]);
 
+  useLayoutEffect(() => {
+    const el = tipRef.current;
+    if (!el) return;
+    el.style.opacity = String(tipAlpha.current);
+    const a = hover?.a;
+    if (!a) return;
+    // Keep the card clear of the hovered dot and of its name, which runs
+    // horizontally beside the dot: tuck the card below the dot, reaching away
+    // from the name's side (above the dot when there is no room below).
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const gap = Math.max(a.r + 14, 28);
+    let left = a.side > 0 ? a.x + 10 - w : a.side < 0 ? a.x - 10 : a.x - w / 2;
+    let top = a.y + gap;
+    if (top + h > box.h - 8) top = a.y - gap - h - (a.side === 0 ? 24 : 0);
+    left = Math.max(8, Math.min(left, box.w - w - 8));
+    top = Math.max(8, top);
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+  });
+
   const open = useCallback((id: string) => router.push(noteHref(id)), [router]);
 
   const tip = hover && palette ? renderTip(hover.h, palette, model, campNames) : null;
@@ -151,8 +182,9 @@ function OrreryStage({ model, worldName, campNames, initialFocus }: Props & { mo
         <OrreryChrome engine={engine} model={model} worldName={worldName} campNames={campNames} palette={palette} onOpen={open} />
       ) : null}
       {model.nodes.length === 0 ? <div className={s.empty}>No notes in this world yet.<br />Write one and it will appear here.</div> : null}
+      {/* Inline position is the fallback for hovers with no anchor (e.g. a sector); the layout effect above places anchored ones. */}
       {tip && hover ? (
-        <div className={s.tip} style={{ left: Math.max(8, Math.min(hover.x + 14, box.w - 256)), top: Math.max(8, Math.min(hover.y + 14, box.h - 96)) }}>
+        <div ref={tipRef} className={s.tip} style={{ left: Math.max(8, Math.min(hover.x + 14, box.w - 256)), top: Math.max(8, Math.min(hover.y + 14, box.h - 96)) }}>
           {tip}
         </div>
       ) : null}

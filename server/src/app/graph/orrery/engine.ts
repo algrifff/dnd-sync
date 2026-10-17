@@ -33,12 +33,29 @@ import {
   type Target,
   type Wheel,
 } from './layout';
-import { drawRel as drawRelShared, pathPts, relColor as relColorShared, strokeBatch as strokeBatchShared, type Stroke } from './draw';
+import { drawRel as drawRelShared, endMarker as endMarkerShared, pathPts, relColor as relColorShared, strokeBatch as strokeBatchShared, type Stroke } from './draw';
+import {
+  advanceHover,
+  CAPTION_SCALE,
+  DRAW_MS,
+  drawProgress,
+  easeOutCubic,
+  HOVER_DOT_GROW,
+  HOVER_LABEL_GROW,
+  LABEL_SCALE,
+  POP_MS,
+  popScale,
+  reversePath,
+  splitBezier,
+  staggerDelays,
+  STAGGER_MS,
+} from './anim';
 import {
   KIND_LABEL,
   kindColor,
   kindSingular,
   kindTextColor,
+  REL_STYLE,
   relLabel,
   type Fonts,
   type Palette,
@@ -49,6 +66,15 @@ export type LinkMode = 'grouped' | 'all';
 export type Hover =
   | { type: 'node'; n: ONode }
   | { type: 'sector'; camp: string; all: number };
+
+/** Where a hovered node's dot and name are on screen, so the card can stay clear of both. */
+export interface HoverAnchor {
+  x: number;
+  y: number;
+  r: number;
+  /** Which side of the dot its name runs: 1 right, -1 left, 0 above. */
+  side: -1 | 0 | 1;
+}
 
 export interface FocusInfo {
   ring1: number;
@@ -75,9 +101,11 @@ export interface Snapshot {
 }
 
 export interface EngineHooks {
-  onHover(h: Hover | null, x: number, y: number): void;
+  onHover(h: Hover | null, x: number, y: number, anchor?: HoverAnchor): void;
   /** The focused note changed (null: back on the wheel). */
   onFocus(n: ONode | null): void;
+  /** Opacity (0..1) of the hover card, eased like the hover itself. */
+  onTipFade?(a: number): void;
 }
 
 export interface EngineOptions {
@@ -110,6 +138,23 @@ export interface Engine {
   destroy(): void;
 }
 
+/** Per-node hover animation: eased progress `h`, and the clock for the
+ *  staggered draw-on of its links. Lives while h > 0 or the node is hovered. */
+interface HoverAnim {
+  n: ONode;
+  /** Raw linear progress; `h` is its easeOutCubic. */
+  p: number;
+  h: number;
+  on: boolean;
+  t0: number;
+  /** When the pointer left (links freeze at their length and fade). */
+  tEnd: number | null;
+  near: Set<ONode>;
+  /** Start delay (ms) of the link to each neighbour, valid for `arcScene`. */
+  arcs: Map<ONode, number>;
+  arcScene: Scene | null;
+}
+
 interface NodeState {
   cur: Target;
   from: Target;
@@ -119,6 +164,7 @@ interface NodeState {
 
 type Scene = Wheel | Focus;
 
+const ARC_TOTAL_MS = STAGGER_MS + DRAW_MS + POP_MS;
 const easeCubic = (t: number): number => (t <= 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 const fract = (x: number): number => x - Math.floor(x);
 const trunc = (s: string, n = 28): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -153,7 +199,7 @@ export function createEngine(
     hi: -1,
     hover: null as Hover | null,
   };
-  const view = { w: 0, h: 0, cx: 0, cy: 0, R: 300, dpr: 1, t: { x: 0, y: 0, k: 1 } };
+  const view = { w: 0, h: 0, cx: 0, cy: 0, R: 300, dpr: 1, il: 8, ir: 8, t: { x: 0, y: 0, k: 1 } };
   const st: NodeState[] = nodes.map(() => ({
     cur: { x: 0, y: 0, r: 0, a: 0 },
     from: { x: 0, y: 0, r: 0, a: 0 },
@@ -169,6 +215,118 @@ export function createEngine(
   let raf = 0;
   let Z: { from: { x: number; y: number; k: number }; to: { x: number; y: number; k: number }; start: number; dur: number } | null = null;
   let destroyed = false;
+
+  // ── hover animation
+  const HA = new Map<ONode, HoverAnim>();
+  let hovList: HoverAnim[] = [];
+  let hovMax = 0;
+  let tNow = performance.now();
+  let lastT = -1;
+  let tipP = 0;
+  let tipSent = -1;
+  const reduceMq = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+  const reduced = (): boolean => !!reduceMq?.matches;
+
+  /** Which neighbours a node's links reach in the current scene. */
+  function arcNeighbours(n: ONode, sc: Scene): Set<ONode> {
+    if (sc.type === 'wheel') {
+      const s = neighbours(n);
+      s.delete(n);
+      return s;
+    }
+    const out = new Set<ONode>();
+    if (n === sc.c) sc.N1.forEach((x) => out.add(x));
+    else {
+      if (sc.N1s.has(n)) out.add(sc.c);
+      for (const [x, y] of sc.e12) {
+        if (x === n) out.add(y);
+        else if (y === n) out.add(x);
+      }
+      for (const r of sc.relsOther) {
+        if (r.s === n) out.add(r.t);
+        else if (r.t === n) out.add(r.s);
+      }
+    }
+    return out;
+  }
+  function ensureArcs(e: HoverAnim): void {
+    if (!scene || e.arcScene === scene) return;
+    e.near = arcNeighbours(e.n, scene);
+    const list = [...e.near];
+    const ang = list.map((x) => Math.atan2(cur(x).y - cur(e.n).y, cur(x).x - cur(e.n).x));
+    const delays = staggerDelays(ang);
+    e.arcs = new Map(list.map((x, i) => [x, delays[i]!]));
+    e.arcScene = scene;
+  }
+  /** Retarget the hover animations at the node now under the pointer. */
+  function syncHover(h: Hover | null): void {
+    const n = h?.type === 'node' ? h.n : null;
+    const now = performance.now();
+    for (const e of HA.values()) {
+      if (e.on && e.n !== n) {
+        e.on = false;
+        e.tEnd = now;
+      }
+    }
+    if (!n) return;
+    let e = HA.get(n);
+    if (!e) {
+      e = { n, p: 0, h: 0, on: true, t0: now, tEnd: null, near: new Set(), arcs: new Map(), arcScene: null };
+      HA.set(n, e);
+    } else if (!e.on) {
+      e.on = true;
+      e.tEnd = null;
+      // Still fading out: its links are already out, so do not redraw them.
+      e.t0 = e.p > 0.01 ? now - ARC_TOTAL_MS : now;
+    }
+    if (reduced()) e.t0 = now - ARC_TOTAL_MS * 2;
+  }
+  /** Advance every hover animation to `now`. Returns whether any is still moving. */
+  function stepHover(now: number): boolean {
+    const dt = lastT < 0 ? 16 : Math.min(now - lastT, 50);
+    const rm = reduced();
+    let more = false;
+    hovMax = 0;
+    for (const [n, e] of HA) {
+      e.p = advanceHover(e.p, e.on, dt, rm);
+      e.h = easeOutCubic(e.p);
+      if (!e.on && e.p <= 0) {
+        HA.delete(n);
+        continue;
+      }
+      ensureArcs(e);
+      if (e.h > hovMax) hovMax = e.h;
+      if (e.on ? e.p < 1 || now - e.t0 < ARC_TOTAL_MS : e.p > 0) more = true;
+    }
+    hovList = [...HA.values()];
+    const tipOn = S.hover !== null;
+    tipP = advanceHover(tipP, tipOn, dt, rm);
+    if (tipOn ? tipP < 1 : tipP > 0) more = true;
+    const ta = easeOutCubic(tipP);
+    if (ta !== tipSent) {
+      tipSent = ta;
+      hooks.onTipFade?.(ta);
+    }
+    return more;
+  }
+  /** 0..1 growth of the link from `e.n` to `nb`. */
+  function arcU(e: HoverAnim, nb: ONode): number {
+    return drawProgress((e.tEnd ?? tNow) - e.t0, e.arcs.get(nb) ?? 0);
+  }
+  /** Alpha of a growing link: full while hovered, fading as the pointer leaves. */
+  const arcA = (e: HoverAnim): number => (e.on ? 1 : e.h);
+  /** Dot scale: grown if hovered, popped when a link reaches it. */
+  function dotScale(n: ONode): number {
+    let s = 1;
+    for (const e of hovList) {
+      if (e.n === n) s = Math.max(s, 1 + (HOVER_DOT_GROW - 1) * e.h);
+      else if (e.near.has(n)) {
+        const since = (e.tEnd ?? tNow) - e.t0 - (e.arcs.get(n) ?? 0) - DRAW_MS;
+        s = Math.max(s, 1 + (popScale(since) - 1) * e.h);
+      }
+    }
+    return s;
+  }
 
   const filters = (): Filters => ({ kinds: S.kinds, camps: S.camps, showIndex: S.showIndex, showSessions: S.showSessions });
 
@@ -258,6 +416,9 @@ export function createEngine(
       if (q >= 1) Z = null;
       else more = true;
     }
+    tNow = now;
+    if (stepHover(now)) more = true;
+    lastT = more ? now : -1;
     draw();
     if (more) kick();
   }
@@ -355,10 +516,40 @@ export function createEngine(
     return total / rs;
   }
   const pathP = (p: readonly number[]): void => pathPts(ctx, p);
+  const relColor = (type: RelationType): string => relColorShared(C, type);
+  const endMarker = (p: readonly number[], type: RelationType, rTarget: number): void => endMarkerShared(ctx, C, p, type, rTarget);
   const strokeBatch = (list: Stroke[], color: string, width: number, alphaMul = 1, dash: number[] = []): void =>
     strokeBatchShared(ctx, list, color, width, alphaMul, dash);
   function drawRel(r: ORel, p: number[], alpha: number, wMul = 1): void {
     drawRelShared(ctx, C, r, p, alpha, dotR(cur(r.t).r), wMul);
+  }
+  /** A Relationship drawn out from one end to `u` of its length, in its own
+   *  dash and colour. The arrow or diamond shows once the line has arrived,
+   *  or at once when it grows out of the target end. */
+  function drawRelGrow(r: ORel, p: number[], alpha: number, wMul: number, u: number, fromEnd: boolean): void {
+    if (u <= 0.001) return;
+    if (u >= 0.999) {
+      drawRel(r, p, alpha, wMul);
+      return;
+    }
+    const def = REL_STYLE[r.type];
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = relColor(r.type);
+    ctx.lineWidth = def.w * wMul;
+    ctx.setLineDash(def.dash);
+    ctx.beginPath();
+    pathP(splitBezier(fromEnd ? reversePath(p) : p, u));
+    ctx.stroke();
+    if (def.dir && fromEnd) endMarker(p, r.type, dotR(cur(r.t).r));
+    ctx.setLineDash([]);
+  }
+  /** The strongest hover whose node is an end of this Relationship. */
+  function relHot(r: ORel): { e: HoverAnim; fromEnd: boolean } | null {
+    let best: { e: HoverAnim; fromEnd: boolean } | null = null;
+    for (const e of hovList) {
+      if ((e.n === r.s || e.n === r.t) && (!best || e.h > best.e.h)) best = { e, fromEnd: e.n === r.t };
+    }
+    return best;
   }
   const relOn = (r: ORel): boolean => S.showRelations && S.relTypes.has(r.type);
   const pt = (n: ONode): [number, number] => [SX(cur(n).x), SY(cur(n).y)];
@@ -366,6 +557,8 @@ export function createEngine(
   const scr = (p: readonly number[]): number[] => p.map((v, i) => (i % 2 ? SY(v) : SX(v)));
 
   // ── wheel drawing
+  /** Where the sector captions sit this frame, so labels stop short of them. */
+  const capObs: Array<{ r: number; mid: number; half: number }> = [];
   function drawWheelStructure(W: Wheel, alpha: number): void {
     const g = W.g;
     const k = view.t.k;
@@ -373,6 +566,7 @@ export function createEngine(
     dashedCircle(g.rOut + 6, C.muted, 0.55 * alpha, [3, 4]);
     dashedCircle((g.rS0 + g.rS1) / 2, C.muted, (S.showSessions ? 0.5 : 0.28) * alpha, [3, 4]);
     const placed: Array<{ mid: number; half: number; lvl: number }> = [];
+    capObs.length = 0;
     for (const s of W.sectors.slice().sort((a, b) => b.span - a.span)) {
       const sa = s.alpha * alpha;
       if (sa < 0.01) continue;
@@ -384,7 +578,7 @@ export function createEngine(
       if (S.showSessions && s.sessions.length) {
         const rm = (g.rS0 + g.rS1) / 2;
         arcStroke(rm, s.a0 + 0.01, s.a1 - 0.01, C.ruleDark, 0.75 * sa, [], 1);
-        setFont(CAPS(7.5, 500), 0.4);
+        setFont(CAPS(7.5 * CAPTION_SCALE, 500), 0.4);
         ctx.fillStyle = C.muted;
         ctx.globalAlpha = 0.9 * sa;
         ctx.textAlign = 'center';
@@ -393,20 +587,21 @@ export function createEngine(
         s.sessions.forEach((n, i) => {
           if (!(i === 0 || i === L - 1 || (n.ep && n.ep % 5 === 0))) return;
           const th = W.pos.get(n)?.th ?? s.mid;
-          const rr = g.rS1 + 9 / k;
+          const rr = g.rS1 + 11 / k;
           ctx.fillText(String(n.ep ?? '·'), SX(rr * Math.cos(th)), SY(rr * Math.sin(th)));
         });
       }
       const hot = S.hover?.type === 'sector' && S.hover.camp === s.camp;
       const label = `${campName(s.camp).toUpperCase()}  ·  ${s.all}`;
-      const font = CAPS(9.5, hot || S.drill === s.camp ? 700 : 600);
+      const font = CAPS(9.5 * CAPTION_SCALE, hot || S.drill === s.camp ? 700 : 600);
       // Small sectors step outward when their name would collide with a neighbour's.
       const half = arcText(label, g.rLab, s.mid, font, '', 0, 1.7, true) / 2 + 0.02;
       let lvl = 0;
       while (lvl < 3 && placed.some((q) => q.lvl === lvl && Math.abs(angDelta(q.mid, s.mid)) < q.half + half)) lvl++;
       placed.push({ mid: s.mid, half, lvl });
-      const rl = g.rLab + (lvl * 14) / k;
-      if (lvl) radialLine(s.mid, g.rS1 + 6 / k, rl - 6 / k, C.rule, sa);
+      const rl = g.rLab + (lvl * 17) / k;
+      capObs.push({ r: rl, mid: s.mid, half });
+      if (lvl) radialLine(s.mid, g.rS1 + 6 / k, rl - 7 / k, C.rule, sa);
       arcText(label, rl, s.mid, font, hot ? C.ink : C.inkSoft, sa, 1.7);
       const big = s.span * g.rIn * k > 46 || S.drill === s.camp;
       if (big) {
@@ -415,13 +610,13 @@ export function createEngine(
           const x = SX(b.ax);
           const y = SY(b.ay);
           const txt = `${KIND_LABEL[b.kind as keyof typeof KIND_LABEL]} ${b.n}`.toUpperCase();
-          setFont(CAPS(7.5, 600), 1);
+          setFont(CAPS(7.5 * CAPTION_SCALE, 600), 1);
           const w = ctx.measureText(txt).width;
           const left = Math.cos(b.tha) < 0;
           const tx = left ? x - 7 - w : x + 7;
           ctx.globalAlpha = 0.82 * sa * b.alpha;
           ctx.fillStyle = C.parchment;
-          ctx.fillRect(tx - 2, y - 5.5, w + 4, 11);
+          ctx.fillRect(tx - 2, y - 6.5, w + 4, 13);
           ctx.globalAlpha = sa * b.alpha;
           ctx.fillStyle = C.muted;
           ctx.textAlign = 'left';
@@ -431,20 +626,20 @@ export function createEngine(
       }
     }
     // The world at the centre.
-    setFont(CAPS(10.5, 700), 3);
+    setFont(CAPS(10.5 * CAPTION_SCALE, 700), 3);
     ctx.fillStyle = C.ink;
     ctx.globalAlpha = alpha;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText((opts.worldName || 'World').toUpperCase(), SX(0) + 1.5, SY(0) - 2);
-    setFont(SERIF(9.5, 'italic'), 0);
+    setFont(SERIF(9.5 * CAPTION_SCALE, 'italic'), 0);
     ctx.fillStyle = C.muted;
-    ctx.fillText('the world', SX(0), SY(0) + 11);
+    ctx.fillText('the world', SX(0), SY(0) + 14);
     if (hasLS) (ctx as unknown as { letterSpacing: string }).letterSpacing = '0px';
   }
 
   function drawWheelEdges(W: Wheel, alpha: number): void {
-    const hov = S.hover?.type === 'node' ? S.hover.n : null;
+    const H = hovMax;
     const plain: Stroke[] = [];
     const spokes: Stroke[] = [];
     const grouped: typeof links = [];
@@ -466,11 +661,12 @@ export function createEngine(
       }
       grouped.push(l);
     }
-    const dim = hov ? 0.35 : 1;
+    const dim = 1 - 0.65 * H;
     strokeBatch(spokes, C.muted, 0.6, 0.3 * dim);
     strokeBatch(plain, C.inkSoft, 0.6, (S.linkMode === 'all' && !S.drill ? 0.09 : 0.16) * dim);
-    const hovG = hov && hov.role === 'band' ? `${hov.campaign}|${hov.bandKind}` : null;
-    const aggLabels: Array<[number[], number]> = [];
+    const bandHov = hovList.filter((e) => e.n.role === 'band').map((e) => ({ key: `${e.n.campaign}|${e.n.bandKind}`, h: e.h }));
+    const hb = bandHov.reduce((m, b) => Math.max(m, b.h), 0);
+    const aggLabels: Array<[number[], number, number]> = [];
     for (const e of aggregateLinks(grouped, alphaOf)) {
       const pa = groupAnchor(W, e.a);
       const pb = groupAnchor(W, e.b);
@@ -478,16 +674,27 @@ export function createEngine(
       const p = scr(routeWheel(W, e.a, e.b, pa, pb));
       const ga = `${e.a.campaign}|${e.a.kind === 'session' ? 'session' : e.a.kind}`;
       const gb = `${e.b.campaign}|${e.b.kind === 'session' ? 'session' : e.b.kind}`;
-      const hot = hovG && (ga === hovG || gb === hovG);
-      ctx.globalAlpha = e.m * (hot ? 0.85 : 0.3 * (hovG ? 0.5 : 1)) * dim;
-      ctx.strokeStyle = hot ? C.candle : C.inkSoft;
+      let hot = 0;
+      for (const b of bandHov) if (b.key === ga || b.key === gb) hot = Math.max(hot, b.h);
       ctx.lineWidth = 0.5 + Math.sqrt(e.n) * 0.42;
-      ctx.beginPath();
-      pathP(p);
-      ctx.stroke();
-      if (hot) aggLabels.push([p, e.n]);
+      const base = e.m * 0.3 * (1 - 0.5 * hb) * (1 - hot) * dim;
+      if (base > 0.004) {
+        ctx.globalAlpha = base;
+        ctx.strokeStyle = C.inkSoft;
+        ctx.beginPath();
+        pathP(p);
+        ctx.stroke();
+      }
+      if (hot > 0.004) {
+        ctx.globalAlpha = e.m * 0.85 * hot * dim;
+        ctx.strokeStyle = C.candle;
+        ctx.beginPath();
+        pathP(p);
+        ctx.stroke();
+        if (hot > 0.5) aggLabels.push([p, e.n, hot]);
+      }
     }
-    // Relationships, lightly bent toward the centre.
+    // Relationships, lightly bent toward the centre; the hovered note's grow out of it.
     for (const r of rels) {
       if (!relOn(r)) continue;
       const m = Math.min(cur(r.s).a, cur(r.t).a) * alpha;
@@ -495,17 +702,24 @@ export function createEngine(
       const [x0, y0] = [cur(r.s).x, cur(r.s).y];
       const [x1, y1] = [cur(r.t).x, cur(r.t).y];
       const p = [SX(x0), SY(y0), SX(((x0 + x1) / 2) * 0.55), SY(((y0 + y1) / 2) * 0.55), SX(x1), SY(y1)];
-      const hot = hov && (r.s === hov || r.t === hov);
-      drawRel(r, p, m * (hov ? (hot ? 1 : 0.15) : 0.34), hot ? 1.3 : 0.8);
+      const hot = relHot(r);
+      drawRel(r, p, m * 0.34 * (1 - 0.56 * H * (1 - (hot ? hot.e.h : 0))), 0.8);
+      if (hot) drawRelGrow(r, p, m * arcA(hot.e), 1.3, arcU(hot.e, hot.fromEnd ? r.s : r.t), hot.fromEnd);
     }
-    // The hovered note's own links, bundled, in candlelight.
-    if (hov && cur(hov).a > 0.1) {
+    // The hovered note's own links, bundled, in candlelight, growing out of its dot.
+    for (const e of hovList) {
+      const hn = e.n;
+      if (cur(hn).a <= 0.1) continue;
       const hl: Stroke[] = [];
-      for (const nb of hov.adj) {
+      for (const nb of hn.adj) {
         if (cur(nb).a < 0.05) continue;
-        const a = cur(nb).a * alpha;
-        if (hov.isIndex || nb.isIndex) hl.push({ p: [...pt(hov), ...pt(nb)], a });
-        else hl.push({ p: scr(routeWheel(W, hov, nb, [cur(hov).x, cur(hov).y], [cur(nb).x, cur(nb).y])), a });
+        const u = arcU(e, nb);
+        if (u <= 0.001) continue;
+        const full =
+          hn.isIndex || nb.isIndex
+            ? [...pt(hn), ...pt(nb)]
+            : scr(routeWheel(W, hn, nb, [cur(hn).x, cur(hn).y], [cur(nb).x, cur(nb).y]));
+        hl.push({ p: splitBezier(full, u), a: cur(nb).a * alpha * arcA(e) });
       }
       strokeBatch(hl, C.candle, 1, 0.85);
     }
@@ -513,13 +727,13 @@ export function createEngine(
       setFont(CAPS(8, 700), 0.5);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      for (const [p, n] of aggLabels) {
+      for (const [p, n, hot] of aggLabels) {
         const q =
           p.length === 6
             ? [0.25 * p[0]! + 0.5 * p[2]! + 0.25 * p[4]!, 0.25 * p[1]! + 0.5 * p[3]! + 0.25 * p[5]!]
             : [0.125 * p[0]! + 0.375 * p[2]! + 0.375 * p[4]! + 0.125 * p[6]!, 0.125 * p[1]! + 0.375 * p[3]! + 0.375 * p[5]! + 0.125 * p[7]!];
         const w = ctx.measureText(String(n)).width + 6;
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = hot;
         ctx.fillStyle = C.vellum;
         ctx.fillRect(q[0]! - w / 2, q[1]! - 6, w, 12);
         ctx.strokeStyle = C.candle;
@@ -541,10 +755,10 @@ export function createEngine(
       if (F.sectors.length > 1) radialLine(s.a0 - 0.02, 0.07 * R, F.rB + 10, C.rule, 0.9 * alpha, [2, 4]);
       const lab = KIND_LABEL[s.kind].toUpperCase() + (s.n1 ? `  ${s.n1}` : '');
       const mid = s.a0 + s.span / 2;
-      arcText(lab, F.rLab, mid, CAPS(9, 700), kindTextColor(C, s.kind), alpha, 1.6);
+      arcText(lab, F.rLab, mid, CAPS(9 * CAPTION_SCALE, 700), kindTextColor(C, s.kind), alpha, 1.6);
       const sub = [s.n2 && `${s.n2} two steps out`, s.over && `+${s.over} more`].filter(Boolean).join(', ');
       // The second line always sits "below" the kind name in reading order.
-      if (sub) arcText(sub, Math.sin(mid) > 0.12 ? F.rLab + 13 : F.rLab - 12, mid, SERIF(9.5, 'italic'), C.muted, alpha, 0.3);
+      if (sub) arcText(sub, Math.sin(mid) > 0.12 ? F.rLab + 16 : F.rLab - 15, mid, SERIF(9.5 * CAPTION_SCALE, 'italic'), C.muted, alpha, 0.3);
     }
   }
   function relLabelText(c: ONode, rs: ORel[]): string {
@@ -552,73 +766,109 @@ export function createEngine(
   }
   function drawFocusEdges(F: Focus, alpha: number): void {
     const c = F.c;
-    const hov = S.hover?.type === 'node' ? S.hover.n : null;
+    const H = hovMax;
     const pc = pt(c);
     const plain: Stroke[] = [];
     const hot: Stroke[] = [];
     const e12: Stroke[] = [];
     const relSp: Array<[ORel, number[], number]> = [];
+    /** The strongest hover on either end of a pair. */
+    const entFor = (a: ONode, b: ONode): HoverAnim | null => {
+      const ea = HA.get(a);
+      const eb = HA.get(b);
+      return ea && eb ? (ea.h >= eb.h ? ea : eb) : (ea ?? eb ?? null);
+    };
     for (const x of F.N1) {
       const m = Math.min(cur(c).a, cur(x).a) * alpha;
       if (m < 0.02) continue;
       const rs = (relByPair.get(pairKey(c, x)) ?? []).filter(relOn);
       if (rs.length) {
         for (const r of rs) relSp.push([r, r.s === c ? [...pc, ...pt(x)] : [...pt(x), ...pc], m]);
-      } else (hov === x ? hot : plain).push({ p: [...pc, ...pt(x)], a: m });
+      } else {
+        plain.push({ p: [...pc, ...pt(x)], a: m });
+        const ent = entFor(c, x);
+        if (ent) {
+          const fromC = ent.n === c;
+          const u = arcU(ent, fromC ? x : c);
+          if (u > 0.001) hot.push({ p: splitBezier(fromC ? [...pc, ...pt(x)] : [...pt(x), ...pc], u), a: m * arcA(ent) });
+        }
+      }
     }
     for (const [x, y] of F.e12) {
       const m = Math.min(cur(x).a, cur(y).a) * alpha;
       if (m < 0.02) continue;
-      (hov && (hov === x || hov === y) ? hot : e12).push({ p: [...pt(x), ...pt(y)], a: m });
+      e12.push({ p: [...pt(x), ...pt(y)], a: m });
+      const ent = entFor(x, y);
+      if (ent) {
+        const fromX = ent.n === x;
+        const u = arcU(ent, fromX ? y : x);
+        if (u > 0.001) hot.push({ p: splitBezier(fromX ? [...pt(x), ...pt(y)] : [...pt(y), ...pt(x)], u), a: m * arcA(ent) });
+      }
     }
-    strokeBatch(e12, C.inkSoft, 0.55, hov ? 0.06 : 0.13);
-    strokeBatch(plain, C.ink, 0.7, hov ? 0.22 : 0.42);
+    strokeBatch(e12, C.inkSoft, 0.55, 0.13 - 0.07 * H);
+    strokeBatch(plain, C.ink, 0.7, 0.42 - 0.2 * H);
     strokeBatch(hot, C.candle, 1.2, 1);
-    for (const [r, p, m] of relSp) drawRel(r, p, m, hov && (r.s === hov || r.t === hov) ? 1.5 : 1.1);
+    for (const [r, p, m] of relSp) {
+      drawRel(r, p, m, 1.1);
+      const h = relHot(r);
+      if (h) drawRelGrow(r, p, m * arcA(h.e), 1.5, arcU(h.e, h.fromEnd ? r.s : r.t), h.fromEnd);
+    }
     for (const r of F.relsOther) {
       if (!relOn(r)) continue;
       const m = Math.min(cur(r.s).a, cur(r.t).a) * alpha;
       if (m < 0.02) continue;
       const [x0, y0] = [cur(r.s).x, cur(r.s).y];
       const [x1, y1] = [cur(r.t).x, cur(r.t).y];
-      drawRel(r, [SX(x0), SY(y0), SX(((x0 + x1) / 2) * 0.6), SY(((y0 + y1) / 2) * 0.6), SX(x1), SY(y1)], m * (hov && (r.s === hov || r.t === hov) ? 1 : 0.55));
+      const p = [SX(x0), SY(y0), SX(((x0 + x1) / 2) * 0.6), SY(((y0 + y1) / 2) * 0.6), SX(x1), SY(y1)];
+      drawRel(r, p, m * 0.55, 1);
+      const h = relHot(r);
+      if (h) drawRelGrow(r, p, m * arcA(h.e), 1, arcU(h.e, h.fromEnd ? r.s : r.t), h.fromEnd);
     }
   }
 
   // ── nodes + labels
   function drawNodes(): void {
     const sc = scene!;
-    const hov = S.hover?.type === 'node' ? S.hover.n : null;
-    const near = hov && sc.type === 'wheel' ? neighbours(hov) : null;
+    const dimOn = sc.type === 'wheel' && hovMax > 0;
     const order = nodes.filter((n) => cur(n).a > 0.01).sort((a, b) => cur(a).r - cur(b).r);
     for (const n of order) {
       let a = cur(n).a;
-      if (near && n !== hov && !near.has(n)) a *= 0.3;
+      let self = 0;
+      let lit = 0;
+      for (const e of hovList) {
+        if (e.n === n) self = Math.max(self, e.h);
+        if (e.n === n || e.near.has(n)) lit = Math.max(lit, e.h);
+      }
+      if (dimOn) a *= 1 - 0.7 * Math.max(0, hovMax - lit);
       const x = SX(cur(n).x);
       const y = SY(cur(n).y);
-      const r = Math.max(0.8, dotR(cur(n).r));
+      const r = Math.max(0.8, dotR(cur(n).r)) * (hovList.length ? dotScale(n) : 1);
       ctx.globalAlpha = a;
-      if (n.isIndex) {
+      if (n.isIndex && n.role === 'camp') {
+        // Campaign hub: a filled disc in ink with a thin ring around it.
+        ctx.fillStyle = C.ink;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, TAU);
+        ctx.fill();
+        ctx.globalAlpha = a * 0.7;
+        ctx.strokeStyle = C.ink;
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.arc(x, y, r + 2.6, 0, TAU);
+        ctx.stroke();
+        ctx.globalAlpha = a;
+      } else if (n.isIndex) {
         ctx.fillStyle = C.vellum;
         ctx.strokeStyle = n.role === 'empty' ? C.muted : C.ink;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        if (n.role === 'camp') ctx.arc(x, y, r, 0, TAU);
-        else {
-          ctx.moveTo(x, y - r - 0.6);
-          ctx.lineTo(x + r + 0.6, y);
-          ctx.lineTo(x, y + r + 0.6);
-          ctx.lineTo(x - r - 0.6, y);
-          ctx.closePath();
-        }
+        ctx.moveTo(x, y - r - 0.6);
+        ctx.lineTo(x + r + 0.6, y);
+        ctx.lineTo(x, y + r + 0.6);
+        ctx.lineTo(x - r - 0.6, y);
+        ctx.closePath();
         ctx.fill();
         ctx.stroke();
-        if (n.role === 'camp') {
-          ctx.beginPath();
-          ctx.arc(x, y, 1.3, 0, TAU);
-          ctx.fillStyle = C.ink;
-          ctx.fill();
-        }
       } else {
         ctx.fillStyle = kindColor(C, n.kind);
         ctx.beginPath();
@@ -630,87 +880,220 @@ export function createEngine(
           ctx.stroke();
         }
       }
-      if (n === hov || (sc.type === 'focus' && n === sc.c)) {
-        ctx.globalAlpha = cur(n).a;
+      const isC = sc.type === 'focus' && n === sc.c;
+      if (self > 0.01 || isC) {
+        if (self > 0.01) {
+          // A soft candlelight halo that swells with the hover.
+          ctx.globalAlpha = cur(n).a * 0.2 * self;
+          ctx.fillStyle = C.candle;
+          ctx.beginPath();
+          ctx.arc(x, y, r + 3.5 + 5 * self, 0, TAU);
+          ctx.fill();
+        }
+        ctx.globalAlpha = cur(n).a * (isC ? 1 : self);
         ctx.strokeStyle = C.candle;
         ctx.lineWidth = 1.4;
         ctx.beginPath();
-        ctx.arc(x, y, r + 3.5, 0, TAU);
+        ctx.arc(x, y, r + (n.isIndex && n.role === 'camp' ? 6 : 3.5) + (isC ? 0 : 2.5 * (1 - self)), 0, TAU);
         ctx.stroke();
       }
     }
     ctx.globalAlpha = 1;
   }
-  function makeGrid(): { test(pts: number[][]): boolean; mark(pts: number[][]): void } {
-    const cells = new Set<string>();
-    const cs = 7;
+
+  // ── labels
+  const LBL = 10.5 * LABEL_SCALE;
+  const CELL = 8;
+  function makeGrid(): { test(x: number, y: number): boolean; mark(x: number, y: number, hr: number): void } {
+    const cells = new Set<number>();
+    const key = (cx: number, cy: number): number => (cx + 512) * 4096 + (cy + 512);
     return {
-      test: (pts) => pts.every(([x, y]) => !cells.has(`${(x! / cs) | 0},${(y! / cs) | 0}`)),
-      mark(pts) {
-        for (const [x, y] of pts) {
-          const cx = (x! / cs) | 0;
-          const cy = (y! / cs) | 0;
-          for (let i = -1; i <= 1; i++) cells.add(`${cx + i},${cy}`);
-        }
+      test(x, y) {
+        const cx = Math.floor(x / CELL);
+        const cy = Math.floor(y / CELL);
+        for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) if (cells.has(key(cx + i, cy + j))) return false;
+        return true;
+      },
+      mark(x, y, hr) {
+        const cx = Math.floor(x / CELL);
+        const cy = Math.floor(y / CELL);
+        for (let i = -hr; i <= hr; i++) for (let j = -hr; j <= hr; j++) cells.add(key(cx + i, cy + j));
       },
     };
   }
   type Grid = ReturnType<typeof makeGrid>;
-  function radialLabel(grid: Grid, n: ONode, text: string, font: string, color: string, alpha: number, force: boolean): boolean {
+  type Ink = Array<[string, number]>;
+  /** A name running radially outward from its dot, drawn over any dots in
+   *  its way (with a parchment halo). It is shortened with an ellipsis only
+   *  to stop before the canvas edge, the side panels, another label or a
+   *  caption. */
+  function radialLabel(grid: Grid, n: ONode, text: string, px: number, style: string, ink: Ink, dotMul = 1): boolean {
     const x = SX(cur(n).x);
     const y = SY(cur(n).y);
-    const th = Math.atan2(cur(n).y, cur(n).x);
-    setFont(font, 0);
-    const w = ctx.measureText(text).width;
-    const off = dotR(cur(n).r) + 4;
-    const dx = Math.cos(th);
-    const dy = Math.sin(th);
-    const pts: number[][] = [];
-    for (let d = 0; d <= w; d += 5) pts.push([x + dx * (off + d), y + dy * (off + d)]);
-    if (!force && !grid.test(pts)) return false;
-    grid.mark(pts);
+    if (x < -30 || y < -30 || x > view.w + 30 || y > view.h + 30) return false;
+    const th0 = Math.atan2(cur(n).y, cur(n).x);
+    const off = dotR(cur(n).r) * dotMul + 4;
+    setFont(SERIF(px, style), 0);
+    const hr = Math.max(1, Math.round(px / 13));
+    const full = ctx.measureText(text).width;
+    const dx = Math.cos(th0);
+    const dy = Math.sin(th0);
+    const rx = dx > 0 ? (view.w - view.ir - x) / dx : dx < 0 ? (x - view.il) / -dx : Infinity;
+    const ry = dy > 0 ? (view.h - 8 - y) / dy : dy < 0 ? (y - 8) / -dy : Infinity;
+    let free = Math.min(rx, ry) - off;
+    for (let d = 0; d <= Math.min(full, free); d += 5) {
+      if (!grid.test(x + dx * (off + d), y + dy * (off + d))) {
+        free = Math.min(free, d - 5);
+        break;
+      }
+    }
+    let t = text;
+    let w = full;
+    if (w > free) {
+      let lo = 5;
+      let hi = text.length - 1;
+      t = '';
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const cand = `${text.slice(0, mid).trimEnd()}…`;
+        const cw = ctx.measureText(cand).width;
+        if (cw <= free) {
+          t = cand;
+          w = cw;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      if (!t) return false;
+    }
+    for (let d = 0; d <= w; d += 5) grid.mark(x + dx * (off + d), y + dy * (off + d), hr);
     ctx.save();
     ctx.translate(x, y);
-    ctx.globalAlpha = alpha;
     ctx.textBaseline = 'middle';
+    const ang = Math.atan2(dy, dx);
     const left = dx < 0;
-    ctx.rotate(left ? th + Math.PI : th);
+    ctx.rotate(left ? ang + Math.PI : ang);
     ctx.textAlign = left ? 'right' : 'left';
     ctx.strokeStyle = C.parchment;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = Math.max(3, px * 0.22);
     ctx.lineJoin = 'round';
-    ctx.strokeText(text, left ? -off : off, 0.5);
-    ctx.fillStyle = color;
-    ctx.fillText(text, left ? -off : off, 0.5);
+    ctx.globalAlpha = Math.max(...ink.map((i) => i[1]));
+    ctx.strokeText(t, left ? -off : off, 0.5);
+    for (const [col, al] of ink) {
+      if (al < 0.01) continue;
+      ctx.globalAlpha = al;
+      ctx.fillStyle = col;
+      ctx.fillText(t, left ? -off : off, 0.5);
+    }
     ctx.restore();
     return true;
+  }
+  /** Where the hovered note's name goes: horizontal, beside the dot on the
+   *  side that has room (outward first), or above it. Decided at full size
+   *  so it never flips while it grows, and never cut off. */
+  function hoverPlan(n: ONode): { side: -1 | 0 | 1; text: string; x: number; y: number; r: number } {
+    const x = SX(cur(n).x);
+    const y = SY(cur(n).y);
+    const r = Math.max(0.8, dotR(cur(n).r)) * HOVER_DOT_GROW;
+    setFont(SERIF(LBL * HOVER_LABEL_GROW, '700'), 0);
+    const maxW = view.w - view.il - view.ir - 16;
+    let text = trunc(n.title, 60);
+    let w = ctx.measureText(text).width;
+    for (let i = 0; w > maxW && text.length > 4 && i < 8; i++) {
+      text = `${text.slice(0, Math.max(3, Math.floor((text.length * maxW) / w) - 1)).trimEnd()}…`;
+      w = ctx.measureText(text).width;
+    }
+    const off = r + 6;
+    const right = view.w - view.ir - x - off;
+    const left = x - view.il - off;
+    const order: Array<1 | -1> = x >= view.cx ? [1, -1] : [-1, 1];
+    const side = order.find((s) => w <= (s > 0 ? right : left)) ?? 0;
+    return { side, text, x, y, r };
+  }
+  /** The hovered note's name: grows and bolds with the hover, drawn last and
+   *  on top with a parchment halo so it is always readable. */
+  function hoverLabel(e: HoverAnim): void {
+    const n = e.n;
+    if (e.h < 0.02 || cur(n).a <= 0.1) return;
+    const pl = hoverPlan(n);
+    const px = LBL * (1 + (HOVER_LABEL_GROW - 1) * e.h);
+    setFont(SERIF(px, String(Math.round((400 + 300 * e.h) / 100) * 100)), 0);
+    const w = ctx.measureText(pl.text).width;
+    const off = Math.max(0.8, dotR(cur(n).r)) * (1 + (HOVER_DOT_GROW - 1) * e.h) + 6;
+    let tx = pl.x + off;
+    let ty = pl.y + 0.5;
+    if (pl.side < 0) tx = pl.x - off - w;
+    else if (pl.side === 0) {
+      tx = Math.max(view.il, Math.min(pl.x - w / 2, view.w - view.ir - w));
+      ty = pl.y - off - px * 0.5;
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(4, px * 0.28);
+    ctx.strokeStyle = C.parchment;
+    ctx.globalAlpha = e.h;
+    ctx.strokeText(pl.text, tx, ty);
+    ctx.fillStyle = C.ink;
+    ctx.fillText(pl.text, tx, ty);
   }
   function drawLabels(alpha: number): void {
     const sc = scene!;
     const grid = makeGrid();
-    const hov = S.hover?.type === 'node' ? S.hover.n : null;
     const k = view.t.k;
+    const done = new Set<ONode>();
+    /** The ordinary radial label of a hovered note fades out as its horizontal one fades in. */
+    const fade = (n: ONode): number => {
+      for (const e of hovList) if (e.n === n) return 1 - e.h;
+      return 1;
+    };
+    const baseW = 1 - hovMax;
     if (sc.type === 'wheel') {
-      if (hov && cur(hov).a > 0.1) radialLabel(grid, hov, trunc(hov.title, 40), SERIF(12, '600'), C.ink, 1, true);
+      for (const o of capObs) {
+        const step = 6 / (o.r * k);
+        for (let a = o.mid - o.half; a <= o.mid + o.half; a += step) grid.mark(SX(o.r * Math.cos(a)), SY(o.r * Math.sin(a)), 1);
+      }
       let pool = nodes.filter((n) => !n.isIndex && n.kind !== 'session' && cur(n).a > 0.5 && to(n).a > 0.5);
-      if (hov) {
-        const nb = neighbours(hov);
-        pool = pool.filter((n) => nb.has(n));
-      } else if (S.drill) pool = pool.filter((n) => n.campaign === S.drill);
-      pool.sort((a, b) => b.degree - a.degree || a.i - b.i);
-      let budget = Math.round((hov ? 12 : S.drill ? 30 : 16) * Math.min(k * k, 9));
-      for (const n of pool) {
-        if (budget <= 0) break;
-        if (radialLabel(grid, n, trunc(n.title), SERIF(10.5), C.inkSoft, alpha, false)) budget--;
+      let basePool = S.drill ? pool.filter((n) => n.campaign === S.drill) : pool;
+      basePool = basePool.slice().sort((a, b) => b.degree - a.degree || a.i - b.i);
+      const baseBudget = Math.round((S.drill ? 30 : 16) * Math.min(k * k, 9));
+      if (hovList.length) {
+        const baseTop = new Set(basePool.slice(0, baseBudget));
+        const nbW = new Map<ONode, number>();
+        for (const e of hovList) for (const x of e.near) nbW.set(x, Math.max(nbW.get(x) ?? 0, e.h));
+        pool = pool.filter((n) => nbW.has(n)).sort((a, b) => b.degree - a.degree || a.i - b.i);
+        let budget = Math.round(12 * Math.min(k * k, 9));
+        for (const n of pool) {
+          if (budget <= 0) break;
+          const w = Math.min(1, nbW.get(n)! + (baseTop.has(n) ? baseW : 0));
+          if (radialLabel(grid, n, trunc(n.title), LBL, '', [[C.inkSoft, alpha * w * fade(n)]], dotScale(n))) {
+            budget--;
+            done.add(n);
+          }
+        }
+      }
+      if (baseW > 0.02) {
+        let budget = baseBudget;
+        for (const n of basePool) {
+          if (budget <= 0) break;
+          if (done.has(n)) continue;
+          if (radialLabel(grid, n, trunc(n.title), LBL, '', [[C.inkSoft, alpha * baseW * fade(n)]])) budget--;
+        }
       }
     } else {
       const F = sc;
       const c = F.c;
       const x = SX(cur(c).x);
-      const y = SY(cur(c).y) + dotR(cur(c).r) + 16;
-      grid.mark([[x - 70, y], [x - 35, y], [x, y], [x + 35, y], [x + 70, y], [x - 60, y + 15], [x, y + 15], [x + 60, y + 15]] as number[][]);
+      const titleFont = SERIF(17 * 1.3, '600');
+      const title = trunc(c.title, 34);
+      const y = SY(cur(c).y) + dotR(cur(c).r) + 22;
+      setFont(titleFont, 0);
+      const tw = ctx.measureText(title).width;
+      for (let d = -tw / 2 - 8; d <= tw / 2 + 8; d += 8) {
+        grid.mark(x + d, y, 2);
+        grid.mark(x + d, y + 18, 1);
+      }
       // Ring captions, like the poster's distance marks.
-      setFont(CAPS(7.5, 600), 1.2);
+      setFont(CAPS(7.5 * CAPTION_SCALE, 600), 1.2);
       ctx.fillStyle = C.muted;
       ctx.globalAlpha = alpha;
       ctx.textAlign = 'right';
@@ -718,8 +1101,9 @@ export function createEngine(
       for (const [txt, r] of [['1 STEP', F.r1], ['2 STEPS', (F.rA + F.rB) / 2]] as Array<[string, number]>) {
         const tx = SX(0) - 4;
         const ty = SY(r) - 3;
+        const cw = ctx.measureText(txt).width;
         ctx.fillText(txt, tx, ty);
-        grid.mark([[tx - 32, ty - 4], [tx - 16, ty - 4], [tx, ty - 4]]);
+        for (let d = 0; d <= cw + 6; d += 8) grid.mark(tx - d, ty - 5, 1);
       }
       // Relationship labels on spokes (skipped, not stacked, when they would collide).
       const placed: number[] = [];
@@ -734,21 +1118,21 @@ export function createEngine(
         const ly = SY(Math.sin(th) * dist * along);
         const txt = relLabelText(c, rs);
         const col = relColorShared(C, rs[0]!.type);
-        setFont(SERIF(10, 'italic'), 0);
+        setFont(SERIF(10 * CAPTION_SCALE, 'italic'), 0);
         const w = ctx.measureText(txt).width;
-        const sp: number[][] = [];
         const ux = Math.cos(th);
         const uy = Math.sin(th);
-        for (let d = -w / 2; d <= w / 2; d += 4) for (const o of [-5, 0, 5]) sp.push([lx + ux * d - uy * o, ly + uy * d + ux * o]);
-        if (!grid.test(sp)) continue;
-        grid.mark(sp);
+        let ok = true;
+        for (let d = -w / 2; d <= w / 2 && ok; d += 6) if (!grid.test(lx + ux * d, ly + uy * d)) ok = false;
+        if (!ok) continue;
+        for (let d = -w / 2; d <= w / 2; d += 6) grid.mark(lx + ux * d, ly + uy * d, 1);
         ctx.save();
         ctx.translate(lx, ly);
         const left = Math.cos(th) < 0;
         ctx.rotate(left ? th + Math.PI : th);
         ctx.globalAlpha = alpha * 0.92;
         ctx.fillStyle = C.vellum;
-        ctx.fillRect(-w / 2 - 3, -6.5, w + 6, 13);
+        ctx.fillRect(-w / 2 - 3, -8, w + 6, 16);
         ctx.globalAlpha = alpha;
         ctx.fillStyle = col;
         ctx.textAlign = 'center';
@@ -756,33 +1140,34 @@ export function createEngine(
         ctx.fillText(txt, 0, 0.5);
         ctx.restore();
       }
-      if (hov && hov !== c && cur(hov).a > 0.1) radialLabel(grid, hov, trunc(hov.title, 40), SERIF(12, '600'), C.ink, 1, true);
       const ring1 = F.N1.filter((n) => cur(n).a > 0.3).sort((a, b) => b.degree - a.degree || a.i - b.i);
       const budget = Math.round(90 * Math.min(k * k, 4));
-      ring1.slice(0, budget).forEach((n) => radialLabel(grid, n, trunc(n.title, 26), SERIF(10.5), C.inkSoft, alpha, false));
+      ring1.slice(0, budget).forEach((n) => radialLabel(grid, n, trunc(n.title, 26), LBL, '', [[C.inkSoft, alpha * fade(n)]], dotScale(n)));
       if (k > 1.6) {
         F.N2.filter((n) => cur(n).a > 0.3)
           .sort((a, b) => b.degree - a.degree || a.i - b.i)
           .slice(0, Math.round(30 * k))
-          .forEach((n) => radialLabel(grid, n, trunc(n.title, 22), SERIF(9.5, 'italic'), C.muted, alpha * 0.9, false));
+          .forEach((n) => radialLabel(grid, n, trunc(n.title, 22), 9.5 * 1.25, 'italic', [[C.muted, alpha * 0.9 * fade(n)]], dotScale(n)));
       }
       // Centre title last so nothing paints over it.
-      setFont(SERIF(17, '600'), 0);
+      setFont(titleFont, 0);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.globalAlpha = alpha;
       ctx.strokeStyle = C.parchment;
-      ctx.lineWidth = 5;
+      ctx.lineWidth = 6;
       ctx.lineJoin = 'round';
-      ctx.strokeText(trunc(c.title, 34), x, y);
+      ctx.strokeText(title, x, y);
       ctx.fillStyle = C.ink;
-      ctx.fillText(trunc(c.title, 34), x, y);
-      setFont(CAPS(8, 600), 1.4);
+      ctx.fillText(title, x, y);
+      setFont(CAPS(8 * CAPTION_SCALE, 600), 1.4);
       ctx.fillStyle = C.muted;
       const sub = `${c.isIndex ? 'INDEX' : kindSingular(c.kind).toUpperCase()} · ${campName(c.campaign).toUpperCase()}`;
-      ctx.strokeText(sub, x, y + 15);
-      ctx.fillText(sub, x, y + 15);
+      ctx.lineWidth = 4;
+      ctx.strokeText(sub, x, y + 18);
+      ctx.fillText(sub, x, y + 18);
     }
+    for (const e of hovList) hoverLabel(e);
     if (hasLS) (ctx as unknown as { letterSpacing: string }).letterSpacing = '0px';
     ctx.globalAlpha = 1;
   }
@@ -864,8 +1249,12 @@ export function createEngine(
     const same = sameHover(h, S.hover);
     S.hover = h;
     canvas.style.cursor = h ? 'pointer' : 'default';
-    hooks.onHover(h, x, y);
-    if (!same) kick();
+    const pl = h?.type === 'node' && scene ? hoverPlan(h.n) : null;
+    hooks.onHover(h, x, y, pl ? { x: pl.x, y: pl.y, r: pl.r, side: pl.side } : undefined);
+    if (!same) {
+      syncHover(h);
+      kick();
+    }
   };
 
   function onPointerDown(ev: PointerEvent): void {
@@ -984,6 +1373,8 @@ export function createEngine(
       canvas.height = Math.round(h * dpr);
       canvas.style.width = `${w}px`;
       canvas.style.height = `${h}px`;
+      view.il = Math.max(8, insetL - 20);
+      view.ir = Math.max(8, insetR - 20);
       view.cx = insetL + (w - insetL - insetR) / 2;
       view.cy = h / 2 + 10;
       view.R = Math.max(170, Math.min((w - insetL - insetR) / 2 - 10, h / 2 - 40));
