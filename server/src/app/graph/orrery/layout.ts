@@ -172,15 +172,25 @@ export function buildModel(payload: Pick<GraphPayload, 'nodes' | 'edges' | 'rela
   }));
   const byId = new Map(nodes.map((n) => [n.id, n]));
 
+  // /api/graph edges are directed, so two notes that link to each other
+  // arrive as two edges. A link here is an unordered pair of notes: keep
+  // the first direction seen and count the pair once.
   const links: OLink[] = [];
+  const seen = new Set<string>();
   for (const e of payload.edges) {
     const s = byId.get(e.source);
     const t = byId.get(e.target);
     if (!s || !t || s === t) continue;
+    const key = pairKey(s, t);
+    if (seen.has(key)) continue;
+    seen.add(key);
     s.adj.add(t);
     t.adj.add(s);
     links.push({ s, t, index: s.isIndex || t.isIndex });
   }
+
+  // Degree is the number of distinct notes linked, not directed edges.
+  for (const n of nodes) n.degree = n.adj.size;
 
   const rels: ORel[] = [];
   const relByPair = new Map<string, ORel[]>();
@@ -669,7 +679,13 @@ export function ring2Cap(ring1Size: number): number {
 
 const focusKindOf = (n: ONode): FocusKind => (n.isIndex ? 'index' : n.kind);
 
-export function computeFocus(model: Model, f: Filters, c: ONode, R: number): Focus {
+export interface FocusOptions {
+  /** Ring 1 only, pushed out to fill the disc: the sidebar's small view. */
+  compact?: boolean;
+}
+
+export function computeFocus(model: Model, f: Filters, c: ONode, R: number, opts: FocusOptions = {}): Focus {
+  const compact = opts.compact === true;
   const ok = (n: ONode): boolean => n !== c && noteVisible(n, f);
   const hidden = { index: 0, session: 0, filtered: 0 };
   const N1: ONode[] = [];
@@ -685,14 +701,14 @@ export function computeFocus(model: Model, f: Filters, c: ONode, R: number): Foc
   const score = new Map<ONode, number>();
   for (const x of N1) {
     for (const y of neighbours(x)) {
-      if (y === c || N1s.has(y) || !ok(y)) continue;
+      if (compact || y === c || N1s.has(y) || !ok(y)) continue;
       score.set(y, (score.get(y) ?? 0) + 1);
     }
   }
   const cand = [...score.keys()].sort(
     (a, b) => score.get(b)! - score.get(a)! || b.degree - a.degree || byText(a.title, b.title) || a.i - b.i,
   );
-  const cap = ring2Cap(N1.length);
+  const cap = compact ? 0 : ring2Cap(N1.length);
   const N2 = cand.slice(0, cap);
   const N2s = new Set(N2);
   const overflow = cand.slice(cap);
@@ -709,7 +725,11 @@ export function computeFocus(model: Model, f: Filters, c: ONode, R: number): Foc
     TAU - gap * groups.length,
     Math.min(0.32, (TAU - gap * groups.length) / Math.max(1, groups.length)),
   );
-  const r1 = 0.32 * R;
+  const r1 = (compact ? (N1.length > 26 ? 0.5 : 0.68) : 0.32) * R;
+  // A busy note would pack ring 1 solid, so the small view spreads it over
+  // a few concentric tracks, alternating along each sector.
+  const tracks = compact ? Math.min(5, Math.max(1, Math.ceil(N1.length / 26))) : 1;
+  const trackStep = tracks > 1 ? (0.93 * R - r1) / (tracks - 1) : 0;
   const rA = 0.69 * R;
   const rB = 0.845 * R;
   const rLab = 0.925 * R;
@@ -728,7 +748,7 @@ export function computeFocus(model: Model, f: Filters, c: ONode, R: number): Foc
           x.i - y.i,
       );
     ord.forEach((n, i) =>
-      pos.set(n, { th: s.a0 + (s.span * (i + 0.5)) / ord.length, rho: r1 + (stagger && i % 2 ? 18 : 0), ring: 1 }),
+      pos.set(n, { th: s.a0 + (s.span * (i + 0.5)) / ord.length, rho: r1 + (compact ? (i % tracks) * trackStep : stagger && i % 2 ? 18 : 0), ring: 1 }),
     );
     const pad = Math.min(0.02, s.span * 0.08);
     const q0 = rA * rA;

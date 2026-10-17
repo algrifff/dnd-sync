@@ -133,6 +133,31 @@ describe('buildModel', () => {
   });
 });
 
+describe('link counting', () => {
+  const trio = [node({ id: 'a.md' }), node({ id: 'b.md' }), node({ id: 'c.md' })];
+
+  test('should count two notes that link to each other as one link', () => {
+    const m = buildModel(payload(trio, [['a.md', 'b.md'], ['b.md', 'a.md'], ['b.md', 'c.md']]));
+    expect(m.links).toHaveLength(2);
+  });
+
+  test('should count a pair once however many times it is listed', () => {
+    const m = buildModel(payload(trio, [['a.md', 'b.md'], ['a.md', 'b.md'], ['b.md', 'a.md']]));
+    expect(m.links).toHaveLength(1);
+  });
+
+  test('should keep the first direction seen and the index flag of the pair', () => {
+    const nodes = [node({ id: 'a.md' }), node({ id: 'idx/index.md', isIndex: true })];
+    const m = buildModel(payload(nodes, [['idx/index.md', 'a.md'], ['a.md', 'idx/index.md']]));
+    expect(m.links.map((l) => [l.s.id, l.t.id, l.index])).toEqual([['idx/index.md', 'a.md', true]]);
+  });
+
+  test('should give a note a degree of distinct linked notes, not directed edges', () => {
+    const m = buildModel(payload(trio, [['a.md', 'b.md'], ['b.md', 'a.md'], ['c.md', 'b.md']]));
+    expect([id(m, 'a.md').degree, id(m, 'b.md').degree, id(m, 'c.md').degree]).toEqual([1, 2, 1]);
+  });
+});
+
 describe('session episode order', () => {
   test('should read the episode number from a title or a path', () => {
     expect([episodeOf('Episode 12', 'x.md'), episodeOf('Untitled', 'Log/session 03.md'), episodeOf('Untitled', 'x.md')]).toEqual([12, 3, null]);
@@ -365,6 +390,44 @@ describe('focus layout', () => {
     const F = computeFocus(m, filtersFor(m), m.nodes[0]!, 400);
     expect([F.N1.length, F.N2.length, F.sectors.length]).toEqual([0, 0, 0]);
     expect(focusTargets(F).get(F.c)).toMatchObject({ x: 0, y: 0 });
+  });
+});
+
+describe('compact focus (sidebar)', () => {
+  const hub = node({ id: 'Hub.md', kind: 'character' });
+  const spokes = Array.from({ length: 70 }, (_, i) => node({ id: `Spoke ${String(i).padStart(2, '0')}.md`, kind: i % 2 ? 'person' : 'location' }));
+  const far = node({ id: 'Far.md' });
+  const edges: Array<[string, string]> = [...spokes.map((n): [string, string] => ['Hub.md', n.id]), [spokes[0]!.id, 'Far.md']];
+  const m = buildModel(payload([hub, ...spokes, far], edges));
+  const f = filtersFor(m);
+
+  test('should show direct links only, with no second ring', () => {
+    const F = computeFocus(m, f, id(m, 'Hub.md'), 120, { compact: true });
+    expect(F.N1).toHaveLength(70);
+    expect([F.N2.length, F.overflow]).toEqual([0, 0]);
+  });
+
+  test('should keep the default layout unchanged without the option', () => {
+    const F = computeFocus(m, f, id(m, 'Hub.md'), 120);
+    expect(F.N2.map((n) => n.id)).toEqual(['Far.md']);
+  });
+
+  test('should place every satellite inside the disc, spread over several tracks', () => {
+    const F = computeFocus(m, f, id(m, 'Hub.md'), 120, { compact: true });
+    const rhos = [...F.pos.values()].map((p) => p.rho);
+    expect(Math.max(...rhos)).toBeLessThanOrEqual(0.93 * 120 + 1e-9);
+    expect(new Set(rhos.map((r) => Math.round(r))).size).toBeGreaterThan(1);
+  });
+
+  test('should keep one sector per kind', () => {
+    const F = computeFocus(m, f, id(m, 'Hub.md'), 120, { compact: true });
+    expect(F.sectors.map((s) => s.kind).sort()).toEqual(['location', 'person']);
+  });
+
+  test('should keep a note with no links centred with nothing around it', () => {
+    const lone = buildModel(payload([node({ id: 'Lone.md' })]));
+    const F = computeFocus(lone, filtersFor(lone), id(lone, 'Lone.md'), 120, { compact: true });
+    expect([F.N1.length, F.sectors.length]).toEqual([0, 0]);
   });
 });
 

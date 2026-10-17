@@ -5,7 +5,7 @@
 import type { ReactElement } from 'react';
 import Link from 'next/link';
 import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
-import { MiniGraph } from './MiniGraph';
+import { MiniGraph } from './MiniGraphLoader';
 import { BacklinksPanel } from './BacklinksPanel';
 import { OutgoingLinksPanel } from './OutgoingLinksPanel';
 
@@ -76,9 +76,8 @@ export function NoteSidebar({
       <Section title="Graph">
         <MiniGraph path={path} />
         <p className="mt-2 text-xs text-[var(--ink-soft)]">
-          Full graph →{' '}
-          <Link href="/graph" className="underline">
-            /graph
+          <Link href={'/graph?focus=' + encodeURIComponent(path)} className="underline">
+            Open in graph →
           </Link>
         </p>
       </Section>
