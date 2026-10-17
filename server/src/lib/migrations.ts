@@ -1081,6 +1081,23 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX note_relations_to ON note_relations(group_id, to_path);
     `,
   },
+  {
+    version: 53,
+    description: 'drop legacy text_docs / binary_files tables (no group_id, nothing reads them)',
+    sql: `
+      -- The v1 plugin-sync tables predate worlds and have no group_id.
+      -- Their routes (/api/files, /api/inventory, /api/search) are gone;
+      -- notes, notes_fts and assets replaced them. This deletes whatever
+      -- rows they still hold. Dropping text_docs drops its triggers too;
+      -- they are named here so the intent survives a reader.
+      DROP TRIGGER IF EXISTS text_docs_ai;
+      DROP TRIGGER IF EXISTS text_docs_au;
+      DROP TRIGGER IF EXISTS text_docs_ad;
+      DROP TABLE IF EXISTS text_docs_fts;
+      DROP TABLE IF EXISTS text_docs;
+      DROP TABLE IF EXISTS binary_files;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

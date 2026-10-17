@@ -67,3 +67,17 @@ describe('migration v47 — storage-stats indexes + redundant index cleanup', ()
     db.query('DELETE FROM notes WHERE id IN (?, ?)').run('n1', 'n2');
   });
 });
+
+describe('migration v53 — legacy text_docs / binary_files are gone', () => {
+  it('should leave no table, FTS index or trigger from the pre-world schema', () => {
+    const leftovers = getDb()
+      .query<{ name: string }, []>(
+        `SELECT name FROM sqlite_master
+          WHERE name LIKE 'text\\_docs%' ESCAPE '\\' OR name LIKE 'binary\\_files%' ESCAPE '\\'`,
+      )
+      .all()
+      .map((r) => r.name);
+
+    expect(leftovers).toEqual([]);
+  });
+});
