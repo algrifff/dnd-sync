@@ -8,6 +8,12 @@ set -eu
 DB=/data/compendium.db
 CONFIG=/app/server/litestream.yml
 
+if [ ! -w /data ]; then
+  echo "[entrypoint] /data is not writable by $(id -un) (uid $(id -u))." >&2
+  echo "[entrypoint] Give the volume to that uid, or on Railway set RAILWAY_RUN_UID=0." >&2
+  exit 1
+fi
+
 if [ -z "${LITESTREAM_REPLICA_URL:-}" ]; then
   echo "[entrypoint] backups: off (LITESTREAM_REPLICA_URL not set)"
   exec bun run server.ts
