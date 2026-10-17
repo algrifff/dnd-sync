@@ -182,6 +182,7 @@ function OrreryStage({ model, worldName, campNames, initialFocus }: Props & { mo
         <OrreryChrome engine={engine} model={model} worldName={worldName} campNames={campNames} palette={palette} onOpen={open} />
       ) : null}
       {model.nodes.length === 0 ? <div className={s.empty}>No notes in this world yet.<br />Write one and it will appear here.</div> : null}
+      {/* Inline position is the fallback for hovers with no anchor (e.g. a sector); the layout effect above places anchored ones. */}
       {tip && hover ? (
         <div ref={tipRef} className={s.tip} style={{ left: Math.max(8, Math.min(hover.x + 14, box.w - 256)), top: Math.max(8, Math.min(hover.y + 14, box.h - 96)) }}>
           {tip}

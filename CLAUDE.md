@@ -237,7 +237,7 @@ whole flow over HTTP) and the MCP Inspector:
 | `server/server.ts` | Entry point — Next.js + WebSocket on the same port |
 | `server/next.config.ts` | `serverExternalPackages` for Yjs/Tiptap/graph libs — touch carefully |
 | `server/src/lib/graph.ts` | Visibility-gated graph payload for `/api/graph`: nodes (kind, campaign, isIndex), links, and Relationships whose both ends are visible |
-| `server/src/app/graph/orrery/layout.ts` | The Orrery at `/graph`: pure, tested wheel and Satellites layouts. `engine.ts` draws them on canvas, `palette.ts` resolves CSS tokens for it. The old Sigma view lives on at `/graph/classic` for Weave, Groups and live cursors |
+| `server/src/app/graph/orrery/layout.ts` | The Orrery at `/graph`: pure, tested wheel and Satellites layouts. `engine.ts` draws them on canvas, `palette.ts` resolves CSS tokens for it, `anim.ts` holds the tested hover timing and Bezier-split math, and `mini.ts` draws the note sidebar's compact view. The old Sigma view lives on at `/graph/classic` for Weave, Groups and live cursors |
 | `server/src/app/notes/sheet-header/SheetHeader.tsx` | Per-kind header dispatcher (character / person / creature / item / location) |
 | `server/src/app/notes/sheet-header/usePatchSheet.ts` | Debounced shallow-merge PATCH hook + Hocuspocus awareness mirror |
 | `server/src/app/notes/sheet-header/util.ts` | `normalizeKind`, `titleSizeClass`, ability/HP/AC readers, rarity/disposition palette |

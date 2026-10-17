@@ -558,20 +558,27 @@ export function spreadAngles(angles: readonly number[], minGap: number): number[
   const norm = (a: number): number => ((a % TAU) + TAU) % TAU;
   const order = angles.map((_, i) => i).sort((i, j) => norm(angles[i]!) - norm(angles[j]!) || i - j);
   const th = order.map((i) => norm(angles[i]!));
+  // n gaps of minGap must fit round the circle, or the relaxation never settles.
+  const gapCap = Math.min(minGap, (TAU / n) * 0.98);
+  let settled = false;
   for (let it = 0; it < 80; it++) {
     let moved = false;
     for (let k = 0; k < n; k++) {
       const j = (k + 1) % n;
       const gap = j === 0 ? th[j]! + TAU - th[k]! : th[j]! - th[k]!;
-      if (gap < minGap - 1e-9) {
-        const d = (minGap - gap) / 2;
+      if (gap < gapCap - 1e-9) {
+        const d = (gapCap - gap) / 2;
         th[k] = th[k]! - d;
         th[j] = th[j]! + d;
         moved = true;
       }
     }
-    if (!moved) break;
+    if (!moved) {
+      settled = true;
+      break;
+    }
   }
+  if (!settled) return angles.slice();
   const out = new Array<number>(n);
   order.forEach((i, k) => {
     // Keep each angle on the same turn as its input so a hub never jumps round the circle.

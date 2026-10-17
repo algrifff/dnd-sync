@@ -480,4 +480,12 @@ describe('spreadAngles', () => {
     const out = spreadAngles([3, 0, 0.05], gap);
     expect(out[1]!).toBeLessThan(out[2]!);
   });
+  test('never packs hubs tighter than the input when the gap cannot fit round the circle', () => {
+    // 7 hubs, as for 7 campaigns on a small screen: 7 × 1.13 rad > TAU.
+    const even = Array.from({ length: 7 }, (_, i) => (i * TAU) / 7);
+    const out = spreadAngles(even, 1.13);
+    expect(sep(out)).toBeGreaterThanOrEqual(sep(even) - 1e-6);
+    const crowded = [0, 0.05, 0.1, 2, 2.05, 4, 4.05];
+    expect(sep(spreadAngles(crowded, 1.13))).toBeGreaterThan(sep(crowded));
+  });
 });

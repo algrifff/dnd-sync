@@ -63,12 +63,14 @@ export function createMini(canvas: HTMLCanvasElement, model: Model, centre: ONod
     for (const n of hp.keys()) m = Math.max(m, hs(n));
     return m;
   };
-  /** How lit a node is: itself hovered, or next to a hovered node. */
-  const lit = (n: ONode): number => {
-    let m = hs(n);
+  /** How strongly a neighbour of `n` is hovered. */
+  const neighbourH = (n: ONode): number => {
+    let m = 0;
     for (const o of hp.keys()) if (o !== n && (o.adj.has(n) || n.adj.has(o))) m = Math.max(m, hs(o));
     return m;
   };
+  /** How lit a node is: itself hovered, or next to a hovered node. */
+  const lit = (n: ONode): number => Math.max(hs(n), neighbourH(n));
   function step(now: number): void {
     raf = 0;
     const dt = lastT < 0 ? 16 : Math.min(now - lastT, 50);
@@ -178,9 +180,8 @@ export function createMini(canvas: HTMLCanvasElement, model: Model, centre: ONod
     for (const n of nodes) {
       const p0 = at(n);
       const self = hs(n);
-      let nbH = 0;
-      for (const o of hp.keys()) if (o !== n && (o.adj.has(n) || n.adj.has(o))) nbH = Math.max(nbH, hs(o));
-      const p = { x: p0.x, y: p0.y, r: p0.r * (1 + (HOVER_DOT_GROW - 1) * self) * (1 + (NEIGHBOUR_DOT_GROW - 1) * nbH) };
+      const nbH = neighbourH(n);
+      const p ={ x: p0.x, y: p0.y, r: p0.r * (1 + (HOVER_DOT_GROW - 1) * self) * (1 + (NEIGHBOUR_DOT_GROW - 1) * nbH) };
       ctx.globalAlpha = n === centre ? 1 : 1 - 0.55 * Math.max(0, H - lit(n));
       if (n.isIndex) {
         ctx.fillStyle = C.vellum;
