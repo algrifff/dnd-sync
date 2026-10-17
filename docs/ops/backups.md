@@ -20,6 +20,7 @@ Set on the service (names only):
 - `LITESTREAM_S3_ENDPOINT` (`https://<account-id>.r2.cloudflarestorage.com`)
 - `LITESTREAM_ACCESS_KEY_ID`
 - `LITESTREAM_SECRET_ACCESS_KEY`
+- `RAILWAY_RUN_UID=0` (required with the non-root image: the container starts as root, takes ownership of the volume, then drops to `bun`)
 
 ## Create the R2 bucket and token
 

@@ -335,6 +335,8 @@ Railway: `railway.toml` at repo root, Dockerfile at `server/Dockerfile`. Build c
 
 Required env vars: `ADMIN_TOKEN` (the `/admin` super-admin login is disabled without it), `DATA_DIR=/data` + a volume mounted at `/data`. `PLAYER_TOKEN` is no longer read by any auth path; setting it is harmless.
 
+Railway needs `RAILWAY_RUN_UID=0` so the container starts as root, takes ownership of the `/data` volume, and drops to the unprivileged `bun` user (`server/docker-entrypoint.sh`).
+
 Optional: `OPENAI_API_KEY` (enables Smart Import and PDF character import), `PUBLIC_APP_URL` (the public `https://` origin; set it on Railway so OAuth metadata and the MCP `resource` do not depend on forwarded headers).
 
 SQLite backups (Litestream to Cloudflare R2) are opt-in: set `LITESTREAM_REPLICA_URL`, `LITESTREAM_S3_ENDPOINT`, `LITESTREAM_ACCESS_KEY_ID` and `LITESTREAM_SECRET_ACCESS_KEY`. With them unset the container boots unchanged (`server/docker-entrypoint.sh`). Assets are not backed up. Setup and restore drill: `docs/ops/backups.md`.

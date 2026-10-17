@@ -8,6 +8,20 @@ set -eu
 DB=/data/compendium.db
 CONFIG=/app/server/litestream.yml
 
+# Railway mounts the volume root-owned. Started as root (RAILWAY_RUN_UID=0),
+# hand the volume to bun (only entries not already bun's, so restarts are
+# cheap) and re-exec this script as bun. Litestream then runs as bun too.
+if [ "$(id -u)" = 0 ]; then
+  find /data -xdev ! -user bun -exec chown bun:bun {} +
+  exec setpriv --reuid=bun --regid=bun --init-groups -- "$0" "$@"
+fi
+
+if [ ! -w /data ]; then
+  echo "[entrypoint] /data is not writable by $(id -un) (uid $(id -u))." >&2
+  echo "[entrypoint] Give the volume to that uid, or on Railway set RAILWAY_RUN_UID=0." >&2
+  exit 1
+fi
+
 if [ -z "${LITESTREAM_REPLICA_URL:-}" ]; then
   echo "[entrypoint] backups: off (LITESTREAM_REPLICA_URL not set)"
   exec bun run server.ts

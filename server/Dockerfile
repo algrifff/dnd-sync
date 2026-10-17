@@ -37,5 +37,11 @@ RUN bun run build
 COPY --from=litestream/litestream:0.5.17 /usr/local/bin/litestream /usr/local/bin/litestream
 RUN chmod +x /app/server/docker-entrypoint.sh
 
+# Run as the image's unprivileged `bun` user. It owns /data (DB, assets) and
+# .next (Next's runtime cache). A volume mounted over /data keeps the volume's
+# own owner; docker-entrypoint.sh stops with a clear error if bun can't write it.
+RUN chown -R bun:bun /data /app/server/.next
+USER bun
+
 EXPOSE 3000
 CMD ["/app/server/docker-entrypoint.sh"]
