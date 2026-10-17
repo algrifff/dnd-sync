@@ -141,7 +141,7 @@ Vercel's open-source, **filesystem-first framework for durable AI agents** — "
 **GO** for chat via an out-of-process sidecar. **NO-GO** on `withEve()` in-process integration. **NO-GO** on adopting Eve's durability layer for the import pipeline *in the first iteration* (attractive later).
 
 Two hard blockers, both real:
-1. **Node version floor.** Eve needs **Node 24+**; you're pinned to **Node 22** (and your `better-sqlite3` ABI is rebuilt against 22 in the Dockerfile). Running Eve in-process forces a runtime bump on the whole app. Running it out-of-process lets the Eve service use Node 24 while the main app stays on 22 — *this alone argues for the sidecar.*
+1. **Node version floor.** Eve needs **Node 24+**; you're pinned to **Node 22** (this audit predates the move to Bun in production, so read "Node 22" below as the old runtime). Running Eve in-process forces a runtime bump on the whole app. Running it out-of-process lets the Eve service use Node 24 while the main app stays on 22 — *this alone argues for the sidecar.*
 2. **`withEve()` assumes it owns the Next.js build.** Your app runs a hand-rolled `node:http` server (`server.ts`) that multiplexes Next + the Hocuspocus `ws` upgrade on one port. The docs are explicitly silent on custom servers; folding `withEve()` in is unsupported territory. The documented escape hatch is the **remote-agent HTTP pattern** — which fits you.
 
 There's also a sharp self-hosting trap: the reverse proxy must forward **both** `/eve/` **and** `/.well-known/workflow/`. Forward only `/eve/` and sessions *start* but silently stall forever (workflow callbacks never arrive). This is the #1 cited self-hosting gotcha.
@@ -165,7 +165,7 @@ There's also a sharp self-hosting trap: the reverse proxy must forward **both** 
  │  Exposes BOTH /eve/v1/* AND /.well-known/workflow/*           │
  └───────────────────────────────────────────────────────────────┘
 ```
-The crux dependency: Eve tools run **in the Eve process** with full `process.env`, and your tools call `getDb()` directly — so the Eve service must reach the same SQLite file (shared Railway volume) and have `better-sqlite3` built for Node 24.
+The crux dependency: Eve tools run **in the Eve process** with full `process.env`, and your tools call `getDb()` directly — so the Eve service must reach the same SQLite file (shared Railway volume) and have a SQLite driver for its own runtime (the app now uses `bun:sqlite`).
 
 ### Scope: what actually moves
 The AI SDK is used in exactly **2 server routes** (`/api/chat`, `/api/sessions/end`) + **2 client components** (`ChatPane`, `HomeChat`) + 1 helper (`chat-tree-refresh.ts`). **The entire import pipeline is NOT on the AI SDK** — it's hand-rolled `generateStructured()` fetches to OpenAI. So an AI-SDK→Eve migration touches only the first group; the import pipeline needs zero migration work (and is a separate, later, opt-in project for Eve's durable workflows).
@@ -200,7 +200,7 @@ Today authz is two mechanisms: omission from `getToolsForRole()`'s map, plus inl
 - **Deferred (own project):** port the import pipeline to Eve durable workflows + HITL — this is the genuinely compelling Eve win (it directly fixes H11), but it's separate from the chat migration.
 
 ### Open questions to resolve before Phase 2
-Per-session dynamic system-prompt injection hook · binding server-side auth context to `ctx.session` · step-budget configurability · Workflow SDK "world" on a shared SQLite volume (does local-disk world tolerate a network volume, or do you need Postgres just for Eve durability?) · `getDb()` + `better-sqlite3` Node-24 reachability in-process · whether `useEveAgent()` can render incremental tool-call UI equivalent to today's · keeping PostHog telemetry without an OTel→PostHog bridge.
+Per-session dynamic system-prompt injection hook · binding server-side auth context to `ctx.session` · step-budget configurability · Workflow SDK "world" on a shared SQLite volume (does local-disk world tolerate a network volume, or do you need Postgres just for Eve durability?) · `getDb()` (`bun:sqlite`) reachability from a Node-24 process in-process · whether `useEveAgent()` can render incremental tool-call UI equivalent to today's · keeping PostHog telemetry without an OTel→PostHog bridge.
 
 ### What NOT to migrate
 The import pipeline (not on the AI SDK — migrating buys nothing now) · `/api/sessions/end` initially (non-streaming, low value early) · `orchestrator.ts` skill detection + `personalities.ts`/`pricing.ts`/`paths.ts` (no SDK coupling — *reuse*, don't migrate) · the custom `server.ts` (keep on Node 22; Eve lives out-of-process) · AI Gateway (use direct `@ai-sdk/openai`, no Vercel dependency).

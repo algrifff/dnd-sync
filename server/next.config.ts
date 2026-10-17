@@ -51,7 +51,7 @@ const config: NextConfig = {
   //
   // `bun:sqlite` is a Bun runtime built-in with no Node equivalent.
   // Keeping it external stops webpack from trying to resolve it at
-  // analysis time under Node.
+  // analysis time.
   serverExternalPackages: [
     'bun:sqlite',
 

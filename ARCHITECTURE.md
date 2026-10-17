@@ -64,16 +64,7 @@ Bun workspaces at the repo root.
 
 ## Runtime split (important)
 
-`server/src/lib/db.ts` switches its SQLite backend at runtime:
-
-| Environment              | SQLite backend  | Why                                            |
-|--------------------------|-----------------|------------------------------------------------|
-| Bun (dev + tests)        | `bun:sqlite`    | Built in, no native compile step               |
-| Node 22 (production)     | `better-sqlite3`| V8-ABI-specific `.node` binary, fast + stable  |
-
-The Dockerfile is multi-stage so it can install everything with Bun and then **rebuild `better-sqlite3` against Node 22's ABI** before running. Don't skip that stage.
-
-Both backends expose the same `Database` interface, so call sites are runtime-agnostic.
+`server/src/lib/db.ts` uses `bun:sqlite` in every environment (dev, tests and production all run on Bun), wrapped in the small `Database` interface that every call site uses. There is no native SQLite module to compile; the Dockerfile is a single stage on `oven/bun`.
 
 ## Data model
 
@@ -149,7 +140,7 @@ upload .zip → import-parse → import-analyse → user reviews plan → import
 | Runtime (dev / tests)   | Bun 1.1                                            |
 | Runtime (production)    | Node.js 22                                         |
 | Language                | TypeScript 5.6, strict + `noUncheckedIndexedAccess`|
-| Database                | SQLite (WAL): `bun:sqlite` or `better-sqlite3`     |
+| Database                | SQLite (WAL): `bun:sqlite`                         |
 | Validation              | Zod (all API boundaries)                            |
 | Real-time editing       | Hocuspocus + Yjs + Tiptap + ProseMirror            |
 | Knowledge graph         | Sigma.js (WebGL) + Graphology                       |
@@ -163,10 +154,7 @@ upload .zip → import-parse → import-analyse → user reviews plan → import
 
 Railway: `railway.toml` at repo root → uses `server/Dockerfile`. Build context is the repo root.
 
-The Dockerfile is a three-stage build:
-1. **deps** (`oven/bun:1.1`) — install workspace deps, compile native modules.
-2. **build** (`node:22-slim`) — Next.js production build, **rebuild `better-sqlite3` against Node 22**.
-3. **runtime** (`node:22-slim`) — minimal image, runs `server.ts` via `tsx`.
+The Dockerfile is a single stage on `oven/bun:1.4.3`: install workspace deps, run the Next.js production build, then start `server.ts` with `bun run`. `poppler-utils` is installed for PDF import.
 
 Required env vars: `ADMIN_TOKEN`, `DATA_DIR=/data` (with a Railway volume mounted at `/data`).
 Optional: `OPENAI_API_KEY` (enables Smart Import and PDF character import).

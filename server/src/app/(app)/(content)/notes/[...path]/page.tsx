@@ -52,7 +52,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
 
   const rightPanelOpen = jar.get('compendium_rightpanel_open')?.value !== 'false';
 
-  // Fan out the independent reads. bun:sqlite / better-sqlite3 are
+  // Fan out the independent reads. bun:sqlite is
   // synchronous, but Promise.all still lets the engine interleave
   // work (await microtask yields) and keeps us from blocking on a
   // slow query before a fast one can start. Tree + kindMap are owned

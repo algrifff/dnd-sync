@@ -1,7 +1,6 @@
 // isUniqueConstraintError() must recognise a real UNIQUE / PRIMARY KEY
-// violation from the runtime's actual DB adapter (bun:sqlite under
-// `bun test`; better-sqlite3 in production) so route handlers can
-// translate a lost create-race into a clean 409 instead of a raw
+// violation from bun:sqlite (the only driver, in dev, tests and production)
+// so route handlers can translate a lost create-race into a clean 409 instead of a raw
 // driver error reaching the client as an unhandled 500.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
