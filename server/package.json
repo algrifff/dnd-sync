@@ -41,7 +41,6 @@
     "@types/adm-zip": "^0.5.8",
     "adm-zip": "^0.5.17",
     "ai": "^6.0.168",
-    "better-sqlite3": "^12.9.0",
     "graphology": "^0.26.0",
     "graphology-layout-forceatlas2": "^0.10.1",
     "lib0": "^0.2.117",
@@ -70,13 +69,11 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/three": "^0.184.0",
     "@types/ws": "^8.5.13",
     "postcss": "^8.4.49",
-    "tailwindcss": "^4.0.0",
-    "tsx": "^4.21.0"
+    "tailwindcss": "^4.0.0"
   }
 }

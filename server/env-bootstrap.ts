@@ -1,7 +1,7 @@
 // Custom `server.ts` entrypoints do not automatically load `.env*` the way
 // `next dev` / `next start` do. Prime `process.env` once at process startup.
 //
-// @next/env is CJS (module.exports = IIFE), so Node 22 ESM can't resolve its
+// @next/env is CJS (module.exports = IIFE), so a plain ESM import cannot resolve its
 // named exports via static analysis. createRequire sidesteps that gap.
 import { createRequire } from 'module';
 import type * as NextEnv from '@next/env';

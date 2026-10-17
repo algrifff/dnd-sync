@@ -52,10 +52,10 @@ globally (`npm i -g bun@1.4.3`) — don't rely on `npx bun`, which resolves the 
 
 ## Runtime split — critical
 
-- **Dev / tests**: Bun → uses `bun:sqlite` (built-in, no native modules)
-- **Production**: Node 22 → uses `better-sqlite3` (V8 ABI-specific .node binary)
-- `server/src/lib/db.ts` switches at runtime: `typeof Bun !== "undefined"`
-- The Dockerfile rebuilds `better-sqlite3` against Node 22's ABI in a separate stage — don't skip this step when changing the Dockerfile
+- **Bun everywhere**: dev, tests and production all run on Bun and use `bun:sqlite` (built-in, no native SQLite module to compile)
+- `server/src/lib/db.ts` loads `bun:sqlite` through `createRequire` (a static import breaks `next build`, whose page-data workers run under Node) and wraps it in the shared `Database` interface; `next.config.ts` keeps `bun:sqlite` external too
+- The Dockerfile is a single stage on `oven/bun:1.4.3` (keep it in step with `mise.toml`); it installs `poppler-utils` for PDF import, runs `next build`, and starts `bun run server.ts`
+- Anything that must run under Node (there is nothing today) cannot import `lib/db.ts`
 
 ## Data model (51 migrations, versions 1–53 — append only, never edit existing)
 
@@ -214,7 +214,7 @@ whole flow over HTTP) and the MCP Inspector:
 
 | File | What it does |
 |------|-------------|
-| `server/src/lib/db.ts` | SQLite singleton, dual-runtime adapter |
+| `server/src/lib/db.ts` | SQLite singleton, `bun:sqlite` behind the `Database` interface |
 | `server/src/lib/migrations.ts` | Append-only migration array — **never edit existing entries** |
 | `server/src/lib/superadmin.ts` | `ADMIN_TOKEN` check for the `/admin/*` `__sa` cookie |
 | `server/src/lib/session.ts` | Session CRUD, CSRF, expiry cleanup |
