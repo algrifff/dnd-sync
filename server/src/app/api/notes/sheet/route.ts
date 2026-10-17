@@ -22,7 +22,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
-import { canWriteAllSheetFields, loadNote } from '@/lib/notes';
+import { canWriteAllSheetFields, loadVisibleNote, visibilityFor } from '@/lib/notes';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { validateSheet } from '@/lib/validateSheet';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
@@ -57,7 +57,9 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  const note = loadNote(session.currentGroupId, body.path);
+  // A note hidden from the caller 404s like a missing one, before any
+  // check that would reveal its shape.
+  const note = loadVisibleNote(session.currentGroupId, body.path, visibilityFor(session.role));
   if (!note) return json({ error: 'not_found' }, 404);
 
   let fm: Record<string, unknown>;
