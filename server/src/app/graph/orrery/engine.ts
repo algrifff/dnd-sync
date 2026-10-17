@@ -874,7 +874,9 @@ export function createEngine(
     ptrs.set(ev.pointerId, p);
     canvas.setPointerCapture(ev.pointerId);
     Z = null;
-    if (ptrs.size === 1) drag = { x: p.x, y: p.y, tx: view.t.x, ty: view.t.y, moved: false };
+    // Touch fires no click after a pan or pinch, so a stale flag would eat the next tap.
+    if (ptrs.size === 1) suppressClick = false;
+    if (ptrs.size === 1) drag ={ x: p.x, y: p.y, tx: view.t.x, ty: view.t.y, moved: false };
     else if (ptrs.size === 2) {
       const [a, b] = [...ptrs.values()];
       pinch = { d: Math.hypot(a!.x - b!.x, a!.y - b!.y) || 1, k: view.t.k };
@@ -973,6 +975,8 @@ export function createEngine(
       kick();
     },
     resize(w, h, dpr, insetL, insetR) {
+      const sized = view.w > 0;
+      const { cx: oldCx, cy: oldCy } = view;
       view.w = w;
       view.h = h;
       view.dpr = dpr;
@@ -984,7 +988,8 @@ export function createEngine(
       view.cy = h / 2 + 10;
       view.R = Math.max(170, Math.min((w - insetL - insetR) / 2 - 10, h / 2 - 40));
       Z = null;
-      view.t = baseT();
+      // Keep the user's zoom and pan across resizes, shifted with the centre.
+      view.t = sized ? { x: view.t.x + view.cx - oldCx, y: view.t.y + view.cy - oldCy, k: view.t.k } : baseT();
       if (scene) {
         go(scene.type === 'wheel' ? computeWheel(model, filters(), view.R, S.drill) : computeFocus(model, filters(), S.focus!, view.R), 0);
         emit();
