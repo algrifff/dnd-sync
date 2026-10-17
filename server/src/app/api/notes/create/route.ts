@@ -15,7 +15,7 @@ import { logAudit } from '@/lib/audit';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { deriveFolderIndex, parentFolderUnderCampaign } from '@/lib/campaign-index';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
-import { isAllowedPath } from '@/lib/notes';
+import { hiddenNotesSql, isAllowedPath, visibilityFor } from '@/lib/notes';
 import { GM_MODE_COOKIE, isGmModeOn } from '@/lib/gm-mode';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
@@ -74,15 +74,15 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (folder.split('/').some((p) => p === '..' || p === '.')) {
     return json({ error: 'invalid_folder' }, 400);
   }
-  const cleanName = parsed.name.trim().replace(/\.(md|canvas)$/i, '');
-  if (!cleanName) return json({ error: 'invalid_name' }, 400);
-  const path = (folder ? folder + '/' : '') + cleanName + '.md';
+  const baseName = parsed.name.trim().replace(/\.(md|canvas)$/i, '');
+  if (!baseName) return json({ error: 'invalid_name' }, 400);
+  const basePath = (folder ? folder + '/' : '') + baseName + '.md';
 
   // Enforce top-level allow-list + no-hidden-segment invariants.
   // Checked against the folder + basename (without the .md suffix) so
   // `.secret.md` and `Random/thing.md` both fail here rather than
   // sneaking in via the note endpoint.
-  const allowed = isAllowedPath(folder ? folder + '/' + cleanName : cleanName);
+  const allowed = isAllowedPath(folder ? folder + '/' + baseName : baseName);
   if (!allowed.ok) {
     const code = allowed.reason === 'names cannot start with a dot' ? 'invalid_name' : 'forbidden';
     const status = code === 'invalid_name' ? 400 : 403;
@@ -91,58 +91,71 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const db = getDb();
 
-  // Seed frontmatter from the template whenever a kind is specified.
-  // Plain pages still get '{}' so the JSON is valid downstream.
-  const frontmatter = buildFrontmatter(requestedKind, cleanName, session.username);
-
   // Title lives on a dedicated Y.Text so the TitleEditor can subscribe
-  // to it independently. Body starts as an empty paragraph — the
-  // slash menu (Phase 4 polish) and keyboard shortcuts give users
-  // everything they need to build the page.
+  // to it independently. Body starts as an empty paragraph.
   const emptyDoc = {
     type: 'doc',
     content: [{ type: 'paragraph' }],
   };
   const schema = getPmSchema();
-  const ydoc = prosemirrorJSONToYDoc(schema, emptyDoc, 'default');
-  ydoc.getText('title').insert(0, cleanName);
-  const state = Y.encodeStateAsUpdate(ydoc);
-
+  const vis = visibilityFor(session.role);
   const id = randomUUID();
   const now = Date.now();
+
   // No pre-check + separate INSERT — that leaves a race window where
   // two concurrent requests for the same path both pass a SELECT and
   // the loser's INSERT then throws a raw UNIQUE-constraint error. Try
-  // the INSERT directly and translate a lost race into the same 409
-  // the old pre-check returned.
-  try {
-    db.query(
-      `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
-                          content_md, yjs_state, frontmatter_json, byte_size,
-                          updated_at, updated_by, created_at, created_by, gm_only)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      id,
-      session.currentGroupId,
-      path,
-      cleanName,
-      JSON.stringify(emptyDoc),
-      '',
-      '',
-      state,
-      JSON.stringify(frontmatter),
-      0,
-      now,
-      session.userId,
-      now,
-      session.userId,
-      gmOnly ? 1 : 0,
-    );
-  } catch (err) {
-    if (isUniqueConstraintError(err)) {
-      return json({ error: 'exists', path }, 409);
+  // the INSERT directly and translate the conflict.
+  //
+  // A path held by a note the caller can't see must not answer 409
+  // (that would confirm the hidden note exists) and must not touch it,
+  // so that case takes the next free " (2)", " (3)" ... name instead,
+  // like a duplicate does. A path held by a visible note is still 409.
+  let cleanName = baseName;
+  let path = basePath;
+  let frontmatter: Record<string, unknown> = {};
+  for (let n = 2; ; n++) {
+    // Seed frontmatter from the template whenever a kind is specified.
+    // Plain pages still get '{}' so the JSON is valid downstream.
+    frontmatter = buildFrontmatter(requestedKind, cleanName, session.username);
+    const ydoc = prosemirrorJSONToYDoc(schema, emptyDoc, 'default');
+    ydoc.getText('title').insert(0, cleanName);
+    const state = Y.encodeStateAsUpdate(ydoc);
+    try {
+      db.query(
+        `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
+                            content_md, yjs_state, frontmatter_json, byte_size,
+                            updated_at, updated_by, created_at, created_by, gm_only)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        session.currentGroupId,
+        path,
+        cleanName,
+        JSON.stringify(emptyDoc),
+        '',
+        '',
+        state,
+        JSON.stringify(frontmatter),
+        0,
+        now,
+        session.userId,
+        now,
+        session.userId,
+        gmOnly ? 1 : 0,
+      );
+      break;
+    } catch (err) {
+      if (!isUniqueConstraintError(err)) throw err;
+      const visible = db
+        .query<{ n: number }, [string, string]>(
+          `SELECT COUNT(*) AS n FROM notes n WHERE n.group_id = ? AND n.path = ?${hiddenNotesSql('n', vis)}`,
+        )
+        .get(session.currentGroupId, path);
+      if ((visible?.n ?? 0) > 0 || n > 50) return json({ error: 'exists', path }, 409);
+      cleanName = `${baseName} (${n})`;
+      path = (folder ? folder + '/' : '') + cleanName + '.md';
     }
-    throw err;
   }
 
   // Run the derive pipeline so the characters / campaigns index
