@@ -27,7 +27,7 @@
 // Bundle-size note: contrary to the initial assumption that this would
 // only matter for SSR (GraphCanvas renders unconditionally with nothing
 // else on the page, so the browser still has to fetch its chunk right
-// after mount either way), it also measurably shrinks /graph's reported
+// after mount either way), it also measurably shrinks /graph/classic's reported
 // First Load JS: 259 kB (static import) -> 166 kB (this dynamic,
 // ssr:false import), per `next build`'s route table. Next excludes a
 // ssr:false dynamic chunk from "First Load JS" because it's fetched via
@@ -41,7 +41,7 @@
 import nextDynamic from 'next/dynamic';
 
 export const GraphCanvas = nextDynamic(
-  () => import('../../../graph/GraphCanvas').then((m) => m.GraphCanvas),
+  () => import('../../../../graph/GraphCanvas').then((m) => m.GraphCanvas),
   {
     ssr: false,
     loading: () => (

@@ -1,0 +1,1180 @@
+// The Orrery's canvas renderer and its interaction state, with no React
+// in it. OrreryCanvas.tsx owns the chrome (panels, search, card) and
+// reads this through `subscribe` / `getSnapshot`; every user action goes
+// back through the methods returned here.
+//
+// Nothing simulates: layouts come from ./layout.ts as plain data and a
+// transition is an interpolation between two of them, so the picture is
+// always the same for the same data and filters.
+
+import type { RelationType } from '@compendium/shared';
+import {
+  aggregateLinks,
+  angDelta,
+  campaignLabel,
+  clamp,
+  computeFocus,
+  computeWheel,
+  focusTargets,
+  groupAnchor,
+  KIND_ORDER,
+  lerp,
+  lerpWheel,
+  neighbours,
+  pairKey,
+  routeWheel,
+  TAU,
+  wheelTargets,
+  type Filters,
+  type Focus,
+  type Model,
+  type ONode,
+  type ORel,
+  type Target,
+  type Wheel,
+} from './layout';
+import {
+  KIND_LABEL,
+  kindColor,
+  kindSingular,
+  kindTextColor,
+  REL_STYLE,
+  relLabel,
+  type Fonts,
+  type Palette,
+} from './palette';
+
+export type LinkMode = 'grouped' | 'all';
+
+export type Hover =
+  | { type: 'node'; n: ONode }
+  | { type: 'sector'; camp: string; all: number };
+
+export interface FocusInfo {
+  ring1: number;
+  ring2: number;
+  overflow: number;
+  hidden: { index: number; session: number; filtered: number };
+}
+
+export interface Snapshot {
+  linkMode: LinkMode;
+  showIndex: boolean;
+  showSessions: boolean;
+  showRelations: boolean;
+  kinds: ReadonlySet<string>;
+  camps: ReadonlySet<string>;
+  relTypes: ReadonlySet<RelationType>;
+  drill: string | null;
+  focus: ONode | null;
+  hist: readonly ONode[];
+  hi: number;
+  focusInfo: FocusInfo | null;
+  /** Whether the scene is the wheel (false while focused). */
+  atWheel: boolean;
+}
+
+export interface EngineHooks {
+  onHover(h: Hover | null, x: number, y: number): void;
+  /** The focused note changed (null: back on the wheel). */
+  onFocus(n: ONode | null): void;
+}
+
+export interface EngineOptions {
+  worldName: string;
+  campNames: Readonly<Record<string, string>>;
+  relationTypes: readonly RelationType[];
+}
+
+export interface Engine {
+  subscribe(fn: () => void): () => void;
+  getSnapshot(): Snapshot;
+  setPalette(p: Palette, f: Fonts): void;
+  resize(w: number, h: number, dpr: number, insetL: number, insetR: number): void;
+  setLinkMode(m: LinkMode): void;
+  setShowIndex(b: boolean): void;
+  setShowSessions(b: boolean): void;
+  setShowRelations(b: boolean): void;
+  toggleKind(k: string, solo: boolean): void;
+  toggleCamp(c: string, solo: boolean): void;
+  toggleRelType(t: RelationType): void;
+  reset(): void;
+  fit(): void;
+  toWheel(drill?: string | null): void;
+  drill(camp: string): void;
+  focusNote(n: ONode, push?: boolean): void;
+  histGo(d: number): void;
+  histJump(i: number): void;
+  /** First scene: every note blooms out of the world at the centre. */
+  start(initialFocus: ONode | null): void;
+  destroy(): void;
+}
+
+interface NodeState {
+  cur: Target;
+  from: Target;
+  to: Target;
+  delay: number;
+}
+
+type Scene = Wheel | Focus;
+
+const easeCubic = (t: number): number => (t <= 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+const fract = (x: number): number => x - Math.floor(x);
+const trunc = (s: string, n = 28): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+export function createEngine(
+  canvas: HTMLCanvasElement,
+  model: Model,
+  opts: EngineOptions,
+  hooks: EngineHooks,
+  palette: Palette,
+  fontStacks: Fonts,
+): Engine {
+  const ctx = canvas.getContext('2d')!;
+  let C = palette;
+  let fonts = fontStacks;
+  const { nodes, links, rels, relByPair } = model;
+  const campName = (c: string): string => campaignLabel(c, opts.campNames);
+  const allKinds = [...KIND_ORDER] as string[];
+
+  // ── state
+  const S = {
+    linkMode: 'grouped' as LinkMode,
+    showIndex: false,
+    showSessions: false,
+    showRelations: true,
+    kinds: new Set<string>(allKinds),
+    camps: new Set<string>(model.camps),
+    relTypes: new Set<RelationType>(opts.relationTypes),
+    drill: null as string | null,
+    focus: null as ONode | null,
+    hist: [] as ONode[],
+    hi: -1,
+    hover: null as Hover | null,
+  };
+  const view = { w: 0, h: 0, cx: 0, cy: 0, R: 300, dpr: 1, t: { x: 0, y: 0, k: 1 } };
+  const st: NodeState[] = nodes.map(() => ({
+    cur: { x: 0, y: 0, r: 0, a: 0 },
+    from: { x: 0, y: 0, r: 0, a: 0 },
+    to: { x: 0, y: 0, r: 0, a: 0 },
+    delay: 0,
+  }));
+  const cur = (n: ONode): Target => st[n.i]!.cur;
+  const to = (n: ONode): Target => st[n.i]!.to;
+
+  let scene: Scene | null = null;
+  let fromScene: Scene | null = null;
+  const T = { start: 0, dur: 0, t: 1, e: 1 };
+  let raf = 0;
+  let Z: { from: { x: number; y: number; k: number }; to: { x: number; y: number; k: number }; start: number; dur: number } | null = null;
+  let destroyed = false;
+
+  const filters = (): Filters => ({ kinds: S.kinds, camps: S.camps, showIndex: S.showIndex, showSessions: S.showSessions });
+
+  // ── snapshot
+  const listeners = new Set<() => void>();
+  let snap: Snapshot;
+  function makeSnapshot(): Snapshot {
+    const F = scene && scene.type === 'focus' ? scene : null;
+    return {
+      linkMode: S.linkMode,
+      showIndex: S.showIndex,
+      showSessions: S.showSessions,
+      showRelations: S.showRelations,
+      kinds: new Set(S.kinds),
+      camps: new Set(S.camps),
+      relTypes: new Set(S.relTypes),
+      drill: S.drill,
+      focus: S.focus,
+      hist: S.hist.slice(),
+      hi: S.hi,
+      focusInfo: F ? { ring1: F.N1.length, ring2: F.N2.length, overflow: F.overflow, hidden: F.hidden } : null,
+      atWheel: !F,
+    };
+  }
+  function emit(): void {
+    snap = makeSnapshot();
+    listeners.forEach((fn) => fn());
+  }
+
+  // ── transitions
+  function go(next: Scene, dur = 950): void {
+    const targets: Map<ONode, Target> = next.type === 'wheel' ? wheelTargets(model, next, filters()) : focusTargets(next);
+    for (const n of nodes) {
+      const s = st[n.i]!;
+      s.from = { ...s.cur };
+      s.to = targets.get(n) ?? { x: s.cur.x * 1.18, y: s.cur.y * 1.18, r: s.cur.r, a: 0 };
+      const th = Math.atan2(s.to.y, s.to.x);
+      s.delay = next.type === 'wheel' ? 0.22 * fract((th + Math.PI / 2) / TAU) : 0.18 * clamp(Math.hypot(s.to.x, s.to.y) / view.R);
+    }
+    fromScene = scene;
+    scene = next;
+    T.start = performance.now();
+    T.dur = dur;
+    T.t = dur ? 0 : 1;
+    if (!dur) {
+      for (const s of st) s.cur = { ...s.to };
+      fromScene = null;
+      T.e = 1;
+    }
+    kick();
+  }
+  function stepNodes(t: number): void {
+    for (const s of st) {
+      const f = s.from;
+      const tt = s.to;
+      const local = clamp((t - s.delay) / (1 - 0.22));
+      const e = easeCubic(local);
+      const fr = Math.hypot(f.x, f.y);
+      const tr = Math.hypot(tt.x, tt.y);
+      const fth = fr < 0.5 ? Math.atan2(tt.y, tt.x) : Math.atan2(f.y, f.x);
+      const tth = tr < 0.5 ? fth : Math.atan2(tt.y, tt.x);
+      const th = fth + angDelta(fth, tth) * e;
+      const rho = lerp(fr, tr, e);
+      s.cur.x = rho * Math.cos(th);
+      s.cur.y = rho * Math.sin(th);
+      s.cur.r = lerp(f.r, tt.r, e);
+      s.cur.a = lerp(f.a, tt.a, e);
+    }
+  }
+  function kick(): void {
+    if (!raf && !destroyed) raf = requestAnimationFrame(frame);
+  }
+  function frame(now: number): void {
+    raf = 0;
+    let more = false;
+    if (T.t < 1) {
+      T.t = clamp((now - T.start) / T.dur);
+      T.e = easeCubic(T.t);
+      stepNodes(T.t);
+      if (T.t >= 1) fromScene = null;
+      else more = true;
+    } else T.e = 1;
+    if (Z) {
+      const q = clamp((now - Z.start) / Z.dur);
+      const e = easeCubic(q);
+      view.t = { x: lerp(Z.from.x, Z.to.x, e), y: lerp(Z.from.y, Z.to.y, e), k: lerp(Z.from.k, Z.to.k, e) };
+      if (q >= 1) Z = null;
+      else more = true;
+    }
+    draw();
+    if (more) kick();
+  }
+
+  // ── view transform
+  const SX = (x: number): number => view.t.x + view.t.k * x;
+  const SY = (y: number): number => view.t.y + view.t.k * y;
+  const dotR = (r: number): number => r * (view.t.k >= 1 ? Math.sqrt(view.t.k) : view.t.k);
+  const baseT = (): { x: number; y: number; k: number } => ({ x: view.cx, y: view.cy, k: 1 });
+  function fit(animate = true): void {
+    if (animate) Z = { from: { ...view.t }, to: baseT(), start: performance.now(), dur: 650 };
+    else {
+      Z = null;
+      view.t = baseT();
+    }
+    kick();
+  }
+  function zoomAbout(px: number, py: number, k: number): void {
+    const nk = clamp(k, 0.5, 8);
+    view.t = { x: px - ((px - view.t.x) * nk) / view.t.k, y: py - ((py - view.t.y) * nk) / view.t.k, k: nk };
+  }
+
+  // ── drawing helpers
+  const hasLS = 'letterSpacing' in ctx;
+  function setFont(f: string, ls = 0): void {
+    ctx.font = f;
+    if (hasLS) (ctx as unknown as { letterSpacing: string }).letterSpacing = `${ls}px`;
+  }
+  const CAPS = (px = 9, w = 600): string => `${w} ${px}px ${fonts.sans}`;
+  const SERIF = (px = 11, style = ''): string => `${style} ${px}px ${fonts.serif}`.trim();
+
+  function dashedCircle(r: number, color: string, alpha: number, dash: number[] = [3, 4], w = 1): void {
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = w;
+    ctx.setLineDash(dash);
+    ctx.beginPath();
+    ctx.arc(SX(0), SY(0), r * view.t.k, 0, TAU);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  function arcStroke(r: number, a0: number, a1: number, color: string, alpha: number, dash: number[] = [], w = 1): void {
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = w;
+    ctx.setLineDash(dash);
+    ctx.beginPath();
+    ctx.arc(SX(0), SY(0), r * view.t.k, a0, a1);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  function radialLine(th: number, r0: number, r1: number, color: string, alpha: number, dash: number[] = [], w = 1): void {
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = w;
+    ctx.setLineDash(dash);
+    ctx.beginPath();
+    ctx.moveTo(SX(r0 * Math.cos(th)), SY(r0 * Math.sin(th)));
+    ctx.lineTo(SX(r1 * Math.cos(th)), SY(r1 * Math.sin(th)));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  /** Small-caps text along an arc, flipped on the lower half so it always
+   *  reads left to right. With `measureOnly`, returns the angle it spans. */
+  function arcText(text: string, r: number, mid: number, font: string, color: string, alpha: number, ls = 1.6, measureOnly = false): number {
+    if (measureOnly) {
+      setFont(font, 0);
+      let t = 0;
+      for (const ch of text) t += ctx.measureText(ch).width + ls;
+      return t / (r * view.t.k);
+    }
+    setFont(font, 0);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const rs = r * view.t.k;
+    const ox = SX(0);
+    const oy = SY(0);
+    const chars = [...text];
+    const ws = chars.map((ch) => ctx.measureText(ch).width + ls);
+    const total = ws.reduce((a, b) => a + b, 0);
+    const flip = Math.sin(mid) > 0.12;
+    let a = flip ? mid + total / rs / 2 : mid - total / rs / 2;
+    chars.forEach((ch, i) => {
+      const w = ws[i]!;
+      const ac = flip ? a - w / 2 / rs : a + w / 2 / rs;
+      ctx.save();
+      ctx.translate(ox + rs * Math.cos(ac), oy + rs * Math.sin(ac));
+      ctx.rotate(flip ? ac - Math.PI / 2 : ac + Math.PI / 2);
+      ctx.fillText(ch, 0, 0);
+      ctx.restore();
+      a = flip ? a - w / rs : a + w / rs;
+    });
+    return total / rs;
+  }
+  function pathPts(p: readonly number[]): void {
+    ctx.moveTo(p[0]!, p[1]!);
+    if (p.length === 4) ctx.lineTo(p[2]!, p[3]!);
+    else if (p.length === 6) ctx.quadraticCurveTo(p[2]!, p[3]!, p[4]!, p[5]!);
+    else ctx.bezierCurveTo(p[2]!, p[3]!, p[4]!, p[5]!, p[6]!, p[7]!);
+  }
+  type Stroke = { p: number[]; a: number };
+  function strokeBatch(list: Stroke[], color: string, width: number, alphaMul = 1, dash: number[] = []): void {
+    if (!list.length) return;
+    const buckets = new Map<number, number[][]>();
+    for (const e of list) {
+      const b = Math.round(e.a * 24);
+      if (b <= 0) continue;
+      const bucket = buckets.get(b);
+      if (bucket) bucket.push(e.p);
+      else buckets.set(b, [e.p]);
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.setLineDash(dash);
+    buckets.forEach((ps, b) => {
+      ctx.globalAlpha = clamp((b / 24) * alphaMul);
+      ctx.beginPath();
+      for (const p of ps) pathPts(p);
+      ctx.stroke();
+    });
+    ctx.setLineDash([]);
+  }
+  const relColor = (type: RelationType): string => C[REL_STYLE[type].color];
+  /** Arrow chevron or an "owns" diamond at the target end of a relation. */
+  function endMarker(p: readonly number[], type: RelationType, rTarget: number): void {
+    const def = REL_STYLE[type];
+    const n = p.length;
+    const ex = p[n - 2]!;
+    const ey = p[n - 1]!;
+    const px = p[n - 4]!;
+    const py = p[n - 3]!;
+    let dx = ex - px;
+    let dy = ey - py;
+    const L = Math.hypot(dx, dy) || 1;
+    dx /= L;
+    dy /= L;
+    const bx = ex - dx * (rTarget + 2.5);
+    const by = ey - dy * (rTarget + 2.5);
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    if (def.diamond) {
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx - dx * 4 - dy * 2.6, by - dy * 4 + dx * 2.6);
+      ctx.lineTo(bx - dx * 8, by - dy * 8);
+      ctx.lineTo(bx - dx * 4 + dy * 2.6, by - dy * 4 - dx * 2.6);
+      ctx.closePath();
+      ctx.fillStyle = relColor(type);
+      ctx.fill();
+    } else {
+      ctx.moveTo(bx - dx * 5 - dy * 3, by - dy * 5 + dx * 3);
+      ctx.lineTo(bx, by);
+      ctx.lineTo(bx - dx * 5 + dy * 3, by - dy * 5 - dx * 3);
+      ctx.stroke();
+    }
+  }
+  function drawRel(r: ORel, p: number[], alpha: number, wMul = 1): void {
+    const def = REL_STYLE[r.type];
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = relColor(r.type);
+    ctx.lineWidth = def.w * wMul;
+    ctx.setLineDash(def.dash);
+    ctx.beginPath();
+    pathPts(p);
+    ctx.stroke();
+    if (def.dir) endMarker(p, r.type, dotR(cur(r.t).r));
+    ctx.setLineDash([]);
+  }
+  const relOn = (r: ORel): boolean => S.showRelations && S.relTypes.has(r.type);
+  const pt = (n: ONode): [number, number] => [SX(cur(n).x), SY(cur(n).y)];
+  /** World-space control points to screen space. */
+  const scr = (p: readonly number[]): number[] => p.map((v, i) => (i % 2 ? SY(v) : SX(v)));
+
+  // ── wheel drawing
+  function drawWheelStructure(W: Wheel, alpha: number): void {
+    const g = W.g;
+    const k = view.t.k;
+    dashedCircle(g.rHub, C.muted, 0.55 * alpha, [2, 3]);
+    dashedCircle(g.rOut + 6, C.muted, 0.55 * alpha, [3, 4]);
+    dashedCircle((g.rS0 + g.rS1) / 2, C.muted, (S.showSessions ? 0.5 : 0.28) * alpha, [3, 4]);
+    const placed: Array<{ mid: number; half: number; lvl: number }> = [];
+    for (const s of W.sectors.slice().sort((a, b) => b.span - a.span)) {
+      const sa = s.alpha * alpha;
+      if (sa < 0.01) continue;
+      radialLine(s.a0, g.rIn - 6, g.rOut + 6, C.rule, 0.9 * sa);
+      radialLine(s.a1, g.rIn - 6, g.rOut + 6, C.rule, 0.9 * sa);
+      s.bands.forEach((b, j) => {
+        if (j > 0) arcStroke(b.r0, s.a0, s.a1, C.rule, 0.95 * sa * b.alpha, [2, 3]);
+      });
+      if (S.showSessions && s.sessions.length) {
+        const rm = (g.rS0 + g.rS1) / 2;
+        arcStroke(rm, s.a0 + 0.01, s.a1 - 0.01, C.ruleDark, 0.75 * sa, [], 1);
+        setFont(CAPS(7.5, 500), 0.4);
+        ctx.fillStyle = C.muted;
+        ctx.globalAlpha = 0.9 * sa;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const L = s.sessions.length;
+        s.sessions.forEach((n, i) => {
+          if (!(i === 0 || i === L - 1 || (n.ep && n.ep % 5 === 0))) return;
+          const th = W.pos.get(n)?.th ?? s.mid;
+          const rr = g.rS1 + 9 / k;
+          ctx.fillText(String(n.ep ?? '·'), SX(rr * Math.cos(th)), SY(rr * Math.sin(th)));
+        });
+      }
+      const hot = S.hover?.type === 'sector' && S.hover.camp === s.camp;
+      const label = `${campName(s.camp).toUpperCase()}  ·  ${s.all}`;
+      const font = CAPS(9.5, hot || S.drill === s.camp ? 700 : 600);
+      // Small sectors step outward when their name would collide with a neighbour's.
+      const half = arcText(label, g.rLab, s.mid, font, '', 0, 1.7, true) / 2 + 0.02;
+      let lvl = 0;
+      while (lvl < 3 && placed.some((q) => q.lvl === lvl && Math.abs(angDelta(q.mid, s.mid)) < q.half + half)) lvl++;
+      placed.push({ mid: s.mid, half, lvl });
+      const rl = g.rLab + (lvl * 14) / k;
+      if (lvl) radialLine(s.mid, g.rS1 + 6 / k, rl - 6 / k, C.rule, sa);
+      arcText(label, rl, s.mid, font, hot ? C.ink : C.inkSoft, sa, 1.7);
+      const big = s.span * g.rIn * k > 46 || S.drill === s.camp;
+      if (big) {
+        for (const b of s.bands) {
+          if (b.alpha < 0.05) continue;
+          const x = SX(b.ax);
+          const y = SY(b.ay);
+          const txt = `${KIND_LABEL[b.kind as keyof typeof KIND_LABEL]} ${b.n}`.toUpperCase();
+          setFont(CAPS(7.5, 600), 1);
+          const w = ctx.measureText(txt).width;
+          const left = Math.cos(b.tha) < 0;
+          const tx = left ? x - 7 - w : x + 7;
+          ctx.globalAlpha = 0.82 * sa * b.alpha;
+          ctx.fillStyle = C.parchment;
+          ctx.fillRect(tx - 2, y - 5.5, w + 4, 11);
+          ctx.globalAlpha = sa * b.alpha;
+          ctx.fillStyle = C.muted;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(txt, tx, y + 0.5);
+        }
+      }
+    }
+    // The world at the centre.
+    setFont(CAPS(10.5, 700), 3);
+    ctx.fillStyle = C.ink;
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText((opts.worldName || 'World').toUpperCase(), SX(0) + 1.5, SY(0) - 2);
+    setFont(SERIF(9.5, 'italic'), 0);
+    ctx.fillStyle = C.muted;
+    ctx.fillText('the world', SX(0), SY(0) + 11);
+    if (hasLS) (ctx as unknown as { letterSpacing: string }).letterSpacing = '0px';
+  }
+
+  function drawWheelEdges(W: Wheel, alpha: number): void {
+    const hov = S.hover?.type === 'node' ? S.hover.n : null;
+    const plain: Stroke[] = [];
+    const spokes: Stroke[] = [];
+    const grouped: typeof links = [];
+    const alphaOf = (l: (typeof links)[number]): number => Math.min(cur(l.s).a, cur(l.t).a) * alpha;
+    for (const l of links) {
+      const a = l.s;
+      const b = l.t;
+      const m = alphaOf(l);
+      if (m < 0.02) continue;
+      if (l.index) {
+        if (!S.showIndex) continue;
+        spokes.push({ p: [...pt(a), ...pt(b)], a: m });
+        continue;
+      }
+      const individual = S.linkMode === 'all' || (S.drill && (a.campaign === S.drill || b.campaign === S.drill));
+      if (individual) {
+        plain.push({ p: scr(routeWheel(W, a, b, [cur(a).x, cur(a).y], [cur(b).x, cur(b).y])), a: m });
+        continue;
+      }
+      grouped.push(l);
+    }
+    const dim = hov ? 0.35 : 1;
+    strokeBatch(spokes, C.muted, 0.6, 0.3 * dim);
+    strokeBatch(plain, C.inkSoft, 0.6, (S.linkMode === 'all' && !S.drill ? 0.09 : 0.16) * dim);
+    const hovG = hov && hov.role === 'band' ? `${hov.campaign}|${hov.bandKind}` : null;
+    const aggLabels: Array<[number[], number]> = [];
+    for (const e of aggregateLinks(grouped, alphaOf)) {
+      const pa = groupAnchor(W, e.a);
+      const pb = groupAnchor(W, e.b);
+      if (!pa || !pb) continue;
+      const p = scr(routeWheel(W, e.a, e.b, pa, pb));
+      const ga = `${e.a.campaign}|${e.a.kind === 'session' ? 'session' : e.a.kind}`;
+      const gb = `${e.b.campaign}|${e.b.kind === 'session' ? 'session' : e.b.kind}`;
+      const hot = hovG && (ga === hovG || gb === hovG);
+      ctx.globalAlpha = e.m * (hot ? 0.85 : 0.3 * (hovG ? 0.5 : 1)) * dim;
+      ctx.strokeStyle = hot ? C.candle : C.inkSoft;
+      ctx.lineWidth = 0.5 + Math.sqrt(e.n) * 0.42;
+      ctx.beginPath();
+      pathPts(p);
+      ctx.stroke();
+      if (hot) aggLabels.push([p, e.n]);
+    }
+    // Relationships, lightly bent toward the centre.
+    for (const r of rels) {
+      if (!relOn(r)) continue;
+      const m = Math.min(cur(r.s).a, cur(r.t).a) * alpha;
+      if (m < 0.02) continue;
+      const [x0, y0] = [cur(r.s).x, cur(r.s).y];
+      const [x1, y1] = [cur(r.t).x, cur(r.t).y];
+      const p = [SX(x0), SY(y0), SX(((x0 + x1) / 2) * 0.55), SY(((y0 + y1) / 2) * 0.55), SX(x1), SY(y1)];
+      const hot = hov && (r.s === hov || r.t === hov);
+      drawRel(r, p, m * (hov ? (hot ? 1 : 0.15) : 0.34), hot ? 1.3 : 0.8);
+    }
+    // The hovered note's own links, bundled, in candlelight.
+    if (hov && cur(hov).a > 0.1) {
+      const hl: Stroke[] = [];
+      for (const nb of hov.adj) {
+        if (cur(nb).a < 0.05) continue;
+        const a = cur(nb).a * alpha;
+        if (hov.isIndex || nb.isIndex) hl.push({ p: [...pt(hov), ...pt(nb)], a });
+        else hl.push({ p: scr(routeWheel(W, hov, nb, [cur(hov).x, cur(hov).y], [cur(nb).x, cur(nb).y])), a });
+      }
+      strokeBatch(hl, C.candle, 1, 0.85);
+    }
+    if (aggLabels.length) {
+      setFont(CAPS(8, 700), 0.5);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (const [p, n] of aggLabels) {
+        const q =
+          p.length === 6
+            ? [0.25 * p[0]! + 0.5 * p[2]! + 0.25 * p[4]!, 0.25 * p[1]! + 0.5 * p[3]! + 0.25 * p[5]!]
+            : [0.125 * p[0]! + 0.375 * p[2]! + 0.375 * p[4]! + 0.125 * p[6]!, 0.125 * p[1]! + 0.375 * p[3]! + 0.375 * p[5]! + 0.125 * p[7]!];
+        const w = ctx.measureText(String(n)).width + 6;
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = C.vellum;
+        ctx.fillRect(q[0]! - w / 2, q[1]! - 6, w, 12);
+        ctx.strokeStyle = C.candle;
+        ctx.lineWidth = 0.8;
+        ctx.strokeRect(q[0]! - w / 2, q[1]! - 6, w, 12);
+        ctx.fillStyle = C.ink;
+        ctx.fillText(String(n), q[0]!, q[1]! + 0.5);
+      }
+    }
+  }
+
+  // ── focus drawing
+  function drawFocusStructure(F: Focus, alpha: number): void {
+    const R = F.R;
+    dashedCircle(F.r1, C.muted, 0.6 * alpha, [3, 4]);
+    dashedCircle((F.rA + F.rB) / 2, C.muted, 0.45 * alpha, [3, 4]);
+    dashedCircle(F.rB + 10, C.rule, 0.6 * alpha, [1, 4]);
+    for (const s of F.sectors) {
+      if (F.sectors.length > 1) radialLine(s.a0 - 0.02, 0.07 * R, F.rB + 10, C.rule, 0.9 * alpha, [2, 4]);
+      const lab = KIND_LABEL[s.kind].toUpperCase() + (s.n1 ? `  ${s.n1}` : '');
+      const mid = s.a0 + s.span / 2;
+      arcText(lab, F.rLab, mid, CAPS(9, 700), kindTextColor(C, s.kind), alpha, 1.6);
+      const sub = [s.n2 && `${s.n2} two steps out`, s.over && `+${s.over} more`].filter(Boolean).join(', ');
+      // The second line always sits "below" the kind name in reading order.
+      if (sub) arcText(sub, Math.sin(mid) > 0.12 ? F.rLab + 13 : F.rLab - 12, mid, SERIF(9.5, 'italic'), C.muted, alpha, 0.3);
+    }
+  }
+  function relLabelText(c: ONode, rs: ORel[]): string {
+    return rs.map((r) => relLabel(r.type, r.s === c)).join(', ');
+  }
+  function drawFocusEdges(F: Focus, alpha: number): void {
+    const c = F.c;
+    const hov = S.hover?.type === 'node' ? S.hover.n : null;
+    const pc = pt(c);
+    const plain: Stroke[] = [];
+    const hot: Stroke[] = [];
+    const e12: Stroke[] = [];
+    const relSp: Array<[ORel, number[], number]> = [];
+    for (const x of F.N1) {
+      const m = Math.min(cur(c).a, cur(x).a) * alpha;
+      if (m < 0.02) continue;
+      const rs = (relByPair.get(pairKey(c, x)) ?? []).filter(relOn);
+      if (rs.length) {
+        for (const r of rs) relSp.push([r, r.s === c ? [...pc, ...pt(x)] : [...pt(x), ...pc], m]);
+      } else (hov === x ? hot : plain).push({ p: [...pc, ...pt(x)], a: m });
+    }
+    for (const [x, y] of F.e12) {
+      const m = Math.min(cur(x).a, cur(y).a) * alpha;
+      if (m < 0.02) continue;
+      (hov && (hov === x || hov === y) ? hot : e12).push({ p: [...pt(x), ...pt(y)], a: m });
+    }
+    strokeBatch(e12, C.inkSoft, 0.55, hov ? 0.06 : 0.13);
+    strokeBatch(plain, C.ink, 0.7, hov ? 0.22 : 0.42);
+    strokeBatch(hot, C.candle, 1.2, 1);
+    for (const [r, p, m] of relSp) drawRel(r, p, m, hov && (r.s === hov || r.t === hov) ? 1.5 : 1.1);
+    for (const r of F.relsOther) {
+      if (!relOn(r)) continue;
+      const m = Math.min(cur(r.s).a, cur(r.t).a) * alpha;
+      if (m < 0.02) continue;
+      const [x0, y0] = [cur(r.s).x, cur(r.s).y];
+      const [x1, y1] = [cur(r.t).x, cur(r.t).y];
+      drawRel(r, [SX(x0), SY(y0), SX(((x0 + x1) / 2) * 0.6), SY(((y0 + y1) / 2) * 0.6), SX(x1), SY(y1)], m * (hov && (r.s === hov || r.t === hov) ? 1 : 0.55));
+    }
+  }
+
+  // ── nodes + labels
+  function drawNodes(): void {
+    const sc = scene!;
+    const hov = S.hover?.type === 'node' ? S.hover.n : null;
+    const near = hov && sc.type === 'wheel' ? neighbours(hov) : null;
+    const order = nodes.filter((n) => cur(n).a > 0.01).sort((a, b) => cur(a).r - cur(b).r);
+    for (const n of order) {
+      let a = cur(n).a;
+      if (near && n !== hov && !near.has(n)) a *= 0.3;
+      const x = SX(cur(n).x);
+      const y = SY(cur(n).y);
+      const r = Math.max(0.8, dotR(cur(n).r));
+      ctx.globalAlpha = a;
+      if (n.isIndex) {
+        ctx.fillStyle = C.vellum;
+        ctx.strokeStyle = n.role === 'empty' ? C.muted : C.ink;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (n.role === 'camp') ctx.arc(x, y, r, 0, TAU);
+        else {
+          ctx.moveTo(x, y - r - 0.6);
+          ctx.lineTo(x + r + 0.6, y);
+          ctx.lineTo(x, y + r + 0.6);
+          ctx.lineTo(x - r - 0.6, y);
+          ctx.closePath();
+        }
+        ctx.fill();
+        ctx.stroke();
+        if (n.role === 'camp') {
+          ctx.beginPath();
+          ctx.arc(x, y, 1.3, 0, TAU);
+          ctx.fillStyle = C.ink;
+          ctx.fill();
+        }
+      } else {
+        ctx.fillStyle = kindColor(C, n.kind);
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, TAU);
+        ctx.fill();
+        if (n.kind === 'session') {
+          ctx.strokeStyle = C.vellum;
+          ctx.lineWidth = 0.6;
+          ctx.stroke();
+        }
+      }
+      if (n === hov || (sc.type === 'focus' && n === sc.c)) {
+        ctx.globalAlpha = cur(n).a;
+        ctx.strokeStyle = C.candle;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(x, y, r + 3.5, 0, TAU);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+  function makeGrid(): { test(pts: number[][]): boolean; mark(pts: number[][]): void } {
+    const cells = new Set<string>();
+    const cs = 7;
+    return {
+      test: (pts) => pts.every(([x, y]) => !cells.has(`${(x! / cs) | 0},${(y! / cs) | 0}`)),
+      mark(pts) {
+        for (const [x, y] of pts) {
+          const cx = (x! / cs) | 0;
+          const cy = (y! / cs) | 0;
+          for (let i = -1; i <= 1; i++) cells.add(`${cx + i},${cy}`);
+        }
+      },
+    };
+  }
+  type Grid = ReturnType<typeof makeGrid>;
+  function radialLabel(grid: Grid, n: ONode, text: string, font: string, color: string, alpha: number, force: boolean): boolean {
+    const x = SX(cur(n).x);
+    const y = SY(cur(n).y);
+    const th = Math.atan2(cur(n).y, cur(n).x);
+    setFont(font, 0);
+    const w = ctx.measureText(text).width;
+    const off = dotR(cur(n).r) + 4;
+    const dx = Math.cos(th);
+    const dy = Math.sin(th);
+    const pts: number[][] = [];
+    for (let d = 0; d <= w; d += 5) pts.push([x + dx * (off + d), y + dy * (off + d)]);
+    if (!force && !grid.test(pts)) return false;
+    grid.mark(pts);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.globalAlpha = alpha;
+    ctx.textBaseline = 'middle';
+    const left = dx < 0;
+    ctx.rotate(left ? th + Math.PI : th);
+    ctx.textAlign = left ? 'right' : 'left';
+    ctx.strokeStyle = C.parchment;
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    ctx.strokeText(text, left ? -off : off, 0.5);
+    ctx.fillStyle = color;
+    ctx.fillText(text, left ? -off : off, 0.5);
+    ctx.restore();
+    return true;
+  }
+  function drawLabels(alpha: number): void {
+    const sc = scene!;
+    const grid = makeGrid();
+    const hov = S.hover?.type === 'node' ? S.hover.n : null;
+    const k = view.t.k;
+    if (sc.type === 'wheel') {
+      if (hov && cur(hov).a > 0.1) radialLabel(grid, hov, trunc(hov.title, 40), SERIF(12, '600'), C.ink, 1, true);
+      let pool = nodes.filter((n) => !n.isIndex && n.kind !== 'session' && cur(n).a > 0.5 && to(n).a > 0.5);
+      if (hov) {
+        const nb = neighbours(hov);
+        pool = pool.filter((n) => nb.has(n));
+      } else if (S.drill) pool = pool.filter((n) => n.campaign === S.drill);
+      pool.sort((a, b) => b.degree - a.degree || a.i - b.i);
+      let budget = Math.round((hov ? 12 : S.drill ? 30 : 16) * Math.min(k * k, 9));
+      for (const n of pool) {
+        if (budget <= 0) break;
+        if (radialLabel(grid, n, trunc(n.title), SERIF(10.5), C.inkSoft, alpha, false)) budget--;
+      }
+    } else {
+      const F = sc;
+      const c = F.c;
+      const x = SX(cur(c).x);
+      const y = SY(cur(c).y) + dotR(cur(c).r) + 16;
+      grid.mark([[x - 70, y], [x - 35, y], [x, y], [x + 35, y], [x + 70, y], [x - 60, y + 15], [x, y + 15], [x + 60, y + 15]] as number[][]);
+      // Ring captions, like the poster's distance marks.
+      setFont(CAPS(7.5, 600), 1.2);
+      ctx.fillStyle = C.muted;
+      ctx.globalAlpha = alpha;
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      for (const [txt, r] of [['1 STEP', F.r1], ['2 STEPS', (F.rA + F.rB) / 2]] as Array<[string, number]>) {
+        const tx = SX(0) - 4;
+        const ty = SY(r) - 3;
+        ctx.fillText(txt, tx, ty);
+        grid.mark([[tx - 32, ty - 4], [tx - 16, ty - 4], [tx, ty - 4]]);
+      }
+      // Relationship labels on spokes (skipped, not stacked, when they would collide).
+      const placed: number[] = [];
+      for (const nb of F.N1) {
+        const rs = (relByPair.get(pairKey(c, nb)) ?? []).filter(relOn);
+        if (!rs.length || cur(nb).a < 0.3) continue;
+        const th = Math.atan2(cur(nb).y, cur(nb).x);
+        const dist = Math.hypot(cur(nb).x, cur(nb).y);
+        const along = placed.some((t) => Math.abs(angDelta(t, th)) < 0.12) ? 0.7 : 0.5;
+        placed.push(th);
+        const lx = SX(Math.cos(th) * dist * along);
+        const ly = SY(Math.sin(th) * dist * along);
+        const txt = relLabelText(c, rs);
+        const col = relColor(rs[0]!.type);
+        setFont(SERIF(10, 'italic'), 0);
+        const w = ctx.measureText(txt).width;
+        const sp: number[][] = [];
+        const ux = Math.cos(th);
+        const uy = Math.sin(th);
+        for (let d = -w / 2; d <= w / 2; d += 4) for (const o of [-5, 0, 5]) sp.push([lx + ux * d - uy * o, ly + uy * d + ux * o]);
+        if (!grid.test(sp)) continue;
+        grid.mark(sp);
+        ctx.save();
+        ctx.translate(lx, ly);
+        const left = Math.cos(th) < 0;
+        ctx.rotate(left ? th + Math.PI : th);
+        ctx.globalAlpha = alpha * 0.92;
+        ctx.fillStyle = C.vellum;
+        ctx.fillRect(-w / 2 - 3, -6.5, w + 6, 13);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = col;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(txt, 0, 0.5);
+        ctx.restore();
+      }
+      if (hov && hov !== c && cur(hov).a > 0.1) radialLabel(grid, hov, trunc(hov.title, 40), SERIF(12, '600'), C.ink, 1, true);
+      const ring1 = F.N1.filter((n) => cur(n).a > 0.3).sort((a, b) => b.degree - a.degree || a.i - b.i);
+      const budget = Math.round(90 * Math.min(k * k, 4));
+      ring1.slice(0, budget).forEach((n) => radialLabel(grid, n, trunc(n.title, 26), SERIF(10.5), C.inkSoft, alpha, false));
+      if (k > 1.6) {
+        F.N2.filter((n) => cur(n).a > 0.3)
+          .sort((a, b) => b.degree - a.degree || a.i - b.i)
+          .slice(0, Math.round(30 * k))
+          .forEach((n) => radialLabel(grid, n, trunc(n.title, 22), SERIF(9.5, 'italic'), C.muted, alpha * 0.9, false));
+      }
+      // Centre title last so nothing paints over it.
+      setFont(SERIF(17, '600'), 0);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = C.parchment;
+      ctx.lineWidth = 5;
+      ctx.lineJoin = 'round';
+      ctx.strokeText(trunc(c.title, 34), x, y);
+      ctx.fillStyle = C.ink;
+      ctx.fillText(trunc(c.title, 34), x, y);
+      setFont(CAPS(8, 600), 1.4);
+      ctx.fillStyle = C.muted;
+      const sub = `${c.isIndex ? 'INDEX' : kindSingular(c.kind).toUpperCase()} · ${campName(c.campaign).toUpperCase()}`;
+      ctx.strokeText(sub, x, y + 15);
+      ctx.fillText(sub, x, y + 15);
+    }
+    if (hasLS) (ctx as unknown as { letterSpacing: string }).letterSpacing = '0px';
+    ctx.globalAlpha = 1;
+  }
+
+  function drawLayer(sc: Scene, alpha: number): void {
+    if (alpha < 0.01) return;
+    if (sc.type === 'wheel') {
+      drawWheelStructure(sc, alpha);
+      drawWheelEdges(sc, alpha);
+    } else {
+      drawFocusStructure(sc, alpha);
+      drawFocusEdges(sc, alpha);
+    }
+  }
+  function draw(): void {
+    if (destroyed) return;
+    const { w, h, dpr } = view;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = C.parchment;
+    ctx.fillRect(0, 0, w, h);
+    if (!scene) return;
+    const e = T.e;
+    if (fromScene && T.t < 1) {
+      if (fromScene.type === 'wheel' && scene.type === 'wheel') drawLayer(lerpWheel(fromScene, scene, e, model.camps), 1);
+      else {
+        drawLayer(fromScene, 1 - e);
+        drawLayer(scene, e);
+      }
+    } else drawLayer(scene, 1);
+    drawNodes();
+    drawLabels(fromScene && T.t < 1 ? e * e : 1);
+  }
+
+  // ── picking + pointer input
+  function pick(mx: number, my: number): Hover | null {
+    let best: ONode | null = null;
+    let bd = Infinity;
+    for (const n of nodes) {
+      if (cur(n).a < 0.25 || to(n).a < 0.25) continue;
+      const d = Math.hypot(SX(cur(n).x) - mx, SY(cur(n).y) - my);
+      const rr = Math.max(dotR(cur(n).r), n.isIndex ? 5 : 2.5) + 3.5;
+      if (d < rr && d < bd) {
+        bd = d;
+        best = n;
+      }
+    }
+    if (best) return { type: 'node', n: best };
+    if (scene && scene.type === 'wheel') {
+      const wx = (mx - view.t.x) / view.t.k;
+      const wy = (my - view.t.y) / view.t.k;
+      const rho = Math.hypot(wx, wy);
+      const th = Math.atan2(wy, wx);
+      const g = scene.g;
+      if (rho > g.rS1 + 4 && rho < g.R * 1.03) {
+        for (const s of scene.sectors) {
+          const d = (((th - s.a0) % TAU) + TAU) % TAU;
+          if (d <= s.span) return { type: 'sector', camp: s.camp, all: s.all };
+        }
+      }
+    }
+    return null;
+  }
+  const sameHover = (a: Hover | null, b: Hover | null): boolean => {
+    if (!a || !b) return a === b;
+    if (a.type === 'node') return b.type === 'node' && a.n === b.n;
+    return b.type === 'sector' && a.camp === b.camp;
+  };
+
+  const ptrs = new Map<number, { x: number; y: number }>();
+  let drag: { x: number; y: number; tx: number; ty: number; moved: boolean } | null = null;
+  let suppressClick = false;
+  let pinch: { d: number; k: number } | null = null;
+  const local = (ev: PointerEvent | MouseEvent): { x: number; y: number } => {
+    const r = canvas.getBoundingClientRect();
+    return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+  };
+  const setHover = (h: Hover | null, x: number, y: number): void => {
+    const same = sameHover(h, S.hover);
+    S.hover = h;
+    canvas.style.cursor = h ? 'pointer' : 'default';
+    hooks.onHover(h, x, y);
+    if (!same) kick();
+  };
+
+  function onPointerDown(ev: PointerEvent): void {
+    if (ev.button) return;
+    const p = local(ev);
+    ptrs.set(ev.pointerId, p);
+    canvas.setPointerCapture(ev.pointerId);
+    Z = null;
+    if (ptrs.size === 1) drag = { x: p.x, y: p.y, tx: view.t.x, ty: view.t.y, moved: false };
+    else if (ptrs.size === 2) {
+      const [a, b] = [...ptrs.values()];
+      pinch = { d: Math.hypot(a!.x - b!.x, a!.y - b!.y) || 1, k: view.t.k };
+      drag = null;
+    }
+  }
+  function onPointerMove(ev: PointerEvent): void {
+    const p = local(ev);
+    if (!ptrs.has(ev.pointerId)) {
+      if (ev.pointerType === 'mouse') setHover(pick(p.x, p.y), p.x, p.y);
+      return;
+    }
+    ptrs.set(ev.pointerId, p);
+    if (ptrs.size === 2 && pinch) {
+      const [a, b] = [...ptrs.values()];
+      const d = Math.hypot(a!.x - b!.x, a!.y - b!.y) || 1;
+      zoomAbout((a!.x + b!.x) / 2, (a!.y + b!.y) / 2, (pinch.k * d) / pinch.d);
+      suppressClick = true;
+      kick();
+    } else if (drag) {
+      const dx = p.x - drag.x;
+      const dy = p.y - drag.y;
+      if (!drag.moved && Math.hypot(dx, dy) > 4) {
+        drag.moved = true;
+        setHover(null, p.x, p.y);
+      }
+      if (drag.moved) {
+        view.t = { x: drag.tx + dx, y: drag.ty + dy, k: view.t.k };
+        suppressClick = true;
+        kick();
+      }
+    }
+  }
+  function onPointerUp(ev: PointerEvent): void {
+    ptrs.delete(ev.pointerId);
+    if (ptrs.size < 2) pinch = null;
+    if (ptrs.size === 0) drag = null;
+    else if (ptrs.size === 1) {
+      const [p] = [...ptrs.values()];
+      drag = { x: p!.x, y: p!.y, tx: view.t.x, ty: view.t.y, moved: true };
+    }
+  }
+  function onWheel(ev: WheelEvent): void {
+    ev.preventDefault();
+    Z = null;
+    const p = local(ev);
+    const d = -ev.deltaY * (ev.deltaMode === 1 ? 0.05 : ev.deltaMode ? 1 : 0.002) * (ev.ctrlKey ? 10 : 1);
+    zoomAbout(p.x, p.y, view.t.k * 2 ** d);
+    kick();
+  }
+  function onLeave(): void {
+    if (ptrs.size) return;
+    setHover(null, 0, 0);
+  }
+  function onClick(ev: MouseEvent): void {
+    if (suppressClick) {
+      suppressClick = false;
+      return;
+    }
+    const p = local(ev);
+    const h = pick(p.x, p.y);
+    if (!h) return;
+    if (h.type === 'sector') return api.drill(h.camp);
+    if (scene?.type === 'wheel' && h.n.isIndex && h.n.role === 'camp') return api.drill(h.n.campaign);
+    api.focusNote(h.n);
+  }
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerUp);
+  canvas.addEventListener('pointerleave', onLeave);
+  canvas.addEventListener('wheel', onWheel, { passive: false });
+  canvas.addEventListener('click', onClick);
+
+  // ── navigation
+  function relayout(): void {
+    if (!scene) return;
+    if (scene.type === 'wheel') go(computeWheel(model, filters(), view.R, S.drill), 750);
+    else go(computeFocus(model, filters(), S.focus!, view.R), 650);
+    emit();
+  }
+  function setFocus(n: ONode | null): void {
+    S.focus = n;
+    hooks.onFocus(n);
+  }
+
+  const api: Engine = {
+    subscribe(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    getSnapshot: () => snap,
+    setPalette(p, f) {
+      C = p;
+      fonts = f;
+      kick();
+    },
+    resize(w, h, dpr, insetL, insetR) {
+      view.w = w;
+      view.h = h;
+      view.dpr = dpr;
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      view.cx = insetL + (w - insetL - insetR) / 2;
+      view.cy = h / 2 + 10;
+      view.R = Math.max(170, Math.min((w - insetL - insetR) / 2 - 10, h / 2 - 40));
+      Z = null;
+      view.t = baseT();
+      if (scene) {
+        go(scene.type === 'wheel' ? computeWheel(model, filters(), view.R, S.drill) : computeFocus(model, filters(), S.focus!, view.R), 0);
+        emit();
+      }
+      draw();
+    },
+    setLinkMode(m) {
+      S.linkMode = m;
+      emit();
+      kick();
+    },
+    setShowIndex(b) {
+      S.showIndex = b;
+      relayout();
+    },
+    setShowSessions(b) {
+      S.showSessions = b;
+      relayout();
+    },
+    setShowRelations(b) {
+      S.showRelations = b;
+      emit();
+      kick();
+    },
+    toggleKind(k, solo) {
+      if (solo) S.kinds = new Set([k]);
+      else if (S.kinds.has(k)) S.kinds.delete(k);
+      else S.kinds.add(k);
+      if (!S.kinds.size) S.kinds = new Set(allKinds);
+      relayout();
+    },
+    toggleCamp(c, solo) {
+      if (solo) S.camps = new Set([c]);
+      else if (S.camps.has(c)) S.camps.delete(c);
+      else S.camps.add(c);
+      if (!S.camps.size) S.camps = new Set(model.camps);
+      if (S.drill && !S.camps.has(S.drill)) S.drill = null;
+      if (S.focus && !S.camps.has(S.focus.campaign) && scene?.type === 'focus') {
+        // A focused note whose campaign was switched off: fall back to the wheel.
+        S.hist = [];
+        S.hi = -1;
+        setFocus(null);
+        go(computeWheel(model, filters(), view.R, S.drill), 750);
+        fit();
+        emit();
+        return;
+      }
+      relayout();
+    },
+    toggleRelType(t) {
+      if (S.relTypes.has(t)) S.relTypes.delete(t);
+      else S.relTypes.add(t);
+      emit();
+      kick();
+    },
+    reset() {
+      S.kinds = new Set(allKinds);
+      S.camps = new Set(model.camps);
+      S.relTypes = new Set(opts.relationTypes);
+      S.showRelations = true;
+      api.toWheel(null);
+    },
+    fit: () => fit(),
+    toWheel(drillCamp = S.drill) {
+      S.drill = drillCamp;
+      setFocus(null);
+      go(computeWheel(model, filters(), view.R, S.drill));
+      fit();
+      emit();
+    },
+    drill(camp) {
+      if (scene?.type !== 'wheel') return api.toWheel(camp);
+      S.drill = S.drill === camp ? null : camp;
+      go(computeWheel(model, filters(), view.R, S.drill), 1000);
+      fit();
+      emit();
+    },
+    focusNote(n, push = true) {
+      if (push) {
+        S.hist = S.hist.slice(0, S.hi + 1);
+        if (S.hist[S.hist.length - 1] !== n) S.hist.push(n);
+        S.hi = S.hist.length - 1;
+      }
+      setFocus(n);
+      setHover(null, 0, 0);
+      go(computeFocus(model, filters(), n, view.R), scene?.type === 'focus' ? 850 : 1050);
+      fit();
+      emit();
+    },
+    histGo(d) {
+      api.histJump(S.hi + d);
+    },
+    histJump(i) {
+      if (i < 0 || i >= S.hist.length) return;
+      S.hi = i;
+      api.focusNote(S.hist[i]!, false);
+    },
+    start(initialFocus) {
+      if (initialFocus) {
+        S.hist = [initialFocus];
+        S.hi = 0;
+        setFocus(initialFocus);
+        go(computeFocus(model, filters(), initialFocus, view.R), 1500);
+      } else {
+        go(computeWheel(model, filters(), view.R, null), 1500);
+      }
+      fit(false);
+      emit();
+    },
+    destroy() {
+      destroyed = true;
+      cancelAnimationFrame(raf);
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerup', onPointerUp);
+      canvas.removeEventListener('pointercancel', onPointerUp);
+      canvas.removeEventListener('pointerleave', onLeave);
+      canvas.removeEventListener('wheel', onWheel);
+      canvas.removeEventListener('click', onClick);
+      listeners.clear();
+    },
+  };
+  snap = makeSnapshot();
+  return api;
+}
+

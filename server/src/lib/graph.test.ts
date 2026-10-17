@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
-import { buildGraph, buildNeighborhood } from './graph';
+import { buildGraph, buildNeighborhood, listVisibleCampaignNames } from './graph';
 import { setupTestDb, teardownTestDb } from './test-utils';
 import { DEFAULT_GROUP_ID } from './users';
 
@@ -376,5 +376,39 @@ describe('buildNeighborhood — relations', () => {
     expect(payload!.relations).toEqual([
       { source: 'v/center.md', target: 'v/near.md', relation: 'ally_of' },
     ]);
+  });
+});
+
+// ── listVisibleCampaignNames ───────────────────────────────────────────
+
+describe('listVisibleCampaignNames', () => {
+  const G = DEFAULT_GROUP_ID;
+  function seedCampaign(slug: string, name: string): void {
+    getDb()
+      .query(
+        `INSERT OR REPLACE INTO campaigns (group_id, slug, name, folder_path, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(G, slug, name, `Campaigns/${slug}`, Date.now());
+  }
+
+  beforeEach(() => {
+    getDb().exec('DELETE FROM campaigns');
+    seedCampaign('open', 'The Open One');
+    seedCampaign('secret', 'The Secret One');
+    seedNote(G, 'Campaigns/open/Characters/A.md');
+    seedNote(G, 'Campaigns/secret/Characters/B.md', { dmOnly: true });
+  });
+
+  it('names a campaign that has a visible note', () => {
+    expect(listVisibleCampaignNames(G, { hideDmOnly: true }).open).toBe('The Open One');
+  });
+
+  it('leaves out a campaign whose only notes are hidden from the caller', () => {
+    expect(Object.keys(listVisibleCampaignNames(G, { hideDmOnly: true }))).toEqual(['open']);
+  });
+
+  it('includes it for a caller who may see dm_only notes', () => {
+    expect(Object.keys(listVisibleCampaignNames(G, { hideDmOnly: false })).sort()).toEqual(['open', 'secret']);
   });
 });
