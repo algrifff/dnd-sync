@@ -17,6 +17,7 @@ import {
   SignupRequestSchema,
 } from '@compendium/shared';
 import { logAudit } from '@/lib/audit';
+import { clientIp } from '@/lib/oauth-http';
 import {
   resetRequestLimiter,
   signupLimiter,
@@ -222,12 +223,6 @@ function toSafeNext(raw: FormDataEntryValue | null): string {
   if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/home';
   if (value.startsWith('/login')) return '/home';
   return value;
-}
-
-function clientIp(hdrs: Headers): string {
-  const fwd = hdrs.get('x-forwarded-for');
-  if (fwd) return fwd.split(',')[0]?.trim() || 'unknown';
-  return hdrs.get('x-real-ip') ?? 'unknown';
 }
 
 function hashForAnalytics(value: string): string {
