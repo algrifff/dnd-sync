@@ -10,6 +10,7 @@ import { setupTestDb, teardownTestDb } from '@/lib/test-utils';
 import { createUser, DEFAULT_GROUP_ID as groupId } from '@/lib/users';
 import { buildSessionCookies, createSession } from '@/lib/session';
 import { moveFolder } from '@/lib/move-folder';
+import { visibilityFor } from '@/lib/notes';
 import { createTools } from '@/lib/ai/tools';
 import { POST as moveRoute } from '@/app/api/notes/move/route';
 import * as noteEdits from '@/lib/note-edits';
@@ -451,7 +452,7 @@ describe('moving a Character or Session', () => {
     await wrapUp([suggestion('s1', KARA)]);
 
     const moved = await moveFolder({
-      groupId, userId: ownerId, from: 'Campaigns/Ashfall/Characters', to: 'Campaigns/Ashfall/Heroes',
+      groupId, userId: ownerId, from: 'Campaigns/Ashfall/Characters', to: 'Campaigns/Ashfall/Heroes', vis: visibilityFor('admin'),
     });
 
     expect(moved.ok).toBe(true);

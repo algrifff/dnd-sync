@@ -11,6 +11,7 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getAssetById, assetPath, deleteAsset } from '@/lib/assets';
 import { logAudit } from '@/lib/audit';
+import { visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -98,16 +99,25 @@ export async function DELETE(req: NextRequest, ctx: RouteCtx): Promise<Response>
     return json({ error: 'invalid_id' }, 400);
   }
 
+  // A gm_only asset is hidden from everyone but admin, and answers
+  // exactly like a missing one (same gate as GET above).
+  const vis = visibilityFor(session.role);
   const asset = getAssetById(id, session.currentGroupId);
-  if (!asset) return json({ error: 'not_found' }, 404);
+  if (!asset || (asset.gm_only === 1 && vis.hideGmOnly)) return json({ error: 'not_found' }, 404);
 
-  const result = deleteAsset(id, session.currentGroupId);
+  const result = deleteAsset(id, session.currentGroupId, vis);
   if (!result.ok) {
     if (result.reason === 'not_found') return json({ error: 'not_found' }, 404);
+    // noteCount counts only notes the caller can see; it is 0 when every
+    // reference sits in a hidden note.
+    const by =
+      result.noteCount > 0
+        ? ` by ${result.noteCount} note${result.noteCount === 1 ? '' : 's'}`
+        : '';
     return json(
       {
         error: 'asset_in_use',
-        reason: `still referenced by ${result.noteCount} note${result.noteCount === 1 ? '' : 's'} — remove the embed or portrait reference first`,
+        reason: `still referenced${by} — remove the embed or portrait reference first`,
       },
       409,
     );

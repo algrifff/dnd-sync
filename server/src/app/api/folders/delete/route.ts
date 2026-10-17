@@ -1,6 +1,7 @@
 // POST /api/folders/delete — remove a folder, everything nested under
 // it, and every referenced row. Body: { path }. Returns { ok, deleted:
-// <note count> }. Always cascades — the client confirms first.
+// <note count> }. Always cascades — the client confirms first. Notes
+// the caller can't see are skipped, not deleted or counted.
 
 import { z } from 'zod';
 import type { NextRequest } from 'next/server';
@@ -11,7 +12,7 @@ import { deleteRelationsOf } from '@/lib/relations';
 import { logAudit } from '@/lib/audit';
 import { closeDocumentConnections } from '@/collab/server';
 import { deriveFolderIndexesFor } from '@/lib/campaign-index';
-import { findNearestIndexPath } from '@/lib/notes';
+import { findNearestIndexPath, hiddenNotesSql, visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,10 +42,13 @@ export async function POST(req: NextRequest): Promise<Response> {
   const db = getDb();
   const groupId = session.currentGroupId;
 
+  // Only the notes the caller can see. Hidden ones (an editor and the
+  // admin's gm_only notes) stay where they are and stay out of the
+  // `deleted` count, so the folder deletes as if they weren't there.
   const notes = db
     .query<{ path: string }, [string, string, string]>(
-      `SELECT path FROM notes
-        WHERE group_id = ? AND (path = ? OR path LIKE ? || '/%')`,
+      `SELECT path FROM notes n
+        WHERE group_id = ? AND (path = ? OR path LIKE ? || '/%')${hiddenNotesSql('n', visibilityFor(session.role))}`,
     )
     .all(groupId, path, path);
 

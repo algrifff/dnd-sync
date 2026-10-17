@@ -6,6 +6,7 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { getAssetById } from '@/lib/assets';
+import { visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,8 +37,11 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     return json({ error: 'invalid_body', detail: err instanceof Error ? err.message : 'bad' }, 400);
   }
 
+  // A gm_only asset the caller can't see answers exactly like a missing one.
   const asset = getAssetById(body.assetId, session.currentGroupId);
-  if (!asset) return json({ error: 'not_found' }, 404);
+  if (!asset || (asset.gm_only === 1 && visibilityFor(session.role).hideGmOnly)) {
+    return json({ error: 'not_found' }, 404);
+  }
 
   const normalised = [...new Set(body.tags.map((t) => t.replace(/^#/, '').toLowerCase()))];
 
