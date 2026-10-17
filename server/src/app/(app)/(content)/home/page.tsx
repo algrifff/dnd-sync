@@ -12,7 +12,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { getDb } from '@/lib/db';
-import { recentlyUpdated } from '@/lib/notes';
+import { countVisibleNotes, recentlyUpdated, visibilityFor } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
 import { GM_MODE_COOKIE, treeModeFor } from '@/lib/gm-mode';
 
@@ -27,21 +27,29 @@ export default async function HomePage(): Promise<ReactElement> {
   const session = readSession(cookieHeader);
   if (!session) redirect('/login?next=/home');
 
-  const counts = getDb()
-    .query<{ notes: number; assets: number }, [string, string]>(
-      `SELECT
-         (SELECT COUNT(*) FROM notes  WHERE group_id = ?) AS notes,
-         (SELECT COUNT(*) FROM assets WHERE group_id = ?) AS assets`,
-    )
-    .get(session.currentGroupId, session.currentGroupId) ?? { notes: 0, assets: 0 };
+  const vis = visibilityFor(session.role);
+  const counts = {
+    notes: countVisibleNotes(session.currentGroupId, vis),
+    // Assets carry gm_only but no dm_only flag.
+    assets:
+      getDb()
+        .query<{ n: number }, [string]>(
+          `SELECT COUNT(*) AS n FROM assets
+            WHERE group_id = ?${vis.hideGmOnly ? ' AND gm_only = 0' : ''}`,
+        )
+        .get(session.currentGroupId)?.n ?? 0,
+  };
 
-  const recent = recentlyUpdated(session.currentGroupId, 12);
+  const recent = recentlyUpdated(session.currentGroupId, 12, vis);
   // Tree is also fetched by the parent layout, but the snapshot-
   // keyed cache in buildTree makes this a ~1ms lookup rather than a
   // second full SELECT. Kept here because topFolders/countFiles are
   // home-specific derived data.
   const gmMode = treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role) === 'gm';
-  const tree = buildTree(session.currentGroupId, { mode: gmMode ? 'gm' : 'player' });
+  const tree = buildTree(session.currentGroupId, {
+    mode: gmMode ? 'gm' : 'player',
+    hideDmOnly: vis.hideDmOnly,
+  });
   const topFolders = tree.root.children.filter((c) => c.kind === 'dir').slice(0, 6);
 
   return (

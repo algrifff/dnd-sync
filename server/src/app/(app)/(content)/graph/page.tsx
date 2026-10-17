@@ -5,7 +5,7 @@ import type { ReactElement } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
-import { listAllTags } from '@/lib/notes';
+import { listAllTags, visibilityFor } from '@/lib/notes';
 // Lazy-loaded (ssr:false) — see GraphCanvasLoader.tsx for why this is a
 // separate Client Component file rather than a plain import, and for
 // the measured bundle-size before/after.
@@ -22,7 +22,9 @@ export default async function GraphPage(): Promise<ReactElement> {
   const session = readSession(cookieHeader);
   if (!session) redirect('/login?next=/graph');
 
-  const allTags = listAllTags(session.currentGroupId).map((t) => t.tag);
+  const allTags = listAllTags(session.currentGroupId, visibilityFor(session.role)).map(
+    (t) => t.tag,
+  );
 
   return (
     <div className="relative flex-1 overflow-hidden">

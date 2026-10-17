@@ -5,6 +5,7 @@ import { readSession } from '@/lib/session';
 import { buildTree } from '@/lib/tree';
 import { GM_MODE_COOKIE, treeModeFor } from '@/lib/gm-mode';
 import { listNoteKinds } from '@/lib/characters';
+import { visibilityFor } from '@/lib/notes';
 import { getWorldFeatures } from '@/lib/groups';
 import { AppHeader } from '../../AppHeader';
 import { NoteTabBar } from '../../NoteTabBar';
@@ -30,9 +31,15 @@ export default async function SettingsLayout({
   if (!session) redirect('/login?next=/settings');
 
   const gmMode = treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role) === 'gm';
-  const playerTree = buildTree(session.currentGroupId, { mode: 'player' });
-  const gmTree = gmMode ? buildTree(session.currentGroupId, { mode: 'gm' }) : null;
-  const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId));
+  const vis = visibilityFor(session.role);
+  const playerTree = buildTree(session.currentGroupId, {
+    mode: 'player',
+    hideDmOnly: vis.hideDmOnly,
+  });
+  const gmTree = gmMode
+    ? buildTree(session.currentGroupId, { mode: 'gm', hideDmOnly: vis.hideDmOnly })
+    : null;
+  const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId, vis));
   const features = getWorldFeatures(session.currentGroupId);
 
   return (

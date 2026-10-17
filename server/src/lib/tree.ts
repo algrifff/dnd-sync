@@ -135,10 +135,10 @@ function cacheKey(
 
 export function buildTree(
   groupId: string,
-  opts?: { hideDmOnly?: boolean; mode?: TreeMode },
+  opts: { hideDmOnly: boolean; mode?: TreeMode },
 ): Tree {
-  const hideDmOnly = !!opts?.hideDmOnly;
-  const mode: TreeMode = opts?.mode ?? 'player';
+  const hideDmOnly = opts.hideDmOnly;
+  const mode: TreeMode = opts.mode ?? 'player';
   const key = cacheKey(groupId, hideDmOnly, mode);
   const snap = snapshotKey(groupId, hideDmOnly, mode);
   const cached = treeCache.get(key);
