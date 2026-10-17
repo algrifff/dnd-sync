@@ -5,6 +5,10 @@ import type { NextConfig } from 'next';
 const config: NextConfig = {
   reactStrictMode: true,
 
+  // Nothing uses next/image, so turn off the /_next/image optimizer: it would
+  // otherwise run sharp on any same-origin image, including player uploads.
+  images: { unoptimized: true },
+
   async rewrites() {
     return [
       {
@@ -51,7 +55,7 @@ const config: NextConfig = {
   //
   // `bun:sqlite` is a Bun runtime built-in with no Node equivalent.
   // Keeping it external stops webpack from trying to resolve it at
-  // analysis time under Node.
+  // analysis time.
   serverExternalPackages: [
     'bun:sqlite',
 

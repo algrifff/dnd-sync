@@ -15,7 +15,8 @@ import { loadNote, isAllowedPath } from '@/lib/notes';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 import { getCampaignBySlug, listCampaigns } from '@/lib/characters';
-import { canonicalFolder, nameToSlug } from '@/lib/ai/paths';
+import { canonicalFolder } from '@/lib/ai/paths';
+import { slugify } from '@/lib/slugify';
 import { canonicalKind, KIND_INPUTS, NOTE_KINDS, type NoteKind } from '@compendium/shared';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
@@ -25,7 +26,12 @@ import {
   parentFolderUnderCampaign,
 } from '@/lib/campaign-index';
 import { validateSheet } from '@/lib/validateSheet';
-import { signalSheetChanged } from '@/collab/server';
+import {
+  closeDocumentConnections,
+  closeDocumentForWrite,
+  releaseServerWrite,
+  signalSheetChanged,
+} from '@/collab/server';
 import { parseCharacter } from '@/lib/character-parser';
 import { writeNote } from '@/lib/import-apply';
 import { applyNoteEdit, type PmDoc } from '@/lib/note-edits';
@@ -65,6 +71,25 @@ export type ToolContext = {
  *  from one that doesn't exist, matching every direct read path. */
 function isGmOnlyHiddenFrom(ctx: ToolContext, note: { gm_only: number }): boolean {
   return note.gm_only === 1 && ctx.sessionRole !== 'admin';
+}
+
+/** True when this caller may not see the note at all: dm_only for a
+ *  non-GM, or gm_only for anyone but an admin. */
+function isHiddenFrom(ctx: ToolContext, note: { dm_only: number; gm_only: number }): boolean {
+  return (note.dm_only === 1 && ctx.role !== 'dm') || isGmOnlyHiddenFrom(ctx, note);
+}
+
+/** The error for a move/rename whose destination is taken, or null when
+ *  it is free. A destination this caller cannot see answers like any
+ *  other invisible note rather than confirming that something is there. */
+function destinationTakenError(ctx: ToolContext, path: string): string | null {
+  const taken = getDb()
+    .query<{ dm_only: number; gm_only: number }, [string, string]>(
+      'SELECT dm_only, gm_only FROM notes WHERE group_id=? AND path=?',
+    )
+    .get(ctx.groupId, path);
+  if (!taken) return null;
+  return isHiddenFrom(ctx, taken) ? `Not found: ${path}` : `Path exists: ${path}`;
 }
 
 // ── Factory ────────────────────────────────────────────────────────────
@@ -483,7 +508,7 @@ function entityCreate(ctx: ToolContext) {
         campaignSlug: slugParam,
         campaignRoot,
       });
-      const path = `${folder}/${nameToSlug(name)}.md`;
+      const path = `${folder}/${slugify(name)}.md`;
 
       // Defence in depth: canonicalFolder should already emit
       // structured paths, but refuse to write anything that would
@@ -735,25 +760,14 @@ function entityMove(ctx: ToolContext) {
       if (isGmOnlyHiddenFrom(ctx, fromNote)) {
         return { ok: false as const, error: `Not found: ${from}` };
       }
-      const conflict = db
-        .query<{ n: number }, [string, string]>('SELECT COUNT(*) AS n FROM notes WHERE group_id=? AND path=?')
-        .get(ctx.groupId, to);
-      if ((conflict?.n ?? 0) > 0) return { ok: false as const, error: `Path exists: ${to}` };
+      const taken = destinationTakenError(ctx, to);
+      if (taken) return { ok: false as const, error: taken };
 
-      db.transaction(() => {
-        // Derived-index tables hold FKs on notes(group_id, path) with no
-        // ON UPDATE CASCADE; check them at COMMIT, after the rewrites below.
-        db.exec('PRAGMA defer_foreign_keys = 1');
+      const failed = await renameNoteRow(ctx, from, to, () => {
         db.query(`UPDATE notes SET path=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
           .run(to, Date.now(), ctx.userId, ctx.groupId, from);
-        for (const tbl of ['note_links', 'tags', 'aliases', 'characters', 'character_campaigns', 'session_notes']) {
-          const col = tbl === 'note_links' ? 'from_path' : tbl === 'characters' || tbl === 'character_campaigns' || tbl === 'session_notes' ? 'note_path' : 'path';
-          db.query(`UPDATE ${tbl} SET ${col}=? WHERE group_id=? AND ${col}=?`).run(to, ctx.groupId, from);
-        }
-        db.query(`UPDATE note_links SET to_path=? WHERE group_id=? AND to_path=?`).run(to, ctx.groupId, from);
-        repointSuggestionPaths(ctx.groupId, from, to);
-        repointRelations(ctx.groupId, from, to);
-      })();
+      });
+      if (failed) return { ok: false as const, error: failed };
 
       void deriveFolderIndexesFor(ctx.groupId, [from, to], {
         userId: ctx.userId,
@@ -764,6 +778,60 @@ function entityMove(ctx: ToolContext) {
       return { ok: true as const, path: to };
     },
   });
+}
+
+/** Moves the note at `from` to `to`: `updateNote` rewrites the notes row,
+ *  and every table keyed by the note's path follows it. Live editors are
+ *  drained first so their pending keystrokes land before the path
+ *  changes, then whatever reattached is discarded: a document still open
+ *  under the old name would store() into a row that no longer exists.
+ *  Returns an error string when the source vanished or the destination
+ *  was taken while the editors drained (the callers' checks run before
+ *  that await), otherwise null. */
+async function renameNoteRow(
+  ctx: ToolContext,
+  from: string,
+  to: string,
+  updateNote: () => void,
+): Promise<string | null> {
+  const db = getDb();
+  const token = await closeDocumentForWrite(ctx.groupId, from);
+  try {
+    let failed: string | null = null;
+    db.transaction(() => {
+      if (!loadNote(ctx.groupId, from)) {
+        failed = `Not found: ${from}`;
+        return;
+      }
+      failed = destinationTakenError(ctx, to);
+      if (failed) return;
+      // Derived-index tables hold FKs on notes(group_id, path) with no
+      // ON UPDATE CASCADE; check them at COMMIT, after the rewrites below.
+      db.exec('PRAGMA defer_foreign_keys = 1');
+      updateNote();
+      for (const tbl of ['note_links', 'tags', 'aliases', 'characters', 'character_campaigns', 'session_notes']) {
+        const col = tbl === 'note_links' ? 'from_path'
+          : tbl === 'characters' || tbl === 'character_campaigns' || tbl === 'session_notes' ? 'note_path'
+          : 'path';
+        db.query(`UPDATE ${tbl} SET ${col}=? WHERE group_id=? AND ${col}=?`).run(to, ctx.groupId, from);
+      }
+      db.query(`UPDATE note_links SET to_path=? WHERE group_id=? AND to_path=?`).run(to, ctx.groupId, from);
+      repointSuggestionPaths(ctx.groupId, from, to);
+      repointRelations(ctx.groupId, from, to);
+      // Structured-note index tables (same FK as above), plus the two soft
+      // references notes/move also rewrites.
+      for (const tbl of ['items', 'locations', 'creatures']) {
+        db.query(`UPDATE ${tbl} SET note_path=? WHERE group_id=? AND note_path=?`).run(to, ctx.groupId, from);
+      }
+      db.query(`UPDATE locations SET parent_path=? WHERE group_id=? AND parent_path=?`).run(to, ctx.groupId, from);
+      db.query(`UPDATE users SET active_character_path=? WHERE active_character_path=?`).run(to, from);
+    })();
+    if (failed) return failed;
+    await closeDocumentConnections(ctx.groupId, from, token);
+    return null;
+  } finally {
+    releaseServerWrite(token);
+  }
 }
 
 // ── entity_change_kind ────────────────────────────────────────────────
@@ -820,7 +888,7 @@ function entityChangeKind(ctx: ToolContext) {
         ...(targetSlug    !== undefined ? { campaignSlug: targetSlug } : {}),
         ...(campaignRoot  !== undefined ? { campaignRoot }              : {}),
       });
-      const newPath = `${folder}/${nameToSlug(leaf)}.md`;
+      const newPath = `${folder}/${slugify(leaf)}.md`;
 
       // Update kind in frontmatter (write either way — kind changed even
       // if path is unchanged).
@@ -830,33 +898,19 @@ function entityChangeKind(ctx: ToolContext) {
       const nextFm = { ...fm, kind: canonical, template: canonical };
 
       if (newPath !== path) {
-        const conflict = db
-          .query<{ n: number }, [string, string]>('SELECT COUNT(*) AS n FROM notes WHERE group_id=? AND path=?')
-          .get(ctx.groupId, newPath);
-        if ((conflict?.n ?? 0) > 0) {
-          return { ok: false as const, error: `Path exists: ${newPath}` };
-        }
-      }
-
-      db.transaction(() => {
-        if (newPath !== path) {
-          db.exec('PRAGMA defer_foreign_keys = 1');
+        const taken = destinationTakenError(ctx, newPath);
+        if (taken) return { ok: false as const, error: taken };
+        const failed = await renameNoteRow(ctx, path, newPath, () => {
           db.query(`UPDATE notes SET path=?, frontmatter_json=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
             .run(newPath, JSON.stringify(nextFm), Date.now(), ctx.userId, ctx.groupId, path);
-          for (const tbl of ['note_links', 'tags', 'aliases', 'characters', 'character_campaigns', 'session_notes']) {
-            const col = tbl === 'note_links' ? 'from_path'
-              : tbl === 'characters' || tbl === 'character_campaigns' || tbl === 'session_notes' ? 'note_path'
-              : 'path';
-            db.query(`UPDATE ${tbl} SET ${col}=? WHERE group_id=? AND ${col}=?`).run(newPath, ctx.groupId, path);
-          }
-          db.query(`UPDATE note_links SET to_path=? WHERE group_id=? AND to_path=?`).run(newPath, ctx.groupId, path);
-          repointSuggestionPaths(ctx.groupId, path, newPath);
-          repointRelations(ctx.groupId, path, newPath);
-        } else {
-          db.query(`UPDATE notes SET frontmatter_json=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
-            .run(JSON.stringify(nextFm), Date.now(), ctx.userId, ctx.groupId, path);
-        }
-      })();
+        });
+        if (failed) return { ok: false as const, error: failed };
+      } else {
+        // frontmatter_json is not part of the Y.Doc, so an open editor's
+        // next store() cannot clobber it and nobody needs evicting.
+        db.query(`UPDATE notes SET frontmatter_json=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
+          .run(JSON.stringify(nextFm), Date.now(), ctx.userId, ctx.groupId, path);
+      }
 
       try {
         deriveAllIndexes({
@@ -947,6 +1001,14 @@ function inventoryAdd(ctx: ToolContext) {
       if (isGmOnlyHiddenFrom(ctx, note)) {
         return { ok: false as const, error: `Not found: ${characterPath}` };
       }
+      // The item's name is written into the sheet, so an item this
+      // caller cannot see must not be linkable.
+      if (itemPath) {
+        const item = loadNote(ctx.groupId, itemPath);
+        if (!item || isHiddenFrom(ctx, item)) {
+          return { ok: false as const, error: `Not found: ${itemPath}` };
+        }
+      }
 
       let fm: Record<string, unknown>;
       try { fm = JSON.parse(note.frontmatter_json) as Record<string, unknown>; }
@@ -1000,7 +1062,7 @@ function noteRead(ctx: ToolContext) {
       // hidden note is indistinguishable from a missing one. gm_only is
       // stricter than dm_only: an 'editor' has ctx.role === 'dm' but
       // must not see it — see isGmOnlyHiddenFrom.
-      if (!note || (note.dm_only === 1 && ctx.role !== 'dm') || isGmOnlyHiddenFrom(ctx, note)) {
+      if (!note || isHiddenFrom(ctx, note)) {
         return { ok: false as const, error: `Not found: ${path}` };
       }
 
@@ -1142,7 +1204,9 @@ function sessionFinalize(ctx: ToolContext) {
       if (ctx.role !== 'dm') return { ok: false as const, error: 'GM only' };
 
       const note = loadNote(ctx.groupId, sessionPath);
-      if (!note) return { ok: false as const, error: `Not found: ${sessionPath}` };
+      if (!note || isGmOnlyHiddenFrom(ctx, note)) {
+        return { ok: false as const, error: `Not found: ${sessionPath}` };
+      }
 
       const now = Date.now();
       getDb()

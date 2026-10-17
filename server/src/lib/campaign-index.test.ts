@@ -151,3 +151,64 @@ describe('deriveFolderIndex — hidden children', () => {
     expect(listed).toEqual(['Visible Villager']);
   });
 });
+
+describe('deriveFolderIndex — folders holding only hidden notes', () => {
+  const groupId = 'g_test_index_hidden_folders';
+  const userId = 'u_test_index_hidden_folders';
+  const parent = 'Campaigns/Demo/Places';
+  const subfolders = ['Open Quarter', 'Smugglers Den', 'Owners Vault'];
+
+  function seedNote(path: string, flags: { dmOnly?: boolean; gmOnly?: boolean } = {}): void {
+    const title = path.split('/').pop()!.replace(/\.md$/, '');
+    getDb()
+      .query(
+        `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
+                            content_md, yjs_state, frontmatter_json, byte_size,
+                            updated_at, updated_by, created_at, created_by, dm_only, gm_only)
+         VALUES (?, ?, ?, ?, '{"type":"doc","content":[]}', '', '', NULL, '{}', 0, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(randomUUID(), groupId, path, title, Date.now(), userId, Date.now(), userId,
+           flags.dmOnly ? 1 : 0, flags.gmOnly ? 1 : 0);
+  }
+
+  function indexBody(folder: string): string | null {
+    return (
+      getDb()
+        .query<{ content_md: string }, [string, string]>(
+          'SELECT content_md FROM notes WHERE group_id = ? AND path = ?',
+        )
+        .get(groupId, `${folder}/index.md`)?.content_md ?? null
+    );
+  }
+
+  beforeAll(() => {
+    setupTestDb();
+    const db = getDb();
+    db.query('INSERT INTO groups (id, name, created_at) VALUES (?, ?, ?)').run(groupId, 'Hidden', Date.now());
+    db.query(
+      `INSERT INTO users (id, username, display_name, password_hash, accent_color, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(userId, 'indexer2', 'Indexer', 'x', '#000', Date.now());
+    seedNote(`${parent}/Tavern.md`);
+    seedNote(`${parent}/Open Quarter/Market.md`);
+    seedNote(`${parent}/Smugglers Den/Cellar.md`, { dmOnly: true });
+    seedNote(`${parent}/Owners Vault/Ledger.md`, { gmOnly: true });
+  });
+  afterAll(() => teardownTestDb());
+
+  it('should list only subfolders that hold a note every viewer can see', async () => {
+    await deriveFolderIndex(groupId, parent, { userId });
+
+    const listed = subfolders.filter((name) => indexBody(parent)!.includes(name));
+    expect(listed).toEqual(['Open Quarter']);
+  });
+
+  it('should not auto-create an index for a folder whose only notes are hidden', async () => {
+    for (const name of subfolders) {
+      await deriveFolderIndex(groupId, `${parent}/${name}`, { userId });
+    }
+
+    const indexed = subfolders.filter((name) => indexBody(`${parent}/${name}`) !== null);
+    expect(indexed).toEqual(['Open Quarter']);
+  });
+});

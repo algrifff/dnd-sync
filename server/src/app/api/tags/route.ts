@@ -1,9 +1,10 @@
-// GET /api/tags — list all tags in the group with usage counts. Used
-// by the TagEditor's autocomplete popover.
+// GET /api/tags — list the tags in the group the caller can see, with
+// usage counts. Used by the TagEditor's autocomplete popover. A tag
+// that only hidden notes or assets carry is not listed.
 
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
-import { getDb } from '@/lib/db';
+import { listNoteAndAssetTags, visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,19 +12,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   const session = requireSession(req);
   if (session instanceof Response) return session;
 
-  const rows = getDb()
-    .query<{ tag: string; count: number }, [string, string]>(
-      `SELECT tag, COUNT(*) AS count
-         FROM (
-           SELECT tag FROM tags WHERE group_id = ?
-           UNION ALL
-           SELECT tag FROM asset_tags WHERE group_id = ?
-         )
-         GROUP BY tag
-         ORDER BY count DESC, tag ASC
-         LIMIT 500`,
-    )
-    .all(session.currentGroupId, session.currentGroupId);
+  const rows = listNoteAndAssetTags(session.currentGroupId, visibilityFor(session.role), 500);
 
   return new Response(JSON.stringify({ tags: rows }), {
     status: 200,

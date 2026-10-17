@@ -40,9 +40,9 @@
 import * as YAML from 'yaml';
 
 import { parseCharacter } from './character-parser';
+import { slugify } from './slugify';
 import {
   canonicalFolder,
-  nameToSlug,
   type EntityKind,
 } from './ai/paths';
 
@@ -159,7 +159,7 @@ function detectCampaignRoot(
   const m = first.match(/^Campaign\s+\d+\s*-\s*(.+)$/i);
   if (m) {
     const name = m[1]!.trim();
-    return { slug: nameToSlug(name), name, depth: 1 };
+    return { slug: slugify(name), name, depth: 1 };
   }
 
   return null;
@@ -585,7 +585,7 @@ function planOneShotFile(
   // on its own; we try to find a sibling root file and use its slug.
   const stem = filename.replace(/\.md$/i, '');
   if (segs.length === 2) {
-    const slug = nameToSlug(`${root}-${stem}`);
+    const slug = slugify(`${root}-${stem}`);
     return finishCharOrPlain({
       f,
       filename,
@@ -599,7 +599,7 @@ function planOneShotFile(
   // Deeper: assume the second segment is a thematic grouping like
   // "Party" → Characters subfolder.
   const groupSeg = segs[1]!;
-  const slug = nameToSlug(`one-shot-${root}`);
+  const slug = slugify(`one-shot-${root}`);
   if (groupSeg.toLowerCase() === 'party') {
     return finishCharOrPlain({
       f,

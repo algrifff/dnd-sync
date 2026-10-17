@@ -25,7 +25,8 @@ import { getDb } from '@/lib/db';
 import { addRelation } from '@/lib/relations';
 import { loadNote, visibilityFor, type NoteRow } from '@/lib/notes';
 import { getCampaignBySlug } from '@/lib/characters';
-import { canonicalPath, nameToSlug } from '@/lib/ai/paths';
+import { canonicalPath } from '@/lib/ai/paths';
+import { slugify } from '@/lib/slugify';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
 import { writeNote } from '@/lib/import-apply';
 import { deriveFolderIndex, parentFolderUnderCampaign } from '@/lib/campaign-index';
@@ -806,7 +807,7 @@ async function resolveTarget(opts: {
  *  (say, Cyrillic) fall back to a short hash of the title, so the same
  *  title always maps to the same path. */
 function slugFor(title: string): string {
-  const slug = nameToSlug(title);
+  const slug = slugify(title);
   if (slug) return slug;
   return `note-${createHash('sha1').update(title.trim().toLowerCase()).digest('hex').slice(0, 8)}`;
 }

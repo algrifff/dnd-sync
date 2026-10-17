@@ -5,7 +5,7 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { readSession } from '@/lib/session';
-import { listNotesByTag } from '@/lib/notes';
+import { listNotesByTag, visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +24,7 @@ export default async function TagDetailPage({ params }: Ctx): Promise<ReactEleme
   const session = readSession(cookieHeader);
   if (!session) notFound();
 
-  const notes = listNotesByTag(session.currentGroupId, tag);
+  const notes = listNotesByTag(session.currentGroupId, tag, visibilityFor(session.role));
 
   return (
     <div className="flex-1 overflow-y-auto">

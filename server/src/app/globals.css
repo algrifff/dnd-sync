@@ -523,3 +523,148 @@ html, body {
     filter: none !important;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+   Wrap-up review (notes/WrapUpDialog, WrapUpRows, WrapUpTick,
+   EndSessionButton). The dialog says nothing it can show: ticks, struck
+   names, dimmed rows and a seal carry the state. Everything that moves
+   is switched off under prefers-reduced-motion at the end of the block.
+   ───────────────────────────────────────────────────────────────────── */
+:root { --wu-ease: cubic-bezier(0.25, 1, 0.5, 1); --wu-on-wine: var(--vellum); }
+[data-theme="night"] { --wu-on-wine: var(--parchment-deep); }
+
+@keyframes wu-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes wu-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes wu-sheet {
+  from { opacity: 0.6; transform: translateY(32px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes wu-pop {
+  from { opacity: 0; transform: scale(0.6); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes wu-draw { to { stroke-dashoffset: 0; } }
+@keyframes wu-halo {
+  from { opacity: 0.55; transform: scale(1); }
+  to   { opacity: 0; transform: scale(1.9); }
+}
+@keyframes wu-flash {
+  from { background-color: rgb(var(--candlelight-rgb) / 0.32); }
+  to   { background-color: transparent; }
+}
+@keyframes wu-tick-up {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.wu-overlay { animation: wu-fade 160ms ease-out both; }
+.wu-panel   { animation: wu-rise 260ms var(--wu-ease) both; }
+@media (max-width: 639px) {
+  .wu-panel { animation: wu-sheet 320ms var(--wu-ease) both; }
+}
+.wu-banner  { animation: wu-rise 320ms var(--wu-ease) both; }
+.wu-enter   { animation: wu-rise 320ms var(--wu-ease) backwards; animation-delay: calc(var(--i, 0) * 28ms); }
+.wu-arrive  { animation: wu-flash 900ms ease-out both; }
+.wu-num     { display: inline-block; animation: wu-tick-up 180ms var(--wu-ease) both; }
+
+.wu-row {
+  transition: opacity 200ms var(--wu-ease), background-color 120ms ease-out;
+  transition-delay: var(--d, 0ms), 0ms;
+}
+.wu-row[data-off="true"] { opacity: 0.5; }
+.wu-row[data-off="true"] .wu-title { color: var(--ink-soft); }
+
+.wu-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--vellum);
+}
+
+.wu-tick { position: relative; display: block; width: 22px; height: 22px; flex: none; }
+.wu-tick__input {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  margin: 0; opacity: 0; cursor: pointer;
+}
+.wu-tick__input:disabled { cursor: not-allowed; }
+.wu-tick__input:focus-visible { outline: none; }
+.wu-tick__box {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  border-radius: 7px;
+  border: 1.5px solid var(--ink-muted);
+  background: var(--vellum);
+  color: var(--wu-on-wine);
+  pointer-events: none;
+  transition: background-color 160ms ease-out, border-color 160ms ease-out,
+    transform 140ms var(--wu-ease), box-shadow 160ms ease-out;
+}
+.wu-row:hover .wu-tick__input:not(:disabled):not(:checked) + .wu-tick__box { border-color: var(--wine); }
+.wu-row:active .wu-tick__input:not(:disabled) + .wu-tick__box { transform: scale(0.86); }
+.wu-tick__input:checked + .wu-tick__box { background: var(--wine); border-color: var(--wine); }
+.wu-tick__input:focus-visible + .wu-tick__box {
+  box-shadow: 0 0 0 2px var(--vellum), 0 0 0 4px var(--candlelight);
+}
+.wu-tick__check {
+  stroke-dasharray: 18; stroke-dashoffset: 18;
+  transition: stroke-dashoffset 220ms var(--wu-ease);
+}
+.wu-tick__input:checked + .wu-tick__box .wu-tick__check {
+  stroke-dashoffset: 0;
+  transition-delay: 50ms;
+}
+.wu-tick__box[data-blocked="true"] {
+  border-style: dashed; background: transparent; color: var(--ink-muted);
+}
+.wu-tick__off { position: absolute; opacity: 0; transition: opacity 160ms ease-out; }
+.wu-tick__box[data-blocked="true"] .wu-tick__off { opacity: 1; }
+
+.wu-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  border-radius: 9999px; border: 1px solid var(--rule);
+  background: var(--parchment-sunk); color: var(--ink-soft);
+  padding: 1px 8px; font-size: 11px; font-weight: 600; line-height: 1.5;
+  white-space: nowrap;
+}
+
+.wu-seg {
+  display: inline-flex; gap: 2px; padding: 2px; max-width: 100%;
+  border-radius: 9999px; border: 1px solid var(--rule); background: var(--parchment-sunk);
+}
+.wu-seg button {
+  display: inline-flex; min-width: 0; align-items: center; gap: 4px;
+  border-radius: 9999px; padding: 4px 10px;
+  font-size: 12px; font-weight: 500; color: var(--ink-soft);
+  transition: background-color 160ms ease-out, color 160ms ease-out, box-shadow 160ms ease-out;
+}
+.wu-seg button:last-child { flex-shrink: 0; }
+.wu-seg button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wu-seg button[aria-pressed="true"] {
+  background: var(--vellum); color: var(--ink);
+  box-shadow: 0 1px 2px rgb(var(--ink-rgb) / 0.18);
+}
+.wu-seg button:not([aria-pressed="true"]):not(:disabled):hover { color: var(--ink); }
+.wu-seg button:disabled { cursor: not-allowed; opacity: 0.6; }
+
+.wu-seal {
+  position: relative; display: grid; place-items: center;
+  width: 64px; height: 64px; border-radius: 9999px;
+  background: var(--wine); color: var(--wu-on-wine);
+  animation: wu-pop 280ms var(--wu-ease) both;
+}
+.wu-seal::after {
+  content: ''; position: absolute; inset: 0; border-radius: 9999px;
+  border: 2px solid var(--candlelight);
+  animation: wu-halo 800ms ease-out 180ms both;
+}
+.wu-seal svg { stroke-dasharray: 30; stroke-dashoffset: 30; animation: wu-draw 360ms var(--wu-ease) 160ms forwards; }
+
+@media (prefers-reduced-motion: reduce) {
+  .wu-overlay, .wu-panel, .wu-banner, .wu-enter, .wu-arrive, .wu-num, .wu-seal, .wu-seal::after { animation: none; }
+  .wu-seal::after { display: none; }
+  .wu-seal svg { animation: none; stroke-dashoffset: 0; }
+  .wu-row, .wu-tick__box, .wu-tick__check, .wu-tick__off, .wu-seg button { transition: none; }
+  .wu-row:active .wu-tick__input:not(:disabled) + .wu-tick__box { transform: none; }
+}

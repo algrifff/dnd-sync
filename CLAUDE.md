@@ -52,12 +52,12 @@ globally (`npm i -g bun@1.4.3`) — don't rely on `npx bun`, which resolves the 
 
 ## Runtime split — critical
 
-- **Dev / tests**: Bun → uses `bun:sqlite` (built-in, no native modules)
-- **Production**: Node 22 → uses `better-sqlite3` (V8 ABI-specific .node binary)
-- `server/src/lib/db.ts` switches at runtime: `typeof Bun !== "undefined"`
-- The Dockerfile rebuilds `better-sqlite3` against Node 22's ABI in a separate stage — don't skip this step when changing the Dockerfile
+- **Bun everywhere**: dev, tests and production all run on Bun and use `bun:sqlite` (built-in, no native SQLite module to compile)
+- `server/src/lib/db.ts` loads `bun:sqlite` through `createRequire` (a static import breaks `next build`, whose page-data workers run under Node) and wraps it in the shared `Database` interface; `next.config.ts` keeps `bun:sqlite` external too
+- The Dockerfile is a single stage on `oven/bun:1.4.3` (keep it in step with `mise.toml`); it installs `poppler-utils` for PDF import, runs `next build`, and starts `bun run server.ts`
+- Anything that must run under Node (there is nothing today) cannot import `lib/db.ts`
 
-## Data model (50 migrations, versions 1–52 — append only, never edit existing)
+## Data model (51 migrations, versions 1–53 — append only, never edit existing)
 
 Numbering isn't contiguous — a couple of version numbers (21, 22) were
 never shipped, so "latest version" and "migration count" are two
@@ -214,7 +214,7 @@ whole flow over HTTP) and the MCP Inspector:
 
 | File | What it does |
 |------|-------------|
-| `server/src/lib/db.ts` | SQLite singleton, dual-runtime adapter |
+| `server/src/lib/db.ts` | SQLite singleton, `bun:sqlite` behind the `Database` interface |
 | `server/src/lib/migrations.ts` | Append-only migration array — **never edit existing entries** |
 | `server/src/lib/superadmin.ts` | `ADMIN_TOKEN` check for the `/admin/*` `__sa` cookie |
 | `server/src/lib/session.ts` | Session CRUD, CSRF, expiry cleanup |
@@ -232,6 +232,7 @@ whole flow over HTTP) and the MCP Inspector:
 | `server/src/lib/mcp/server.ts` | Per-request stateless Streamable HTTP MCP server over that registry |
 | `server/src/app/api/mcp/route.ts` | Bearer gate + 401 challenge in front of the MCP server |
 | `server/scripts/mcp-smoke.ts` | Live end-to-end check of the connector over HTTP |
+| `server/scripts/suggest-relations.ts` | Read-only: prints candidate `member_of` / `located_in` Relationships from Person and Creature `faction` / `location` frontmatter (logic in `lib/relation-suggestions.ts`) |
 | `server/src/collab/server.ts` | Hocuspocus server for web editing |
 | `server/server.ts` | Entry point — Next.js + WebSocket on the same port |
 | `server/next.config.ts` | `serverExternalPackages` for Yjs/Tiptap/graph libs — touch carefully |
@@ -334,7 +335,11 @@ Railway: `railway.toml` at repo root, Dockerfile at `server/Dockerfile`. Build c
 
 Required env vars: `ADMIN_TOKEN` (the `/admin` super-admin login is disabled without it), `DATA_DIR=/data` + a volume mounted at `/data`. `PLAYER_TOKEN` is no longer read by any auth path; setting it is harmless.
 
+Railway needs `RAILWAY_RUN_UID=0` so the container starts as root, takes ownership of the `/data` volume, and drops to the unprivileged `bun` user (`server/docker-entrypoint.sh`).
+
 Optional: `OPENAI_API_KEY` (enables Smart Import and PDF character import), `PUBLIC_APP_URL` (the public `https://` origin; set it on Railway so OAuth metadata and the MCP `resource` do not depend on forwarded headers).
+
+SQLite backups (Litestream to Cloudflare R2) are opt-in: set `LITESTREAM_REPLICA_URL`, `LITESTREAM_S3_ENDPOINT`, `LITESTREAM_ACCESS_KEY_ID` and `LITESTREAM_SECRET_ACCESS_KEY`. With them unset the container boots unchanged (`server/docker-entrypoint.sh`). Assets are not backed up. Setup and restore drill: `docs/ops/backups.md`.
 
 ## Skills (invoke with `/skill:<name>`)
 

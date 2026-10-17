@@ -18,6 +18,7 @@ import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { getRenameableFolderForIndex } from '@/lib/folder-rename';
 import { moveFolder } from '@/lib/move-folder';
+import { visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,6 +81,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     userId: session.userId,
     from: fromFolder,
     to: toFolder,
+    vis: visibilityFor(session.role),
   });
   if (!result.ok) {
     const status =

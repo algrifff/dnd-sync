@@ -1,18 +1,11 @@
 // SQLite singleton. Opens compendium.db under $DATA_DIR, applies pending
 // migrations, and returns a ready handle.
 //
-// Backing store is runtime-adaptive:
-//   - bun:sqlite      when running under Bun  (tests, local dev)
-//   - better-sqlite3  when running under Node.js  (production via Dockerfile)
-//
-// better-sqlite3 uses V8 API (not N-API) so its .node binary is Node
-// version-specific. The Dockerfile's build stage rebuilds it against
-// Node 22 after copying node_modules from the Bun install stage.
-//
-// Both back-ends expose the same Database interface (query/get/all/run)
-// so every call site works unchanged regardless of which runtime is in use.
+// Backing store is bun:sqlite everywhere: dev, tests and production all
+// run under Bun. The adapter below wraps it in the small Database
+// interface (query/get/all/run) that every call site uses.
 
-import BetterSqlite3 from 'better-sqlite3';
+import type { Database as BunDatabase, SQLQueryBindings } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
@@ -47,32 +40,32 @@ function resolveDataDir(): string {
   return abs;
 }
 
-const IS_BUN = typeof process.versions.bun === 'string';
-
 // ── bun:sqlite adapter ─────────────────────────────────────────────────
 
 function makeBunDatabase(path: string): Database {
-  // createRequire resolves bun:* built-in modules under Bun even in ESM.
-  const _req = createRequire(import.meta.url);
-  const { Database: BunDB } = _req('bun:sqlite') as { Database: new (p: string) => BunSqliteInner };
+  // Loaded lazily through createRequire, not a top-level import: `next build`
+  // collects page data in Node worker processes, where a static
+  // `import 'bun:sqlite'` fails to resolve ("Cannot find module") even
+  // though nothing opens the DB there. At runtime this is always Bun.
+  const { Database: BunDB } = createRequire(import.meta.url)('bun:sqlite') as { Database: new (path: string) => BunDatabase };
   const inner = new BunDB(path);
 
   // bun:sqlite Statement.run() returns void; follow up with changes() to
-  // emulate better-sqlite3's RunResult shape that the codebase relies on.
-  const changesStmt = inner.query<{ c: number; r: number }>(
+  // build the RunResult shape that the codebase relies on.
+  const changesStmt = inner.query<{ c: number; r: number }, []>(
     'SELECT changes() AS c, last_insert_rowid() AS r',
   );
 
   return {
     exec: (sql) => { inner.exec(sql); },
     query: <Row = unknown, Params extends unknown[] = unknown[]>(sql: string): Statement<Row, Params> => {
-      const stmt = inner.query<Row>(sql);
+      const stmt = inner.query<Row, SQLQueryBindings[]>(sql);
       return {
         get: (...params: Params): Row | undefined =>
-          stmt.get(...(params as unknown[])) ?? undefined,
-        all: (...params: Params): Row[] => stmt.all(...(params as unknown[])),
+          stmt.get(...(params as SQLQueryBindings[])) ?? undefined,
+        all: (...params: Params): Row[] => stmt.all(...(params as SQLQueryBindings[])),
         run: (...params: Params): RunResult => {
-          stmt.run(...(params as unknown[]));
+          stmt.run(...(params as SQLQueryBindings[]));
           const meta = changesStmt.get();
           return { changes: meta?.c ?? 0, lastInsertRowid: meta?.r ?? 0 };
         },
@@ -86,61 +79,13 @@ function makeBunDatabase(path: string): Database {
   };
 }
 
-// Minimal shape of bun:sqlite Database that we actually use.
-type BunSqliteInner = {
-  exec(sql: string): void;
-  query<Row>(sql: string): BunStmt<Row>;
-  transaction<A extends unknown[]>(fn: (...args: A) => void): (...args: A) => void;
-  close(): void;
-};
-type BunStmt<Row> = {
-  get(...params: unknown[]): Row | null | undefined;
-  all(...params: unknown[]): Row[];
-  run(...params: unknown[]): void;
-};
-
-// ── better-sqlite3 adapter (Node.js runtime) ───────────────────────────
-
-function makeNodeDatabase(path: string): Database {
-  const inner = new BetterSqlite3(path);
-
-  return {
-    exec: (sql) => { inner.exec(sql); },
-    query: <Row = unknown, Params extends unknown[] = unknown[]>(sql: string): Statement<Row, Params> => {
-      const stmt = inner.prepare(sql);
-      return {
-        get: (...params: Params): Row | undefined =>
-          stmt.get(...(params as unknown[])) as Row | undefined,
-        all: (...params: Params): Row[] =>
-          stmt.all(...(params as unknown[])) as Row[],
-        run: (...params: Params): RunResult => {
-          const r = stmt.run(...(params as unknown[]));
-          return {
-            changes: Number(r.changes),
-            lastInsertRowid: Number(r.lastInsertRowid),
-          };
-        },
-      };
-    },
-    transaction: <A extends unknown[]>(fn: (...args: A) => void) => {
-      const wrapped = inner.transaction(fn);
-      return (...args: A): void => { wrapped(...args); };
-    },
-    close: () => { inner.close(); },
-  };
-}
-
 // ── public API ──────────────────────────────────────────────────────────
-
-function makeDatabase(path: string): Database {
-  return IS_BUN ? makeBunDatabase(path) : makeNodeDatabase(path);
-}
 
 export function getDb(): Database {
   if (db) return db;
 
   const path = join(resolveDataDir(), 'compendium.db');
-  const handle = makeDatabase(path);
+  const handle = makeBunDatabase(path);
 
   handle.exec('PRAGMA journal_mode = WAL');
   handle.exec('PRAGMA foreign_keys = ON');
@@ -182,21 +127,14 @@ export function closeDb(): void {
   }
 }
 
-// ── constraint-violation detection (cross-adapter) ─────────────────────
+// ── constraint-violation detection ──────────────────────────────────────
 //
-// Both back-ends throw a driver-specific error class (bun:sqlite's
-// `SQLiteError`, better-sqlite3's `SqliteError`) but each sets `.code`
-// to the *same* extended SQLite result-code string — verified directly
-// against both adapters in this repo (`bun -e` against bun:sqlite;
-// better-sqlite3's C++ source at
-// node_modules/better-sqlite3/src/objects/database.cpp calls
-// `sqlite3_extended_errcode()` and maps it through the same code table
-// as node_modules/better-sqlite3/src/util/constants.cpp, e.g.
-// `SQLITE_CONSTRAINT_UNIQUE` / `SQLITE_CONSTRAINT_PRIMARYKEY`).
+// bun:sqlite throws a `SQLiteError` whose `.code` is the extended SQLite
+// result-code string, e.g. `SQLITE_CONSTRAINT_UNIQUE` /
+// `SQLITE_CONSTRAINT_PRIMARYKEY`.
 //
 // Do NOT match on `.message` — it embeds the table/column name and
-// wording isn't a contract either adapter guarantees to keep stable.
-// `.code` is the stable, adapter-agnostic signal.
+// wording isn't a contract. `.code` is the stable signal.
 //
 // Only the UNIQUE and PRIMARYKEY constraint codes are treated as "the
 // row already exists" — a NOTNULL/FOREIGNKEY/CHECK violation is a real

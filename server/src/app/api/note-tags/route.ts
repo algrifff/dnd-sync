@@ -10,7 +10,7 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
-import { loadNote } from '@/lib/notes';
+import { loadVisibleNote, visibilityFor } from '@/lib/notes';
 import type { PmNode } from '@/lib/md-to-pm';
 
 export const dynamic = 'force-dynamic';
@@ -42,7 +42,9 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     return json({ error: 'invalid_body', detail: err instanceof Error ? err.message : 'bad' }, 400);
   }
 
-  const note = loadNote(session.currentGroupId, body.path);
+  // A note hidden from the caller 404s like a missing one: its tags are
+  // neither written nor echoed back.
+  const note = loadVisibleNote(session.currentGroupId, body.path, visibilityFor(session.role));
   if (!note) return json({ error: 'not_found' }, 404);
 
   const normalised = [...new Set(body.tags.map((t) => t.replace(/^#/, '').toLowerCase()))];

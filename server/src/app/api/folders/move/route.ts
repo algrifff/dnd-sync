@@ -8,7 +8,7 @@ import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { hasControlChars } from '@/lib/notes';
+import { hasControlChars, visibilityFor } from '@/lib/notes';
 import { logAudit } from '@/lib/audit';
 import { assertMoveAllowed } from '@/lib/move-policy';
 import { moveFolder } from '@/lib/move-folder';
@@ -49,6 +49,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     userId: session.userId,
     from,
     to,
+    vis: visibilityFor(session.role),
   });
   if (!result.ok) {
     const status = result.error === 'not_found' ? 404 : result.error === 'exists' ? 409 : 400;

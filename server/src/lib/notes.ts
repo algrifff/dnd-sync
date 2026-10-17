@@ -103,12 +103,48 @@ export type TagRow = {
  *  never see `gm_only` notes. */
 export type VisibilityOpts = { hideDmOnly?: boolean; hideGmOnly?: boolean };
 
+/** A fully specified visibility predicate. List functions take this
+ *  rather than `VisibilityOpts` so a caller can't pass `{}` and get
+ *  every hidden note back. */
+export type Visibility = { hideDmOnly: boolean; hideGmOnly: boolean };
+
+type MemberRole = 'admin' | 'editor' | 'viewer';
+const MEMBER_ROLES: readonly MemberRole[] = ['admin', 'editor', 'viewer'];
+
 /** The canonical role → visibility mapping. Every REST / RSC read path
  *  derives its filter here rather than re-deriving the comparison. */
-export function visibilityFor(
-  role: 'admin' | 'editor' | 'viewer',
-): { hideDmOnly: boolean; hideGmOnly: boolean } {
+export function visibilityFor(role: MemberRole): Visibility {
   return { hideDmOnly: role === 'viewer', hideGmOnly: role !== 'admin' };
+}
+
+/** Visibility of a member of a group; a user with no membership row is
+ *  treated as a viewer. */
+export function visibilityForMember(groupId: string, userId: string): Visibility {
+  const row = getDb()
+    .query<{ role: string }, [string, string]>(
+      'SELECT role FROM group_members WHERE group_id = ? AND user_id = ?',
+    )
+    .get(groupId, userId);
+  const role = MEMBER_ROLES.find((r) => r === row?.role) ?? 'viewer';
+  return visibilityFor(role);
+}
+
+/** ` AND <alias>.dm_only = 0 AND <alias>.gm_only = 0`, or the parts of
+ *  it `vis` asks for. Appended to a WHERE clause over `notes <alias>`. */
+export function hiddenNotesSql(alias: string, vis: Visibility): string {
+  return (
+    (vis.hideDmOnly ? ` AND ${alias}.dm_only = 0` : '') +
+    (vis.hideGmOnly ? ` AND ${alias}.gm_only = 0` : '')
+  );
+}
+
+/** SQL predicate: note `<n>` is visible to the member row `<m>` under
+ *  that member's own role. Built from `visibilityFor` so the mapping
+ *  stays in one place; a role outside MEMBER_ROLES matches nothing. */
+function visibleToMemberSql(n: string, m: string): string {
+  return MEMBER_ROLES.map(
+    (role) => `(${m}.role = '${role}'${hiddenNotesSql(n, visibilityFor(role))})`,
+  ).join(' OR ');
 }
 
 /** Inputs to `canWriteAllSheetFields` — deliberately plain data, no DB
@@ -166,6 +202,21 @@ export function loadNote(groupId: string, path: string): NoteRow | null {
       )
       .get(groupId, path) ?? null
   );
+}
+
+/** `loadNote`, but a note hidden by `vis` comes back as `null`, so the
+ *  caller answers it exactly as it answers a missing one. */
+export function loadVisibleNote(groupId: string, path: string, vis: Visibility): NoteRow | null {
+  const note = loadNote(groupId, path);
+  return note && !isHiddenFrom(note, vis) ? note : null;
+}
+
+/** The single-row form of `hiddenNotesSql`. */
+export function isHiddenFrom(
+  note: { dm_only: number; gm_only: number },
+  vis: Visibility,
+): boolean {
+  return (note.gm_only === 1 && vis.hideGmOnly) || (note.dm_only === 1 && vis.hideDmOnly);
 }
 
 /** Nearest ancestor folder — starting at `folderPath` itself and
@@ -275,13 +326,20 @@ export function loadTags(groupId: string, path: string): string[] {
     .map((r) => r.tag);
 }
 
-export function listAllTags(groupId: string): Array<{ tag: string; count: number }> {
+/** Every tag on a note `vis` lets the caller see, with how many such
+ *  notes carry it. A tag that only hidden notes carry is not listed. */
+export function listAllTags(
+  groupId: string,
+  vis: Visibility,
+): Array<{ tag: string; count: number }> {
   return getDb()
     .query<{ tag: string; count: number }, [string]>(
-      `SELECT tag, COUNT(*) AS count
-         FROM tags WHERE group_id = ?
-         GROUP BY tag
-         ORDER BY count DESC, tag ASC`,
+      `SELECT t.tag AS tag, COUNT(*) AS count
+         FROM tags t
+         JOIN notes n ON n.group_id = t.group_id AND n.path = t.path
+        WHERE t.group_id = ?${hiddenNotesSql('n', vis)}
+        GROUP BY t.tag
+        ORDER BY count DESC, t.tag ASC`,
     )
     .all(groupId);
 }
@@ -289,6 +347,7 @@ export function listAllTags(groupId: string): Array<{ tag: string; count: number
 export function listNotesByTag(
   groupId: string,
   tag: string,
+  vis: Visibility,
 ): Array<{ path: string; title: string; updatedAt: number }> {
   return getDb()
     .query<
@@ -298,30 +357,65 @@ export function listNotesByTag(
       `SELECT n.path AS path, n.title AS title, n.updated_at AS updatedAt
          FROM tags t
          JOIN notes n ON n.group_id = t.group_id AND n.path = t.path
-        WHERE t.group_id = ? AND t.tag = ?
+        WHERE t.group_id = ? AND t.tag = ?${hiddenNotesSql('n', vis)}
         ORDER BY n.title COLLATE NOCASE ASC`,
     )
     .all(groupId, tag);
 }
 
-export function listAllPaths(groupId: string): Array<{ path: string; title: string; updatedAt: number }> {
-  return getDb()
-    .query<
-      { path: string; title: string; updatedAt: number },
-      [string]
-    >(`SELECT path, title, updated_at AS updatedAt FROM notes WHERE group_id = ? ORDER BY path`)
-    .all(groupId);
+/** Number of notes in the World `vis` lets the caller see. */
+export function countVisibleNotes(groupId: string, vis: Visibility): number {
+  return (
+    getDb()
+      .query<{ n: number }, [string]>(
+        `SELECT COUNT(*) AS n FROM notes n
+          WHERE n.group_id = ?${hiddenNotesSql('n', vis)}`,
+      )
+      .get(groupId)?.n ?? 0
+  );
 }
 
-export function recentlyUpdated(groupId: string, limit: number): Array<{ path: string; title: string; updatedAt: number }> {
+/** Tag autocomplete: every tag on a note or asset `vis` lets the caller
+ *  see, with its usage count across both. Assets carry `gm_only` but no
+ *  `dm_only` flag. */
+export function listNoteAndAssetTags(
+  groupId: string,
+  vis: Visibility,
+  limit: number,
+): Array<{ tag: string; count: number }> {
+  return getDb()
+    .query<{ tag: string; count: number }, [string, string, number]>(
+      `SELECT tag, COUNT(*) AS count
+         FROM (
+           SELECT t.tag AS tag FROM tags t
+             JOIN notes n ON n.group_id = t.group_id AND n.path = t.path
+            WHERE t.group_id = ?${hiddenNotesSql('n', vis)}
+           UNION ALL
+           SELECT at.tag AS tag FROM asset_tags at
+             JOIN assets a ON a.id = at.asset_id
+            WHERE at.group_id = ?${vis.hideGmOnly ? ' AND a.gm_only = 0' : ''}
+         )
+         GROUP BY tag
+         ORDER BY count DESC, tag ASC
+         LIMIT ?`,
+    )
+    .all(groupId, groupId, limit);
+}
+
+export function recentlyUpdated(
+  groupId: string,
+  limit: number,
+  vis: Visibility,
+): Array<{ path: string; title: string; updatedAt: number }> {
   return getDb()
     .query<
       { path: string; title: string; updatedAt: number },
       [string, number]
     >(
-      `SELECT path, title, updated_at AS updatedAt
-         FROM notes WHERE group_id = ?
-         ORDER BY updated_at DESC LIMIT ?`,
+      `SELECT n.path AS path, n.title AS title, n.updated_at AS updatedAt
+         FROM notes n
+        WHERE n.group_id = ?${hiddenNotesSql('n', vis)}
+        ORDER BY n.updated_at DESC LIMIT ?`,
     )
     .all(groupId, Math.max(1, Math.min(limit, 200)));
 }
@@ -336,7 +430,8 @@ export type RecentForUserRow = {
 
 /** Recently updated notes across every world the user is a member of.
  *  Used on the personal overview (`/me`) to surface what the user was
- *  last touching regardless of which world it lived in. */
+ *  last touching regardless of which world it lived in. Each World's
+ *  notes are filtered by the user's role in that World. */
 export function listRecentForUser(userId: string, limit: number): RecentForUserRow[] {
   return getDb()
     .query<RecentForUserRow, [string, number]>(
@@ -349,6 +444,7 @@ export function listRecentForUser(userId: string, limit: number): RecentForUserR
          JOIN group_members gm ON gm.group_id = n.group_id
          JOIN groups g         ON g.id = n.group_id
         WHERE gm.user_id = ?
+          AND (${visibleToMemberSql('n', 'gm')})
         ORDER BY n.updated_at DESC
         LIMIT ?`,
     )

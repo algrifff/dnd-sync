@@ -4,7 +4,7 @@ import type { ReactElement } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
-import { GraphCanvas3D } from '../../../graph/GraphCanvas3D';
+import { GraphCanvas3D } from './GraphCanvas3DLoader';
 
 export const dynamic = 'force-dynamic';
 

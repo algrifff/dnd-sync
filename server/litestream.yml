@@ -1,0 +1,18 @@
+# Litestream 0.5.x config. Values come from env vars (${VAR} is expanded
+# at load). Only used when LITESTREAM_REPLICA_URL is set; see
+# docker-entrypoint.sh and docs/ops/backups.md.
+#
+# Credentials are read from LITESTREAM_ACCESS_KEY_ID and
+# LITESTREAM_SECRET_ACCESS_KEY.
+
+# Keep 72h of history; take a snapshot daily.
+snapshot:
+  interval: 24h
+  retention: 72h
+
+dbs:
+  - path: /data/compendium.db
+    replica:
+      url: ${LITESTREAM_REPLICA_URL}
+      endpoint: ${LITESTREAM_S3_ENDPOINT}
+      region: auto

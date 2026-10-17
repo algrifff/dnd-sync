@@ -47,6 +47,8 @@ Tags stay as they are: flat labels on a single Note, from `#hashtags` and frontm
 - Agents can ask for the Notes that share a tag with a given Note. This is computed on read.
 - A namespaced tag such as `faction/zhentarim` on a Person, next to a Lore Note titled Zhentarim, is a good guess for a `member_of` Relationship. A later backfill may offer these guesses for review. It never applies them.
 
+Update, 2026-10-11: the tag-based backfill was dropped. Measured on a snapshot of production, 0 of 872 tags are namespaced, and the tags that exist are mostly noise, so `faction/<name>` has no data behind it. The structured data is the frontmatter `faction:` and `location:` fields on Person and Creature Notes. `server/scripts/suggest-relations.ts` reads those and prints candidate `member_of` and `located_in` Relationships. It is still read-only and still reviewed: a candidate becomes a Relationship only when a Wrap-up proposes it and a Player applies it. The paragraph above stays as the original decision.
+
 ## Consequences
 
 - Relationships appear in the graph only through their link, and carry their type only in the new MCP reads and the review dialog until a Note-page panel exists.

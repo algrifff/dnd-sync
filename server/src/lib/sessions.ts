@@ -1,4 +1,4 @@
-// Session index derivation + listing.
+// Session index derivation.
 //
 // A session note is any note whose frontmatter declares
 // `kind: session`. The sessions table mirrors a subset of the
@@ -13,49 +13,6 @@
 
 import { getDb } from './db';
 import { slugify } from './slugify';
-
-export type SessionListRow = {
-  notePath: string;
-  campaignSlug: string | null;
-  sessionDate: string | null;
-  sessionNumber: number | null;
-  title: string | null;
-  attendees: string[];
-  updatedAt: number;
-};
-
-type DbRow = {
-  note_path: string;
-  campaign_slug: string | null;
-  session_date: string | null;
-  session_number: number | null;
-  title: string | null;
-  attendees_json: string | null;
-  updated_at: number;
-};
-
-function rowToSession(r: DbRow): SessionListRow {
-  let attendees: string[] = [];
-  if (r.attendees_json) {
-    try {
-      const parsed = JSON.parse(r.attendees_json) as unknown;
-      if (Array.isArray(parsed)) {
-        attendees = parsed.filter((v): v is string => typeof v === 'string');
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  return {
-    notePath: r.note_path,
-    campaignSlug: r.campaign_slug,
-    sessionDate: r.session_date,
-    sessionNumber: r.session_number,
-    title: r.title,
-    attendees,
-    updatedAt: r.updated_at,
-  };
-}
 
 export type SessionStatus = 'open' | 'closed';
 
@@ -161,31 +118,6 @@ export function deriveSessionFromFrontmatter(opts: {
     JSON.stringify(attendees),
     Date.now(),
   );
-}
-
-export function listSessions(
-  groupId: string,
-  filter?: { campaignSlug?: string },
-): SessionListRow[] {
-  const db = getDb();
-  const wheres: string[] = ['group_id = ?'];
-  const args: string[] = [groupId];
-  if (filter?.campaignSlug) {
-    wheres.push('campaign_slug = ?');
-    args.push(filter.campaignSlug);
-  }
-  return db
-    .query<DbRow, string[]>(
-      `SELECT note_path, campaign_slug, session_date, session_number,
-              title, attendees_json, updated_at
-         FROM session_notes
-        WHERE ${wheres.join(' AND ')}
-        ORDER BY COALESCE(session_date, '') DESC,
-                 COALESCE(session_number, 0) DESC,
-                 updated_at DESC`,
-    )
-    .all(...args)
-    .map(rowToSession);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

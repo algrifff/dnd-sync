@@ -190,7 +190,7 @@ Bun workspaces: `shared` and `server`. The `scripts/` folder holds one-off utili
 │   └── src/
 │       ├── app/            # App Router pages + ~70 API route handlers
 │       ├── lib/            # Business logic (notes, auth, ai, import, …)
-│       │   ├── db.ts       # SQLite singleton — bun:sqlite or better-sqlite3
+│       │   ├── db.ts       # SQLite singleton — bun:sqlite
 │       │   ├── migrations.ts
 │       │   ├── auth.ts     # Bearer token + session auth
 │       │   ├── notes.ts    # Note CRUD, backlink derivation, FTS sync
@@ -238,7 +238,7 @@ Bun workspaces: `shared` and `server`. The `scripts/` folder holds one-off utili
 
 ## Database
 
-- **Engine:** SQLite — `bun:sqlite` under Bun (dev / tests), `better-sqlite3` under Node 22 (production). Both expose the same interface; switch happens in `server/src/lib/db.ts`.
+- **Engine:** SQLite — `bun:sqlite`, used in dev, tests and production alike (everything runs on Bun). Wrapped in `server/src/lib/db.ts`.
 - **File location:** `DATA_DIR/compendium.db` (default `./.data/compendium.db`)
 - **Mode:** WAL (write-ahead logging) for concurrent reads
 - **Migrations:** append-only array in `server/src/lib/migrations.ts`, currently at schema version 48. Auto-applied on boot.
@@ -277,10 +277,7 @@ docker run -d \
   compendium
 ```
 
-The Dockerfile is a three-stage build:
-1. **deps** (`oven/bun:1.1`) — install workspace deps, compile native modules (argon2, better-sqlite3)
-2. **build** (`node:22-slim`) — Next.js production build, **rebuild `better-sqlite3` against Node 22**
-3. **runtime** (`node:22-slim`) — minimal image, runs `server.ts` via `tsx`
+The Dockerfile is a single stage on `oven/bun:1.4.3`: install workspace deps, run the Next.js production build, then start `server.ts` with `bun run`.
 
 ---
 
@@ -291,7 +288,7 @@ The Dockerfile is a three-stage build:
 | Framework | Next.js 15 (App Router), React 19 |
 | Runtime (dev / tests) | Bun 1.1 |
 | Runtime (prod) | Node.js 22 |
-| Database | SQLite — `bun:sqlite` (dev) / `better-sqlite3` (prod), WAL mode |
+| Database | SQLite — `bun:sqlite`, WAL mode |
 | Collaborative editing | Hocuspocus + Yjs |
 | Editor | Tiptap + ProseMirror |
 | Knowledge graph | Sigma.js (WebGL) + Graphology |
