@@ -251,30 +251,33 @@ function rowToListEntry(
   };
 }
 
-/** All characters in the group. Use for dashboards and pickers. */
+/** Characters in the group whose notes `vis` lets the caller see. Use
+ *  for dashboards and pickers. */
 export function listCharacters(
   groupId: string,
+  vis: Visibility,
   filter?: { playerUserId?: string; kind?: CharacterKind },
 ): CharacterListRow[] {
   const db = getDb();
-  const wheres: string[] = ['group_id = ?'];
+  const wheres: string[] = ['c.group_id = ?'];
   const args: string[] = [groupId];
   if (filter?.playerUserId) {
-    wheres.push('player_user_id = ?');
+    wheres.push('c.player_user_id = ?');
     args.push(filter.playerUserId);
   }
   if (filter?.kind) {
-    wheres.push('kind = ?');
+    wheres.push('c.kind = ?');
     args.push(filter.kind);
   }
   const rows = db
     .query<CharacterDbRow, string[]>(
-      `SELECT note_path, kind, player_user_id, display_name, portrait_path,
-              level, class, race, ac, hp_max, hp_current, hp_temporary,
-              proficiency_bonus, updated_at
-         FROM characters
-        WHERE ${wheres.join(' AND ')}
-        ORDER BY display_name COLLATE NOCASE`,
+      `SELECT c.note_path, c.kind, c.player_user_id, c.display_name, c.portrait_path,
+              c.level, c.class, c.race, c.ac, c.hp_max, c.hp_current, c.hp_temporary,
+              c.proficiency_bonus, c.updated_at
+         FROM characters c
+         JOIN notes n ON n.group_id = c.group_id AND n.path = c.note_path
+        WHERE ${wheres.join(' AND ')}${hiddenNotesSql('n', vis)}
+        ORDER BY c.display_name COLLATE NOCASE`,
     )
     .all(...args);
   if (rows.length === 0) return [];

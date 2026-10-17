@@ -117,7 +117,7 @@ export function uniqueFoldersFor(paths: string[]): string[] {
  *  current set of direct children.
  *
  *  When `ensureWith` is supplied AND the folder actually has content
- *  (any note or folder marker under it), the index.md is auto-created
+ *  (a non-hidden note or a folder marker under it), the index.md is auto-created
  *  if missing so the AI tool / import pipeline doesn't have to know
  *  about every brand-new subfolder it just spawned a note in.
  *
@@ -368,15 +368,19 @@ export const deriveCampaignIndexesFor = deriveFolderIndexesFor;
 
 // ── Folder discovery ──────────────────────────────────────────────────
 
-/** True when the folder has at least one note or folder marker
- *  underneath it (or sitting on it). Used as a guard before
- *  auto-creating an index.md so we don't resurrect indexes for
- *  empty/deleted folders. */
+/** True when the folder has at least one note every member can see, or
+ *  a folder marker, underneath it (or sitting on it). Used as a guard
+ *  before auto-creating an index.md so we don't resurrect indexes for
+ *  empty/deleted folders, and so a folder holding only hidden notes
+ *  doesn't get a visible index that names it. */
 function folderHasContent(groupId: string, folderPath: string): boolean {
   const db = getDb();
   const noteRow = db
     .query<{ x: number }, [string, string]>(
-      "SELECT 1 AS x FROM notes WHERE group_id = ? AND path LIKE ? || '/%' LIMIT 1",
+      `SELECT 1 AS x FROM notes
+        WHERE group_id = ? AND path LIKE ? || '/%'
+          AND dm_only = 0 AND gm_only = 0
+        LIMIT 1`,
     )
     .get(groupId, folderPath);
   if (noteRow) return true;
@@ -487,13 +491,16 @@ function listDirectChildren(
 
   // Direct child folders: take the segment immediately after `<folder>/`
   // from any note path with at least 2 deeper segments OR from any
-  // folder marker under this folder.
+  // folder marker under this folder. Hidden notes are skipped here too:
+  // a subfolder holding only hidden notes would otherwise be named in
+  // the shared index.
   const folderSet = new Set<string>();
 
   const deeperNotes = db
     .query<{ path: string }, [string, string]>(
       `SELECT DISTINCT path FROM notes
-        WHERE group_id = ? AND path LIKE ? || '/%/%'`,
+        WHERE group_id = ? AND path LIKE ? || '/%/%'
+          AND dm_only = 0 AND gm_only = 0`,
     )
     .all(groupId, folderPath);
   for (const r of deeperNotes) {

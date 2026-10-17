@@ -16,6 +16,7 @@ import { listItems } from '@/lib/items';
 import { listLocations } from '@/lib/locations';
 import { listCreatures } from '@/lib/creatures';
 import { listCharacters } from '@/lib/characters';
+import { visibilityFor } from '@/lib/notes';
 import { DataModelValidator } from './Validator';
 
 export const dynamic = 'force-dynamic';
@@ -30,7 +31,7 @@ export default async function DataModelPlayground(): Promise<ReactElement> {
     .join('; ');
   const session = readSession(cookieHeader);
   if (!session) redirect('/login?next=/dev/data-model');
-  if (session.role !== 'admin' && session.role !== 'editor') {
+  if (session.role !== 'admin') {
     redirect('/settings/profile');
   }
 
@@ -38,7 +39,7 @@ export default async function DataModelPlayground(): Promise<ReactElement> {
   const items = listItems(groupId);
   const locations = listLocations(groupId);
   const creatures = listCreatures(groupId);
-  const characters = listCharacters(groupId);
+  const characters = listCharacters(groupId, visibilityFor(session.role));
 
   const compendiumCounts = getDb()
     .query<CompendiumCountRow, []>(

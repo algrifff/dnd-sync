@@ -192,6 +192,21 @@ export function loadNote(groupId: string, path: string): NoteRow | null {
   );
 }
 
+/** `loadNote`, but a note `vis` hides comes back as null, so the caller
+ *  answers it exactly like a missing note. */
+export function loadVisibleNote(
+  groupId: string,
+  path: string,
+  vis: Visibility,
+): NoteRow | null {
+  const note = loadNote(groupId, path);
+  if (!note) return null;
+  if ((vis.hideDmOnly && note.dm_only === 1) || (vis.hideGmOnly && note.gm_only === 1)) {
+    return null;
+  }
+  return note;
+}
+
 /** Nearest ancestor folder — starting at `folderPath` itself and
  *  walking up toward the root — that has an `index.md` note. Used to
  *  pick a sensible redirect target after a note or folder delete:
@@ -348,13 +363,31 @@ export function countVisibleNotes(groupId: string, vis: Visibility): number {
   );
 }
 
-export function listAllPaths(groupId: string): Array<{ path: string; title: string; updatedAt: number }> {
+/** Tag autocomplete: every tag on a note or asset `vis` lets the caller
+ *  see, with its usage count across both. Assets carry `gm_only` but no
+ *  `dm_only` flag. */
+export function listNoteAndAssetTags(
+  groupId: string,
+  vis: Visibility,
+  limit: number,
+): Array<{ tag: string; count: number }> {
   return getDb()
-    .query<
-      { path: string; title: string; updatedAt: number },
-      [string]
-    >(`SELECT path, title, updated_at AS updatedAt FROM notes WHERE group_id = ? ORDER BY path`)
-    .all(groupId);
+    .query<{ tag: string; count: number }, [string, string, number]>(
+      `SELECT tag, COUNT(*) AS count
+         FROM (
+           SELECT t.tag AS tag FROM tags t
+             JOIN notes n ON n.group_id = t.group_id AND n.path = t.path
+            WHERE t.group_id = ?${hiddenNotesSql('n', vis)}
+           UNION ALL
+           SELECT at.tag AS tag FROM asset_tags at
+             JOIN assets a ON a.id = at.asset_id
+            WHERE at.group_id = ?${vis.hideGmOnly ? ' AND a.gm_only = 0' : ''}
+         )
+         GROUP BY tag
+         ORDER BY count DESC, tag ASC
+         LIMIT ?`,
+    )
+    .all(groupId, groupId, limit);
 }
 
 export function recentlyUpdated(
