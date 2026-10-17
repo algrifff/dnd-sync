@@ -106,11 +106,32 @@ describe('writeNote', () => {
 });
 
 describe('writeNote wikilink resolution and hidden notes', () => {
+  let editorId: string;
+  beforeAll(async () => {
+    const u = await createUser({
+      username: 'importer-editor',
+      displayName: 'Editor',
+      password: 'correct-horse-battery',
+      role: 'editor',
+    });
+    editorId = u.id;
+  });
+
   function seedHidden(path: string, col: 'dm_only' | 'gm_only'): void {
     write(path, 'Secret.');
     getDb()
       .query(`UPDATE notes SET ${col} = 1 WHERE group_id = ? AND path = ?`)
       .run(DEFAULT_GROUP_ID, path);
+  }
+  function writeAs(who: string, path: string, markdown: string): void {
+    writeNote({
+      groupId: DEFAULT_GROUP_ID,
+      userId: who,
+      path,
+      markdown,
+      frontmatter: { tags: ['npc'] },
+      isUpdate: false,
+    });
   }
   function linksOf(path: string): string[] {
     return getDb()
@@ -121,21 +142,29 @@ describe('writeNote wikilink resolution and hidden notes', () => {
       .map((r) => r.to_path);
   }
 
-  it('does not resolve a [[Name]] to a gm_only or dm_only note path', () => {
+  it('does not let an editor resolve a [[Name]] to a gm_only note, but does for dm_only', () => {
     seedHidden('NPCs/Shadowbroker.md', 'gm_only');
     seedHidden('NPCs/Whisper.md', 'dm_only');
 
-    write('World Lore/Rumours.md', 'Hears of [[Shadowbroker]] and [[Whisper]].');
+    writeAs(editorId, 'World Lore/Rumours.md', 'Hears of [[Shadowbroker]] and [[Whisper]].');
 
     const links = linksOf('World Lore/Rumours.md');
     expect(links).not.toContain('NPCs/Shadowbroker.md');
-    expect(links).not.toContain('NPCs/Whisper.md');
+    expect(links).toContain('NPCs/Whisper.md');
+  });
+
+  it('lets an admin resolve a [[Name]] to a gm_only note', () => {
+    seedHidden('NPCs/Vault Keeper.md', 'gm_only');
+
+    writeAs(userId, 'World Lore/Admin Secrets.md', 'Guarded by [[Vault Keeper]].');
+
+    expect(linksOf('World Lore/Admin Secrets.md')).toContain('NPCs/Vault Keeper.md');
   });
 
   it('still resolves a [[Name]] to a visible note', () => {
     write('NPCs/Innkeeper.md', 'Hello.');
 
-    write('World Lore/Pub.md', 'Run by [[Innkeeper]].');
+    writeAs(editorId, 'World Lore/Pub.md', 'Run by [[Innkeeper]].');
 
     expect(linksOf('World Lore/Pub.md')).toContain('NPCs/Innkeeper.md');
   });
