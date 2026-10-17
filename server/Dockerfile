@@ -33,5 +33,9 @@ COPY server ./server
 WORKDIR /app/server
 RUN bun run build
 
+# Litestream (continuous SQLite backup) is opt-in: see docker-entrypoint.sh.
+COPY --from=litestream/litestream:0.5.17 /usr/local/bin/litestream /usr/local/bin/litestream
+RUN chmod +x /app/server/docker-entrypoint.sh
+
 EXPOSE 3000
-CMD ["bun", "run", "server.ts"]
+CMD ["/app/server/docker-entrypoint.sh"]
