@@ -29,6 +29,7 @@ import type { ImportClassifyResult } from './ai/skills/types';
 import type { TokenUsage } from './ai/pricing';
 import { listCampaigns } from './characters';
 import { getDb } from './db';
+import { hiddenNotesSql, visibilityForMember } from './notes';
 import { slugify } from './slugify';
 
 const DEFAULT_CONCURRENCY = 4;
@@ -384,14 +385,14 @@ function buildContext(
   const db = getDb();
   const existingVaultPaths = db
     .query<{ path: string }, [string]>(
-      'SELECT path FROM notes WHERE group_id = ?',
+      `SELECT path FROM notes n WHERE n.group_id = ?${hiddenNotesSql('n', visibilityForMember(job.groupId, job.createdBy))}`, // paths the job owner cannot see stay out of the AI context
     )
     .all(job.groupId)
     .map((r) => r.path);
 
   const existingVaultTags = db
     .query<{ tag: string }, [string]>(
-      `SELECT DISTINCT tag FROM tags WHERE group_id = ? ORDER BY tag LIMIT 200`,
+      `SELECT DISTINCT t.tag FROM tags t JOIN notes n ON n.group_id = t.group_id AND n.path = t.path WHERE t.group_id = ?${hiddenNotesSql('n', visibilityForMember(job.groupId, job.createdBy))} ORDER BY t.tag LIMIT 200`,
     )
     .all(job.groupId)
     .map((r) => r.tag);

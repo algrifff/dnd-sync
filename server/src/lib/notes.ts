@@ -117,6 +117,18 @@ export function visibilityFor(role: MemberRole): Visibility {
   return { hideDmOnly: role === 'viewer', hideGmOnly: role !== 'admin' };
 }
 
+/** Visibility of a member of a group; a user with no membership row is
+ *  treated as a viewer. */
+export function visibilityForMember(groupId: string, userId: string): Visibility {
+  const row = getDb()
+    .query<{ role: string }, [string, string]>(
+      'SELECT role FROM group_members WHERE group_id = ? AND user_id = ?',
+    )
+    .get(groupId, userId);
+  const role = MEMBER_ROLES.find((r) => r === row?.role) ?? 'viewer';
+  return visibilityFor(role);
+}
+
 /** ` AND <alias>.dm_only = 0 AND <alias>.gm_only = 0`, or the parts of
  *  it `vis` asks for. Appended to a WHERE clause over `notes <alias>`. */
 export function hiddenNotesSql(alias: string, vis: Visibility): string {

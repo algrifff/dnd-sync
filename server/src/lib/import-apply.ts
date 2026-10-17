@@ -26,6 +26,7 @@ import { prosemirrorJSONToYDoc } from 'y-prosemirror';
 import * as Y from 'yjs';
 import YAML from 'yaml';
 import { getDb } from './db';
+import { hiddenNotesSql, visibilityForMember } from './notes';
 import {
   assetPath,
   isSupportedMime,
@@ -639,7 +640,7 @@ export function writeNote(opts: WriteOpts): void {
   // subsequent saves anyway.
   const vaultPaths = db
     .query<{ path: string }, [string]>(
-      'SELECT path FROM notes WHERE group_id = ?',
+      `SELECT path FROM notes n WHERE n.group_id = ?${hiddenNotesSql('n', visibilityForMember(opts.groupId, opts.userId))}`, // the writer must not resolve a link to a path they cannot see
     )
     .all(opts.groupId)
     .map((r) => r.path);
