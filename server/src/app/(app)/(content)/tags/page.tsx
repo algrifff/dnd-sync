@@ -5,7 +5,7 @@ import type { ReactElement } from 'react';
 import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { readSession } from '@/lib/session';
-import { listAllTags } from '@/lib/notes';
+import { listAllTags, visibilityFor } from '@/lib/notes';
 import { TagsFilterBar } from '../../../tags/TagsFilterBar';
 
 export const dynamic = 'force-dynamic';
@@ -19,7 +19,7 @@ export default async function TagsIndexPage(): Promise<ReactElement> {
   const session = readSession(cookieHeader);
   if (!session) notFound();
 
-  const tags = listAllTags(session.currentGroupId);
+  const tags = listAllTags(session.currentGroupId, visibilityFor(session.role));
 
   return (
     <div className="flex-1 overflow-y-auto">
