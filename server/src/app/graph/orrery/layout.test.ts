@@ -10,6 +10,8 @@ import {
   focusTargets,
   groupKey,
   neighbours,
+  spreadAngles,
+  TAU,
   ring2Cap,
   searchNotes,
   sessionOrder,
@@ -452,5 +454,30 @@ describe('search and labels', () => {
 
   test('should not read a label off the object prototype', () => {
     expect(campaignLabel('constructor', {})).toBe('Constructor');
+  });
+});
+
+describe('spreadAngles', () => {
+  const gap = 0.6;
+  const sep = (a: number[]): number => {
+    const t = a.map((x) => ((x % TAU) + TAU) % TAU).sort((p, q) => p - q);
+    let m = Infinity;
+    t.forEach((v, i) => (m = Math.min(m, i === t.length - 1 ? t[0]! + TAU - v : t[i + 1]! - v)));
+    return m;
+  };
+  test('pushes crowded hubs apart to the minimum gap and keeps their order', () => {
+    const out = spreadAngles([0, 0.1, 0.2, 3], gap);
+    expect(sep(out)).toBeGreaterThan(gap - 1e-6);
+    expect(out[0]!).toBeLessThan(out[1]!);
+    expect(out[1]!).toBeLessThan(out[2]!);
+  });
+  test('leaves well-spaced angles untouched', () => {
+    expect(spreadAngles([0, 2, 4], gap)).toEqual([0, 2, 4]);
+  });
+  test('handles one or none and keeps results in the input order', () => {
+    expect(spreadAngles([], gap)).toEqual([]);
+    expect(spreadAngles([1.5], gap)).toEqual([1.5]);
+    const out = spreadAngles([3, 0, 0.05], gap);
+    expect(out[1]!).toBeLessThan(out[2]!);
   });
 });

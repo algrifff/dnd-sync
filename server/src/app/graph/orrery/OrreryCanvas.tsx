@@ -12,7 +12,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { RELATION_TYPES } from '@compendium/shared';
 import type { GraphPayload } from '@/lib/graph';
-import { createEngine, type Engine, type Hover } from './engine';
+import { createEngine, type Engine, type Hover, type HoverAnchor } from './engine';
 import { buildModel, campaignLabel, type Model, type ONode } from './layout';
 import { OrreryChrome } from './OrreryChrome';
 import { kindSingular, kindTextColor, resolveFonts, resolvePalette, type Palette } from './palette';
@@ -83,7 +83,7 @@ function OrreryStage({ model, worldName, campNames, initialFocus }: Props & { mo
   const [engine, setEngine] = useState<Engine | null>(null);
   const [palette, setPalette] = useState<Palette | null>(null);
   // The last hover is held until the card has faded out (the engine says when).
-  const [hover, setHover] = useState<{ h: Hover; x: number; y: number } | null>(null);
+  const [hover, setHover] = useState<{ h: Hover; x: number; y: number; a?: HoverAnchor | undefined } | null>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const tipAlpha = useRef(0);
   const [box, setBox] = useState({ w: 0, h: 0 });
@@ -100,8 +100,8 @@ function OrreryStage({ model, worldName, campNames, initialFocus }: Props & { mo
       model,
       { worldName, campNames, relationTypes: RELATION_TYPES },
       {
-        onHover: (h, x, y) => {
-          if (h) setHover({ h, x, y });
+        onHover: (h, x, y, a) => {
+          if (h) setHover({ h, x, y, a });
         },
         onFocus: syncUrl,
         onTipFade: (a) => {
@@ -151,7 +151,24 @@ function OrreryStage({ model, worldName, campNames, initialFocus }: Props & { mo
   }, [model, worldName, campNames]);
 
   useLayoutEffect(() => {
-    if (tipRef.current) tipRef.current.style.opacity = String(tipAlpha.current);
+    const el = tipRef.current;
+    if (!el) return;
+    el.style.opacity = String(tipAlpha.current);
+    const a = hover?.a;
+    if (!a) return;
+    // Keep the card clear of the hovered dot and of its name, which runs
+    // horizontally beside the dot: tuck the card below the dot, reaching away
+    // from the name's side (above the dot when there is no room below).
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const gap = Math.max(a.r + 14, 28);
+    let left = a.side > 0 ? a.x + 10 - w : a.side < 0 ? a.x - 10 : a.x - w / 2;
+    let top = a.y + gap;
+    if (top + h > box.h - 8) top = a.y - gap - h - (a.side === 0 ? 24 : 0);
+    left = Math.max(8, Math.min(left, box.w - w - 8));
+    top = Math.max(8, top);
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
   });
 
   const open = useCallback((id: string) => router.push(noteHref(id)), [router]);

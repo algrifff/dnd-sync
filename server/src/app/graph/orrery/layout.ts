@@ -311,7 +311,7 @@ export interface WheelGeom {
 }
 
 export function wheelGeom(R: number): WheelGeom {
-  return { R, rHub: 0.115 * R, rIn: 0.185 * R, rOut: 0.79 * R, rS0: 0.85 * R, rS1: 0.895 * R, rLab: 0.955 * R };
+  return { R, rHub: 0.125 * R, rIn: 0.185 * R, rOut: 0.79 * R, rS0: 0.85 * R, rS1: 0.895 * R, rLab: 0.955 * R };
 }
 
 export interface Band {
@@ -332,6 +332,8 @@ export interface Sector {
   a1: number;
   span: number;
   mid: number;
+  /** Angle of the hub point: the sector's middle, nudged so neighbouring campaign discs do not overlap. */
+  hth: number;
   /** Hub point (campaign index sits here). */
   hx: number;
   hy: number;
@@ -357,8 +359,9 @@ export interface Wheel {
 function finishSector(s: Sector, g: WheelGeom): Sector {
   s.a1 = s.a0 + s.span;
   s.mid = s.a0 + s.span / 2;
-  s.hx = g.rHub * Math.cos(s.mid);
-  s.hy = g.rHub * Math.sin(s.mid);
+  if (!Number.isFinite(s.hth)) s.hth = s.mid;
+  s.hx = g.rHub * Math.cos(s.hth);
+  s.hy = g.rHub * Math.sin(s.hth);
   const sr = g.rS0 - 0.035 * g.R;
   s.sx = sr * Math.cos(s.mid);
   s.sy = sr * Math.sin(s.mid);
@@ -416,7 +419,7 @@ export function computeWheel(model: Model, f: Filters, R: number, drill: string 
     const b = B.get(c)!;
     const span = spans[ci]!;
     const s: Sector = {
-      camp: c, a0: a + gap / 2, a1: 0, span, mid: 0, hx: 0, hy: 0, sx: 0, sy: 0,
+      camp: c, a0: a + gap / 2, a1: 0, span, mid: 0, hth: 0, hx: 0, hy: 0, sx: 0, sy: 0,
       bands: [], all: b.all, nSess: b.sessions.length, alpha: 1, sessions: [],
     };
     a += span + gap;
@@ -457,6 +460,14 @@ export function computeWheel(model: Model, f: Filters, R: number, drill: string 
     sectors.push(finishSector(s, g));
   });
   const by = new Map(sectors.map((s) => [s.camp, s]));
+  // Keep the campaign discs apart where neighbouring sectors are narrow.
+  const hubGap = 2 * Math.asin(Math.min(1, (2 * (HUB_R.camp + 2.6) + 2) / (2 * g.rHub)));
+  const hth = spreadAngles(sectors.map((s) => s.mid), hubGap);
+  sectors.forEach((s, i) => {
+    s.hth = hth[i]!;
+    s.hx = g.rHub * Math.cos(s.hth);
+    s.hy = g.rHub * Math.sin(s.hth);
+  });
 
   // Index hubs.
   const dup = new Map<string, Array<[ONode, Band]>>();
@@ -466,7 +477,7 @@ export function computeWheel(model: Model, f: Filters, R: number, drill: string 
     const s = by.get(n.campaign);
     if (!s) continue;
     if (n.role === 'camp') {
-      pos.set(n, { th: s.mid, rho: g.rHub });
+      pos.set(n, { th: s.hth, rho: g.rHub });
       continue;
     }
     const band = n.role === 'band' ? s.bands.find((q) => q.kind === n.bandKind) : undefined;
@@ -513,6 +524,7 @@ export function lerpWheel(A: Wheel, B: Wheel, e: number, camps: readonly string[
       const s: Sector = {
         ...b,
         a0: a.a0 + angDelta(a.a0, b.a0) * e,
+        hth: a.hth + angDelta(a.hth, b.hth) * e,
         span: lerp(a.span, b.span, e),
         alpha: 1,
         bands: [],
@@ -536,8 +548,37 @@ export function lerpWheel(A: Wheel, B: Wheel, e: number, camps: readonly string[
   return { type: 'wheel', g, sectors, by: new Map(sectors.map((s) => [s.camp, s])), R: B.R, pos: B.pos };
 }
 
-/** Hub marker radii on the wheel: campaign discs (2x the old 4.6) and kind-hub diamonds (1.4x the old 3.3). */
-export const HUB_R = { camp: 9.2, band: 4.6, empty: 1.6 } as const;
+/** Hub marker radii on the wheel: campaign discs (1.7x the old 4.6) and kind-hub diamonds (1.4x the old 3.3). */
+export const HUB_R = { camp: 7.8, band: 4.6, empty: 1.6 } as const;
+
+/** Spread angles apart so no two neighbours (round the circle) are closer than `minGap`, keeping their order. Pure; returns new angles in the input order. */
+export function spreadAngles(angles: readonly number[], minGap: number): number[] {
+  const n = angles.length;
+  if (n < 2) return angles.slice();
+  const norm = (a: number): number => ((a % TAU) + TAU) % TAU;
+  const order = angles.map((_, i) => i).sort((i, j) => norm(angles[i]!) - norm(angles[j]!) || i - j);
+  const th = order.map((i) => norm(angles[i]!));
+  for (let it = 0; it < 80; it++) {
+    let moved = false;
+    for (let k = 0; k < n; k++) {
+      const j = (k + 1) % n;
+      const gap = j === 0 ? th[j]! + TAU - th[k]! : th[j]! - th[k]!;
+      if (gap < minGap - 1e-9) {
+        const d = (minGap - gap) / 2;
+        th[k] = th[k]! - d;
+        th[j] = th[j]! + d;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  const out = new Array<number>(n);
+  order.forEach((i, k) => {
+    // Keep each angle on the same turn as its input so a hub never jumps round the circle.
+    out[i] = angles[i]! + angDelta(angles[i]!, th[k]!);
+  });
+  return out;
+}
 
 export const wheelRadius = (n: ONode): number => 1.3 + Math.sqrt(n.degree) * 0.62;
 

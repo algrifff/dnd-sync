@@ -55,6 +55,7 @@ import {
   kindColor,
   kindSingular,
   kindTextColor,
+  REL_STYLE,
   relLabel,
   type Fonts,
   type Palette,
@@ -65,6 +66,15 @@ export type LinkMode = 'grouped' | 'all';
 export type Hover =
   | { type: 'node'; n: ONode }
   | { type: 'sector'; camp: string; all: number };
+
+/** Where a hovered node's dot and name are on screen, so the card can stay clear of both. */
+export interface HoverAnchor {
+  x: number;
+  y: number;
+  r: number;
+  /** Which side of the dot its name runs: 1 right, -1 left, 0 above. */
+  side: -1 | 0 | 1;
+}
 
 export interface FocusInfo {
   ring1: number;
@@ -91,7 +101,7 @@ export interface Snapshot {
 }
 
 export interface EngineHooks {
-  onHover(h: Hover | null, x: number, y: number): void;
+  onHover(h: Hover | null, x: number, y: number, anchor?: HoverAnchor): void;
   /** The focused note changed (null: back on the wheel). */
   onFocus(n: ONode | null): void;
   /** Opacity (0..1) of the hover card, eased like the hover itself. */
@@ -528,7 +538,7 @@ export function createEngine(
     ctx.lineWidth = def.w * wMul;
     ctx.setLineDash(def.dash);
     ctx.beginPath();
-    pathPts(splitBezier(fromEnd ? reversePath(p) : p, u));
+    pathP(splitBezier(fromEnd ? reversePath(p) : p, u));
     ctx.stroke();
     if (def.dir && fromEnd) endMarker(p, r.type, dotR(cur(r.t).r));
     ctx.setLineDash([]);
@@ -912,41 +922,12 @@ export function createEngine(
     };
   }
   type Grid = ReturnType<typeof makeGrid>;
-  /** Screen dots labels must not run into (focus scene), hashed by cell. */
-  let dotHash: Map<number, Array<[number, number, number, ONode]>> | null = null;
-  const DCELL = 24;
-  function buildDotHash(list: readonly ONode[]): void {
-    dotHash = new Map();
-    for (const n of list) {
-      if (cur(n).a < 0.3) continue;
-      const x = SX(cur(n).x);
-      const y = SY(cur(n).y);
-      const k = (Math.floor(x / DCELL) + 512) * 4096 + (Math.floor(y / DCELL) + 512);
-      const b = dotHash.get(k);
-      const rec: [number, number, number, ONode] = [x, y, dotR(cur(n).r) * dotScale(n), n];
-      if (b) b.push(rec);
-      else dotHash.set(k, [rec]);
-    }
-  }
-  function hitsDot(x: number, y: number, clear: number, self: ONode): boolean {
-    if (!dotHash) return false;
-    const cx = Math.floor(x / DCELL) + 512;
-    const cy = Math.floor(y / DCELL) + 512;
-    for (let i = -1; i <= 1; i++) {
-      for (let j = -1; j <= 1; j++) {
-        const b = dotHash.get((cx + i) * 4096 + (cy + j));
-        if (!b) continue;
-        for (const [dx, dy, r, n] of b) if (n !== self && Math.hypot(dx - x, dy - y) < r + clear) return true;
-      }
-    }
-    return false;
-  }
   type Ink = Array<[string, number]>;
-  /** A name running radially outward from its dot. It is shortened with an
-   *  ellipsis to stop before the canvas edge, another label, a caption or
-   *  (in the focus scene) a dot; with `force` it ignores the others and may
-   *  run inward instead when that leaves more room. */
-  function radialLabel(grid: Grid, n: ONode, text: string, px: number, style: string, ink: Ink, force: boolean, dotMul = 1): boolean {
+  /** A name running radially outward from its dot, drawn over any dots in
+   *  its way (with a parchment halo). It is shortened with an ellipsis only
+   *  to stop before the canvas edge, the side panels, another label or a
+   *  caption. */
+  function radialLabel(grid: Grid, n: ONode, text: string, px: number, style: string, ink: Ink, dotMul = 1): boolean {
     const x = SX(cur(n).x);
     const y = SY(cur(n).y);
     if (x < -30 || y < -30 || x > view.w + 30 || y > view.h + 30) return false;
@@ -954,47 +935,36 @@ export function createEngine(
     const off = dotR(cur(n).r) * dotMul + 4;
     setFont(SERIF(px, style), 0);
     const hr = Math.max(1, Math.round(px / 13));
-    const minChars = force ? 3 : 5;
     const full = ctx.measureText(text).width;
-    let best: { t: string; w: number; dx: number; dy: number } | null = null;
-    for (const sgn of force ? [1, -1] : [1]) {
-      const dx = Math.cos(th0) * sgn;
-      const dy = Math.sin(th0) * sgn;
-      const rx = dx > 0 ? (view.w - view.ir - x) / dx : dx < 0 ? (x - view.il) / -dx : Infinity;
-      const ry = dy > 0 ? (view.h - 8 - y) / dy : dy < 0 ? (y - 8) / -dy : Infinity;
-      let free = Math.min(rx, ry) - off;
-      if (!force) {
-        for (let d = 0; d <= Math.min(full, free); d += 5) {
-          const qx = x + dx * (off + d);
-          const qy = y + dy * (off + d);
-          if (!grid.test(qx, qy) || hitsDot(qx, qy, px * 0.5, n)) {
-            free = Math.min(free, d - 5);
-            break;
-          }
-        }
+    const dx = Math.cos(th0);
+    const dy = Math.sin(th0);
+    const rx = dx > 0 ? (view.w - view.ir - x) / dx : dx < 0 ? (x - view.il) / -dx : Infinity;
+    const ry = dy > 0 ? (view.h - 8 - y) / dy : dy < 0 ? (y - 8) / -dy : Infinity;
+    let free = Math.min(rx, ry) - off;
+    for (let d = 0; d <= Math.min(full, free); d += 5) {
+      if (!grid.test(x + dx * (off + d), y + dy * (off + d))) {
+        free = Math.min(free, d - 5);
+        break;
       }
-      let t = text;
-      let w = full;
-      if (w > free) {
-        let lo = minChars;
-        let hi = text.length - 1;
-        t = '';
-        while (lo <= hi) {
-          const mid = (lo + hi) >> 1;
-          const cand = `${text.slice(0, mid).trimEnd()}…`;
-          const cw = ctx.measureText(cand).width;
-          if (cw <= free) {
-            t = cand;
-            w = cw;
-            lo = mid + 1;
-          } else hi = mid - 1;
-        }
-        if (!t) continue;
-      }
-      if (!best || w > best.w) best = { t, w, dx, dy };
     }
-    if (!best) return false;
-    const { t, w, dx, dy } = best;
+    let t = text;
+    let w = full;
+    if (w > free) {
+      let lo = 5;
+      let hi = text.length - 1;
+      t = '';
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const cand = `${text.slice(0, mid).trimEnd()}…`;
+        const cw = ctx.measureText(cand).width;
+        if (cw <= free) {
+          t = cand;
+          w = cw;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      if (!t) return false;
+    }
     for (let d = 0; d <= w; d += 5) grid.mark(x + dx * (off + d), y + dy * (off + d), hr);
     ctx.save();
     ctx.translate(x, y);
@@ -1017,23 +987,65 @@ export function createEngine(
     ctx.restore();
     return true;
   }
-  /** The hovered note's name: grows and bolds with the hover. `rest` is how
-   *  visible its ordinary label already was before the hover began. */
-  function hoverLabel(grid: Grid, e: HoverAnim, rest: number): void {
+  /** Where the hovered note's name goes: horizontal, beside the dot on the
+   *  side that has room (outward first), or above it. Decided at full size
+   *  so it never flips while it grows, and never cut off. */
+  function hoverPlan(n: ONode): { side: -1 | 0 | 1; text: string; x: number; y: number; r: number } {
+    const x = SX(cur(n).x);
+    const y = SY(cur(n).y);
+    const r = Math.max(0.8, dotR(cur(n).r)) * HOVER_DOT_GROW;
+    setFont(SERIF(LBL * HOVER_LABEL_GROW, '700'), 0);
+    const maxW = view.w - view.il - view.ir - 16;
+    let text = trunc(n.title, 60);
+    let w = ctx.measureText(text).width;
+    for (let i = 0; w > maxW && text.length > 4 && i < 8; i++) {
+      text = `${text.slice(0, Math.max(3, Math.floor((text.length * maxW) / w) - 1)).trimEnd()}…`;
+      w = ctx.measureText(text).width;
+    }
+    const off = r + 6;
+    const right = view.w - view.ir - x - off;
+    const left = x - view.il - off;
+    const order: Array<1 | -1> = x >= view.cx ? [1, -1] : [-1, 1];
+    const side = order.find((s) => w <= (s > 0 ? right : left)) ?? 0;
+    return { side, text, x, y, r };
+  }
+  /** The hovered note's name: grows and bolds with the hover, drawn last and
+   *  on top with a parchment halo so it is always readable. */
+  function hoverLabel(e: HoverAnim): void {
     const n = e.n;
     if (e.h < 0.02 || cur(n).a <= 0.1) return;
+    const pl = hoverPlan(n);
     const px = LBL * (1 + (HOVER_LABEL_GROW - 1) * e.h);
-    const wgt = String(Math.round((400 + 300 * e.h) / 100) * 100);
-    const vis = Math.max(rest, e.h);
-    radialLabel(grid, n, trunc(n.title, 40), px, wgt, [[C.inkSoft, (1 - e.h) * vis], [C.ink, e.h * vis]], true, 1 + (HOVER_DOT_GROW - 1) * e.h);
+    setFont(SERIF(px, String(Math.round((400 + 300 * e.h) / 100) * 100)), 0);
+    const w = ctx.measureText(pl.text).width;
+    const off = Math.max(0.8, dotR(cur(n).r)) * (1 + (HOVER_DOT_GROW - 1) * e.h) + 6;
+    let tx = pl.x + off;
+    let ty = pl.y + 0.5;
+    if (pl.side < 0) tx = pl.x - off - w;
+    else if (pl.side === 0) {
+      tx = Math.max(view.il, Math.min(pl.x - w / 2, view.w - view.ir - w));
+      ty = pl.y - off - px * 0.5;
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(4, px * 0.28);
+    ctx.strokeStyle = C.parchment;
+    ctx.globalAlpha = e.h;
+    ctx.strokeText(pl.text, tx, ty);
+    ctx.fillStyle = C.ink;
+    ctx.fillText(pl.text, tx, ty);
   }
   function drawLabels(alpha: number): void {
     const sc = scene!;
     const grid = makeGrid();
-    dotHash = null;
     const k = view.t.k;
-    const hovered = new Set(hovList.map((e) => e.n));
-    const done = new Set<ONode>(hovered);
+    const done = new Set<ONode>();
+    /** The ordinary radial label of a hovered note fades out as its horizontal one fades in. */
+    const fade = (n: ONode): number => {
+      for (const e of hovList) if (e.n === n) return 1 - e.h;
+      return 1;
+    };
     const baseW = 1 - hovMax;
     if (sc.type === 'wheel') {
       for (const o of capObs) {
@@ -1046,15 +1058,14 @@ export function createEngine(
       const baseBudget = Math.round((S.drill ? 30 : 16) * Math.min(k * k, 9));
       if (hovList.length) {
         const baseTop = new Set(basePool.slice(0, baseBudget));
-        for (const e of hovList) hoverLabel(grid, e, baseTop.has(e.n) ? baseW : 0);
         const nbW = new Map<ONode, number>();
         for (const e of hovList) for (const x of e.near) nbW.set(x, Math.max(nbW.get(x) ?? 0, e.h));
-        pool = pool.filter((n) => nbW.has(n) && !hovered.has(n)).sort((a, b) => b.degree - a.degree || a.i - b.i);
+        pool = pool.filter((n) => nbW.has(n)).sort((a, b) => b.degree - a.degree || a.i - b.i);
         let budget = Math.round(12 * Math.min(k * k, 9));
         for (const n of pool) {
           if (budget <= 0) break;
           const w = Math.min(1, nbW.get(n)! + (baseTop.has(n) ? baseW : 0));
-          if (radialLabel(grid, n, trunc(n.title), LBL, '', [[C.inkSoft, alpha * w]], false, dotScale(n))) {
+          if (radialLabel(grid, n, trunc(n.title), LBL, '', [[C.inkSoft, alpha * w * fade(n)]], dotScale(n))) {
             budget--;
             done.add(n);
           }
@@ -1065,13 +1076,12 @@ export function createEngine(
         for (const n of basePool) {
           if (budget <= 0) break;
           if (done.has(n)) continue;
-          if (radialLabel(grid, n, trunc(n.title), LBL, '', [[C.inkSoft, alpha * baseW]], false)) budget--;
+          if (radialLabel(grid, n, trunc(n.title), LBL, '', [[C.inkSoft, alpha * baseW * fade(n)]])) budget--;
         }
       }
     } else {
       const F = sc;
       const c = F.c;
-      buildDotHash([c, ...F.N1, ...F.N2]);
       const x = SX(cur(c).x);
       const titleFont = SERIF(17 * 1.3, '600');
       const title = trunc(c.title, 34);
@@ -1130,15 +1140,14 @@ export function createEngine(
         ctx.fillText(txt, 0, 0.5);
         ctx.restore();
       }
-      for (const e of hovList) if (e.n !== c) hoverLabel(grid, e, F.N1s.has(e.n) ? 1 : 0);
-      const ring1 = F.N1.filter((n) => cur(n).a > 0.3 && !hovered.has(n)).sort((a, b) => b.degree - a.degree || a.i - b.i);
+      const ring1 = F.N1.filter((n) => cur(n).a > 0.3).sort((a, b) => b.degree - a.degree || a.i - b.i);
       const budget = Math.round(90 * Math.min(k * k, 4));
-      ring1.slice(0, budget).forEach((n) => radialLabel(grid, n, trunc(n.title, 26), LBL, '', [[C.inkSoft, alpha]], false, dotScale(n)));
+      ring1.slice(0, budget).forEach((n) => radialLabel(grid, n, trunc(n.title, 26), LBL, '', [[C.inkSoft, alpha * fade(n)]], dotScale(n)));
       if (k > 1.6) {
-        F.N2.filter((n) => cur(n).a > 0.3 && !hovered.has(n))
+        F.N2.filter((n) => cur(n).a > 0.3)
           .sort((a, b) => b.degree - a.degree || a.i - b.i)
           .slice(0, Math.round(30 * k))
-          .forEach((n) => radialLabel(grid, n, trunc(n.title, 22), 9.5 * 1.25, 'italic', [[C.muted, alpha * 0.9]], false, dotScale(n)));
+          .forEach((n) => radialLabel(grid, n, trunc(n.title, 22), 9.5 * 1.25, 'italic', [[C.muted, alpha * 0.9 * fade(n)]], dotScale(n)));
       }
       // Centre title last so nothing paints over it.
       setFont(titleFont, 0);
@@ -1158,6 +1167,7 @@ export function createEngine(
       ctx.strokeText(sub, x, y + 18);
       ctx.fillText(sub, x, y + 18);
     }
+    for (const e of hovList) hoverLabel(e);
     if (hasLS) (ctx as unknown as { letterSpacing: string }).letterSpacing = '0px';
     ctx.globalAlpha = 1;
   }
@@ -1239,7 +1249,8 @@ export function createEngine(
     const same = sameHover(h, S.hover);
     S.hover = h;
     canvas.style.cursor = h ? 'pointer' : 'default';
-    hooks.onHover(h, x, y);
+    const pl = h?.type === 'node' && scene ? hoverPlan(h.n) : null;
+    hooks.onHover(h, x, y, pl ? { x: pl.x, y: pl.y, r: pl.r, side: pl.side } : undefined);
     if (!same) {
       syncHover(h);
       kick();
