@@ -76,9 +76,8 @@ export function NoteSidebar({
       <Section title="Graph">
         <MiniGraph path={path} />
         <p className="mt-2 text-xs text-[var(--ink-soft)]">
-          Full graph →{' '}
-          <Link href="/graph" className="underline">
-            /graph
+          <Link href={'/graph?focus=' + encodeURIComponent(path)} className="underline">
+            Open in graph →
           </Link>
         </p>
       </Section>

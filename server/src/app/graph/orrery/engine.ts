@@ -33,12 +33,12 @@ import {
   type Target,
   type Wheel,
 } from './layout';
+import { drawRel as drawRelShared, pathPts, relColor as relColorShared, strokeBatch as strokeBatchShared, type Stroke } from './draw';
 import {
   KIND_LABEL,
   kindColor,
   kindSingular,
   kindTextColor,
-  REL_STYLE,
   relLabel,
   type Fonts,
   type Palette,
@@ -354,78 +354,11 @@ export function createEngine(
     });
     return total / rs;
   }
-  function pathPts(p: readonly number[]): void {
-    ctx.moveTo(p[0]!, p[1]!);
-    if (p.length === 4) ctx.lineTo(p[2]!, p[3]!);
-    else if (p.length === 6) ctx.quadraticCurveTo(p[2]!, p[3]!, p[4]!, p[5]!);
-    else ctx.bezierCurveTo(p[2]!, p[3]!, p[4]!, p[5]!, p[6]!, p[7]!);
-  }
-  type Stroke = { p: number[]; a: number };
-  function strokeBatch(list: Stroke[], color: string, width: number, alphaMul = 1, dash: number[] = []): void {
-    if (!list.length) return;
-    const buckets = new Map<number, number[][]>();
-    for (const e of list) {
-      const b = Math.round(e.a * 24);
-      if (b <= 0) continue;
-      const bucket = buckets.get(b);
-      if (bucket) bucket.push(e.p);
-      else buckets.set(b, [e.p]);
-    }
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    ctx.setLineDash(dash);
-    buckets.forEach((ps, b) => {
-      ctx.globalAlpha = clamp((b / 24) * alphaMul);
-      ctx.beginPath();
-      for (const p of ps) pathPts(p);
-      ctx.stroke();
-    });
-    ctx.setLineDash([]);
-  }
-  const relColor = (type: RelationType): string => C[REL_STYLE[type].color];
-  /** Arrow chevron or an "owns" diamond at the target end of a relation. */
-  function endMarker(p: readonly number[], type: RelationType, rTarget: number): void {
-    const def = REL_STYLE[type];
-    const n = p.length;
-    const ex = p[n - 2]!;
-    const ey = p[n - 1]!;
-    const px = p[n - 4]!;
-    const py = p[n - 3]!;
-    let dx = ex - px;
-    let dy = ey - py;
-    const L = Math.hypot(dx, dy) || 1;
-    dx /= L;
-    dy /= L;
-    const bx = ex - dx * (rTarget + 2.5);
-    const by = ey - dy * (rTarget + 2.5);
-    ctx.setLineDash([]);
-    ctx.beginPath();
-    if (def.diamond) {
-      ctx.moveTo(bx, by);
-      ctx.lineTo(bx - dx * 4 - dy * 2.6, by - dy * 4 + dx * 2.6);
-      ctx.lineTo(bx - dx * 8, by - dy * 8);
-      ctx.lineTo(bx - dx * 4 + dy * 2.6, by - dy * 4 - dx * 2.6);
-      ctx.closePath();
-      ctx.fillStyle = relColor(type);
-      ctx.fill();
-    } else {
-      ctx.moveTo(bx - dx * 5 - dy * 3, by - dy * 5 + dx * 3);
-      ctx.lineTo(bx, by);
-      ctx.lineTo(bx - dx * 5 + dy * 3, by - dy * 5 - dx * 3);
-      ctx.stroke();
-    }
-  }
+  const pathP = (p: readonly number[]): void => pathPts(ctx, p);
+  const strokeBatch = (list: Stroke[], color: string, width: number, alphaMul = 1, dash: number[] = []): void =>
+    strokeBatchShared(ctx, list, color, width, alphaMul, dash);
   function drawRel(r: ORel, p: number[], alpha: number, wMul = 1): void {
-    const def = REL_STYLE[r.type];
-    ctx.globalAlpha = alpha;
-    ctx.strokeStyle = relColor(r.type);
-    ctx.lineWidth = def.w * wMul;
-    ctx.setLineDash(def.dash);
-    ctx.beginPath();
-    pathPts(p);
-    ctx.stroke();
-    if (def.dir) endMarker(p, r.type, dotR(cur(r.t).r));
-    ctx.setLineDash([]);
+    drawRelShared(ctx, C, r, p, alpha, dotR(cur(r.t).r), wMul);
   }
   const relOn = (r: ORel): boolean => S.showRelations && S.relTypes.has(r.type);
   const pt = (n: ONode): [number, number] => [SX(cur(n).x), SY(cur(n).y)];
@@ -550,7 +483,7 @@ export function createEngine(
       ctx.strokeStyle = hot ? C.candle : C.inkSoft;
       ctx.lineWidth = 0.5 + Math.sqrt(e.n) * 0.42;
       ctx.beginPath();
-      pathPts(p);
+      pathP(p);
       ctx.stroke();
       if (hot) aggLabels.push([p, e.n]);
     }
@@ -800,7 +733,7 @@ export function createEngine(
         const lx = SX(Math.cos(th) * dist * along);
         const ly = SY(Math.sin(th) * dist * along);
         const txt = relLabelText(c, rs);
-        const col = relColor(rs[0]!.type);
+        const col = relColorShared(C, rs[0]!.type);
         setFont(SERIF(10, 'italic'), 0);
         const w = ctx.measureText(txt).width;
         const sp: number[][] = [];
