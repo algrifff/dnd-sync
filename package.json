@@ -27,6 +27,8 @@
   "overrides": {
     "@opentelemetry/propagator-jaeger": "^2.9.0",
     "lodash-es": "^4.18.1",
-    "postcss": "^8.5.30"
+    "postcss": "^8.5.30",
+    "prosemirror-transform": "^1.12.2",
+    "prosemirror-view": "^1.42.6"
   }
 }
