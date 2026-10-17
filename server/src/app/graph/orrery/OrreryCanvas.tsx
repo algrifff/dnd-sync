@@ -9,7 +9,7 @@
 // canvas, matchMedia-style browser APIs and getComputedStyle on mount.
 
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { RELATION_TYPES } from '@compendium/shared';
 import type { GraphPayload } from '@/lib/graph';
 import { createEngine, type Engine, type Hover } from './engine';
@@ -82,7 +82,10 @@ function OrreryStage({ model, worldName, campNames, initialFocus }: Props & { mo
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [engine, setEngine] = useState<Engine | null>(null);
   const [palette, setPalette] = useState<Palette | null>(null);
+  // The last hover is held until the card has faded out (the engine says when).
   const [hover, setHover] = useState<{ h: Hover; x: number; y: number } | null>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+  const tipAlpha = useRef(0);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const initialRef = useRef(initialFocus);
 
@@ -97,8 +100,15 @@ function OrreryStage({ model, worldName, campNames, initialFocus }: Props & { mo
       model,
       { worldName, campNames, relationTypes: RELATION_TYPES },
       {
-        onHover: (h, x, y) => setHover(h ? { h, x, y } : null),
+        onHover: (h, x, y) => {
+          if (h) setHover({ h, x, y });
+        },
         onFocus: syncUrl,
+        onTipFade: (a) => {
+          tipAlpha.current = a;
+          if (tipRef.current) tipRef.current.style.opacity = String(a);
+          if (a <= 0) setHover(null);
+        },
       },
       pal,
       fonts,
@@ -140,6 +150,10 @@ function OrreryStage({ model, worldName, campNames, initialFocus }: Props & { mo
     };
   }, [model, worldName, campNames]);
 
+  useLayoutEffect(() => {
+    if (tipRef.current) tipRef.current.style.opacity = String(tipAlpha.current);
+  });
+
   const open = useCallback((id: string) => router.push(noteHref(id)), [router]);
 
   const tip = hover && palette ? renderTip(hover.h, palette, model, campNames) : null;
@@ -152,7 +166,7 @@ function OrreryStage({ model, worldName, campNames, initialFocus }: Props & { mo
       ) : null}
       {model.nodes.length === 0 ? <div className={s.empty}>No notes in this world yet.<br />Write one and it will appear here.</div> : null}
       {tip && hover ? (
-        <div className={s.tip} style={{ left: Math.max(8, Math.min(hover.x + 14, box.w - 256)), top: Math.max(8, Math.min(hover.y + 14, box.h - 96)) }}>
+        <div ref={tipRef} className={s.tip} style={{ left: Math.max(8, Math.min(hover.x + 14, box.w - 256)), top: Math.max(8, Math.min(hover.y + 14, box.h - 96)) }}>
           {tip}
         </div>
       ) : null}

@@ -536,6 +536,9 @@ export function lerpWheel(A: Wheel, B: Wheel, e: number, camps: readonly string[
   return { type: 'wheel', g, sectors, by: new Map(sectors.map((s) => [s.camp, s])), R: B.R, pos: B.pos };
 }
 
+/** Hub marker radii on the wheel: campaign discs (2x the old 4.6) and kind-hub diamonds (1.4x the old 3.3). */
+export const HUB_R = { camp: 9.2, band: 4.6, empty: 1.6 } as const;
+
 export const wheelRadius = (n: ONode): number => 1.3 + Math.sqrt(n.degree) * 0.62;
 
 /** Hub index notes that appear on the wheel for the current filters. */
@@ -561,7 +564,7 @@ export function wheelTargets(model: Model, W: Wheel, f: Filters): Map<ONode, Tar
     if (n.isIndex) {
       out.set(n, {
         ...xy,
-        r: n.role === 'camp' ? 4.6 : n.role === 'empty' ? 1.6 : 3.3,
+        r: n.role === 'camp' ? HUB_R.camp : n.role === 'empty' ? HUB_R.empty : HUB_R.band,
         a: hubVisible(n, W, f) ? 1 : 0,
       });
     } else {
