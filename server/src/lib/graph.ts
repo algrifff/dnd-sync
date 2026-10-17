@@ -341,7 +341,7 @@ const KIND_SQL_N = kindSql('n.frontmatter_json');
 function nodeMeta(r: { path: string; kind: string | null }): Pick<GraphNode, 'kind' | 'campaign' | 'isIndex'> {
   return {
     kind: parseKind(r.kind) ?? 'note',
-    campaign: /^Campaigns\/([^/]+)/.exec(r.path)?.[1] ?? null,
+    campaign: /^Campaigns\/([^/]+)\//.exec(r.path)?.[1] ?? null,
     isIndex: isAnchorPath(r.path),
   };
 }

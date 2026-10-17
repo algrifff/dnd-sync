@@ -790,7 +790,7 @@ export function searchNotes(model: Model, query: string, limit = 12): ONode[] {
  *  otherwise the slug title-cased. */
 export function campaignLabel(key: string, names: Readonly<Record<string, string>>): string {
   if (key === UNFILED) return 'Unfiled';
-  const known = names[key];
+  const known = Object.hasOwn(names, key) ? names[key] : undefined;
   if (known) return known;
   return key.replace(/[-_]+/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
 }

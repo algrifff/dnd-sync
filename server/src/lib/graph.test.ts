@@ -280,6 +280,7 @@ describe('buildGraph — kind / campaign / isIndex', () => {
     seedNote(DEFAULT_GROUP_ID, 'Campaigns/ember/index.md');
     seedNote(DEFAULT_GROUP_ID, 'World Lore/README.md', { frontmatter: '{"kind":"nonsense"}' });
     seedNote(DEFAULT_GROUP_ID, 'loose.md', { frontmatter: '{"kind":42}' });
+    seedNote(DEFAULT_GROUP_ID, 'Campaigns/Overview.md');
 
     const payload = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { hideDmOnly: false });
     const byId = new Map(payload.nodes.map((n) => [n.id, n]));
@@ -300,6 +301,8 @@ describe('buildGraph — kind / campaign / isIndex', () => {
       isIndex: true,
     });
     expect(byId.get('loose.md')).toMatchObject({ kind: 'note', campaign: null, isIndex: false });
+    // A file directly under Campaigns/ is not a campaign of its own.
+    expect(byId.get('Campaigns/Overview.md')).toMatchObject({ campaign: null });
   });
 });
 

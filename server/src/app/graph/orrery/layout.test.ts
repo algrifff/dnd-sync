@@ -386,4 +386,8 @@ describe('search and labels', () => {
   test('should prefer the name from the campaigns table', () => {
     expect(campaignLabel('the-hired-help', { 'the-hired-help': 'Hired Help, Inc.' })).toBe('Hired Help, Inc.');
   });
+
+  test('should not read a label off the object prototype', () => {
+    expect(campaignLabel('constructor', {})).toBe('Constructor');
+  });
 });
