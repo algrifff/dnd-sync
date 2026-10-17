@@ -17,7 +17,7 @@ import {
   isUnderCampaign,
   parentFolderUnderCampaign,
 } from '@/lib/campaign-index';
-import { isAllowedPath } from '@/lib/notes';
+import { hiddenNotesSql, isAllowedPath, visibilityFor } from '@/lib/notes';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 
@@ -91,9 +91,12 @@ export async function POST(req: NextRequest): Promise<Response> {
   // race-free by catching a constraint violation. It narrows the
   // window; it doesn't close it. (A note landing under this exact path
   // between this check and the marker INSERT is the residual race.)
+  // Only notes the caller can see count: a 409 for a folder holding
+  // nothing but hidden notes would confirm they exist, and a marker over
+  // such a folder is harmless (the folder already exists implicitly).
   const noteClash = db
     .query<{ n: number }, [string, string]>(
-      "SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path LIKE ? || '/%'",
+      `SELECT COUNT(*) AS n FROM notes n WHERE n.group_id = ? AND n.path LIKE ? || '/%'${hiddenNotesSql('n', visibilityFor(session.role))}`,
     )
     .get(session.currentGroupId, path);
   if ((noteClash?.n ?? 0) > 0) {

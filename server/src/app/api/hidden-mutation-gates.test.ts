@@ -17,6 +17,8 @@ import { POST as deleteFolder } from './folders/delete/route';
 import { POST as moveFolder } from './folders/move/route';
 import { DELETE as deleteAsset } from './assets/[id]/route';
 import { PATCH as setAssetTags } from './asset-tags/route';
+import { POST as createNote } from './notes/create/route';
+import { POST as createFolder } from './folders/create/route';
 
 type Role = 'admin' | 'editor' | 'viewer';
 const sessions = {} as Record<Role, Session>;
@@ -69,11 +71,14 @@ function request(method: string, url: string, role: Role, body?: unknown): NextR
   const cookie = buildSessionCookies(session)
     .map((c) => `${c.name}=${c.value}`)
     .join('; ');
-  return new Request(`http://localhost${url}`, {
+  const req = new Request(`http://localhost${url}`, {
     method,
     headers: { cookie, 'x-csrf-token': session.csrfToken, 'content-type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  }) as unknown as NextRequest;
+  });
+  // Routes that read GM mode go through NextRequest.cookies.
+  Object.assign(req, { cookies: { get: () => undefined } });
+  return req as unknown as NextRequest;
 }
 
 async function result(res: Response): Promise<{ status: number; body: unknown }> {
@@ -401,3 +406,73 @@ describe('viewers', () => {
     });
   });
 });
+
+describe('POST /api/notes/create', () => {
+  const create = async (role: Role, folder: string, name: string) =>
+    result(await createNote(request('POST', '/api/notes/create', role, { folder, name })));
+
+  it('should not answer 409 or touch a gm_only note when an editor creates at its path', async () => {
+    const res = await create('editor', 'World Lore/Lore', 'Secret');
+
+    expect({ res, paths: notePaths(), secretIsGm: gmOnlyAt('World Lore/Lore/Secret.md') }).toEqual({
+      res: { status: 201, body: { ok: true, path: 'World Lore/Lore/Secret (2).md' } },
+      paths: [
+        'World Lore/Lore/Secret (2).md',
+        'World Lore/Lore/Secret.md',
+        'World Lore/Lore/Visible.md',
+        'World Lore/Vault/Plot.md',
+      ],
+      secretIsGm: true,
+    });
+  });
+
+  it('should still answer 409 when the path holds a note the caller can see', async () => {
+    const res = await create('editor', 'World Lore/Lore', 'Visible');
+
+    expect(res).toEqual({
+      status: 409,
+      body: { error: 'exists', path: 'World Lore/Lore/Visible.md' },
+    });
+  });
+
+  it('should answer 409 for the admin at a gm_only note, who can see it', async () => {
+    const res = await create('admin', 'World Lore/Lore', 'Secret');
+
+    expect(res.status).toBe(409);
+  });
+});
+
+describe('POST /api/folders/create', () => {
+  const create = async (role: Role, parent: string, name: string) =>
+    result(await createFolder(request('POST', '/api/folders/create', role, { parent, name })));
+
+  it('should not answer 409 for an editor when the folder only holds gm_only notes', async () => {
+    const missing = await create('editor', 'World Lore', 'Nowhere');
+    const hidden = await create('editor', 'World Lore', 'Vault');
+
+    expect({ missing: missing.status, hidden: hidden.status, paths: notePaths() }).toEqual({
+      missing: 201,
+      hidden: 201,
+      paths: ['World Lore/Lore/Secret.md', 'World Lore/Lore/Visible.md', 'World Lore/Vault/Plot.md'],
+    });
+  });
+
+  it('should answer 409 for an editor when the folder holds a visible note', async () => {
+    const res = await create('editor', 'World Lore', 'Lore');
+
+    expect(res.status).toBe(409);
+  });
+
+  it('should answer 409 for the admin when the folder only holds gm_only notes', async () => {
+    const res = await create('admin', 'World Lore', 'Vault');
+
+    expect(res.status).toBe(409);
+  });
+});
+
+function gmOnlyAt(path: string): boolean {
+  return (
+    getDb().query<{ gm_only: number }, [string]>('SELECT gm_only FROM notes WHERE path = ?').get(path)!
+      .gm_only === 1
+  );
+}
