@@ -8,7 +8,7 @@
 // render the node skeleton fast and stream edges in afterwards:
 //   - omitted / "full" — full payload (legacy behaviour)
 //   - "nodes" — { nodes, updatedAt }, edges omitted
-//   - "edges" — { edges, updatedAt }, nodes omitted
+//   - "edges" — { edges, relations, updatedAt }, nodes omitted
 // We still build the full payload server-side because the work is
 // dominated by the SELECTs, not the JSON shaping; splitting just
 // trims the wire payload and unblocks the UI sooner.
@@ -57,6 +57,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   const body: Record<string, unknown> = { updatedAt: payload.updatedAt };
   if (phase === 'full' || phase === 'nodes') body.nodes = payload.nodes;
   if (phase === 'full' || phase === 'edges') body.edges = payload.edges;
+  if (phase === 'full' || phase === 'edges') body.relations = payload.relations;
 
   return new Response(JSON.stringify(body), {
     status: 200,

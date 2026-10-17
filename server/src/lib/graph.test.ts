@@ -10,16 +10,25 @@ import { DEFAULT_GROUP_ID } from './users';
 function seedNote(
   groupId: string,
   path: string,
-  flags: { dmOnly?: boolean; gmOnly?: boolean } = {},
+  flags: { dmOnly?: boolean; gmOnly?: boolean; frontmatter?: string } = {},
 ): string {
   const id = randomUUID();
   getDb()
     .query(
       `INSERT INTO notes (id, group_id, path, content_json, content_text,
-                          title, updated_at, dm_only, gm_only)
-       VALUES (?, ?, ?, '{}', '', ?, ?, ?, ?)`,
+                          title, updated_at, dm_only, gm_only, frontmatter_json)
+       VALUES (?, ?, ?, '{}', '', ?, ?, ?, ?, ?)`,
     )
-    .run(id, groupId, path, path, Date.now(), flags.dmOnly ? 1 : 0, flags.gmOnly ? 1 : 0);
+    .run(
+      id,
+      groupId,
+      path,
+      path,
+      Date.now(),
+      flags.dmOnly ? 1 : 0,
+      flags.gmOnly ? 1 : 0,
+      flags.frontmatter ?? '{}',
+    );
   return id;
 }
 
@@ -27,6 +36,15 @@ function seedTag(groupId: string, path: string, tag: string): void {
   getDb()
     .query(`INSERT INTO tags (group_id, path, tag) VALUES (?, ?, ?)`)
     .run(groupId, path, tag);
+}
+
+function seedRelation(groupId: string, from: string, relation: string, to: string): void {
+  getDb()
+    .query(
+      `INSERT INTO note_relations (group_id, from_path, relation, to_path, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(groupId, from, relation, to, Date.now());
 }
 
 function seedLink(groupId: string, fromPath: string, toPath: string): void {
@@ -42,6 +60,7 @@ afterAll(() => teardownTestDb());
 
 beforeEach(() => {
   const db = getDb();
+  db.exec('DELETE FROM note_relations');
   db.exec('DELETE FROM note_links');
   db.exec('DELETE FROM tags');
   db.exec('DELETE FROM notes');
@@ -250,5 +269,112 @@ describe('buildNeighborhood — frontier cannot traverse through a hidden note',
     const ids = payload!.nodes.map((n) => n.id);
     expect(ids).toContain(dmGate);
     expect(ids).toContain(behindDmGate);
+  });
+});
+
+// ── node metadata ───────────────────────────────────────────────────────
+
+describe('buildGraph — kind / campaign / isIndex', () => {
+  it('derives each field from frontmatter and path', () => {
+    seedNote(DEFAULT_GROUP_ID, 'Campaigns/ember/Characters/Mira.md', { frontmatter: '{"kind":"pc"}' });
+    seedNote(DEFAULT_GROUP_ID, 'Campaigns/ember/index.md');
+    seedNote(DEFAULT_GROUP_ID, 'World Lore/README.md', { frontmatter: '{"kind":"nonsense"}' });
+    seedNote(DEFAULT_GROUP_ID, 'loose.md', { frontmatter: '{"kind":42}' });
+
+    const payload = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { hideDmOnly: false });
+    const byId = new Map(payload.nodes.map((n) => [n.id, n]));
+
+    expect(byId.get('Campaigns/ember/Characters/Mira.md')).toMatchObject({
+      kind: 'character',
+      campaign: 'ember',
+      isIndex: false,
+    });
+    expect(byId.get('Campaigns/ember/index.md')).toMatchObject({
+      kind: 'note',
+      campaign: 'ember',
+      isIndex: true,
+    });
+    expect(byId.get('World Lore/README.md')).toMatchObject({
+      kind: 'note',
+      campaign: null,
+      isIndex: true,
+    });
+    expect(byId.get('loose.md')).toMatchObject({ kind: 'note', campaign: null, isIndex: false });
+  });
+});
+
+// ── relations ───────────────────────────────────────────────────────────
+
+describe('buildGraph — relations', () => {
+  const a = 'vault/a.md';
+  const b = 'vault/b.md';
+  const all = { kind: 'all' } as const;
+
+  it('includes a relation when both ends are visible', () => {
+    seedNote(DEFAULT_GROUP_ID, a);
+    seedNote(DEFAULT_GROUP_ID, b);
+    seedRelation(DEFAULT_GROUP_ID, a, 'member_of', b);
+
+    const payload = buildGraph(DEFAULT_GROUP_ID, all, { hideDmOnly: true });
+
+    expect(payload.relations).toEqual([{ source: a, target: b, relation: 'member_of' }]);
+  });
+
+  it('hides it from a viewer when either end is dm_only, but not from a GM', () => {
+    seedNote(DEFAULT_GROUP_ID, a, { dmOnly: true });
+    seedNote(DEFAULT_GROUP_ID, b);
+    seedNote(DEFAULT_GROUP_ID, 'vault/c.md');
+    seedRelation(DEFAULT_GROUP_ID, a, 'leads', b);
+    seedRelation(DEFAULT_GROUP_ID, 'vault/c.md', 'owns', a);
+
+    expect(buildGraph(DEFAULT_GROUP_ID, all, { hideDmOnly: true }).relations).toEqual([]);
+    expect(buildGraph(DEFAULT_GROUP_ID, all, { hideDmOnly: false }).relations).toHaveLength(2);
+  });
+
+  it('hides it from an editor when an end is gm_only', () => {
+    seedNote(DEFAULT_GROUP_ID, a, { gmOnly: true });
+    seedNote(DEFAULT_GROUP_ID, b);
+    seedRelation(DEFAULT_GROUP_ID, a, 'leads', b);
+
+    const payload = buildGraph(DEFAULT_GROUP_ID, all, { mode: 'player', hideDmOnly: false });
+
+    expect(payload.relations).toEqual([]);
+  });
+
+  it('drops a relation with an end outside the requested scope', () => {
+    seedNote(DEFAULT_GROUP_ID, 'in/a.md');
+    seedNote(DEFAULT_GROUP_ID, 'out/b.md');
+    seedRelation(DEFAULT_GROUP_ID, 'in/a.md', 'ally_of', 'out/b.md');
+
+    const scoped = buildGraph(DEFAULT_GROUP_ID, { kind: 'folder', path: 'in' }, { hideDmOnly: false });
+
+    expect(scoped.relations).toEqual([]);
+  });
+
+  it('changes the etag when a relation is added', () => {
+    seedNote(DEFAULT_GROUP_ID, a);
+    seedNote(DEFAULT_GROUP_ID, b);
+    const before = buildGraph(DEFAULT_GROUP_ID, all, { hideDmOnly: false }).etag;
+
+    seedRelation(DEFAULT_GROUP_ID, a, 'ally_of', b);
+
+    expect(buildGraph(DEFAULT_GROUP_ID, all, { hideDmOnly: false }).etag).not.toBe(before);
+  });
+});
+
+describe('buildNeighborhood — relations', () => {
+  it('includes relations among the returned nodes and omits ones to nodes outside', () => {
+    seedNote(DEFAULT_GROUP_ID, 'v/center.md');
+    seedNote(DEFAULT_GROUP_ID, 'v/near.md');
+    seedNote(DEFAULT_GROUP_ID, 'v/far.md');
+    seedLink(DEFAULT_GROUP_ID, 'v/center.md', 'v/near.md');
+    seedRelation(DEFAULT_GROUP_ID, 'v/center.md', 'ally_of', 'v/near.md');
+    seedRelation(DEFAULT_GROUP_ID, 'v/center.md', 'enemy_of', 'v/far.md');
+
+    const payload = buildNeighborhood(DEFAULT_GROUP_ID, 'v/center.md', 1, { hideDmOnly: false });
+
+    expect(payload!.relations).toEqual([
+      { source: 'v/center.md', target: 'v/near.md', relation: 'ally_of' },
+    ]);
   });
 });

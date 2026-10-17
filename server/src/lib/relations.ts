@@ -105,6 +105,20 @@ export function listRelations(opts: { groupId: string; role: Role; path: string 
   }));
 }
 
+/** Every stored (forward) Relationship in the world, unfiltered. The
+ *  caller must drop rows whose ends the reader may not see; graph.ts
+ *  does so against its already-gated node set. */
+export function listWorldRelations(
+  groupId: string,
+): Array<{ from: string; relation: RelationType; to: string }> {
+  return getDb()
+    .query<{ from: string; relation: RelationType; to: string }, [string]>(
+      `SELECT from_path AS "from", relation, to_path AS "to" FROM note_relations
+        WHERE group_id = ? ORDER BY from_path, relation, to_path`,
+    )
+    .all(groupId);
+}
+
 /** Carries a Note's Relationships from `from` to `to` inside the caller's
  *  move transaction, including those it established as a Session. A row
  *  that would duplicate one already at `to` merges into it, and a

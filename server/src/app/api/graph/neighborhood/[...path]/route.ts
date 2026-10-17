@@ -42,6 +42,7 @@ export async function GET(req: NextRequest, ctx: Ctx): Promise<Response> {
     JSON.stringify({
       nodes: payload.nodes,
       edges: payload.edges,
+      relations: payload.relations,
       updatedAt: payload.updatedAt,
       center: path,
     }),
