@@ -34,7 +34,7 @@ export function worldFtsMatch(groupId: string, query: string): string {
  *  stems, so callers must confirm a whole-word hit themselves. Returns ''
  *  when the term has no searchable tokens. */
 export function worldBodyPhraseMatch(groupId: string, term: string): string {
-  const tokens = term.split(/[^\p{L}\p{N}]+/u).filter((t) => t.length > 0);
+  const tokens = term.split(/[^\p{L}\p{M}\p{N}]+/u).filter((t) => t.length > 0);
   if (tokens.length === 0) return '';
   return `group_id : ${ftsPhrase(groupId)} AND content : ${ftsPhrase(tokens.join(' ').toLowerCase())}`;
 }

@@ -52,6 +52,14 @@ describe('findUnlinkedMentions', () => {
     });
   });
 
+  it('finds a mention of a title written with a decomposed accent', () => {
+    const RHUN = 'Places/rhun.md';
+    note(RHUN, 'Rhûn', 'A sea far to the east.');
+    note('Lore/map.md', 'Map', 'The road runs east to Rhûn and the inland sea.');
+
+    expect(find('editor', RHUN)).toEqual(['Lore/map.md']);
+  });
+
   it('trims a long snippet to roughly 80 characters around the match', () => {
     note('Lore/long.md', 'Long', `${'word '.repeat(40)}Volo ${'more '.repeat(40)}`);
 

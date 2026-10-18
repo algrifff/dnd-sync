@@ -133,7 +133,9 @@ export function findUnlinkedMentions(opts: {
     .query<{ alias: string }, [string, string]>('SELECT alias FROM aliases WHERE group_id = ? AND path = ?')
     .all(groupId, path)
     .map((r) => r.alias);
-  const terms = [...new Set([self.title, ...aliases].map((t) => t.trim()))].filter(
+  // NFC on both sides, so a decomposed accent (common in macOS vault
+  // imports) matches its composed form.
+  const terms = [...new Set([self.title, ...aliases].map((t) => t.trim().normalize('NFC')))].filter(
     (t) => [...t].length >= MIN_TERM_LENGTH,
   );
 
@@ -159,15 +161,16 @@ export function findUnlinkedMentions(opts: {
         )
         .all(match, groupId, path, path, path, PAGE_SIZE, offset);
       for (const r of rows) {
-        if (!mayContainTerm(r.content_text, term)) continue;
-        const m = findWholeWord(r.content_text, term);
+        const text = r.content_text.normalize('NFC');
+        if (!mayContainTerm(text, term)) continue;
+        const m = findWholeWord(text, term);
         if (!m) continue;
         termHits++;
         if (found.has(r.path)) continue;
         found.set(r.path, {
           path: r.path,
           title: r.title,
-          snippet: snippetAround(r.content_text, m.index, m.length),
+          snippet: snippetAround(text, m.index, m.length),
           updatedAt: r.updated_at,
         });
       }
