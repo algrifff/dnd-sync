@@ -77,7 +77,7 @@ export function relationProvenance(
   r: Pick<RelationRow, 'sessionPath' | 'sessionTitle' | 'createdBy'>,
 ): { kind: 'session'; path: string; title: string } | { kind: 'author'; name: string } | null {
   if (r.sessionPath) {
-    return { kind: 'session', path: r.sessionPath, title: r.sessionTitle ?? baseName(r.sessionPath) };
+    return { kind: 'session', path: r.sessionPath, title: r.sessionTitle || baseName(r.sessionPath) };
   }
   return r.createdBy ? { kind: 'author', name: r.createdBy } : null;
 }

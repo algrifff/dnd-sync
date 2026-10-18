@@ -85,6 +85,12 @@ describe('relationProvenance', () => {
     ).toEqual({ kind: 'session', path: 'Logs/s1.md', title: 'The Mill' });
   });
 
+  it('names the Session by its file when the title is empty', () => {
+    expect(
+      relationProvenance({ sessionPath: 'Logs/s1.md', sessionTitle: '', createdBy: 'Alex' }),
+    ).toEqual({ kind: 'session', path: 'Logs/s1.md', title: 's1' });
+  });
+
   it('falls back to who added it, then to nothing', () => {
     expect(relationProvenance({ sessionPath: null, sessionTitle: null, createdBy: 'Alex' })).toEqual({
       kind: 'author',
