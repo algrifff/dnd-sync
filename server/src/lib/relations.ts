@@ -13,7 +13,9 @@ import {
   type RelationName,
   type RelationType,
 } from '@compendium/shared';
+import { collectLinksAndTags } from '@/collab/derive';
 import { getDb } from '@/lib/db';
+import type { PmNode } from '@/lib/md-to-pm';
 import { visibilityFor } from '@/lib/notes';
 import type { Role } from '@/lib/wrap-up';
 
@@ -61,14 +63,51 @@ export function addManualLink(opts: { groupId: string; from: string; to: string 
   return { added: changes > 0 };
 }
 
-/** Deletes the manual `from -> to` link. A body-derived one (`is_manual = 0`)
- *  is left alone: it would come back on the next save of `from` while its
- *  wikilink remains, so it is edited in the text instead. */
+/** Removes the manual `from -> to` link. When `from`'s body still
+ *  wikilinks `to`, the edge is body-derived too: it is only un-flagged
+ *  (`is_manual = 0`) and stays, reported as `removed: false`, so backlinks
+ *  and the graph keep it until the text is edited. A body-only row
+ *  (`is_manual = 0`) is left alone. */
 export function removeLink(opts: { groupId: string; from: string; to: string }): { removed: boolean } {
-  const changes = getDb()
-    .query('DELETE FROM note_links WHERE group_id = ? AND from_path = ? AND to_path = ? AND is_manual = 1')
-    .run(opts.groupId, opts.from, opts.to).changes;
-  return { removed: changes > 0 };
+  const db = getDb();
+  let removed = false;
+  db.transaction(() => {
+    const row = db
+      .query<{ is_manual: number }, [string, string, string]>(
+        'SELECT is_manual FROM note_links WHERE group_id = ? AND from_path = ? AND to_path = ?',
+      )
+      .get(opts.groupId, opts.from, opts.to);
+    if (!row || row.is_manual !== 1) return;
+    if (bodyLinks(opts.groupId, opts.from).has(opts.to)) {
+      db.query(
+        'UPDATE note_links SET is_manual = 0 WHERE group_id = ? AND from_path = ? AND to_path = ?',
+      ).run(opts.groupId, opts.from, opts.to);
+      return;
+    }
+    db.query('DELETE FROM note_links WHERE group_id = ? AND from_path = ? AND to_path = ?').run(
+      opts.groupId,
+      opts.from,
+      opts.to,
+    );
+    removed = true;
+  })();
+  return { removed };
+}
+
+/** Targets `path`'s stored body links to, by the same extraction the
+ *  derive step uses. */
+function bodyLinks(groupId: string, path: string): Set<string> {
+  const row = getDb()
+    .query<{ content_json: string }, [string, string]>(
+      'SELECT content_json FROM notes WHERE group_id = ? AND path = ?',
+    )
+    .get(groupId, path);
+  if (!row) return new Set();
+  try {
+    return new Set(collectLinksAndTags(JSON.parse(row.content_json) as PmNode).wikilinks);
+  } catch {
+    return new Set();
+  }
 }
 
 /** Removes the one stored row for `from relation to`, canonicalised like

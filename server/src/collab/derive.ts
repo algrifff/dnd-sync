@@ -211,7 +211,8 @@ function isDmOnly(fmJson: string): boolean {
   }
 }
 
-function collectLinksAndTags(doc: PmNode): { wikilinks: string[]; tags: string[] } {
+/** The wikilink / embed targets and inline tags of a ProseMirror doc. */
+export function collectLinksAndTags(doc: PmNode): { wikilinks: string[]; tags: string[] } {
   const links = new Set<string>();
   const tags = new Set<string>();
   walk(doc);

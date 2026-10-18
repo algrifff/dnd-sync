@@ -270,6 +270,38 @@ describe('DELETE /api/notes/relations', () => {
     expect(audits('relation.remove')).toHaveLength(0);
   });
 
+  it('keeps the edge, body-only, when the text still links the other Note', async () => {
+    const body = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'wikilink', attrs: { target: GUILD } }] }] };
+    getDb()
+      .query('UPDATE notes SET content_json = ? WHERE group_id = ? AND path = ?')
+      .run(JSON.stringify(body), DEFAULT_GROUP_ID, VOLO);
+    getDb()
+      .query('INSERT INTO note_links (group_id, from_path, to_path, is_manual) VALUES (?, ?, ?, 0)')
+      .run(DEFAULT_GROUP_ID, VOLO, GUILD);
+    expect((await add(gm, VOLO, 'link', GUILD)).status).toBe(201);
+    expect(linkRow(VOLO, GUILD)).toEqual({ is_manual: 1 });
+
+    const res = await remove(gm, VOLO, 'link', GUILD);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, status: 'unchanged' });
+    expect(linkRow(VOLO, GUILD)).toEqual({ is_manual: 0 });
+    expect(audits('relation.remove')).toHaveLength(0);
+  });
+
+  it('deletes a purely manual link even when the body links other Notes', async () => {
+    const body = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'wikilink', attrs: { target: RIVAL } }] }] };
+    getDb()
+      .query('UPDATE notes SET content_json = ? WHERE group_id = ? AND path = ?')
+      .run(JSON.stringify(body), DEFAULT_GROUP_ID, VOLO);
+    await add(gm, VOLO, 'link', GUILD);
+
+    const res = await remove(gm, VOLO, 'link', GUILD);
+
+    expect(await res.json()).toEqual({ ok: true, status: 'removed' });
+    expect(linkRow(VOLO, GUILD)).toBeFalsy();
+  });
+
   it('refuses a Player removing a link when they cannot edit one end, keeping it', async () => {
     await add(gm, MINE, 'link', VOLO);
 
