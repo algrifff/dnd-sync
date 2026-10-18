@@ -33,7 +33,8 @@ import {
   type Target,
   type Wheel,
 } from './layout';
-import { drawRel as drawRelShared, endMarker as endMarkerShared, pathPts, relColor as relColorShared, strokeBatch as strokeBatchShared, type Stroke } from './draw';
+import { drawRel as drawRelShared, endMarker as endMarkerShared, pathPts, strokeBatch as strokeBatchShared, type Stroke } from './draw';
+import { pickAt, relsOnPair, type NodeHit, type PathHit } from './hit';
 import {
   advanceHover,
   CAPTION_SCALE,
@@ -56,6 +57,7 @@ import {
   kindSingular,
   kindTextColor,
   REL_STYLE,
+  relColor,
   relLabel,
   type Fonts,
   type Palette,
@@ -65,6 +67,8 @@ export type LinkMode = 'grouped' | 'all';
 
 export type Hover =
   | { type: 'node'; n: ONode }
+  /** Every Relationship between the pair under the pointer: two can share one path. */
+  | { type: 'rel'; rs: ORel[] }
   | { type: 'sector'; camp: string; all: number };
 
 /** Where a hovered node's dot and name are on screen, so the card can stay clear of both. */
@@ -516,11 +520,10 @@ export function createEngine(
     return total / rs;
   }
   const pathP = (p: readonly number[]): void => pathPts(ctx, p);
-  const relColor = (type: RelationType): string => relColorShared(C, type);
   const endMarker = (p: readonly number[], type: RelationType, rTarget: number): void => endMarkerShared(ctx, C, p, type, rTarget);
   const strokeBatch = (list: Stroke[], color: string, width: number, alphaMul = 1, dash: number[] = []): void =>
     strokeBatchShared(ctx, list, color, width, alphaMul, dash);
-  function drawRel(r: ORel, p: number[], alpha: number, wMul = 1): void {
+  function drawRel(r: ORel, p: readonly number[], alpha: number, wMul = 1): void {
     drawRelShared(ctx, C, r, p, alpha, dotR(cur(r.t).r), wMul);
   }
   /** A Relationship drawn out from one end to `u` of its length, in its own
@@ -534,7 +537,7 @@ export function createEngine(
     }
     const def = REL_STYLE[r.type];
     ctx.globalAlpha = alpha;
-    ctx.strokeStyle = relColor(r.type);
+    ctx.strokeStyle = relColor(C, r.type);
     ctx.lineWidth = def.w * wMul;
     ctx.setLineDash(def.dash);
     ctx.beginPath();
@@ -552,6 +555,21 @@ export function createEngine(
     return best;
   }
   const relOn = (r: ORel): boolean => S.showRelations && S.relTypes.has(r.type);
+  /** The Relationship lines drawn this frame, in screen space, for hover picking. */
+  const relHits: PathHit<ORel>[] = [];
+  /** Draw a Relationship and, when it is solid enough to point at, make it pickable. */
+  function drawRelPickable(r: ORel, p: number[], alpha: number, wMul: number, m: number): void {
+    drawRel(r, p, alpha, wMul);
+    if (m >= 0.25) relHits.push({ p, item: r });
+  }
+  /** The hovered Relationship, drawn again on top: full strength, wider. */
+  function drawHoveredRel(): void {
+    if (S.hover?.type !== 'rel') return;
+    for (const r of S.hover.rs) {
+      const hit = relHits.find((h) => h.item === r);
+      if (hit) drawRel(r, hit.p, 1, 2);
+    }
+  }
   const pt = (n: ONode): [number, number] => [SX(cur(n).x), SY(cur(n).y)];
   /** World-space control points to screen space. */
   const scr = (p: readonly number[]): number[] => p.map((v, i) => (i % 2 ? SY(v) : SX(v)));
@@ -703,7 +721,7 @@ export function createEngine(
       const [x1, y1] = [cur(r.t).x, cur(r.t).y];
       const p = [SX(x0), SY(y0), SX(((x0 + x1) / 2) * 0.55), SY(((y0 + y1) / 2) * 0.55), SX(x1), SY(y1)];
       const hot = relHot(r);
-      drawRel(r, p, m * 0.34 * (1 - 0.56 * H * (1 - (hot ? hot.e.h : 0))), 0.8);
+      drawRelPickable(r, p, m * 0.34 * (1 - 0.56 * H * (1 - (hot ? hot.e.h : 0))), 0.8, m);
       if (hot) drawRelGrow(r, p, m * arcA(hot.e), 1.3, arcU(hot.e, hot.fromEnd ? r.s : r.t), hot.fromEnd);
     }
     // The hovered note's own links, bundled, in candlelight, growing out of its dot.
@@ -809,7 +827,7 @@ export function createEngine(
     strokeBatch(plain, C.ink, 0.7, 0.42 - 0.2 * H);
     strokeBatch(hot, C.candle, 1.2, 1);
     for (const [r, p, m] of relSp) {
-      drawRel(r, p, m, 1.1);
+      drawRelPickable(r, p, m, 1.1, m);
       const h = relHot(r);
       if (h) drawRelGrow(r, p, m * arcA(h.e), 1.5, arcU(h.e, h.fromEnd ? r.s : r.t), h.fromEnd);
     }
@@ -820,7 +838,7 @@ export function createEngine(
       const [x0, y0] = [cur(r.s).x, cur(r.s).y];
       const [x1, y1] = [cur(r.t).x, cur(r.t).y];
       const p = [SX(x0), SY(y0), SX(((x0 + x1) / 2) * 0.6), SY(((y0 + y1) / 2) * 0.6), SX(x1), SY(y1)];
-      drawRel(r, p, m * 0.55, 1);
+      drawRelPickable(r, p, m * 0.55, 1, m);
       const h = relHot(r);
       if (h) drawRelGrow(r, p, m * arcA(h.e), 1, arcU(h.e, h.fromEnd ? r.s : r.t), h.fromEnd);
     }
@@ -1117,7 +1135,7 @@ export function createEngine(
         const lx = SX(Math.cos(th) * dist * along);
         const ly = SY(Math.sin(th) * dist * along);
         const txt = relLabelText(c, rs);
-        const col = relColorShared(C, rs[0]!.type);
+        const col = relColor(C, rs[0]!.type);
         setFont(SERIF(10 * CAPTION_SCALE, 'italic'), 0);
         const w = ctx.measureText(txt).width;
         const ux = Math.cos(th);
@@ -1189,6 +1207,7 @@ export function createEngine(
     ctx.globalAlpha = 1;
     ctx.fillStyle = C.parchment;
     ctx.fillRect(0, 0, w, h);
+    relHits.length = 0;
     if (!scene) return;
     const e = T.e;
     if (fromScene && T.t < 1) {
@@ -1198,24 +1217,23 @@ export function createEngine(
         drawLayer(scene, e);
       }
     } else drawLayer(scene, 1);
+    drawHoveredRel();
     drawNodes();
     drawLabels(fromScene && T.t < 1 ? e * e : 1);
   }
 
   // ── picking + pointer input
-  function pick(mx: number, my: number): Hover | null {
-    let best: ONode | null = null;
-    let bd = Infinity;
+  /** What is under the pointer. Lines only count for hover (`lines`): a click
+   *  goes to the node or sector beneath, so a line never blocks drilling in. */
+  function pick(mx: number, my: number, lines = true): Hover | null {
+    const dots: NodeHit<ONode>[] = [];
     for (const n of nodes) {
       if (cur(n).a < 0.25 || to(n).a < 0.25) continue;
-      const d = Math.hypot(SX(cur(n).x) - mx, SY(cur(n).y) - my);
-      const rr = Math.max(dotR(cur(n).r), n.isIndex ? 5 : 2.5) + 3.5;
-      if (d < rr && d < bd) {
-        bd = d;
-        best = n;
-      }
+      dots.push({ x: SX(cur(n).x), y: SY(cur(n).y), r: Math.max(dotR(cur(n).r), n.isIndex ? 5 : 2.5) + 3.5, item: n });
     }
-    if (best) return { type: 'node', n: best };
+    const hit = pickAt(dots, lines ? relHits : [], mx, my);
+    if (hit?.type === 'node') return { type: 'node', n: hit.item };
+    if (hit?.type === 'rel') return { type: 'rel', rs: relsOnPair(relHits.map((h) => h.item), hit.item) };
     if (scene && scene.type === 'wheel') {
       const wx = (mx - view.t.x) / view.t.k;
       const wy = (my - view.t.y) / view.t.k;
@@ -1234,6 +1252,7 @@ export function createEngine(
   const sameHover = (a: Hover | null, b: Hover | null): boolean => {
     if (!a || !b) return a === b;
     if (a.type === 'node') return b.type === 'node' && a.n === b.n;
+    if (a.type === 'rel') return b.type === 'rel' && a.rs[0] === b.rs[0];
     return b.type === 'sector' && a.camp === b.camp;
   };
 
@@ -1248,7 +1267,7 @@ export function createEngine(
   const setHover = (h: Hover | null, x: number, y: number): void => {
     const same = sameHover(h, S.hover);
     S.hover = h;
-    canvas.style.cursor = h ? 'pointer' : 'default';
+    canvas.style.cursor = h?.type === 'rel' ? (pick(x, y, false) ? 'pointer' : 'default') : h ? 'pointer' : 'default';
     const pl = h?.type === 'node' && scene ? hoverPlan(h.n) : null;
     hooks.onHover(h, x, y, pl ? { x: pl.x, y: pl.y, r: pl.r, side: pl.side } : undefined);
     if (!same) {
@@ -1326,8 +1345,8 @@ export function createEngine(
       return;
     }
     const p = local(ev);
-    const h = pick(p.x, p.y);
-    if (!h) return;
+    const h = pick(p.x, p.y, false);
+    if (!h || h.type === 'rel') return;
     if (h.type === 'sector') return api.drill(h.camp);
     if (scene?.type === 'wheel' && h.n.isIndex && h.n.role === 'camp') return api.drill(h.n.campaign);
     api.focusNote(h.n);

@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { canonicalPair, forwardOf, inverseOf, parseRelation, RELATION_TYPES, RELATIONS } from './relation';
+import {
+  canonicalPair,
+  forwardOf,
+  inverseOf,
+  parseRelation,
+  RELATION_GROUPS,
+  RELATION_TYPES,
+  RELATIONS,
+  relationTypesIn,
+} from './relation';
 
 describe('RELATIONS', () => {
   test('a symmetric type is its own inverse, with one label', () => {
@@ -17,6 +26,28 @@ describe('RELATIONS', () => {
       if (info.symmetric) continue;
       expect(RELATION_TYPES as readonly string[]).not.toContain(info.inverse);
     }
+  });
+
+  test('every type belongs to one of the listed groups', () => {
+    const groups = RELATION_GROUPS.map((g) => g.id as string);
+
+    const unlisted = RELATION_TYPES.filter((t) => !groups.includes(RELATIONS[t].group));
+
+    expect(unlisted).toEqual([]);
+  });
+});
+
+describe('relationTypesIn', () => {
+  test('lists each type under exactly one group, every group non-empty', () => {
+    const perGroup = RELATION_GROUPS.map((g) => relationTypesIn(g.id));
+
+    expect(perGroup.every((ts) => ts.length > 0)).toBe(true);
+    expect(perGroup.flat().sort()).toEqual([...RELATION_TYPES].sort());
+  });
+
+  test('groups the organisation types together', () => {
+    expect(relationTypesIn('organisation')).toEqual(['member_of', 'leads', 'works_for']);
+    expect(relationTypesIn('place')).toEqual(['owns', 'located_in']);
   });
 });
 

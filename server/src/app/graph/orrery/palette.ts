@@ -3,7 +3,7 @@
 // by the browser and handed to the renderer; the caller re-resolves when
 // the theme flips (see OrreryCanvas), which is what makes night mode work.
 
-import { RELATIONS, type NoteKind, type RelationType } from '@compendium/shared';
+import { RELATIONS, type NoteKind, type RelationGroup, type RelationType } from '@compendium/shared';
 import type { FocusKind, RingKind } from './layout';
 
 export interface Palette {
@@ -21,6 +21,8 @@ export interface Palette {
   wine: string;
   sage: string;
   embers: string;
+  wisteria: string;
+  deepWater: string;
   grey: string;
 }
 
@@ -36,6 +38,8 @@ const TOKENS: Array<[keyof Palette, string]> = [
   ['wine', '--wine'],
   ['sage', '--sage'],
   ['embers', '--embers'],
+  ['wisteria', '--wisteria'],
+  ['deepWater', '--deep-water'],
 ];
 
 type Rgb = [number, number, number];
@@ -135,10 +139,23 @@ export type { RingKind };
 
 // ───────────────────────────────────────────── relationships
 
-type ColorKey = 'moss' | 'wine' | 'sage' | 'ink' | 'embers' | 'inkSoft' | 'muted';
+/** A Relationship's colour comes from its group (RELATIONS in
+ *  @compendium/shared). Family uses `candleText`, not `candle`: plain
+ *  candlelight is about 2.5:1 against the day background, too faint for a 1px
+ *  line, and it is also the colour of a hovered note's own links. */
+export const GROUP_COLOR: Record<RelationGroup, keyof Palette> = {
+  friendly: 'moss',
+  hostile: 'wine',
+  organisation: 'wisteria',
+  place: 'deepWater',
+  family: 'candleText',
+  neutral: 'muted',
+};
 
+export const relColor = (p: Palette, type: RelationType): string => p[GROUP_COLOR[RELATIONS[type].group]];
+
+/** Dash, width and end marker of each type; the colour is its group's. */
 export interface RelStyle {
-  color: ColorKey;
   dash: number[];
   w: number;
   /** Draws an arrow head at the target end. */
@@ -148,15 +165,15 @@ export interface RelStyle {
 }
 
 export const REL_STYLE: Record<RelationType, RelStyle> = {
-  ally_of: { color: 'moss', dash: [], w: 1.5 },
-  enemy_of: { color: 'wine', dash: [6, 3], w: 1.5 },
-  member_of: { color: 'sage', dash: [1.5, 2.5], w: 1.6, dir: true },
-  located_in: { color: 'sage', dash: [1.5, 2.5], w: 1.6, dir: true },
-  leads: { color: 'ink', dash: [8, 3, 2, 3], w: 1.2, dir: true },
-  works_for: { color: 'ink', dash: [8, 3, 2, 3], w: 1.2, dir: true },
-  owns: { color: 'embers', dash: [], w: 1.3, dir: true, diamond: true },
-  parent_of: { color: 'inkSoft', dash: [], w: 1, dir: true },
-  related_to: { color: 'muted', dash: [3, 4], w: 1.1 },
+  ally_of: { dash: [], w: 1.5 },
+  enemy_of: { dash: [6, 3], w: 1.5 },
+  member_of: { dash: [1.5, 2.5], w: 1.6, dir: true },
+  located_in: { dash: [1.5, 2.5], w: 1.6, dir: true },
+  leads: { dash: [8, 3, 2, 3], w: 1.2, dir: true },
+  works_for: { dash: [8, 3, 2, 3], w: 1.2, dir: true },
+  owns: { dash: [], w: 1.3, dir: true, diamond: true },
+  parent_of: { dash: [], w: 1, dir: true },
+  related_to: { dash: [3, 4], w: 1.1 },
 };
 
 /** "ally of" read from the source note's side, "has member" from the other. */

@@ -7,7 +7,7 @@
 
 import Link from 'next/link';
 import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactElement } from 'react';
-import { RELATION_TYPES, type RelationType } from '@compendium/shared';
+import { RELATION_GROUPS, relationTypesIn, type RelationType } from '@compendium/shared';
 import type { Engine } from './engine';
 import { campaignLabel, KIND_ORDER, searchNotes, type Model, type ONode } from './layout';
 import {
@@ -17,6 +17,7 @@ import {
   kindSingular,
   kindTextColor,
   REL_STYLE,
+  relColor,
   relLabel,
   type Palette,
 } from './palette';
@@ -35,7 +36,7 @@ const trunc = (t: string, n: number): string => (t.length > n ? `${t.slice(0, n 
 
 function RelSwatch({ type, palette, w = 26 }: { type: RelationType; palette: Palette; w?: number }): ReactElement {
   const d = REL_STYLE[type];
-  const color = palette[d.color];
+  const color = relColor(palette, type);
   return (
     <svg width={w} height={10} aria-hidden="true">
       <line x1={1} y1={5} x2={w - (d.dir ? 3 : 1)} y2={5} stroke={color} strokeWidth={d.w} strokeDasharray={d.dash.join(' ')} />
@@ -240,12 +241,17 @@ function OrreryChromeImpl({ engine, model, worldName, campNames, palette, onOpen
         <div className={s.caps} style={{ marginBottom: 5 }}>
           Relationships <span style={{ letterSpacing: 0, textTransform: 'none' }}>(click to filter)</span>
         </div>
-        {RELATION_TYPES.map((t) => (
-          <button key={t} className={`${s.rel} ${S.relTypes.has(t) ? '' : s.off}`} onClick={() => engine.toggleRelType(t)}>
-            <RelSwatch type={t} palette={palette} />
-            <span>{capitalise(relLabel(t, true))}</span>
-            <em>{stats.rel.get(t) ?? 0}</em>
-          </button>
+        {RELATION_GROUPS.map((g) => (
+          <div key={g.id} role="group" aria-label={g.label}>
+            <div className={`${s.caps} ${s.relGroup}`}>{g.label}</div>
+            {relationTypesIn(g.id).map((t) => (
+              <button key={t} className={`${s.rel} ${S.relTypes.has(t) ? '' : s.off}`} onClick={() => engine.toggleRelType(t)}>
+                <RelSwatch type={t} palette={palette} />
+                <span>{capitalise(relLabel(t, true))}</span>
+                <em>{stats.rel.get(t) ?? 0}</em>
+              </button>
+            ))}
+          </div>
         ))}
       </aside>
 
