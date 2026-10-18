@@ -1,0 +1,4 @@
+# generic-api-key false positives: the localStorage key name
+# 'compendium.tabs.v1', not a secret.
+f2b6398bb275388ab248614a0dc1ee85be4717c2:server/src/app/note-tabs-storage.ts:generic-api-key:7
+d3902c3338d2107b386e2022ec46d3041bcf5ae8:server/src/app/NoteTabs.tsx:generic-api-key:19

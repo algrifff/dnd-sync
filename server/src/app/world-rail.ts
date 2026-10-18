@@ -5,17 +5,11 @@
 // rules for badges, reordering, shortcuts and remembered pages are
 // testable without a DOM.
 
-export type WorldRow = {
-  id: string;
-  name: string;
-  role: 'admin' | 'editor' | 'viewer';
-  /** 0 = no uploaded icon. Non-zero busts the icon cache. */
-  iconVersion: number;
-  /** Newest visible note or asset change by another member, server
-   *  epoch ms. The caller's own writes are never counted. */
-  latestActivityAt: number | null;
-  openSession: { path: string } | null;
-};
+import type { WorldRow as ApiWorldRow } from '@/lib/groups';
+
+/** A GET /api/worlds row. Which world is active comes from the session
+ *  state the rail already holds, not from the row. */
+export type WorldRow = Omit<ApiWorldRow, 'isActive'>;
 
 /** World id → the world's `latestActivityAt` as last observed while the
  *  user had it open. Server time only, so the client clock never enters
