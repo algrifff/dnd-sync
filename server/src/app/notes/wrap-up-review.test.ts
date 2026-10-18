@@ -13,6 +13,7 @@ import {
   setAccepted,
   setAsNew,
   setRelationAccepted,
+  setUseExisting,
   toDecisions,
   applyRequestBody,
 } from './wrap-up-review';
@@ -55,7 +56,7 @@ describe('Wrap-up review state', () => {
     state = setAsNew(state, 'm3', true);
     state = setAccepted(state, 'm3', false);
 
-    expect(toDecisions(state)).toEqual({ accepted: ['m2'], asNew: ['m2'] });
+    expect(toDecisions(state)).toEqual({ accepted: ['m2'], asNew: ['m2'], useExisting: {} });
   });
 
   it('stamps the apply body with the generatedAt of the proposal that was reviewed', () => {
@@ -67,7 +68,37 @@ describe('Wrap-up review state', () => {
       generatedAt: 1234,
       accepted: ['m2', 'm3'],
       asNew: [],
+      useExisting: {},
       acceptedRelations: [],
+    });
+  });
+
+  it('moves a new Note to History when the closer picks a similar existing Note, and back', () => {
+    const picked = setUseExisting(initialReview(proposal), 'm3', 'Items/rusty-key.md');
+
+    const after = groupRows(proposal, picked);
+    const back = groupRows(proposal, setUseExisting(picked, 'm3', null));
+
+    expect(after.fresh).toEqual([]);
+    expect(after.history.map((r) => r.mention.id)).toEqual(['m1', 'm2', 'm3']);
+    expect(after.history[2]!.destination).toEqual({
+      type: 'existing',
+      path: 'Items/rusty-key.md',
+      certain: true,
+      chosen: true,
+    });
+    expect(back.fresh.map((r) => r.mention.id)).toEqual(['m3']);
+  });
+
+  it('sends the chosen Note for ticked mentions only, instead of asNew', () => {
+    let state = setUseExisting(initialReview(proposal), 'm3', 'Items/rusty-key.md');
+    state = setUseExisting(setAsNew(state, 'm2', true), 'm2', 'People/marta-2.md');
+    state = setUseExisting(setAccepted(state, 'm1', false), 'm1', 'People/bram-2.md');
+
+    expect(toDecisions(state)).toEqual({
+      accepted: ['m2', 'm3'],
+      asNew: [],
+      useExisting: { m2: 'People/marta-2.md', m3: 'Items/rusty-key.md' },
     });
   });
 
@@ -115,6 +146,15 @@ describe('Relationships in the Wrap-up review', () => {
     expect(rows(switched)[0]!.from).toBe('Bram');
     expect(rows(setAsNew(switched, 'm2', true))[1]!.from).toBe('the innkeeper');
     expect(relationRows(withRelations, initialReview(withRelations), none, {})[0]!.from).toBe('Bram');
+  });
+
+  it('names a mention end by the existing Note the closer chose for it', () => {
+    const state = setUseExisting(initialReview(withRelations), 'm3', 'Items/rusty-key.md');
+
+    const named = relationRows(withRelations, state, none, { ...titles, 'Items/rusty-key.md': 'Rusty Key' });
+
+    expect(named[1]!.to).toBe('Rusty Key');
+    expect(named[1]!.accepted).toBe(true);
   });
 
   it('unticks and blocks the relations that depend on an unticked mention, whichever end it is', () => {
@@ -173,6 +213,7 @@ describe('Relationships in the Wrap-up review', () => {
       generatedAt: 1,
       accepted: ['m2', 'm3'],
       asNew: [],
+      useExisting: {},
       acceptedRelations: ['r2'],
     });
   });

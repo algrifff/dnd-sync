@@ -50,6 +50,7 @@ import { canDropOn, isDraggableSource, isCampaignRoot, campaignRootSlug } from '
 import { RowMenu } from './RowMenu';
 import { CampaignRowMenu } from './CampaignRowMenu';
 import { PeerStack } from './PeerStack';
+import { SimilarNoteWarning, useSimilarNotes } from './SimilarNoteWarning';
 import { useModalA11y } from './dialog/useModalA11y';
 
 export type FileTreeKind = 'pc' | 'npc' | 'ally' | 'villain' | 'session';
@@ -1690,6 +1691,10 @@ function NewEntryRow({
     NEW_ENTRY_OPTIONS.find((o) => o.kind === kind)?.placeholder ?? 'Untitled';
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState<string>(initialValue ?? placeholder);
+  const [typed, setTyped] = useState(false);
+  // Renames pass an initialValue and folders are not Notes; the untouched
+  // default name is not a real one.
+  const similar = useSimilarNotes(value, initialValue === undefined && kind !== 'folder' && kind !== 'campaign' && typed);
 
   useEffect(() => {
     // Focus + select the default "Untitled" on mount so the user can
@@ -1713,7 +1718,10 @@ function NewEntryRow({
         <input
           ref={inputRef}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setTyped(true);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Escape') {
               e.preventDefault();
@@ -1735,6 +1743,16 @@ function NewEntryRow({
           className="flex-1 border-0 bg-transparent px-0 text-sm text-[var(--ink)] outline-none placeholder:text-[var(--ink-soft)]/60 disabled:opacity-60"
         />
       </form>
+      <div style={{ paddingLeft: padding + 14 }}>
+        <SimilarNoteWarning
+          matches={similar}
+          onOpen={onCancel}
+          onCreateAnyway={() => {
+            const trimmed = value.trim();
+            if (trimmed) onSubmit(trimmed);
+          }}
+        />
+      </div>
       {error && (
         <p className="ml-[30px] mt-1 text-xs text-[var(--wine)]">{error}</p>
       )}

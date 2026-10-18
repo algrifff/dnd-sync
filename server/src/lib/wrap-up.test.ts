@@ -13,6 +13,7 @@ import type { PmDoc } from '@/lib/note-edits';
 import { listRelations } from '@/lib/relations';
 import {
   applyWrapUp,
+  similarNotesFor,
   loadPendingWrapUp,
   loadVisibleSession,
   submitWrapUp,
@@ -828,6 +829,112 @@ describe('Relationships in a Wrap-up', () => {
 
       expect(result.relationsAdded).toEqual([{ id: 'r8', status: 'added' }]);
       expect(relationsOf('Campaigns/Ashfall/People/marta.md').map((r) => [r.relation, r.path])).toEqual([['led_by', GUILD]]);
+    });
+  });
+});
+
+describe('Similarly named Notes in a Wrap-up', () => {
+  const SIM_SESSION = 'Campaigns/Ashfall/Adventure Log/2026-10-15-the-ford.md';
+  const KIXISH = 'Campaigns/Ashfall/People/kixish.md';
+  const BASSOS = 'Campaigns/Ashfall/People/bassos.md';
+  const FERRY_GUILD = 'Campaigns/Ashfall/Lore/the-ferry-guild.md';
+  const THESSALY = 'Campaigns/Ashfall/Characters/thessaly.md';
+  const KIXXISH = 'Campaigns/Ashfall/People/kixxish.md';
+
+  const proposal = (): WrapUpProposal => ({
+    ...proposalFrom(SIM_SESSION, [
+      fresh('Kixxish', 'person', 'A ferryman.', 'Poled the party across.'),
+      fresh('Basos', 'person', 'A smith.', 'Sharpened a blade.'),
+      fresh('Thessaly', 'person', 'A twin?', 'Waved.'),
+    ]),
+    relations: [{ id: 'r1', from: { type: 'mention', mentionId: 'm1' }, relation: 'member_of', to: { type: 'existing', path: FERRY_GUILD } }],
+  });
+
+  const run = (decisions: { accepted: string[]; acceptedRelations?: string[]; useExisting?: Record<string, string> }, role: 'admin' | 'viewer' = 'viewer') =>
+    applyWrapUp({ groupId, userId, role, sessionPath: SIM_SESSION, proposal: proposal(), decisions: { asNew: [], ...decisions } });
+
+  beforeAll(() => {
+    seed({
+      path: SIM_SESSION,
+      title: 'The Ford',
+      frontmatter: { kind: 'session', campaigns: ['ashfall'] },
+      body: { type: 'doc', content: [paragraph(text('Kixxish ferried us. Basos sharpened a blade.'))] },
+    });
+    seed({ path: KIXISH, title: 'Kixish', frontmatter: { kind: 'person' } });
+    seed({ path: BASSOS, title: 'Bassos', frontmatter: { kind: 'person', dm_only: true }, dmOnly: true });
+    seed({ path: FERRY_GUILD, title: 'The Ferry Guild', frontmatter: { kind: 'lore' } });
+    seed({ path: THESSALY, title: 'Thessalie', frontmatter: { kind: 'character' } });
+  });
+
+  describe('offering', () => {
+    it('lists a close-named Note for each mention that would be new', () => {
+      const similar = similarNotesFor(groupId, 'viewer', proposal());
+
+      expect(Object.keys(similar)).toEqual(['m1']);
+      expect(similar.m1!.map((s) => [s.path, s.title, s.reason])).toEqual([[KIXISH, 'Kixish', 'close_spelling']]);
+    });
+
+    it('leaves out a Note the reader cannot see, and shows it to a GM', () => {
+      expect(similarNotesFor(groupId, 'viewer', proposal()).m2).toBeUndefined();
+      expect(similarNotesFor(groupId, 'editor', proposal()).m2!.map((s) => s.path)).toEqual([BASSOS]);
+    });
+
+    it('leaves out a Note a mention cannot land on, such as a Character', () => {
+      expect(similarNotesFor(groupId, 'admin', proposal()).m3).toBeUndefined();
+    });
+
+    it('offers nothing for a mention already matched to an existing Note', () => {
+      const matched = proposalFrom(SIM_SESSION, [existing('Kixxish', KIXISH, 'person', 'Poled.')]);
+
+      expect(similarNotesFor(groupId, 'viewer', matched)).toEqual({});
+    });
+  });
+
+  describe('applying', () => {
+    it('puts the History entry on the chosen Note and creates no new one', async () => {
+      const result = await run({ accepted: ['m1'], useExisting: { m1: KIXISH } });
+
+      expect(result.applied).toEqual([{ id: 'm1', path: KIXISH, created: false }]);
+      expect(historyEntries(contentOf(KIXISH))).toEqual(['The Ford: Poled the party across.']);
+      expect(noteExists(KIXXISH)).toBe(false);
+    });
+
+    it('resolves a Relationship end on the mention to the chosen Note', async () => {
+      const result = await run({ accepted: ['m1'], acceptedRelations: ['r1'], useExisting: { m1: KIXISH } });
+
+      expect(result.relationsAdded).toEqual([{ id: 'r1', status: 'added' }]);
+      expect(listRelations({ groupId, role: 'admin', path: KIXISH }).map((r) => [r.relation, r.path])).toEqual([['member_of', FERRY_GUILD]]);
+    });
+
+    it('skips a chosen Note the applier cannot see, the same as a hidden or missing one, and creates nothing', async () => {
+      const result = await run({ accepted: ['m2'], useExisting: { m2: BASSOS } });
+      const missing = await run({ accepted: ['m2'], useExisting: { m2: 'Campaigns/Ashfall/People/nobody.md' } });
+
+      expect(result.applied).toEqual([]);
+      expect(result.skipped).toEqual([{ id: 'm2', reason: 'not_visible' }]);
+      expect(missing.skipped).toEqual(result.skipped);
+      expect(noteExists('Campaigns/Ashfall/People/basos.md')).toBe(false);
+      expect(historyEntries(contentOf(BASSOS))).toEqual([]);
+    });
+
+    it('lets a GM use the Note a Player could not', async () => {
+      const result = await run({ accepted: ['m2'], useExisting: { m2: BASSOS } }, 'admin');
+
+      expect(result.applied).toEqual([{ id: 'm2', path: BASSOS, created: false }]);
+    });
+
+    it('refuses a chosen Note that cannot take History', async () => {
+      const result = await run({ accepted: ['m3'], useExisting: { m3: THESSALY } });
+
+      expect(result.skipped).toEqual([{ id: 'm3', reason: 'invalid_target' }]);
+      expect(historyEntries(contentOf(THESSALY))).toEqual([]);
+    });
+
+    it('ignores a chosen Note for a mention the closer did not tick', async () => {
+      const result = await run({ accepted: [], useExisting: { m1: KIXISH } });
+
+      expect(result.applied).toEqual([]);
+      expect(result.skipped).toEqual([]);
     });
   });
 });

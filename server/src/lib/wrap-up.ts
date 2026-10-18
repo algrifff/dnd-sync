@@ -23,6 +23,7 @@ import { z } from 'zod';
 import { parseKind, RelationType } from '@compendium/shared';
 import { getDb } from '@/lib/db';
 import { addRelation } from '@/lib/relations';
+import { findSimilarNotes, type SimilarNote } from '@/lib/similar-names';
 import { loadNote, visibilityFor, type NoteRow } from '@/lib/notes';
 import { getCampaignBySlug } from '@/lib/characters';
 import { canonicalPath } from '@/lib/ai/paths';
@@ -525,6 +526,33 @@ export function existingTitles(groupId: string, proposal: WrapUpProposal): Recor
   return out;
 }
 
+/** Matches fetched per mention before the unusable kinds are dropped. */
+const SIMILAR_SCAN = 12;
+
+/** For each mention that would create a new Note, the visible Notes with
+ *  a close name that could take its History instead (at most 3, only
+ *  kinds a mention can land on). Keyed by mention id; mentions with none
+ *  are absent. Computed on read, never stored: the World moves on while
+ *  a proposal waits. Call it on a proposal from `loadPendingWrapUp`. */
+export function similarNotesFor(
+  groupId: string,
+  role: Role,
+  proposal: WrapUpProposal,
+): Record<string, SimilarNote[]> {
+  const out: Record<string, SimilarNote[]> = {};
+  for (const mention of proposal.mentions) {
+    if (mention.match.type !== 'new') continue;
+    const matches = findSimilarNotes({ groupId, role, name: mention.match.title, limit: SIMILAR_SCAN })
+      .filter((m) => {
+        const note = loadNote(groupId, m.path);
+        return note !== null && mentionKindOf(note.path, note.frontmatter_json) !== null;
+      })
+      .slice(0, 3);
+    if (matches.length > 0) out[mention.id] = matches;
+  }
+  return out;
+}
+
 // ── Apply ──────────────────────────────────────────────────────────────
 
 export type WrapUpDecisions = {
@@ -535,11 +563,23 @@ export type WrapUpDecisions = {
   /** Relationship ids the closer ticked. A Relationship also needs both
    *  of its ends to have landed. Absent means none. */
   acceptedRelations?: string[];
+  /** Accepted mention ids whose History the closer sent to a different
+   *  existing Note (mention id to path), e.g. a similarly named one the
+   *  review offered in place of a new Note. Wins over `asNew`. A
+   *  Relationship end on the mention follows it. */
+  useExisting?: Record<string, string>;
 };
 
-/** `edit_failed`: the Note could not take the History entry (it vanished
- *  or refused the edit). `invalid_title`: nothing to name a new Note by. */
-export type SkipReason = 'unknown_mention' | 'not_visible' | 'edit_failed' | 'invalid_title';
+/** `invalid_target`: the Note chosen with `useExisting` cannot receive
+ *  History (a Character, a Session, a plain Note). `edit_failed`: the
+ *  Note could not take the History entry (it vanished or refused the
+ *  edit). `invalid_title`: nothing to name a new Note by. */
+export type SkipReason =
+  | 'unknown_mention'
+  | 'not_visible'
+  | 'invalid_target'
+  | 'edit_failed'
+  | 'invalid_title';
 
 export type AppliedMention = { id: string; path: string; created: boolean };
 
@@ -582,6 +622,7 @@ export async function applyWrapUp(opts: {
   const vis = visibilityFor(role);
   const byId = new Map(proposal.mentions.map((m) => [m.id, m]));
   const asNew = new Set(opts.decisions.asNew);
+  const useExisting = opts.decisions.useExisting ?? {};
   const campaign = campaignFor(groupId, session);
 
   const applied: AppliedMention[] = [];
@@ -594,6 +635,7 @@ export async function applyWrapUp(opts: {
     }
     const target = await resolveTarget({
       groupId, userId, vis, mention, forceNew: asNew.has(id), campaign, session,
+      useExisting: Object.hasOwn(useExisting, id) ? useExisting[id] : undefined,
     });
     if (target.status !== 'ok') {
       skipped.push({ id, reason: target.status });
@@ -738,11 +780,12 @@ type Visibility = ReturnType<typeof visibilityFor>;
 
 type Target =
   | { status: 'ok'; path: string; created: boolean }
-  | { status: 'not_visible' | 'invalid_title' };
+  | { status: 'not_visible' | 'invalid_target' | 'invalid_title' };
 
 /** The Note a mention lands on, creating it when it is new and nothing
  *  visible with that title or canonical path exists yet. An existing
- *  match the closer cannot see is `not_visible`.
+ *  match, or a Note the closer chose instead, that they cannot see is
+ *  `not_visible`: the same answer as one that does not exist.
  *
  *  A hidden Note at a new mention's canonical path is treated as if it
  *  were not there: the new Note takes the next free path, so neither
@@ -755,11 +798,20 @@ async function resolveTarget(opts: {
   vis: Visibility;
   mention: Mention;
   forceNew: boolean;
+  /** The closer's chosen Note for this mention, overriding its match. */
+  useExisting?: string | undefined;
   campaign: Campaign;
   session: NoteRow;
 }): Promise<Target> {
   const { groupId, userId, vis, mention, session } = opts;
   const match = mention.match;
+
+  if (opts.useExisting !== undefined) {
+    const note = loadNote(groupId, opts.useExisting);
+    if (!note || isHidden(note, vis)) return { status: 'not_visible' };
+    if (!mentionKindOf(note.path, note.frontmatter_json)) return { status: 'invalid_target' };
+    return { status: 'ok', path: note.path, created: false };
+  }
 
   if (match.type === 'existing' && !opts.forceNew) {
     const note = loadNote(groupId, match.path);

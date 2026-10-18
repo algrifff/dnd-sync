@@ -1,17 +1,24 @@
-// Review state for the Wrap-up dialog: what the closer ticked and which
-// uncertain matches they switched to a new Note. Pure, so the grouping
+// Review state for the Wrap-up dialog: what the closer ticked, which
+// uncertain matches they switched to a new Note and which new Notes they
+// pointed at a similarly named existing one. Pure, so the grouping
 // and the decisions sent to /api/sessions/wrap-up/apply are testable
 // without a DOM. Type-only imports: lib/wrap-up pulls in the database.
 
 import { RELATIONS } from '@compendium/shared';
 import type { Mention, Relation, StoredEndpoint, WrapUpProposal } from '@/lib/wrap-up';
 
-export type ReviewChoice = { accepted: boolean; asNew: boolean };
+export type ReviewChoice = {
+  accepted: boolean;
+  asNew: boolean;
+  /** Path of an existing Note chosen in place of the mention's own
+   *  match (a new Note, or an uncertain match). Wins over `asNew`. */
+  useExisting: string | null;
+};
 export type ReviewState = ReadonlyMap<string, ReviewChoice>;
 
 export type Destination =
   | { type: 'new'; title: string; summary: string; switched: boolean }
-  | { type: 'existing'; path: string; certain: boolean };
+  | { type: 'existing'; path: string; certain: boolean; chosen: boolean };
 
 export type ReviewRow = { mention: Mention; accepted: boolean; destination: Destination };
 
@@ -60,7 +67,9 @@ export const KIND_LABEL: Record<Mention['kind'], string> = {
 
 /** Every mention ticked, every match as proposed. */
 export function initialReview(proposal: WrapUpProposal): ReviewState {
-  return new Map(proposal.mentions.map((m) => [m.id, { accepted: true, asNew: false }]));
+  return new Map(
+    proposal.mentions.map((m) => [m.id, { accepted: true, asNew: false, useExisting: null }]),
+  );
 }
 
 export function setAccepted(state: ReviewState, id: string, accepted: boolean): ReviewState {
@@ -69,6 +78,12 @@ export function setAccepted(state: ReviewState, id: string, accepted: boolean): 
 
 export function setAsNew(state: ReviewState, id: string, asNew: boolean): ReviewState {
   return update(state, id, (c) => ({ ...c, asNew }));
+}
+
+/** Sends the mention's History to the existing Note at `path`, or back to
+ *  its own match with null. */
+export function setUseExisting(state: ReviewState, id: string, path: string | null): ReviewState {
+  return update(state, id, (c) => ({ ...c, useExisting: path }));
 }
 
 function update(
@@ -82,7 +97,8 @@ function update(
 }
 
 /** Splits the proposal into the two review groups. A match the closer
- *  switched to new moves from History to New notes. */
+ *  switched to new moves from History to New notes; a new Note the closer
+ *  pointed at an existing one moves the other way. */
 export function groupRows(
   proposal: WrapUpProposal,
   state: ReviewState,
@@ -90,9 +106,15 @@ export function groupRows(
   const fresh: ReviewRow[] = [];
   const history: ReviewRow[] = [];
   for (const mention of proposal.mentions) {
-    const choice = state.get(mention.id) ?? { accepted: true, asNew: false };
+    const choice = state.get(mention.id) ?? { accepted: true, asNew: false, useExisting: null };
     const match = mention.match;
-    if (match.type === 'new') {
+    if (choice.useExisting) {
+      history.push({
+        mention,
+        accepted: choice.accepted,
+        destination: { type: 'existing', path: choice.useExisting, certain: true, chosen: true },
+      });
+    } else if (match.type === 'new') {
       fresh.push({
         mention,
         accepted: choice.accepted,
@@ -108,7 +130,7 @@ export function groupRows(
       history.push({
         mention,
         accepted: choice.accepted,
-        destination: { type: 'existing', path: match.path, certain: match.certain },
+        destination: { type: 'existing', path: match.path, certain: match.certain, chosen: false },
       });
     }
   }
@@ -141,9 +163,11 @@ export function relationRows(
     if (end.type === 'existing') return titles[end.path] ?? end.path;
     const mention = mentions.get(end.mentionId);
     if (!mention) return '(unknown)';
+    const choice = state.get(mention.id);
+    if (choice?.useExisting) return titles[choice.useExisting] ?? mention.name;
     const match = mention.match;
     if (match.type === 'new') return match.title;
-    if (state.get(mention.id)?.asNew || !match.certain) return mention.name;
+    if (choice?.asNew || !match.certain) return mention.name;
     return titles[match.path] ?? mention.name;
   };
   const unticked = (end: StoredEndpoint): boolean => {
@@ -256,6 +280,7 @@ export function applyRequestBody(
   accepted: string[];
   asNew: string[];
   acceptedRelations: string[];
+  useExisting: Record<string, string>;
 } {
   return {
     sessionPath,
@@ -266,13 +291,19 @@ export function applyRequestBody(
 }
 
 /** The decisions half of the apply body. */
-export function toDecisions(state: ReviewState): { accepted: string[]; asNew: string[] } {
+export function toDecisions(state: ReviewState): {
+  accepted: string[];
+  asNew: string[];
+  useExisting: Record<string, string>;
+} {
   const accepted: string[] = [];
   const asNew: string[] = [];
+  const useExisting: Record<string, string> = {};
   for (const [id, choice] of state) {
     if (!choice.accepted) continue;
     accepted.push(id);
-    if (choice.asNew) asNew.push(id);
+    if (choice.useExisting) useExisting[id] = choice.useExisting;
+    else if (choice.asNew) asNew.push(id);
   }
-  return { accepted, asNew };
+  return { accepted, asNew, useExisting };
 }

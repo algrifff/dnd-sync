@@ -4,7 +4,10 @@
 // Body: { sessionPath, generatedAt: the proposal's generatedAt as the
 // closer reviewed it, accepted: mention ids, asNew: accepted ids whose
 // uncertain match the closer switched to a new Note, acceptedRelations:
-// ticked Relationship ids (default none) }
+// ticked Relationship ids (default none), useExisting: { mention id: path }
+// sends an accepted mention's History to that existing Note instead of its
+// own match (default none). A path the applier cannot see skips the mention
+// exactly as a hidden match does; a Relationship end on it follows it. }
 //
 // A ticked Relationship is recorded only when both of its ends landed;
 // otherwise it comes back in relationsSkipped, not as an error.
@@ -35,6 +38,10 @@ const Body = z.object({
   accepted: z.array(z.string().min(1).max(64)).max(200),
   asNew: z.array(z.string().min(1).max(64)).max(200).default([]),
   acceptedRelations: z.array(z.string().min(1).max(64)).max(200).default([]),
+  useExisting: z
+    .record(z.string().min(1).max(64), z.string().min(1).max(512))
+    .refine((r) => Object.keys(r).length <= 200)
+    .default({}),
 });
 
 export async function POST(req: NextRequest): Promise<Response> {
@@ -66,7 +73,12 @@ export async function POST(req: NextRequest): Promise<Response> {
       role,
       sessionPath: body.sessionPath,
       proposal,
-      decisions: { accepted: body.accepted, asNew: body.asNew, acceptedRelations: body.acceptedRelations },
+      decisions: {
+        accepted: body.accepted,
+        asNew: body.asNew,
+        acceptedRelations: body.acceptedRelations,
+        useExisting: body.useExisting,
+      },
     });
 
     void captureServer({
