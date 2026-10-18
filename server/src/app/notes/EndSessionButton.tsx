@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, ScrollText, X } from 'lucide-react';
 import { broadcastTreeChange } from '@/lib/tree-sync';
@@ -8,21 +8,35 @@ import { EVENTS, track } from '@/lib/analytics/client';
 import { WrapUpDialog } from './WrapUpDialog';
 import { WrapUpDoneChips } from './WrapUpDoneChips';
 import { doneMessage, type WrapUpOutcome } from './wrap-up-review';
+import { REVIEW_PARAM, WRAP_UP_CHANGED_EVENT } from '../wrap-up-inbox';
 
 export function EndSessionButton({
   sessionPath,
   csrfToken,
   isAlreadyClosed,
+  hasPendingWrapUp,
   campaignSlug,
 }: {
   sessionPath: string;
   csrfToken: string;
   isAlreadyClosed: boolean;
+  /** A proposal is waiting: the button invites review instead. */
+  hasPendingWrapUp: boolean;
   campaignSlug: string | undefined;
 }): React.JSX.Element {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState<{ outcome: WrapUpOutcome | null } | null>(null);
+
+  // Arrived from the header's Wrap-up notice (`?review=1`): open the
+  // review straight away and drop the flag so a reload doesn't reopen it.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has(REVIEW_PARAM)) return;
+    url.searchParams.delete(REVIEW_PARAM);
+    window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+    if (hasPendingWrapUp) setOpen(true);
+  }, [sessionPath, hasPendingWrapUp]);
 
   function handleDone(outcome: WrapUpOutcome | null): void {
     track(EVENTS.END_SESSION_CONFIRMED, {
@@ -32,6 +46,7 @@ export function EndSessionButton({
     });
     setOpen(false);
     setDone({ outcome });
+    window.dispatchEvent(new Event(WRAP_UP_CHANGED_EVENT));
     router.refresh();
     if (outcome && outcome.created > 0) broadcastTreeChange();
   }
@@ -77,7 +92,10 @@ export function EndSessionButton({
         className="mb-5 inline-flex items-center gap-2 rounded-[8px] bg-[var(--wine)] px-4 py-2 text-sm font-medium text-[var(--wu-on-wine)] shadow-[0_1px_0_rgb(var(--ink-rgb)/0.2)] transition hover:brightness-110 active:scale-[0.97]"
       >
         <ScrollText size={15} aria-hidden />
-        {isAlreadyClosed ? 'Wrap up again' : 'End of Session'}
+        {hasPendingWrapUp ? 'Review Wrap-up' : isAlreadyClosed ? 'Wrap up again' : 'End of Session'}
+        {hasPendingWrapUp && (
+          <span aria-hidden className="h-2 w-2 rounded-full bg-[var(--candlelight)]" />
+        )}
       </button>
       {open && (
         <WrapUpDialog

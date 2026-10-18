@@ -14,6 +14,8 @@ import { WorldSearchBar } from './WorldSearchBar';
 import { GmModeToggle } from './GmModeToggle';
 import { MobileNavToggle } from './MobileNavToggle';
 import { getWorldHeader } from '@/lib/groups';
+import { listPendingWrapUps } from '@/lib/wrap-up';
+import { WrapUpInbox } from './WrapUpInbox';
 import { logoutAction } from './login/actions';
 
 export function AppHeader({
@@ -40,6 +42,7 @@ export function AppHeader({
   const worldHeader = getWorldHeader(groupId);
   const worldName = worldHeader?.name ?? '';
   const headerColor = worldHeader?.headerColor ?? 'var(--ink)';
+  const pendingWrapUps = listPendingWrapUps(groupId, role);
 
   return (
     <header className="grid h-14 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-[var(--rule)] bg-[var(--parchment-sunk)] px-4">
@@ -82,8 +85,9 @@ export function AppHeader({
       {/* ── Centre: search (dead-centred by the grid) ── */}
       <WorldSearchBar />
 
-      {/* ── Right: GM-mode pill (admin only), then user chip ── */}
+      {/* ── Right: Wrap-up notice, GM-mode pill (admin only), then user chip ── */}
       <div className="flex min-w-0 items-center justify-end gap-2">
+        <WrapUpInbox key={groupId} initial={pendingWrapUps} />
         {role === 'admin' && csrfToken && (
           <GmModeToggle initialOn={gmMode} csrfToken={csrfToken} />
         )}

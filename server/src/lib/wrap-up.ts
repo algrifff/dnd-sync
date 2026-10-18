@@ -506,6 +506,42 @@ export function loadPendingWrapUp(
   };
 }
 
+export type PendingWrapUp = {
+  sessionPath: string;
+  title: string;
+  generatedAt: number;
+  mentions: number;
+  relations: number;
+  suggestions: number;
+};
+
+/** Every Session in the World with a proposal waiting for review that
+ *  `role` may see, newest first, counted as `loadPendingWrapUp` would
+ *  show it. Backs the header's "Wrap-up ready" notice. */
+export function listPendingWrapUps(groupId: string, role: Role): PendingWrapUp[] {
+  const rows = getDb()
+    .query<{ note_path: string }, [string]>(
+      `SELECT note_path FROM session_notes WHERE group_id=? AND wrap_up_json IS NOT NULL`,
+    )
+    .all(groupId);
+  const out: PendingWrapUp[] = [];
+  for (const { note_path } of rows) {
+    const lookup = loadVisibleSession(groupId, role, note_path);
+    if (lookup.status !== 'ok') continue;
+    const proposal = loadPendingWrapUp(groupId, role, note_path);
+    if (!proposal) continue;
+    out.push({
+      sessionPath: note_path,
+      title: lookup.note.title,
+      generatedAt: proposal.generatedAt,
+      mentions: proposal.mentions.length,
+      relations: proposal.relations.length,
+      suggestions: proposal.suggestions.length,
+    });
+  }
+  return out.sort((a, b) => b.generatedAt - a.generatedAt);
+}
+
 /** Titles of the Notes a proposal points at (existing matches, existing
  *  Relationship ends and Suggestion Characters), for the review dialog's
  *  "Matched to <Title>?", its Relationships and its Suggestions list. Call it on a proposal from

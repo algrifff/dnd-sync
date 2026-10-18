@@ -14,6 +14,7 @@ import { listRelations } from '@/lib/relations';
 import {
   applyWrapUp,
   similarNotesFor,
+  listPendingWrapUps,
   loadPendingWrapUp,
   loadVisibleSession,
   submitWrapUp,
@@ -405,6 +406,31 @@ describe('loadPendingWrapUp', () => {
 
     expect(result.applied.map((a) => a.path)).toEqual([LANTERN]);
     expect(historyEntries(contentOf(SECRET))).toEqual([]);
+  });
+});
+
+describe('listPendingWrapUps', () => {
+  it('should list Sessions with a proposal the reader can see, counted as they would see it', () => {
+    submitWrapUp({
+      groupId, role: 'admin',
+      submission: { sessionPath: SESSION, mentions: [existing('the spy', SECRET, 'person', 'Was seen.'), existing('Bram', BRAM, 'person', 'Was there.')] },
+    });
+    submitWrapUp({ groupId, role: 'admin', submission: { sessionPath: SECRET_SESSION, mentions: [] } });
+
+    const player = listPendingWrapUps(groupId, 'viewer');
+    const owner = listPendingWrapUps(groupId, 'admin');
+
+    expect(player.map((p) => [p.sessionPath, p.mentions])).toEqual([[SESSION, 1]]);
+    expect(owner.map((p) => p.sessionPath).sort()).toEqual([SECRET_SESSION, SESSION].sort());
+  });
+
+  it('should drop a Session once it is closed', async () => {
+    submitWrapUp({ groupId, role: 'admin', submission: { sessionPath: SESSION, mentions: [] } });
+    const proposal = loadPendingWrapUp(groupId, 'admin', SESSION)!;
+
+    await applyWrapUp({ groupId, userId, role: 'admin', sessionPath: SESSION, proposal, decisions: { accepted: [], asNew: [] } });
+
+    expect(listPendingWrapUps(groupId, 'admin').map((p) => p.sessionPath)).not.toContain(SESSION);
   });
 });
 
