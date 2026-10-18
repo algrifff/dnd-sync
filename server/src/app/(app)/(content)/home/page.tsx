@@ -56,7 +56,7 @@ export default async function HomePage(): Promise<ReactElement> {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <main className="surface-paper mx-auto w-full max-w-4xl px-6 py-10">
+      <main className="mx-auto w-full max-w-4xl px-6 py-10">
         <section className="mb-6">
           <div>
             <h1

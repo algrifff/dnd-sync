@@ -171,7 +171,7 @@ function IndexTable(props: {
             </thead>
             <tbody>
               {props.rows.map((row, i) => (
-                <tr key={i} className="border-b border-[#EEE5D1] last:border-b-0">
+                <tr key={i} className="border-b border-[var(--rule)] last:border-b-0">
                   {props.columns.map((c) => (
                     <td key={c} className="px-2 py-1 font-mono text-xs">
                       {String(row[c] ?? '')}
