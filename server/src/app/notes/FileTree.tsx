@@ -50,6 +50,7 @@ import { canDropOn, isDraggableSource, isCampaignRoot, campaignRootSlug } from '
 import { RowMenu } from './RowMenu';
 import { CampaignRowMenu } from './CampaignRowMenu';
 import { PeerStack } from './PeerStack';
+import { SimilarNoteWarning, useSimilarNotes } from './SimilarNoteWarning';
 import { useModalA11y } from './dialog/useModalA11y';
 
 export type FileTreeKind = 'pc' | 'npc' | 'ally' | 'villain' | 'session';
@@ -1690,6 +1691,11 @@ function NewEntryRow({
     NEW_ENTRY_OPTIONS.find((o) => o.kind === kind)?.placeholder ?? 'Untitled';
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState<string>(initialValue ?? placeholder);
+  const [typed, setTyped] = useState(false);
+  const warningRef = useRef<HTMLDivElement>(null);
+  // Renames pass an initialValue and folders are not Notes; the untouched
+  // default name is not a real one.
+  const similar = useSimilarNotes(value, initialValue === undefined && kind !== 'folder' && kind !== 'campaign' && typed);
 
   useEffect(() => {
     // Focus + select the default "Untitled" on mount so the user can
@@ -1699,6 +1705,15 @@ function NewEntryRow({
   }, []);
 
   const padding = 8 + depth * 14;
+
+  // Click-away commits the current name (or the placeholder default if the
+  // user never typed). Empty string falls back to cancellation.
+  const commitOnLeave = (): void => {
+    if (disabled) return;
+    const trimmed = value.trim();
+    if (trimmed) onSubmit(trimmed);
+    else onCancel();
+  };
 
   return (
     <div>
@@ -1713,28 +1728,55 @@ function NewEntryRow({
         <input
           ref={inputRef}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setTyped(true);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Escape') {
               e.preventDefault();
               onCancel();
             }
           }}
-          onBlur={() => {
-            // Click-away commits the current name (or the placeholder
-            // default if the user never typed). Empty string falls back
-            // to cancellation. Tracked via initialValue check so the
-            // submit-and-rerender cycle doesn't re-fire blur.
-            if (disabled) return;
-            const trimmed = value.trim();
-            if (trimmed) onSubmit(trimmed);
-            else onCancel();
+          onBlur={(e) => {
+            // Tabbing into the similar-Note warning must not create the Note
+            // before "Open it" / "Create anyway" can be chosen.
+            if (warningRef.current?.contains(e.relatedTarget as Node | null)) return;
+            commitOnLeave();
           }}
           disabled={disabled}
           placeholder={placeholder}
           className="flex-1 border-0 bg-transparent px-0 text-sm text-[var(--ink)] outline-none placeholder:text-[var(--ink-soft)]/60 disabled:opacity-60"
         />
       </form>
+      <div
+        ref={warningRef}
+        style={{ paddingLeft: padding + 14 }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            onCancel();
+          }
+        }}
+        onBlur={(e) => {
+          // Focus left the warning for somewhere other than the name input
+          // or the warning itself: commit as a click-away would.
+          const next = e.relatedTarget as Node | null;
+          if (warningRef.current?.contains(next) || next === inputRef.current) return;
+          commitOnLeave();
+        }}
+      >
+        <SimilarNoteWarning
+          matches={similar}
+          disabled={disabled}
+          onOpen={onCancel}
+          onCreateAnyway={() => {
+            if (disabled) return;
+            const trimmed = value.trim();
+            if (trimmed) onSubmit(trimmed);
+          }}
+        />
+      </div>
       {error && (
         <p className="ml-[30px] mt-1 text-xs text-[var(--wine)]">{error}</p>
       )}

@@ -2,13 +2,15 @@
 
 // Review step of a Wrap-up (docs/adr/0001-wrap-up-on-close.md). Loads the
 // Session's pending proposal, lets the closer untick mentions and
-// Relationships and switch uncertain matches to a new Note, then applies
+// Relationships, switch uncertain matches to a new Note and point a new
+// Note at a similarly named existing one, then applies
 // the rest. Nothing is written until "Apply".
 
 import Link from 'next/link';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Check, Feather, Loader2, RefreshCw, ScrollText, Sparkles, X, type LucideIcon } from 'lucide-react';
 import type { WrapUpProposal } from '@/lib/wrap-up';
+import type { SimilarNote } from '@/lib/similar-names';
 import { EVENTS, track } from '@/lib/analytics/client';
 import { useModalA11y } from './dialog/useModalA11y';
 import { ReviewList, SuggestionsNotice } from './WrapUpRows';
@@ -29,7 +31,12 @@ type Load =
   | { status: 'loading' }
   | { status: 'error'; message: string }
   | { status: 'empty' }
-  | { status: 'ready'; proposal: WrapUpProposal; titles: Record<string, string> };
+  | {
+      status: 'ready';
+      proposal: WrapUpProposal;
+      titles: Record<string, string>;
+      similar: Record<string, SimilarNote[]>;
+    };
 
 const QUIET_BUTTON =
   'rounded-[8px] px-3 py-2 text-sm font-medium text-[var(--ink-soft)] transition hover:bg-[var(--parchment)] hover:text-[var(--ink)] active:scale-[0.97] disabled:opacity-40';
@@ -74,11 +81,12 @@ export function WrapUpDialog({
       const data = (await res.json()) as {
         proposal: WrapUpProposal | null;
         existingTitles: Record<string, string>;
+        similar?: Record<string, SimilarNote[]>;
       };
       if (data.proposal) {
         setReview(initialReview(data.proposal));
         setRelationsOff(new Set());
-        setLoad({ status: 'ready', proposal: data.proposal, titles: data.existingTitles });
+        setLoad({ status: 'ready', proposal: data.proposal, titles: titlesWithSimilar(data.existingTitles, data.similar ?? {}), similar: data.similar ?? {} });
       } else {
         setLoad({ status: 'empty' });
       }
@@ -236,6 +244,7 @@ export function WrapUpDialog({
                 <ReviewList
                   proposal={ready.proposal}
                   titles={ready.titles}
+                  similar={ready.similar}
                   review={review}
                   relationsOff={relationsOff}
                   disabled={busy}
@@ -356,6 +365,16 @@ function Alert({ children, className = '' }: { children: React.ReactNode; classN
       {children}
     </p>
   );
+}
+
+/** The review looks Notes up by path; a similar Note carries its own title. */
+function titlesWithSimilar(
+  titles: Record<string, string>,
+  similar: Record<string, SimilarNote[]>,
+): Record<string, string> {
+  const all = { ...titles };
+  for (const matches of Object.values(similar)) for (const m of matches) all[m.path] = m.title;
+  return all;
 }
 
 function hasReviewRows(proposal: WrapUpProposal): boolean {
