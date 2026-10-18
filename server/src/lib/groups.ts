@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
 import { ensureDefaultFolders } from './tree';
 import { logAudit } from './audit';
+import { assetVisibleToMemberSql, visibleToMemberSql } from './notes';
 
 export type WorldRow = {
   id: string;
@@ -18,6 +19,11 @@ export type WorldRow = {
   isActive: boolean;
   /** Cache-buster for /api/worlds/[id]/icon?v=N. 0 means no icon. */
   iconVersion: number;
+  /** Newest note save or asset upload (epoch ms) the caller may see in
+   *  this world, or null when there is none. */
+  latestActivityAt: number | null;
+  /** The most recently saved open Session the caller may see. */
+  openSession: { path: string } | null;
 };
 
 export type WorldHeader = {
@@ -101,8 +107,15 @@ type ListDbRow = {
   role: 'admin' | 'editor' | 'viewer';
   icon_updated_at: number;
   current_group_id: string;
+  latest_note_at: number | null;
+  latest_asset_at: number | null;
+  open_session_path: string | null;
 };
 
+/** Every world the user belongs to, in their rail order: placed worlds
+ *  by `sort_order`, then unplaced ones by name. The activity columns
+ *  are gated by the user's role in each world, so a hidden note or
+ *  asset never moves `latestActivityAt` or surfaces as `openSession`. */
 export function listWorldsForSession(
   userId: string,
   sessionId: string,
@@ -110,11 +123,21 @@ export function listWorldsForSession(
   const rows = getDb()
     .query<ListDbRow, [string, string]>(
       `SELECT g.id, g.name, gm.role, g.icon_updated_at,
-              (SELECT s.current_group_id FROM sessions s WHERE s.id = ?) AS current_group_id
+              (SELECT s.current_group_id FROM sessions s WHERE s.id = ?) AS current_group_id,
+              (SELECT n.updated_at FROM notes n
+                WHERE n.group_id = g.id AND (${visibleToMemberSql('n', 'gm')})
+                ORDER BY n.updated_at DESC LIMIT 1) AS latest_note_at,
+              (SELECT MAX(a.uploaded_at) FROM assets a
+                WHERE a.group_id = g.id AND (${assetVisibleToMemberSql('a', 'gm')})) AS latest_asset_at,
+              (SELECT sn.note_path FROM session_notes sn
+                 JOIN notes n ON n.group_id = sn.group_id AND n.path = sn.note_path
+                WHERE sn.group_id = g.id AND sn.status = 'open'
+                  AND (${visibleToMemberSql('n', 'gm')})
+                ORDER BY n.updated_at DESC LIMIT 1) AS open_session_path
          FROM groups g
          JOIN group_members gm ON gm.group_id = g.id
         WHERE gm.user_id = ?
-        ORDER BY g.name COLLATE NOCASE`,
+        ORDER BY gm.sort_order IS NULL, gm.sort_order, g.name COLLATE NOCASE`,
     )
     .all(sessionId, userId);
   return rows.map((r) => ({
@@ -123,7 +146,43 @@ export function listWorldsForSession(
     role: r.role,
     isActive: r.id === r.current_group_id,
     iconVersion: r.icon_updated_at,
+    latestActivityAt: latestOf(r.latest_note_at, r.latest_asset_at),
+    openSession: r.open_session_path ? { path: r.open_session_path } : null,
   }));
+}
+
+function latestOf(a: number | null, b: number | null): number | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.max(a, b);
+}
+
+export type WorldOrderResult = { ok: true } | { ok: false; error: 'invalid_world' };
+
+/** Place the user's worlds in `worldIds` order. Memberships left out
+ *  become unplaced (NULL) and sort after, by name, so a world joined in
+ *  another tab since the client last listed never breaks the write.
+ *  An id the user is not a member of rejects the whole write. */
+export function setWorldOrder(userId: string, worldIds: readonly string[]): WorldOrderResult {
+  const db = getDb();
+  const memberOf = new Set(
+    db
+      .query<{ group_id: string }, [string]>(
+        'SELECT group_id FROM group_members WHERE user_id = ?',
+      )
+      .all(userId)
+      .map((r) => r.group_id),
+  );
+  if (!worldIds.every((id) => memberOf.has(id))) return { ok: false, error: 'invalid_world' };
+
+  db.transaction(() => {
+    db.query('UPDATE group_members SET sort_order = NULL WHERE user_id = ?').run(userId);
+    const place = db.query(
+      'UPDATE group_members SET sort_order = ? WHERE user_id = ? AND group_id = ?',
+    );
+    worldIds.forEach((id, index) => place.run(index, userId, id));
+  })();
+  return { ok: true };
 }
 
 // ── Icon blob helpers ──────────────────────────────────────────────────

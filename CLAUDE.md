@@ -57,7 +57,7 @@ globally (`npm i -g bun@1.4.3`) — don't rely on `npx bun`, which resolves the 
 - The Dockerfile is a single stage on `oven/bun:1.4.3` (keep it in step with `mise.toml`); it installs `poppler-utils` for PDF import, runs `next build`, and starts `bun run server.ts`
 - Anything that must run under Node (there is nothing today) cannot import `lib/db.ts`
 
-## Data model (51 migrations, versions 1–53 — append only, never edit existing)
+## Data model (52 migrations, versions 1–54 — append only, never edit existing)
 
 Numbering isn't contiguous — a couple of version numbers (21, 22) were
 never shipped, so "latest version" and "migration count" are two
@@ -70,7 +70,7 @@ Key tables:
 | `notes` | All content — path, ProseMirror JSON, Yjs state, frontmatter, `dm_only` + `gm_only` visibility flags |
 | `users` | Web app accounts — email, password_hash (Argon2), avatar |
 | `groups` | Worlds/campaigns — the multi-tenancy container |
-| `group_members` | User ↔ group with role: `admin`, `editor`, `viewer` |
+| `group_members` | User ↔ group with role: `admin`, `editor`, `viewer`, plus the user's own worlds-rail `sort_order` (v54, NULL sorts last by name; written by `PUT /api/worlds/order`) |
 | `sessions` | HTTP-only session cookies + CSRF tokens |
 | `characters` | Derived index from note frontmatter — re-derived on every save |
 | `session_notes` | Session status (open → closed) and the pending Wrap-up proposal (`wrap_up_json`) |

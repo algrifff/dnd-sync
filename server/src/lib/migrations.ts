@@ -1098,6 +1098,15 @@ const MIGRATIONS: readonly Migration[] = [
       DROP TABLE IF EXISTS binary_files;
     `,
   },
+  {
+    version: 54,
+    description: 'group_members.sort_order: per-user world rail order',
+    sql: `
+      -- NULL means "never placed": those worlds sort after placed ones,
+      -- by name. Written only by PUT /api/worlds/order.
+      ALTER TABLE group_members ADD COLUMN sort_order INTEGER;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {
