@@ -31,7 +31,7 @@ import { Check, Flame, Link2, Pencil, Plus } from 'lucide-react';
 import { useWorldSwitch } from './(app)/WorldSwitch';
 import { NewWorldDialog } from './NewWorldDialog';
 import { useWorldDrag } from './useWorldDrag';
-import { worldColor, worldInitials } from './world-chip';
+import { worldChipStyle, worldInitials } from './world-chip';
 import {
   applyOrder,
   moveBy,
@@ -512,7 +512,7 @@ function WorldIcon({
         aria-current={active ? 'true' : undefined}
         aria-busy={pending || undefined}
         className={
-          'flex h-10 w-10 touch-manipulation select-none items-center justify-center overflow-hidden text-sm font-semibold text-[var(--rail-ink)] transition-[border-radius] duration-150 [-webkit-touch-callout:none] motion-reduce:transition-none ' +
+          'flex h-10 w-10 touch-manipulation select-none items-center justify-center overflow-hidden text-sm font-semibold transition-[border-radius] duration-150 [-webkit-touch-callout:none] motion-reduce:transition-none ' +
           (dragging ? 'cursor-grabbing shadow-lg ' : '') +
           (pending
             ? 'rail-pending rounded-[14px]'
@@ -520,7 +520,7 @@ function WorldIcon({
               ? 'rounded-[14px] ring-2 ring-[var(--rail-ink)]/20'
               : 'rounded-full hover:rounded-[14px] focus-visible:rounded-[14px]')
         }
-        style={{ backgroundColor: hasIcon ? 'var(--ink)' : worldColor(world.id) }}
+        style={hasIcon ? { backgroundColor: 'var(--ink)' } : worldChipStyle(world.id)}
       >
         {hasIcon ? (
           <img

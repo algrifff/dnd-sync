@@ -1,24 +1,30 @@
-// Fallback chip for a world with no uploaded icon: a palette colour
-// picked from the world id plus initials from its name. Shared by the
-// worlds rail and /me so one world wears the same colour everywhere.
+// Fallback chip for a world with no uploaded icon: a colour picked from
+// the world id plus initials from its name. Shared by the worlds rail
+// and /me so one world wears the same chip everywhere. Each chip's
+// background and initials ink are a pair of tokens in globals.css
+// (`--chip-<name>`, `--chip-<name>-ink`), chosen per theme so the
+// initials stay readable in day and night.
 
-export const WORLD_CHIP_PALETTE = [
-  'var(--wine)',
-  'var(--moss)',
-  'var(--sage)',
-  'var(--candlelight)',
-  'var(--embers)',
-  'var(--wisteria)',
-  'var(--deep-water)',
-  'var(--chestnut)',
+export const WORLD_CHIPS = [
+  'wine',
+  'moss',
+  'sage',
+  'candlelight',
+  'embers',
+  'wisteria',
+  'deep-water',
+  'chestnut',
 ] as const;
 
-export function worldColor(id: string): string {
+export type WorldChipStyle = { backgroundColor: string; color: string };
+
+export function worldChipStyle(id: string): WorldChipStyle {
   let h = 0;
   for (let i = 0; i < id.length; i++) {
     h = (h * 31 + id.charCodeAt(i)) >>> 0;
   }
-  return WORLD_CHIP_PALETTE[h % WORLD_CHIP_PALETTE.length]!;
+  const chip = WORLD_CHIPS[h % WORLD_CHIPS.length]!;
+  return { backgroundColor: `var(--chip-${chip})`, color: `var(--chip-${chip}-ink)` };
 }
 
 export function worldInitials(name: string): string {
