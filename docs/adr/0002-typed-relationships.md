@@ -49,6 +49,8 @@ Tags stay as they are: flat labels on a single Note, from `#hashtags` and frontm
 
 Update, 2026-10-11: the tag-based backfill was dropped. Measured on a snapshot of production, 0 of 872 tags are namespaced, and the tags that exist are mostly noise, so `faction/<name>` has no data behind it. The structured data is the frontmatter `faction:` and `location:` fields on Person and Creature Notes. `server/scripts/suggest-relations.ts` reads those and prints candidate `member_of` and `located_in` Relationships. It is still read-only and still reviewed: a candidate becomes a Relationship only when a Wrap-up proposes it and a Player applies it. The paragraph above stays as the original decision.
 
+Update, 2026-10-18: ADR 0003 lets a person add or remove a Relationship from the Note page when they can edit both Notes. "Only through a Wrap-up" and "add-only" now apply to automated writers only. The Note page has a Connections panel listing Relationships by type. The rest of this ADR stands.
+
 ## Consequences
 
 - Relationships appear in the graph only through their link, and carry their type only in the new MCP reads and the review dialog until a Note-page panel exists.
