@@ -1692,6 +1692,7 @@ function NewEntryRow({
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState<string>(initialValue ?? placeholder);
   const [typed, setTyped] = useState(false);
+  const warningRef = useRef<HTMLDivElement>(null);
   // Renames pass an initialValue and folders are not Notes; the untouched
   // default name is not a real one.
   const similar = useSimilarNotes(value, initialValue === undefined && kind !== 'folder' && kind !== 'campaign' && typed);
@@ -1704,6 +1705,15 @@ function NewEntryRow({
   }, []);
 
   const padding = 8 + depth * 14;
+
+  // Click-away commits the current name (or the placeholder default if the
+  // user never typed). Empty string falls back to cancellation.
+  const commitOnLeave = (): void => {
+    if (disabled) return;
+    const trimmed = value.trim();
+    if (trimmed) onSubmit(trimmed);
+    else onCancel();
+  };
 
   return (
     <div>
@@ -1728,22 +1738,34 @@ function NewEntryRow({
               onCancel();
             }
           }}
-          onBlur={() => {
-            // Click-away commits the current name (or the placeholder
-            // default if the user never typed). Empty string falls back
-            // to cancellation. Tracked via initialValue check so the
-            // submit-and-rerender cycle doesn't re-fire blur.
-            if (disabled) return;
-            const trimmed = value.trim();
-            if (trimmed) onSubmit(trimmed);
-            else onCancel();
+          onBlur={(e) => {
+            // Tabbing into the similar-Note warning must not create the Note
+            // before "Open it" / "Create anyway" can be chosen.
+            if (warningRef.current?.contains(e.relatedTarget as Node | null)) return;
+            commitOnLeave();
           }}
           disabled={disabled}
           placeholder={placeholder}
           className="flex-1 border-0 bg-transparent px-0 text-sm text-[var(--ink)] outline-none placeholder:text-[var(--ink-soft)]/60 disabled:opacity-60"
         />
       </form>
-      <div style={{ paddingLeft: padding + 14 }}>
+      <div
+        ref={warningRef}
+        style={{ paddingLeft: padding + 14 }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            onCancel();
+          }
+        }}
+        onBlur={(e) => {
+          // Focus left the warning for somewhere other than the name input
+          // or the warning itself: commit as a click-away would.
+          const next = e.relatedTarget as Node | null;
+          if (warningRef.current?.contains(next) || next === inputRef.current) return;
+          commitOnLeave();
+        }}
+      >
         <SimilarNoteWarning
           matches={similar}
           onOpen={onCancel}

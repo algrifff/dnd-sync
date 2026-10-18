@@ -30,7 +30,7 @@ const STOP_WORDS = new Set(['the', 'a', 'an', 'of']);
 export function nameTokens(name: string): string[] {
   return name
     .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\p{M}+/gu, '')
     .toLowerCase()
     .replace(/\(.*?\)/g, ' ')
     .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
@@ -97,8 +97,6 @@ export function findSimilarNotes(opts: {
   role: 'admin' | 'editor' | 'viewer';
   name: string;
   limit?: number;
-  /** A Note that is not a duplicate of itself, e.g. the one being renamed. */
-  excludePath?: string;
 }): SimilarNote[] {
   const wanted = nameTokens(opts.name);
   if (wanted.length === 0) return [];
@@ -123,7 +121,6 @@ export function findSimilarNotes(opts: {
 
   const found: Array<SimilarNote & Closeness> = [];
   for (const note of notes) {
-    if (note.path === opts.excludePath) continue;
     const kind = kindOf(note.frontmatter_json);
     if (SKIPPED_KINDS.has(kind)) continue;
     let best: Closeness | undefined;

@@ -19,7 +19,7 @@ function seed(path: string, title: string, frontmatter: Record<string, unknown>,
     .run(randomUUID(), groupId, path, title, JSON.stringify(frontmatter), now, authorId, now, authorId, flags.dmOnly ? 1 : 0, flags.gmOnly ? 1 : 0);
 }
 
-const find = (name: string, role: 'admin' | 'editor' | 'viewer' = 'admin', extra: { limit?: number; excludePath?: string } = {}) =>
+const find = (name: string, role: 'admin' | 'editor' | 'viewer' = 'admin', extra: { limit?: number } = {}) =>
   findSimilarNotes({ groupId, role, name, ...extra });
 const titles = (name: string, role: 'admin' | 'editor' | 'viewer' = 'admin') => find(name, role).map((m) => m.title);
 
@@ -47,6 +47,8 @@ describe('nameTokens', () => {
   });
 
   it('keeps letters outside the Latin alphabet', () => {
+    expect(nameTokens('राम')).toHaveLength(1);
+    expect(nameTokens('राम Sharma')).toHaveLength(2);
     expect(nameTokens('Кирилл')).toEqual(['кирилл']);
   });
 });
@@ -106,9 +108,8 @@ describe('findSimilarNotes', () => {
     expect(titles('Sylvanus Vex', 'admin')).toEqual(['Sylvanus Vex', 'Sylvanus Vexx']);
   });
 
-  it('caps the matches and honours excludePath', () => {
+  it('caps the matches', () => {
     expect(find('Sylvanus Vex', 'admin', { limit: 1 })).toHaveLength(1);
-    expect(find('Sylvanus Vex', 'admin', { excludePath: 'People/the-spy.md' }).map((m) => m.title)).toEqual(['Sylvanus Vexx']);
   });
 
   it('returns nothing for a name with no letters or digits', () => {
