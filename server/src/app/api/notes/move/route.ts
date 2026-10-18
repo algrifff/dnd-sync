@@ -81,9 +81,12 @@ export async function POST(req: NextRequest): Promise<Response> {
       // AND the /api/tree ETag rotates. Without this the client refetches
       // /api/tree, gets 304, re-renders the stale tree, and the row snaps
       // back to the old position.
-      db.query('UPDATE notes SET path = ?, updated_at = ? WHERE group_id = ? AND path = ?').run(
+      db.query(
+        'UPDATE notes SET path = ?, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
+      ).run(
         to,
         Date.now(),
+        session.userId,
         session.currentGroupId,
         from,
       );
@@ -163,9 +166,12 @@ export async function POST(req: NextRequest): Promise<Response> {
   // Rewrite wikilink targets in every note that pointed at the old
   // path, then kick their live editors so they pull the rewritten body.
   try {
-    const touched = rewriteWikilinksForLinkers(session.currentGroupId, linkers, [
-      { from, to },
-    ]);
+    const touched = rewriteWikilinksForLinkers(
+      session.currentGroupId,
+      linkers,
+      [{ from, to }],
+      session.userId,
+    );
     for (const linker of touched) await closeDocumentConnections(session.currentGroupId, linker);
   } catch (err) {
     console.error('[notes/move] wikilink rewrite failed:', err);

@@ -74,8 +74,8 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   const now = Date.now();
   db.transaction(() => {
     db.query(
-      'UPDATE notes SET frontmatter_json = ?, updated_at = ? WHERE group_id = ? AND path = ?',
-    ).run(JSON.stringify(fm), now, session.currentGroupId, body.path);
+      'UPDATE notes SET frontmatter_json = ?, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
+    ).run(JSON.stringify(fm), now, session.userId, session.currentGroupId, body.path);
 
     db.query('DELETE FROM tags WHERE group_id = ? AND path = ?').run(
       session.currentGroupId,
