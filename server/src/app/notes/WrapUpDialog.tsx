@@ -5,6 +5,7 @@
 // Relationships and switch uncertain matches to a new Note, then applies
 // the rest. Nothing is written until "Apply".
 
+import Link from 'next/link';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Check, Feather, Loader2, RefreshCw, ScrollText, Sparkles, X, type LucideIcon } from 'lucide-react';
 import type { WrapUpProposal } from '@/lib/wrap-up';
@@ -215,7 +216,16 @@ export function WrapUpDialog({
               {load.status === 'error' && <Alert className="mt-4">{load.message}</Alert>}
 
               {load.status === 'empty' && (
-                <Placeholder Icon={Feather} label="No Wrap-up yet" />
+                <>
+                  <Placeholder Icon={Feather} label="No Wrap-up yet" />
+                  <p className="-mt-8 pb-6 text-center text-xs text-[var(--ink-muted)]">
+                    Ask your connected Claude to &ldquo;wrap up {sessionName(sessionPath)} in Compendium&rdquo;,
+                    then Check again.{' '}
+                    <Link href="/settings/profile#connect-claude" className="underline hover:text-[var(--wine)]">
+                      How to connect Claude
+                    </Link>
+                  </p>
+                </>
               )}
 
               {ready && !hasReviewRows(ready.proposal) && ready.proposal.suggestions.length === 0 && (
@@ -314,6 +324,10 @@ function LoadingRows(): React.JSX.Element {
       ))}
     </div>
   );
+}
+
+function sessionName(path: string): string {
+  return path.split('/').pop()?.replace(/\.md$/i, '') ?? path;
 }
 
 function Placeholder({
