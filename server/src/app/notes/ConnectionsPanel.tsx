@@ -111,13 +111,19 @@ export function ConnectionsPanel({
   const removeLink = useCallback(
     (row: LinkRow): void => {
       setRemoveError(null);
-      setLinks((prev) => prev.filter((l) => l.path !== row.path));
+      const manual = row.edges.filter((e) => e.isManual);
+      const kept = row.edges.filter((e) => !e.isManual);
+      setLinks((prev) =>
+        kept.length === 0
+          ? prev.filter((l) => l.path !== row.path)
+          : prev.map((l) => (l.path === row.path ? { ...l, edges: kept, canRemove: false } : l)),
+      );
       const restore = (): void => {
         setLinks((prev) => (prev.some((l) => l.path === row.path) ? prev : [...prev, row]));
         setRemoveError(`Could not remove the link with ${row.title || baseName(row.path)}.`);
       };
       void Promise.all(
-        row.edges.map((edge) =>
+        manual.map((edge) =>
           fetch('/api/notes/relations', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
@@ -208,7 +214,11 @@ export function ConnectionsPanel({
           <SubHeading>Links</SubHeading>
           <ul className="space-y-0.5">
             {links.map((l) => (
-              <li key={l.path} className="group flex items-center gap-1.5 text-xs">
+              <li
+                key={l.path}
+                className="group flex items-center gap-1.5 text-xs"
+                title={l.edges.some((e) => e.isManual) ? undefined : `Linked in the text of ${baseName(l.path)}`}
+              >
                 <span
                   className="w-3 shrink-0 text-center text-[var(--ink-soft)]"
                   title={ARROW_TITLES[l.direction]}
@@ -222,7 +232,7 @@ export function ConnectionsPanel({
                 >
                   {l.title || baseName(l.path)}
                 </Link>
-                {l.canRemove && (
+                {l.canRemove ? (
                   <button
                     type="button"
                     onClick={() => removeLink(l)}
@@ -232,6 +242,10 @@ export function ConnectionsPanel({
                   >
                     <X size={10} aria-hidden />
                   </button>
+                ) : (
+                  !l.edges.some((e) => e.isManual) && (
+                    <span className="sr-only">Linked in the text of {l.title || baseName(l.path)}</span>
+                  )
                 )}
               </li>
             ))}

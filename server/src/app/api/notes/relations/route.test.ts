@@ -129,6 +129,15 @@ describe('POST /api/notes/relations', () => {
     expect(linkRow(GUILD, VOLO) ?? null).toBeNull();
   });
 
+  it("'link' from the mentioning Note to this one stores mentioning -> this", async () => {
+    // The unlinked-mention Link posts { path: mentioning, otherPath: this }.
+    const res = await add(gm, RIVAL, 'link', VOLO);
+
+    expect(res.status).toBe(201);
+    expect(linkRow(RIVAL, VOLO)).toEqual({ is_manual: 1 });
+    expect(linkRow(VOLO, RIVAL)).toBeFalsy();
+  });
+
   it("'link' flips an existing body-derived link to manual", async () => {
     getDb()
       .query('INSERT INTO note_links (group_id, from_path, to_path, is_manual) VALUES (?, ?, ?, 0)')
@@ -246,6 +255,19 @@ describe('DELETE /api/notes/relations', () => {
     const again = await remove(gm, VOLO, 'link', GUILD);
     expect(await again.json()).toEqual({ ok: true, status: 'unchanged' });
     expect(audits('relation.remove')).toHaveLength(1);
+  });
+
+  it('leaves a body-derived link alone: unchanged, and the row stays', async () => {
+    getDb()
+      .query('INSERT INTO note_links (group_id, from_path, to_path, is_manual) VALUES (?, ?, ?, 0)')
+      .run(DEFAULT_GROUP_ID, VOLO, GUILD);
+
+    const res = await remove(gm, VOLO, 'link', GUILD);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, status: 'unchanged' });
+    expect(linkRow(VOLO, GUILD)).toEqual({ is_manual: 0 });
+    expect(audits('relation.remove')).toHaveLength(0);
   });
 
   it('refuses a Player removing a link when they cannot edit one end, keeping it', async () => {

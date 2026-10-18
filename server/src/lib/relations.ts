@@ -61,11 +61,12 @@ export function addManualLink(opts: { groupId: string; from: string; to: string 
   return { added: changes > 0 };
 }
 
-/** Deletes the plain `from -> to` link, manual or body-derived. A body-derived
- *  one comes back on the next save of `from` while its wikilink remains. */
+/** Deletes the manual `from -> to` link. A body-derived one (`is_manual = 0`)
+ *  is left alone: it would come back on the next save of `from` while its
+ *  wikilink remains, so it is edited in the text instead. */
 export function removeLink(opts: { groupId: string; from: string; to: string }): { removed: boolean } {
   const changes = getDb()
-    .query('DELETE FROM note_links WHERE group_id = ? AND from_path = ? AND to_path = ?')
+    .query('DELETE FROM note_links WHERE group_id = ? AND from_path = ? AND to_path = ? AND is_manual = 1')
     .run(opts.groupId, opts.from, opts.to).changes;
   return { removed: changes > 0 };
 }

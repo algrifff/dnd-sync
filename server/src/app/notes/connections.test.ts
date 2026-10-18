@@ -58,8 +58,8 @@ describe('mergeLinks', () => {
       ['c.md', 'both'],
     ]);
     expect(rows[2]?.edges).toEqual([
-      { fromPath: me, toPath: 'c.md' },
-      { fromPath: 'c.md', toPath: me },
+      { fromPath: me, toPath: 'c.md', isManual: false },
+      { fromPath: 'c.md', toPath: me, isManual: true },
     ]);
   });
 
@@ -86,6 +86,24 @@ describe('mergeLinks', () => {
       ['a.md', false],
       ['b.md', true],
     ]);
+  });
+
+  it('gives a body-only row no ×, and a mixed row one', () => {
+    const rows = mergeLinks({
+      currentPath: me,
+      outgoing: [
+        { to_path: 'a.md', title: 'A', is_manual: 0 },
+        { to_path: 'c.md', title: 'C', is_manual: 0 },
+      ],
+      backlinks: [{ from_path: 'c.md', title: 'C', is_manual: 1 }],
+      removable: new Set(['a.md', 'c.md']),
+    });
+
+    expect(rows.map((r) => [r.path, r.canRemove])).toEqual([
+      ['a.md', false],
+      ['c.md', true],
+    ]);
+    expect(rows[1]?.edges.map((e) => e.isManual)).toEqual([false, true]);
   });
 
   it('ignores a self link', () => {

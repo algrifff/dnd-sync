@@ -30,9 +30,11 @@ export type LinkRow = {
   path: string;
   title: string;
   direction: LinkDirection;
-  /** The `note_links` edges the × removes, as `{ fromPath, toPath }`. */
-  edges: Array<{ fromPath: string; toPath: string }>;
-  /** The caller can edit both Notes, so may remove the link (computed on the server). */
+  /** The `note_links` edges of the row. `isManual` is false for one derived
+   *  from a `[[wikilink]]` in a body, which the × cannot remove. */
+  edges: Array<{ fromPath: string; toPath: string; isManual: boolean }>;
+  /** True when the caller can edit both Notes AND at least one edge is manual
+   *  (computed on the server): a body-derived link would only be re-added. */
   canRemove: boolean;
 };
 
@@ -68,20 +70,25 @@ export function mergeLinks(opts: {
 }): LinkRow[] {
   const { currentPath, exclude, removable } = opts;
   const rows = new Map<string, LinkRow>();
-  const upsert = (path: string, title: string, dir: 'out' | 'in'): void => {
+  const upsert = (path: string, title: string, dir: 'out' | 'in', isManual: boolean): void => {
     if (path === currentPath || exclude?.has(path)) return;
     const edge =
-      dir === 'out' ? { fromPath: currentPath, toPath: path } : { fromPath: path, toPath: currentPath };
+      dir === 'out'
+        ? { fromPath: currentPath, toPath: path, isManual }
+        : { fromPath: path, toPath: currentPath, isManual };
     const existing = rows.get(path);
     if (!existing) {
-      rows.set(path, { path, title, direction: dir, edges: [edge], canRemove: removable?.has(path) ?? false });
+      rows.set(path, { path, title, direction: dir, edges: [edge], canRemove: false });
       return;
     }
     if (existing.direction !== dir) existing.direction = 'both';
     existing.edges.push(edge);
   };
-  for (const l of opts.outgoing) upsert(l.to_path, l.title, 'out');
-  for (const b of opts.backlinks) upsert(b.from_path, b.title, 'in');
+  for (const l of opts.outgoing) upsert(l.to_path, l.title, 'out', l.is_manual === 1);
+  for (const b of opts.backlinks) upsert(b.from_path, b.title, 'in', b.is_manual === 1);
+  for (const row of rows.values()) {
+    row.canRemove = (removable?.has(row.path) ?? false) && row.edges.some((e) => e.isManual);
+  }
   return [...rows.values()].sort((a, b) => a.title.localeCompare(b.title) || a.path.localeCompare(b.path));
 }
 
