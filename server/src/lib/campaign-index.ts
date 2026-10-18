@@ -317,15 +317,21 @@ export async function deriveFolderIndex(
   ).run(groupId, indexPath);
   // Wipe old reverse edges TO this index before re-inserting the current
   // child set. This handles children that have moved away since last derive.
+  // A reverse edge someone also linked by hand stays as a plain manual link;
+  // the re-insert below flags it structural again if the child is still here.
   db.query(
-    'DELETE FROM note_links WHERE group_id = ? AND to_path = ? AND is_index = 1',
+    'DELETE FROM note_links WHERE group_id = ? AND to_path = ? AND is_index = 1 AND is_manual = 0',
+  ).run(groupId, indexPath);
+  db.query(
+    'UPDATE note_links SET is_index = 0 WHERE group_id = ? AND to_path = ? AND is_index = 1',
   ).run(groupId, indexPath);
 
   const insertForward = db.query(
     'INSERT OR IGNORE INTO note_links (group_id, from_path, to_path) VALUES (?, ?, ?)',
   );
   const insertReverse = db.query(
-    'INSERT OR IGNORE INTO note_links (group_id, from_path, to_path, is_index) VALUES (?, ?, ?, 1)',
+    `INSERT INTO note_links (group_id, from_path, to_path, is_index) VALUES (?, ?, ?, 1)
+     ON CONFLICT (group_id, from_path, to_path) DO UPDATE SET is_index = 1`,
   );
   for (const f of folders) {
     insertForward.run(groupId, indexPath, f.indexPath);

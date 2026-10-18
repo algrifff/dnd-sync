@@ -212,3 +212,58 @@ describe('deriveFolderIndex — folders holding only hidden notes', () => {
     expect(indexed).toEqual(['Open Quarter']);
   });
 });
+
+describe('deriveFolderIndex — manual links to the index', () => {
+  const groupId = 'g_test_index_manual';
+  const userId = 'u_test_index_manual';
+  const folder = 'Campaigns/Demo/Guilds';
+  const index = `${folder}/index.md`;
+  const stays = `${folder}/Stays.md`;
+  const leaves = `${folder}/Leaves.md`;
+
+  beforeAll(() => {
+    setupTestDb();
+    const db = getDb();
+    db.query('INSERT INTO groups (id, name, created_at) VALUES (?, ?, ?)').run(groupId, 'Manual', Date.now());
+    db.query(
+      `INSERT INTO users (id, username, display_name, password_hash, accent_color, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(userId, 'linker', 'Linker', 'x', '#000', Date.now());
+  });
+  afterAll(() => teardownTestDb());
+
+  function seed(path: string): void {
+    getDb()
+      .query(
+        `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
+                            content_md, yjs_state, frontmatter_json, byte_size,
+                            updated_at, updated_by, created_at, created_by)
+         VALUES (?, ?, ?, ?, '{"type":"doc","content":[]}', '', '', NULL, '{}', 0, ?, ?, ?, ?)`,
+      )
+      .run(randomUUID(), groupId, path, path, Date.now(), userId, Date.now(), userId);
+  }
+
+  const row = (from: string) =>
+    getDb()
+      .query<{ is_manual: number; is_index: number }, [string, string, string]>(
+        'SELECT is_manual, is_index FROM note_links WHERE group_id = ? AND from_path = ? AND to_path = ?',
+      )
+      .get(groupId, from, index);
+
+  it('keeps a manual child -> index link across re-derives, even after the child leaves', async () => {
+    seed(stays);
+    seed(leaves);
+    await deriveFolderIndex(groupId, folder, { userId });
+    getDb()
+      .query('UPDATE note_links SET is_manual = 1 WHERE group_id = ? AND to_path = ?')
+      .run(groupId, index);
+
+    await deriveFolderIndex(groupId, folder, { userId });
+    expect(row(stays)).toEqual({ is_manual: 1, is_index: 1 });
+
+    getDb().query('UPDATE notes SET path = ? WHERE group_id = ? AND path = ?').run('Campaigns/Demo/Elsewhere.md', groupId, leaves);
+    await deriveFolderIndex(groupId, folder, { userId });
+    expect(row(leaves)).toEqual({ is_manual: 1, is_index: 0 });
+    expect(row(stays)).toEqual({ is_manual: 1, is_index: 1 });
+  });
+});
