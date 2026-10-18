@@ -15,8 +15,7 @@ import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
 import type { UnlinkedMention } from '@/lib/unlinked-mentions';
-import { AddBacklink } from './AddBacklink';
-import { AddOutgoingLink } from './AddOutgoingLink';
+import { AddConnection } from './AddConnection';
 import {
   ARROWS,
   baseName,
@@ -44,6 +43,7 @@ export function ConnectionsPanel({
   outgoingLinks,
   currentPath,
   csrfToken,
+  canEdit,
 }: {
   relations: RelationRow[];
   mentions: UnlinkedMention[];
@@ -53,9 +53,29 @@ export function ConnectionsPanel({
   outgoingLinks: OutgoingLinkRow[];
   currentPath: string;
   csrfToken: string;
+  /** The caller can edit this Note, so may add connections to it. */
+  canEdit: boolean;
 }): React.JSX.Element {
   const router = useRouter();
-  const groups = useMemo(() => groupRelations(relations), [relations]);
+  const [rows, setRows] = useState<RelationRow[]>(relations);
+  useEffect(() => {
+    setRows(relations);
+  }, [relations]);
+  const groups = useMemo(() => groupRelations(rows), [rows]);
+
+  const removeRelation = useCallback(
+    (row: RelationRow): void => {
+      setRows((prev) => prev.filter((r) => !(r.path === row.path && r.relation === row.relation)));
+      void fetch('/api/notes/relations', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ path: currentPath, relation: row.relation, otherPath: row.path }),
+      }).finally(() => {
+        router.refresh();
+      });
+    },
+    [csrfToken, currentPath, router],
+  );
   const serverLinks = useMemo(
     () =>
       mergeLinks({
@@ -118,10 +138,7 @@ export function ConnectionsPanel({
         <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
           Connections
         </h3>
-        <span className="flex items-center gap-1">
-          <AddOutgoingLink currentPath={currentPath} csrfToken={csrfToken} />
-          <AddBacklink currentPath={currentPath} csrfToken={csrfToken} />
-        </span>
+        {canEdit && <AddConnection currentPath={currentPath} csrfToken={csrfToken} />}
       </div>
 
       {empty && <p className="text-xs text-[var(--ink-soft)]/80">No connections yet.</p>}
@@ -135,7 +152,7 @@ export function ConnectionsPanel({
                 <p className="text-xs font-medium text-[var(--ink-soft)]">{g.label}</p>
                 <ul className="mt-0.5 space-y-1">
                   {g.rows.map((r) => (
-                    <RelationItem key={r.relation + r.path} row={r} />
+                    <RelationItem key={r.relation + r.path} row={r} onRemove={removeRelation} />
                   ))}
                 </ul>
               </div>
@@ -223,13 +240,36 @@ function SubHeading({ children }: { children: React.ReactNode }): React.JSX.Elem
   );
 }
 
-function RelationItem({ row }: { row: RelationRow }): React.JSX.Element {
+function RelationItem({
+  row,
+  onRemove,
+}: {
+  row: RelationRow;
+  onRemove: (row: RelationRow) => void;
+}): React.JSX.Element {
   const provenance = relationProvenance(row);
   return (
-    <li className="text-xs">
-      <Link href={'/notes/' + encodePath(row.path)} title={row.path} className={LINK_CLASS}>
-        {row.title || baseName(row.path)}
-      </Link>
+    <li className="group text-xs">
+      <div className="flex items-center gap-1.5">
+        <Link
+          href={'/notes/' + encodePath(row.path)}
+          title={row.path}
+          className={'min-w-0 truncate ' + LINK_CLASS}
+        >
+          {row.title || baseName(row.path)}
+        </Link>
+        {row.canRemove && (
+          <button
+            type="button"
+            onClick={() => onRemove(row)}
+            title={`Remove "${row.label}" with ${baseName(row.path)}`}
+            aria-label={`Remove "${row.label}" with ${baseName(row.path)}`}
+            className="ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--ink-soft)] opacity-0 transition hover:bg-[var(--wine)]/15 hover:text-[var(--wine)] focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            <X size={10} aria-hidden />
+          </button>
+        )}
+      </div>
       {provenance && (
         <p className="text-[11px] text-[var(--ink-muted)]">
           {provenance.kind === 'session' ? (

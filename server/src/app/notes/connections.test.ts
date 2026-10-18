@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  connectionOptions,
   groupRelations,
   mergeLinks,
   relationProvenance,
@@ -14,6 +15,7 @@ const rel = (label: string, path: string, title: string): RelationRow => ({
   sessionPath: null,
   sessionTitle: null,
   createdBy: null,
+  canRemove: true,
 });
 
 describe('groupRelations', () => {
@@ -91,5 +93,25 @@ describe('relationProvenance', () => {
       name: 'Alex',
     });
     expect(relationProvenance({ sessionPath: null, sessionTitle: null, createdBy: null })).toBeNull();
+  });
+});
+
+describe('connectionOptions', () => {
+  const options = connectionOptions();
+
+  it('starts with a plain link', () => {
+    expect(options[0]).toEqual({ value: 'link', label: 'just linked' });
+  });
+
+  it('offers every type and every inverse once, labelled from this side', () => {
+    const byValue = Object.fromEntries(options.map((o) => [o.value, o.label]));
+
+    expect(byValue.works_for).toBe('works for');
+    expect(byValue.employs).toBe('employs');
+    expect(byValue.contains).toBe('contains');
+    expect(byValue.ally_of).toBe('ally of');
+    expect(new Set(options.map((o) => o.value)).size).toBe(options.length);
+    // 9 types + 6 inverses of the directed ones + the plain link.
+    expect(options).toHaveLength(1 + 9 + 6);
   });
 });

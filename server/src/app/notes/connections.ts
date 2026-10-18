@@ -1,6 +1,7 @@
 // Pure helpers behind ConnectionsPanel: no React, no DB, so they can be
 // tested directly (docs/adr/0003-connections-panel-and-manual-relationships.md).
 
+import { RELATION_TYPES, RELATIONS } from '@compendium/shared';
 import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
 
 /** The pieces of a Relationship the panel shows. Structural subset of
@@ -13,6 +14,8 @@ export type RelationRow = {
   sessionPath: string | null;
   sessionTitle: string | null;
   createdBy: string | null;
+  /** The caller can edit both Notes, so may remove it (computed on the server). */
+  canRemove: boolean;
 };
 
 export type RelationGroup = { label: string; rows: RelationRow[] };
@@ -84,6 +87,20 @@ export function relationProvenance(
     return { kind: 'session', path: r.sessionPath, title: r.sessionTitle ?? baseName(r.sessionPath) };
   }
   return r.createdBy ? { kind: 'author', name: r.createdBy } : null;
+}
+
+export type ConnectionOption = { value: string; label: string };
+
+/** What "Add connection" offers, from this Note's side: a plain link, then
+ *  every type and every inverse (a symmetric type once). */
+export function connectionOptions(): ConnectionOption[] {
+  const options: ConnectionOption[] = [{ value: 'link', label: 'just linked' }];
+  for (const type of RELATION_TYPES) {
+    const info = RELATIONS[type];
+    options.push({ value: type, label: info.label });
+    if (!info.symmetric) options.push({ value: info.inverse, label: info.inverseLabel });
+  }
+  return options;
 }
 
 export function baseName(p: string): string {

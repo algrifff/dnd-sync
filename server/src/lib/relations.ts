@@ -52,6 +52,22 @@ export function addRelation(opts: {
   return { status: added ? 'added' : 'unchanged' };
 }
 
+/** Removes the one stored row for `from relation to`, canonicalised like
+ *  `addRelation`. The plain link it came with stays. */
+export function removeRelation(opts: {
+  groupId: string;
+  from: string;
+  relation: RelationType;
+  to: string;
+}): { status: 'removed' | 'missing' } {
+  const pair = canonicalPair(opts.from, opts.relation, opts.to);
+  const removed =
+    getDb()
+      .query('DELETE FROM note_relations WHERE group_id = ? AND from_path = ? AND relation = ? AND to_path = ?')
+      .run(opts.groupId, pair.from, pair.relation, pair.to).changes > 0;
+  return { status: removed ? 'removed' : 'missing' };
+}
+
 /** A Relationship as read from one of its Notes. */
 export type RelationView = {
   /** The type from this Note's side: `has_member` when it is the group. */

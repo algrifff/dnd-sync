@@ -17,6 +17,7 @@ export function NoteSidebar({
   relations,
   mentions,
   canLinkMentions,
+  canEdit,
   backlinks,
   outgoingLinks,
   tags,
@@ -27,6 +28,7 @@ export function NoteSidebar({
   relations: RelationRow[];
   mentions: UnlinkedMention[];
   canLinkMentions: boolean;
+  canEdit: boolean;
   backlinks: BacklinkRow[];
   outgoingLinks: OutgoingLinkRow[];
   tags: string[];
@@ -39,6 +41,7 @@ export function NoteSidebar({
         relations={relations}
         mentions={mentions}
         canLinkMentions={canLinkMentions}
+        canEdit={canEdit}
         backlinks={backlinks}
         outgoingLinks={outgoingLinks}
         currentPath={path}
