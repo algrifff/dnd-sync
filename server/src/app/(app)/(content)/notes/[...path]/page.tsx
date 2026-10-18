@@ -25,6 +25,7 @@ import { NoteSidebar, extractOutline } from '../../../../notes/NoteSidebar';
 import type { MentionRow, RelationRow } from '../../../../notes/connections';
 import { EndSessionButton } from '../../../../notes/EndSessionButton';
 import { getSessionStatus } from '@/lib/sessions';
+import { loadPendingWrapUp } from '@/lib/wrap-up';
 import { CollapsibleRightPanel } from '../../../../CollapsibleRightPanel';
 
 export const dynamic = 'force-dynamic';
@@ -123,6 +124,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   // Campaign slug for session end — from frontmatter.campaigns[0] or path
   let sessionCampaignSlug: string | undefined;
   let sessionStatus: 'open' | 'closed' = 'open';
+  let hasPendingWrapUp = false;
   if (isSessionNote) {
     const camps = Array.isArray(frontmatter.campaigns)
       ? frontmatter.campaigns
@@ -132,6 +134,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
         ? camps[0]
         : /^Campaigns\/([^/]+)\//.exec(path)?.[1];
     sessionStatus = getSessionStatus(session.currentGroupId, path);
+    hasPendingWrapUp = loadPendingWrapUp(session.currentGroupId, session.role, path) !== null;
   }
 
   let contentJson: unknown = null;
@@ -231,6 +234,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
                       sessionPath={path}
                       csrfToken={session.csrfToken}
                       isAlreadyClosed={sessionStatus === 'closed'}
+                      hasPendingWrapUp={hasPendingWrapUp}
                       campaignSlug={sessionCampaignSlug}
                     />
                   )}
