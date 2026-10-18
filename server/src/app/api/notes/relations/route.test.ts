@@ -289,6 +289,18 @@ describe('DELETE /api/notes/relations', () => {
     expect(audits('relation.remove')).toHaveLength(0);
   });
 
+  it('keeps a folder-index edge, un-flagged, when its manual link is removed', async () => {
+    getDb()
+      .query('INSERT INTO note_links (group_id, from_path, to_path, is_index) VALUES (?, ?, ?, 1)')
+      .run(DEFAULT_GROUP_ID, VOLO, GUILD);
+    expect((await add(gm, VOLO, 'link', GUILD)).status).toBe(201);
+
+    const res = await remove(gm, VOLO, 'link', GUILD);
+
+    expect(await res.json()).toEqual({ ok: true, status: 'unchanged' });
+    expect(linkRow(VOLO, GUILD)).toEqual({ is_manual: 0 });
+  });
+
   it('deletes a purely manual link even when the body links other Notes', async () => {
     const body = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'wikilink', attrs: { target: RIVAL } }] }] };
     getDb()

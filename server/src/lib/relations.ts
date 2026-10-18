@@ -13,10 +13,10 @@ import {
   type RelationName,
   type RelationType,
 } from '@compendium/shared';
-import { collectLinksAndTags } from '@/collab/derive';
 import { getDb } from '@/lib/db';
 import type { PmNode } from '@/lib/md-to-pm';
 import { visibilityFor } from '@/lib/notes';
+import { collectLinksAndTags } from '@/lib/pm-links';
 import type { Role } from '@/lib/wrap-up';
 
 /** Records `from relation to`. Adding it again, from either end of a
@@ -63,22 +63,22 @@ export function addManualLink(opts: { groupId: string; from: string; to: string 
   return { added: changes > 0 };
 }
 
-/** Removes the manual `from -> to` link. When `from`'s body still
- *  wikilinks `to`, the edge is body-derived too: it is only un-flagged
- *  (`is_manual = 0`) and stays, reported as `removed: false`, so backlinks
- *  and the graph keep it until the text is edited. A body-only row
- *  (`is_manual = 0`) is left alone. */
+/** Removes the manual `from -> to` link. When the edge has another
+ *  source, `from`'s body still wikilinks `to` or it is a folder-index
+ *  edge (`is_index = 1`), it is only un-flagged (`is_manual = 0`) and
+ *  stays, reported as `removed: false`. A row that is not manual is left
+ *  alone. */
 export function removeLink(opts: { groupId: string; from: string; to: string }): { removed: boolean } {
   const db = getDb();
   let removed = false;
   db.transaction(() => {
     const row = db
-      .query<{ is_manual: number }, [string, string, string]>(
-        'SELECT is_manual FROM note_links WHERE group_id = ? AND from_path = ? AND to_path = ?',
+      .query<{ is_manual: number; is_index: number }, [string, string, string]>(
+        'SELECT is_manual, is_index FROM note_links WHERE group_id = ? AND from_path = ? AND to_path = ?',
       )
       .get(opts.groupId, opts.from, opts.to);
     if (!row || row.is_manual !== 1) return;
-    if (bodyLinks(opts.groupId, opts.from).has(opts.to)) {
+    if (row.is_index === 1 || bodyLinks(opts.groupId, opts.from).has(opts.to)) {
       db.query(
         'UPDATE note_links SET is_manual = 0 WHERE group_id = ? AND from_path = ? AND to_path = ?',
       ).run(opts.groupId, opts.from, opts.to);
