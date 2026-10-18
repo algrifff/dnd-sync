@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  connectionOptions,
   groupRelations,
   mergeLinks,
   relationProvenance,
@@ -15,6 +16,7 @@ const rel = (label: string, path: string, title: string): RelationRow => ({
   fromSession: false,
   sessionTitle: null,
   createdBy: null,
+  canRemove: true,
 });
 
 describe('groupRelations', () => {
@@ -56,8 +58,8 @@ describe('mergeLinks', () => {
       ['c.md', 'both'],
     ]);
     expect(rows[2]?.edges).toEqual([
-      { fromPath: me, toPath: 'c.md' },
-      { fromPath: 'c.md', toPath: me },
+      { fromPath: me, toPath: 'c.md', isManual: false },
+      { fromPath: 'c.md', toPath: me, isManual: true },
     ]);
   });
 
@@ -70,6 +72,38 @@ describe('mergeLinks', () => {
     });
 
     expect(rows.map((r) => r.path)).toEqual(['b.md']);
+  });
+
+  it('marks only the removable paths', () => {
+    const rows = mergeLinks({
+      currentPath: me,
+      outgoing: [{ to_path: 'a.md', title: 'A', is_manual: 1 }],
+      backlinks: [{ from_path: 'b.md', title: 'B', is_manual: 1 }],
+      removable: new Set(['b.md']),
+    });
+
+    expect(rows.map((r) => [r.path, r.canRemove])).toEqual([
+      ['a.md', false],
+      ['b.md', true],
+    ]);
+  });
+
+  it('gives a body-only row no ×, and a mixed row one', () => {
+    const rows = mergeLinks({
+      currentPath: me,
+      outgoing: [
+        { to_path: 'a.md', title: 'A', is_manual: 0 },
+        { to_path: 'c.md', title: 'C', is_manual: 0 },
+      ],
+      backlinks: [{ from_path: 'c.md', title: 'C', is_manual: 1 }],
+      removable: new Set(['a.md', 'c.md']),
+    });
+
+    expect(rows.map((r) => [r.path, r.canRemove])).toEqual([
+      ['a.md', false],
+      ['c.md', true],
+    ]);
+    expect(rows[1]?.edges.map((e) => e.isManual)).toEqual([false, true]);
   });
 
   it('ignores a self link', () => {
@@ -104,5 +138,25 @@ describe('relationProvenance', () => {
       name: 'Alex',
     });
     expect(relationProvenance({ sessionPath: null, fromSession: false, sessionTitle: null, createdBy: null })).toBeNull();
+  });
+});
+
+describe('connectionOptions', () => {
+  const options = connectionOptions();
+
+  it('starts with a plain link', () => {
+    expect(options[0]).toEqual({ value: 'link', label: 'just linked' });
+  });
+
+  it('offers every type and every inverse once, labelled from this side', () => {
+    const byValue = Object.fromEntries(options.map((o) => [o.value, o.label]));
+
+    expect(byValue.works_for).toBe('works for');
+    expect(byValue.employs).toBe('employs');
+    expect(byValue.contains).toBe('contains');
+    expect(byValue.ally_of).toBe('ally of');
+    expect(new Set(options.map((o) => o.value)).size).toBe(options.length);
+    // 9 types + 6 inverses of the directed ones + the plain link.
+    expect(options).toHaveLength(1 + 9 + 6);
   });
 });

@@ -14,12 +14,15 @@ import {
 import { getTemplate, type NoteTemplate, type TemplateKind } from '@/lib/templates';
 import { getWorldHeader } from '@/lib/groups';
 import { listRelations } from '@/lib/relations';
+import { canEditDoc } from '@/lib/note-permissions';
+import { findUnlinkedMentions } from '@/lib/unlinked-mentions';
 import { lockedFolderTitleFor } from '@/lib/folder-rename';
 import { NoteMenu } from '../../../../notes/NoteMenu';
 import { NoteWorkspace } from '../../../../notes/NoteWorkspace';
 import { ExcalidrawCanvas } from '../../../../excalidraw/ExcalidrawCanvas';
 import { TagEditor } from '../../../../notes/TagEditor';
 import { NoteSidebar, extractOutline } from '../../../../notes/NoteSidebar';
+import type { MentionRow, RelationRow } from '../../../../notes/connections';
 import { EndSessionButton } from '../../../../notes/EndSessionButton';
 import { getSessionStatus } from '@/lib/sessions';
 import { CollapsibleRightPanel } from '../../../../CollapsibleRightPanel';
@@ -59,11 +62,15 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   // slow query before a fast one can start. Tree + kindMap are owned
   // by the parent (content)/layout so this page only fetches the
   // note-specific payloads.
-  const [worldHeader, relations, backlinks, outgoingLinks, tags, creator] =
+  const canEditThis = canEditDoc(path, session);
+  const [worldHeader, relationViews, mentionViews, backlinks, outgoingLinks, tags, creator] =
     await Promise.all([
       Promise.resolve(getWorldHeader(session.currentGroupId)),
       Promise.resolve(
         listRelations({ groupId: session.currentGroupId, role: session.role, path }),
+      ),
+      Promise.resolve(
+        findUnlinkedMentions({ groupId: session.currentGroupId, role: session.role, path }),
       ),
       Promise.resolve(loadBacklinks(session.currentGroupId, path, vis)),
       Promise.resolve(loadOutgoingLinks(session.currentGroupId, path, vis)),
@@ -74,6 +81,12 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
     ]);
 
   const accentColor = worldHeader.headerColor;
+  // Connecting or disconnecting two Notes needs edit rights on both.
+  const canEditBoth = (other: string): boolean => canEditThis && canEditDoc(other, session);
+  const relations: RelationRow[] = relationViews.map((r) => ({ ...r, canRemove: canEditBoth(r.path) }));
+  const linkedPaths = new Set([...backlinks.map((b) => b.from_path), ...outgoingLinks.map((l) => l.to_path)]);
+  const removableLinkPaths = [...linkedPaths].filter(canEditBoth);
+  const mentions: MentionRow[] = mentionViews.map((m) => ({ ...m, canLink: canEditBoth(m.path) }));
 
   // Parse frontmatter ONCE — character resolution, session detection,
   // and campaign-slug extraction all used to re-parse the same JSON.
@@ -254,6 +267,9 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
           <NoteSidebar
             path={path}
             relations={relations}
+            mentions={mentions}
+            canEdit={canEditThis}
+            removableLinkPaths={removableLinkPaths}
             backlinks={backlinks}
             outgoingLinks={outgoingLinks}
             tags={tags}

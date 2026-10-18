@@ -29,6 +29,16 @@ export function worldFtsMatch(groupId: string, query: string): string {
   return fts ? `group_id : ${ftsPhrase(groupId)} AND {title content} : (${fts})` : '';
 }
 
+/** MATCH expression for `term` as an exact phrase in one world's note
+ *  bodies only: no prefix `*`, no title column. The porter tokenizer still
+ *  stems, so callers must confirm a whole-word hit themselves. Returns ''
+ *  when the term has no searchable tokens. */
+export function worldBodyPhraseMatch(groupId: string, term: string): string {
+  const tokens = term.split(/[^\p{L}\p{M}\p{N}]+/u).filter((t) => t.length > 0);
+  if (tokens.length === 0) return '';
+  return `group_id : ${ftsPhrase(groupId)} AND content : ${ftsPhrase(tokens.join(' ').toLowerCase())}`;
+}
+
 const TITLE_LIMIT = 12;
 const CONTENT_LIMIT = 8;
 const ASSET_LIMIT = 5;

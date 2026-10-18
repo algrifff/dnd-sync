@@ -108,7 +108,7 @@ export type VisibilityOpts = { hideDmOnly?: boolean; hideGmOnly?: boolean };
  *  every hidden note back. */
 export type Visibility = { hideDmOnly: boolean; hideGmOnly: boolean };
 
-type MemberRole = 'admin' | 'editor' | 'viewer';
+export type MemberRole = 'admin' | 'editor' | 'viewer';
 const MEMBER_ROLES: readonly MemberRole[] = ['admin', 'editor', 'viewer'];
 
 /** The canonical role → visibility mapping. Every REST / RSC read path
@@ -218,6 +218,11 @@ export function loadNote(groupId: string, path: string): NoteRow | null {
 export function loadVisibleNote(groupId: string, path: string, vis: Visibility): NoteRow | null {
   const note = loadNote(groupId, path);
   return note && !isHiddenFrom(note, vis) ? note : null;
+}
+
+/** True when the note exists in `groupId` and `role` may see it. */
+export function isNoteVisible(groupId: string, role: MemberRole, path: string): boolean {
+  return loadVisibleNote(groupId, path, visibilityFor(role)) !== null;
 }
 
 /** The single-row form of `hiddenNotesSql`. */

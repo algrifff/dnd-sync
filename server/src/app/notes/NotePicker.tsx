@@ -22,6 +22,7 @@ export function NotePicker({
   onClose,
   excludePath,
   autoFocus = true,
+  header,
 }: {
   /** Viewport-coord top-left for the popover. */
   anchor: { left: number; top: number };
@@ -30,6 +31,8 @@ export function NotePicker({
   /** Omit a path from the list — typically the currently-open note. */
   excludePath?: string;
   autoFocus?: boolean;
+  /** Rendered at the top of the popover, above the search box. */
+  header?: React.ReactNode;
 }): React.JSX.Element {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [query, setQuery] = useState<string>('');
@@ -145,6 +148,7 @@ export function NotePicker({
       className="fixed z-50 w-80 overflow-hidden rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] shadow-[0_12px_32px_rgb(var(--ink-rgb) / 0.18)]"
       style={{ left, top }}
     >
+      {header}
       <div className="border-b border-[var(--rule)] p-2">
         <input
           ref={inputRef}

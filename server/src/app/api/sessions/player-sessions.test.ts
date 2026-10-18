@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { NextRequest } from 'next/server';
-import { canEditDoc } from '@/collab/server';
+import { canEditDoc } from '@/lib/note-permissions';
 import { getDb } from '@/lib/db';
 import { getSessionStatus } from '@/lib/sessions';
 import { setupTestDb, teardownTestDb } from '@/lib/test-utils';
