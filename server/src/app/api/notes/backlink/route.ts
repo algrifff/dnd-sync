@@ -16,10 +16,10 @@
 
 import { z } from 'zod';
 import type { NextRequest } from 'next/server';
-import { requireSession, type Session } from '@/lib/session';
+import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
-import { loadNote, visibilityFor } from '@/lib/notes';
+import { isNoteVisible } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,8 +51,8 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (fromPath === toPath) return json({ error: 'self_link' }, 400);
 
   // Verify both notes exist in this group.
-  if (!isVisible(session, fromPath)) return json({ error: 'from_not_found' }, 404);
-  if (!isVisible(session, toPath)) return json({ error: 'to_not_found' }, 404);
+  if (!isNoteVisible(session.currentGroupId, session.role, fromPath)) return json({ error: 'from_not_found' }, 404);
+  if (!isNoteVisible(session.currentGroupId, session.role, toPath)) return json({ error: 'to_not_found' }, 404);
 
   getDb()
     .query(
@@ -84,8 +84,8 @@ export async function DELETE(req: NextRequest): Promise<Response> {
   }
 
   const { fromPath, toPath } = body;
-  if (!isVisible(session, fromPath)) return json({ error: 'from_not_found' }, 404);
-  if (!isVisible(session, toPath)) return json({ error: 'to_not_found' }, 404);
+  if (!isNoteVisible(session.currentGroupId, session.role, fromPath)) return json({ error: 'from_not_found' }, 404);
+  if (!isNoteVisible(session.currentGroupId, session.role, toPath)) return json({ error: 'to_not_found' }, 404);
 
   // Removes both manual and body-derived links. Body-derived links will
   // be re-created on the next save of the source note if the [[wikilink]]
@@ -99,13 +99,6 @@ export async function DELETE(req: NextRequest): Promise<Response> {
     .run(session.currentGroupId, fromPath, toPath);
 
   return json({ ok: true });
-}
-
-function isVisible(session: Session, path: string): boolean {
-  const note = loadNote(session.currentGroupId, path);
-  if (!note) return false;
-  const vis = visibilityFor(session.role);
-  return !((note.gm_only === 1 && vis.hideGmOnly) || (note.dm_only === 1 && vis.hideDmOnly));
 }
 
 function json(body: unknown, status = 200): Response {

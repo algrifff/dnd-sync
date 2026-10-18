@@ -211,6 +211,11 @@ export function loadVisibleNote(groupId: string, path: string, vis: Visibility):
   return note && !isHiddenFrom(note, vis) ? note : null;
 }
 
+/** True when the note exists in `groupId` and `role` may see it. */
+export function isNoteVisible(groupId: string, role: MemberRole, path: string): boolean {
+  return loadVisibleNote(groupId, path, visibilityFor(role)) !== null;
+}
+
 /** The single-row form of `hiddenNotesSql`. */
 export function isHiddenFrom(
   note: { dm_only: number; gm_only: number },

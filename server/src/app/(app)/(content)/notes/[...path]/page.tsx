@@ -22,7 +22,7 @@ import { NoteWorkspace } from '../../../../notes/NoteWorkspace';
 import { ExcalidrawCanvas } from '../../../../excalidraw/ExcalidrawCanvas';
 import { TagEditor } from '../../../../notes/TagEditor';
 import { NoteSidebar, extractOutline } from '../../../../notes/NoteSidebar';
-import type { RelationRow } from '../../../../notes/connections';
+import type { MentionRow, RelationRow } from '../../../../notes/connections';
 import { EndSessionButton } from '../../../../notes/EndSessionButton';
 import { getSessionStatus } from '@/lib/sessions';
 import { CollapsibleRightPanel } from '../../../../CollapsibleRightPanel';
@@ -63,7 +63,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   // by the parent (content)/layout so this page only fetches the
   // note-specific payloads.
   const canEditThis = canEditDoc(path, session);
-  const [worldHeader, relationViews, mentions, backlinks, outgoingLinks, tags, creator] =
+  const [worldHeader, relationViews, mentionViews, backlinks, outgoingLinks, tags, creator] =
     await Promise.all([
       Promise.resolve(getWorldHeader(session.currentGroupId)),
       Promise.resolve(
@@ -85,6 +85,12 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   const relations: RelationRow[] = relationViews.map((r) => ({
     ...r,
     canRemove: canEditThis && canEditDoc(r.path, session),
+  }));
+
+  // A mention can be linked by someone who can edit both Notes.
+  const mentions: MentionRow[] = mentionViews.map((m) => ({
+    ...m,
+    canLink: canEditThis && canEditDoc(m.path, session),
   }));
 
   // Parse frontmatter ONCE — character resolution, session detection,
@@ -267,7 +273,6 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
             path={path}
             relations={relations}
             mentions={mentions}
-            canLinkMentions={session.role !== 'viewer'}
             canEdit={canEditThis}
             backlinks={backlinks}
             outgoingLinks={outgoingLinks}

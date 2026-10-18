@@ -7,8 +7,7 @@ import Link from 'next/link';
 import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
 import { MiniGraph } from './MiniGraphLoader';
 import { ConnectionsPanel } from './ConnectionsPanel';
-import type { RelationRow } from './connections';
-import type { UnlinkedMention } from '@/lib/unlinked-mentions';
+import type { MentionRow, RelationRow } from './connections';
 
 export type OutlineItem = { level: number; text: string };
 
@@ -16,7 +15,6 @@ export function NoteSidebar({
   path,
   relations,
   mentions,
-  canLinkMentions,
   canEdit,
   backlinks,
   outgoingLinks,
@@ -26,8 +24,7 @@ export function NoteSidebar({
 }: {
   path: string;
   relations: RelationRow[];
-  mentions: UnlinkedMention[];
-  canLinkMentions: boolean;
+  mentions: MentionRow[];
   canEdit: boolean;
   backlinks: BacklinkRow[];
   outgoingLinks: OutgoingLinkRow[];
@@ -40,7 +37,6 @@ export function NoteSidebar({
       <ConnectionsPanel
         relations={relations}
         mentions={mentions}
-        canLinkMentions={canLinkMentions}
         canEdit={canEdit}
         backlinks={backlinks}
         outgoingLinks={outgoingLinks}

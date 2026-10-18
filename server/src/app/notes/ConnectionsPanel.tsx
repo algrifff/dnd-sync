@@ -14,7 +14,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
-import type { UnlinkedMention } from '@/lib/unlinked-mentions';
 import { AddConnection } from './AddConnection';
 import {
   ARROWS,
@@ -24,6 +23,7 @@ import {
   mergeLinks,
   relationProvenance,
   type LinkRow,
+  type MentionRow,
   type RelationRow,
 } from './connections';
 
@@ -38,7 +38,6 @@ const ARROW_TITLES = {
 export function ConnectionsPanel({
   relations,
   mentions,
-  canLinkMentions,
   backlinks,
   outgoingLinks,
   currentPath,
@@ -46,9 +45,7 @@ export function ConnectionsPanel({
   canEdit,
 }: {
   relations: RelationRow[];
-  mentions: UnlinkedMention[];
-  /** Viewers cannot add links, so they see mentions without the button. */
-  canLinkMentions: boolean;
+  mentions: MentionRow[];
   backlinks: BacklinkRow[];
   outgoingLinks: OutgoingLinkRow[];
   currentPath: string;
@@ -111,24 +108,24 @@ export function ConnectionsPanel({
     [csrfToken, router],
   );
 
-  const [unlinked, setUnlinked] = useState<UnlinkedMention[]>(mentions);
+  const [unlinked, setUnlinked] = useState<MentionRow[]>(mentions);
   useEffect(() => {
     setUnlinked(mentions);
   }, [mentions]);
 
   const [linkError, setLinkError] = useState<string | null>(null);
   const linkMention = useCallback(
-    (m: UnlinkedMention): void => {
+    (m: MentionRow): void => {
       setLinkError(null);
       setUnlinked((prev) => prev.filter((x) => x.path !== m.path));
       const restore = (): void => {
         setUnlinked((prev) => (prev.some((x) => x.path === m.path) ? prev : [m, ...prev]));
         setLinkError(`Could not link ${m.title || baseName(m.path)}.`);
       };
-      void fetch('/api/notes/backlink', {
+      void fetch('/api/notes/relations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-        body: JSON.stringify({ fromPath: m.path, toPath: currentPath }),
+        body: JSON.stringify({ path: m.path, relation: 'link', otherPath: currentPath }),
       })
         .then((res) => {
           if (!res.ok) restore();
@@ -229,7 +226,7 @@ export function ConnectionsPanel({
                     {m.snippet}
                   </p>
                 </div>
-                {canLinkMentions && (
+                {m.canLink && (
                   <button
                     type="button"
                     onClick={() => linkMention(m)}

@@ -129,6 +129,18 @@ describe('POST /api/notes/relations', () => {
     expect(linkRow(GUILD, VOLO) ?? null).toBeNull();
   });
 
+  it("'link' flips an existing body-derived link to manual", async () => {
+    getDb()
+      .query('INSERT INTO note_links (group_id, from_path, to_path, is_manual) VALUES (?, ?, ?, 0)')
+      .run(DEFAULT_GROUP_ID, VOLO, GUILD);
+
+    const res = await add(gm, VOLO, 'link', GUILD);
+
+    expect(res.status).toBe(201);
+    expect(linkRow(VOLO, GUILD)).toEqual({ is_manual: 1 });
+    expect((await add(gm, VOLO, 'link', GUILD)).status).toBe(200);
+  });
+
   it('adding a symmetric type from the other end is unchanged', async () => {
     await add(gm, VOLO, 'enemy_of', RIVAL);
 

@@ -41,15 +41,24 @@ export function addRelation(opts: {
         )
         .run(opts.groupId, pair.from, pair.relation, pair.to, opts.sessionPath, opts.userId, Date.now())
         .changes > 0;
-    // Marked manual even when the body already links the pair, so the
-    // link outlives an edit that removes the wikilink.
-    db.query(
-      `INSERT INTO note_links (group_id, from_path, to_path, is_manual)
-       VALUES (?, ?, ?, 1)
-       ON CONFLICT (group_id, from_path, to_path) DO UPDATE SET is_manual = 1`,
-    ).run(opts.groupId, pair.from, pair.to);
+    addManualLink({ groupId: opts.groupId, from: pair.from, to: pair.to });
   })();
   return { status: added ? 'added' : 'unchanged' };
+}
+
+/** Adds the plain `from -> to` link as a manual one. A body-derived row for
+ *  the pair is flipped to manual, so the link outlives an edit that removes
+ *  the wikilink. `added` is true when the row was new or was flipped. */
+export function addManualLink(opts: { groupId: string; from: string; to: string }): { added: boolean } {
+  const changes = getDb()
+    .query(
+      `INSERT INTO note_links (group_id, from_path, to_path, is_manual)
+       VALUES (?, ?, ?, 1)
+       ON CONFLICT (group_id, from_path, to_path) DO UPDATE SET is_manual = 1
+         WHERE note_links.is_manual = 0`,
+    )
+    .run(opts.groupId, opts.from, opts.to).changes;
+  return { added: changes > 0 };
 }
 
 /** Removes the one stored row for `from relation to`, canonicalised like

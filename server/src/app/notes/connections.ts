@@ -4,6 +4,7 @@
 import { RELATION_TYPES, RELATIONS } from '@compendium/shared';
 import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
 import type { RelationView } from '@/lib/relations';
+import type { UnlinkedMention } from '@/lib/unlinked-mentions';
 
 /** The pieces of a Relationship the panel shows. Derived from
  *  `RelationView`, so the two cannot drift. */
@@ -14,6 +15,10 @@ export type RelationRow = Pick<
   /** The caller can edit both Notes, so may remove it (computed on the server). */
   canRemove: boolean;
 };
+
+/** An unlinked mention plus whether the caller can edit both Notes, so may
+ *  link it (computed on the server). */
+export type MentionRow = UnlinkedMention & { canLink: boolean };
 
 export type RelationGroup = { label: string; rows: RelationRow[] };
 

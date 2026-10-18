@@ -20,11 +20,10 @@ import type { NextRequest } from 'next/server';
 import { forwardOf, type RelationType } from '@compendium/shared';
 import { requireSession, type Session } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
-import { loadNote, visibilityFor } from '@/lib/notes';
+import { isNoteVisible } from '@/lib/notes';
 import { canEditDoc } from '@/lib/note-permissions';
-import { addRelation, removeRelation } from '@/lib/relations';
+import { addManualLink, addRelation, removeRelation } from '@/lib/relations';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,13 +55,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   const groupId = session.currentGroupId;
 
   if (!forward) {
-    const added =
-      getDb()
-        .query(
-          `INSERT OR IGNORE INTO note_links (group_id, from_path, to_path, is_manual)
-           VALUES (?, ?, ?, 1)`,
-        )
-        .run(groupId, body.path, body.otherPath).changes > 0;
+    const { added } = addManualLink({ groupId, from: body.path, to: body.otherPath });
     if (added) audit('relation.add', session, { from: body.path, relation: 'link', to: body.otherPath });
     return json({ ok: true, status: added ? 'added' : 'unchanged' }, added ? 201 : 200);
   }
@@ -115,7 +108,9 @@ async function parseBody(req: NextRequest): Promise<Parsed | Response> {
  *  `forbidden`). Null when the request may go ahead. */
 function checkNotes(session: Session, body: Parsed): Response | null {
   const paths = [body.path, body.otherPath];
-  if (!paths.every((p) => isVisible(session, p))) return json({ error: 'not_found' }, 404);
+  if (!paths.every((p) => isNoteVisible(session.currentGroupId, session.role, p))) {
+    return json({ error: 'not_found' }, 404);
+  }
   if (!paths.every((p) => canEditDoc(p, session))) {
     return json({ error: 'forbidden', reason: 'you cannot edit both notes' }, 403);
   }
@@ -144,13 +139,6 @@ function audit(
     target: details.from,
     details,
   });
-}
-
-function isVisible(session: Session, path: string): boolean {
-  const note = loadNote(session.currentGroupId, path);
-  if (!note) return false;
-  const vis = visibilityFor(session.role);
-  return !((note.gm_only === 1 && vis.hideGmOnly) || (note.dm_only === 1 && vis.hideDmOnly));
 }
 
 function json(body: unknown, status = 200): Response {
