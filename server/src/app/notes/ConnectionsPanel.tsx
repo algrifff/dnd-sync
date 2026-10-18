@@ -96,16 +96,27 @@ export function ConnectionsPanel({
     setUnlinked(mentions);
   }, [mentions]);
 
+  const [linkError, setLinkError] = useState<string | null>(null);
   const linkMention = useCallback(
     (m: UnlinkedMention): void => {
+      setLinkError(null);
       setUnlinked((prev) => prev.filter((x) => x.path !== m.path));
+      const restore = (): void => {
+        setUnlinked((prev) => (prev.some((x) => x.path === m.path) ? prev : [m, ...prev]));
+        setLinkError(`Could not link ${m.title || baseName(m.path)}.`);
+      };
       void fetch('/api/notes/backlink', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
         body: JSON.stringify({ fromPath: m.path, toPath: currentPath }),
-      }).finally(() => {
-        router.refresh();
-      });
+      })
+        .then((res) => {
+          if (!res.ok) restore();
+        })
+        .catch(restore)
+        .finally(() => {
+          router.refresh();
+        });
     },
     [csrfToken, currentPath, router],
   );
@@ -181,6 +192,11 @@ export function ConnectionsPanel({
       {unlinked.length > 0 && (
         <div className="mb-3">
           <SubHeading>Unlinked mentions</SubHeading>
+          {linkError && (
+            <p role="alert" className="mb-1 text-[11px] text-[var(--wine)]">
+              {linkError}
+            </p>
+          )}
           <ul className="space-y-1.5">
             {unlinked.map((m) => (
               <li key={m.path} className="flex items-start gap-2 text-xs">
