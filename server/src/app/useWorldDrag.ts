@@ -32,12 +32,16 @@ export function useWorldDrag({
   ids,
   onPreview,
   onDrop,
+  onCancel,
 }: {
   railRef: RefObject<HTMLElement | null>;
   ids: readonly string[];
-  /** The order to show while dragging, or the starting order on cancel. */
+  /** The order to show while dragging. */
   onPreview: (order: string[]) => void;
-  onDrop: (order: string[], movedId: string, startOrder: string[]) => void;
+  onDrop: (order: string[], movedId: string) => void;
+  /** The drag ended without a new order (Escape, pointercancel, or a drop
+   *  in place). Gets the order from before the drag. */
+  onCancel: (startOrder: string[]) => void;
 }): {
   draggingId: string | null;
   onPointerDown: (e: React.PointerEvent<HTMLElement>, id: string) => void;
@@ -47,8 +51,8 @@ export function useWorldDrag({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const gesture = useRef<Gesture | null>(null);
   const swallowClick = useRef<boolean>(false);
-  const latest = useRef({ ids, onPreview, onDrop });
-  latest.current = { ids, onPreview, onDrop };
+  const latest = useRef({ ids, onPreview, onDrop, onCancel });
+  latest.current = { ids, onPreview, onDrop, onCancel };
 
   const end = useRef<(commit: boolean) => void>(() => {});
 
@@ -119,9 +123,9 @@ export function useWorldDrag({
         setDraggingId(null);
         swallowClick.current = true;
         if (commit && g.order.join() !== g.startOrder.join()) {
-          latest.current.onDrop(g.order, g.id, g.startOrder);
-        } else if (!commit) {
-          latest.current.onPreview(g.startOrder);
+          latest.current.onDrop(g.order, g.id);
+        } else {
+          latest.current.onCancel(g.startOrder);
         }
       };
 

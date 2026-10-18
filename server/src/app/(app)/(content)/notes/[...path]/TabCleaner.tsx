@@ -8,7 +8,7 @@
 
 import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { tabsStorageKey } from '../../../../NoteTabs';
+import { tabsStorageKey } from '../../../../note-tabs-storage';
 
 type StoredTab = { path: string; title: string };
 

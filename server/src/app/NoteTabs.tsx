@@ -13,14 +13,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { X, FileText } from 'lucide-react';
 import { TREE_CHANGE_EVENT, TREE_CHANGE_REMOTE_EVENT } from '@/lib/tree-sync';
 import { setPersistentPaths } from './notes/provider-cache';
-
-// One list shared by every world, from before tabs were per world.
-// Opening a world pruned the other worlds' notes out of it.
-const LEGACY_STORAGE_KEY = 'compendium.tabs.v1';
-
-export function tabsStorageKey(groupId: string): string {
-  return `compendium.tabs.v2:${groupId}`;
-}
+import { adoptsLegacyTabs, LEGACY_TABS_KEY, tabsStorageKey } from './note-tabs-storage';
 
 type Tab = { path: string; title: string };
 
@@ -38,8 +31,9 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
     try {
       let raw = localStorage.getItem(tabsStorageKey(groupId));
       if (raw === null) {
-        raw = localStorage.getItem(LEGACY_STORAGE_KEY);
-        localStorage.removeItem(LEGACY_STORAGE_KEY);
+        const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? '');
+        if (adoptsLegacyTabs(keys)) raw = localStorage.getItem(LEGACY_TABS_KEY);
+        localStorage.removeItem(LEGACY_TABS_KEY);
       }
       const parsed = raw ? (JSON.parse(raw) as unknown) : null;
       if (Array.isArray(parsed)) {

@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
   applyOrder,
-  markSeen,
   moveBy,
   moveTo,
   nearestSlot,
+  orderFetched,
   parseLastPages,
   parseSeenMap,
   railShortcut,
@@ -76,35 +76,69 @@ describe('railWorlds', () => {
 });
 
 describe('reconcileSeen', () => {
-  test('a world with no entry is marked seen now, not left to badge', () => {
-    const next = reconcileSeen({}, [row('a', { latestActivityAt: 50 })], null, 1000);
-    expect(next).toEqual({ a: 1000 });
+  test('a world seen for the first time takes its current activity, so it does not badge', () => {
+    const rows = [row('a', { latestActivityAt: 50 }), row('b')];
+    const next = reconcileSeen({}, rows, null);
+    expect(next).toEqual({ a: 50, b: 0 });
+    expect(railWorlds(rows, next, null, null).map((w) => w.unread)).toEqual([false, false]);
   });
 
   test('an existing entry for an inactive world is kept, so its badge survives', () => {
-    const next = reconcileSeen({ a: 10 }, [row('a', { latestActivityAt: 50 })], null, 1000);
+    const next = reconcileSeen({ a: 10 }, [row('a', { latestActivityAt: 50 })], null);
     expect(next).toEqual({ a: 10 });
   });
 
-  test('the active world is moved to now', () => {
-    const next = reconcileSeen({ a: 10 }, [row('a', { latestActivityAt: 50 })], 'a', 1000);
-    expect(next).toEqual({ a: 1000 });
-  });
-
-  test('activity ahead of the client clock still counts as seen', () => {
-    const next = reconcileSeen({ a: 10 }, [row('a', { latestActivityAt: 5000 })], 'a', 1000);
-    expect(next).toEqual({ a: 5000 });
+  test('the active world takes its current activity', () => {
+    const next = reconcileSeen({ a: 10 }, [row('a', { latestActivityAt: 50 })], 'a');
+    expect(next).toEqual({ a: 50 });
   });
 
   test('returns the same object when nothing changed', () => {
     const seen = { a: 10 };
-    expect(reconcileSeen(seen, [row('a')], null, 1000)).toBe(seen);
+    expect(reconcileSeen(seen, [row('a', { latestActivityAt: 10 })], 'a')).toBe(seen);
+  });
+
+  test('a world left with no new activity stays clean, and badges once someone else writes', () => {
+    let seen = reconcileSeen({}, [row('a', { latestActivityAt: 100 }), row('b')], 'a');
+    // The user switches to b. Their own late saves in a never move a's
+    // latestActivityAt, so a stays at 100.
+    seen = reconcileSeen(seen, [row('a', { latestActivityAt: 100 }), row('b')], 'b');
+    expect(railWorlds([row('a', { latestActivityAt: 100 })], seen, 'b', null)[0]!.unread).toBe(false);
+
+    const later = [row('a', { latestActivityAt: 101 }), row('b')];
+    seen = reconcileSeen(seen, later, 'b');
+    expect(railWorlds(later, seen, 'b', null)[0]!.unread).toBe(true);
+  });
+
+  test('an optimistic switch target that never became active keeps its badge', () => {
+    const rows = [row('a'), row('b', { latestActivityAt: 200 })];
+    const seen = reconcileSeen({ a: 0, b: 100 }, rows, 'a');
+    expect(railWorlds(rows, seen, 'a', null)[1]!.unread).toBe(true);
   });
 });
 
-test('markSeen never moves a world backwards', () => {
-  expect(markSeen({ a: 500 }, 'a', 100)).toEqual({ a: 500 });
-  expect(markSeen({ a: 500 }, 'a', 900)).toEqual({ a: 900 });
+describe('orderFetched', () => {
+  const fetched = [row('a'), row('b'), row('c')];
+
+  test('a fresh response takes the server order', () => {
+    const shown = [row('c'), row('b'), row('a')];
+    expect(orderFetched(fetched, shown, null, false).map((r) => r.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  test('a response to a request sent before the last save keeps the order on screen', () => {
+    const shown = [row('c'), row('a'), row('b')];
+    const next = orderFetched([row('a', { name: 'Renamed' }), row('b'), row('c')], shown, null, true);
+    expect(next.map((r) => r.id)).toEqual(['c', 'a', 'b']);
+    expect(next[1]!.name).toBe('Renamed');
+  });
+
+  test('an unconfirmed local order wins over any response', () => {
+    expect(orderFetched(fetched, null, ['b', 'c', 'a'], false).map((r) => r.id)).toEqual([
+      'b',
+      'c',
+      'a',
+    ]);
+  });
 });
 
 describe('reorder', () => {

@@ -11,12 +11,15 @@ export type WorldRow = {
   role: 'admin' | 'editor' | 'viewer';
   /** 0 = no uploaded icon. Non-zero busts the icon cache. */
   iconVersion: number;
-  /** Newest visible note or asset change, epoch ms. */
+  /** Newest visible note or asset change by another member, server
+   *  epoch ms. The caller's own writes are never counted. */
   latestActivityAt: number | null;
   openSession: { path: string } | null;
 };
 
-/** World id → epoch ms when the user last had that world open. */
+/** World id → the world's `latestActivityAt` as last observed while the
+ *  user had it open. Server time only, so the client clock never enters
+ *  the comparison. */
 export type SeenMap = Readonly<Record<string, number>>;
 
 export type RailWorld = {
@@ -68,33 +71,26 @@ export function railWorlds(
   });
 }
 
-/** Brings the seen map up to date after a fetch. The active world counts
- *  as seen now. A world with no entry yet is marked seen silently, so a
- *  first visit (or a newly joined world) never lights up every badge.
- *  Both use the world's own latest activity as a floor, so a client
- *  clock behind the server cannot leave the user's own edits unread.
+/** Brings the seen map up to date after a fetch. The active world (the
+ *  one the server confirms, never an optimistic switch target) takes its
+ *  current `latestActivityAt`. A world with no entry yet takes it too, so
+ *  a first visit (or a newly joined world) never lights up every badge.
  *  Returns `seen` itself when nothing changes. */
 export function reconcileSeen(
   seen: SeenMap,
   rows: readonly WorldRow[],
   activeId: string | null,
-  now: number,
 ): SeenMap {
   let next: Record<string, number> | null = null;
   for (const row of rows) {
     const prev = seen[row.id];
     if (prev !== undefined && row.id !== activeId) continue;
-    const at = Math.max(now, row.latestActivityAt ?? 0, prev ?? 0);
+    const at = row.latestActivityAt ?? 0;
     if (at === prev) continue;
     next ??= { ...seen };
     next[row.id] = at;
   }
   return next ?? seen;
-}
-
-export function markSeen(seen: SeenMap, id: string, at: number): SeenMap {
-  const prev = seen[id] ?? 0;
-  return at > prev ? { ...seen, [id]: at } : seen;
 }
 
 export function moveTo(ids: readonly string[], id: string, toIndex: number): string[] {
@@ -122,6 +118,21 @@ export function applyOrder<T extends { id: string }>(
     .map((row, i) => ({ row, key: rank.get(row.id) ?? order.length + i }))
     .sort((a, b) => a.key - b.key)
     .map((x) => x.row);
+}
+
+/** The rail order for a fetched list. A local order the server has not
+ *  confirmed yet wins. Otherwise a stale response (one whose request
+ *  started before the last order save landed) keeps the order on screen
+ *  and only refreshes the rows' data. */
+export function orderFetched<T extends { id: string }>(
+  fetched: readonly T[],
+  shown: readonly T[] | null,
+  localOrder: readonly string[] | null,
+  stale: boolean,
+): T[] {
+  if (localOrder) return applyOrder(fetched, localOrder);
+  if (stale && shown) return applyOrder(fetched, shown.map((r) => r.id));
+  return [...fetched];
 }
 
 /** Index of the slot whose centre is closest to `y`. */
@@ -205,7 +216,9 @@ function capitalise(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-const SEEN_KEY = 'compendium.worldSeen.v1';
+// v1 held client clock times, which v2's server-time values cannot be
+// compared against.
+const SEEN_KEY = 'compendium.worldSeen.v2';
 const LAST_PAGE_KEY = 'compendium.worldLastPage.v1';
 
 function readJson(key: string): unknown {

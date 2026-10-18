@@ -34,8 +34,8 @@ import { useWorldDrag } from './useWorldDrag';
 import { worldColor, worldInitials } from './world-chip';
 import {
   applyOrder,
-  markSeen,
   moveBy,
+  orderFetched,
   railShortcut,
   railWorlds,
   readLastPage,
@@ -91,19 +91,29 @@ export function WorldsSidebar({
   const [announcement, setAnnouncement] = useState<string>('');
   const railRef = useRef<HTMLElement | null>(null);
   const hintId = useId();
-  // An order the user made that the server has not confirmed yet. A
-  // fetch landing meanwhile keeps it instead of snapping back.
-  const localOrder = useRef<string[] | null>(null);
+  // Orders the server has not confirmed: the live preview of a drag in
+  // progress, and the last order sent to PUT /api/worlds/order until it
+  // lands. A fetch arriving meanwhile keeps them instead of snapping back.
+  const dragOrder = useRef<string[] | null>(null);
+  const savingOrder = useRef<string[] | null>(null);
+  // Every fetch gets a sequence number. A response to a request sent
+  // before the last order save landed (seq < orderFreshFrom) may carry
+  // the old order, so its order is ignored.
+  const fetchSeq = useRef<number>(0);
+  const orderFreshFrom = useRef<number>(0);
   const lastFetchAt = useRef<number>(0);
 
   const fetchWorlds = useCallback(async (): Promise<void> => {
     lastFetchAt.current = Date.now();
+    const seq = ++fetchSeq.current;
     try {
       const res = await fetch('/api/worlds', { cache: 'no-store' });
       if (!res.ok) return;
       const body = (await res.json()) as { worlds?: WorldRow[] };
       const fetched = body.worlds ?? [];
-      setRows(localOrder.current ? applyOrder(fetched, localOrder.current) : fetched);
+      const local = dragOrder.current ?? savingOrder.current;
+      const stale = seq < orderFreshFrom.current;
+      setRows((shown) => orderFetched(fetched, shown, local, stale));
     } catch {
       /* keep the current list */
     }
@@ -138,24 +148,20 @@ export function WorldsSidebar({
     };
   }, [fetchWorlds]);
 
-  // The active world counts as seen on every fetch (which also runs
-  // when the tab regains focus), and the world being left counts as
-  // seen at the moment of leaving, so the user's own last edits there
-  // never come back as a badge.
-  const leaving = useRef<string | null>(activeWorldId);
+  // The world the session is actually in records its latest activity on
+  // every fetch (which also runs when the tab regains focus). The
+  // optimistic switch target is left alone, so a failed switch keeps
+  // its badge. The user's own writes never reach latestActivityAt, so
+  // saves that land after they leave do not come back as a badge.
+  const confirmedWorldId = onMe ? null : worldId;
   useEffect(() => {
     let next = readSeen();
-    if (ownsRail) {
-      const now = Date.now();
-      if (leaving.current && leaving.current !== activeWorldId) {
-        next = markSeen(next, leaving.current, now);
-      }
-      if (rows) next = reconcileSeen(next, rows, activeWorldId, now);
+    if (ownsRail && rows) {
+      next = reconcileSeen(next, rows, confirmedWorldId);
       writeSeen(next);
     }
-    leaving.current = activeWorldId;
     setSeen(next);
-  }, [rows, activeWorldId, ownsRail]);
+  }, [rows, confirmedWorldId, ownsRail]);
 
   const items = useMemo<RailWorld[] | null>(
     () => (rows ? railWorlds(rows, seen, activeWorldId, pendingWorldId) : null),
@@ -198,10 +204,12 @@ export function WorldsSidebar({
           });
           if (!res.ok) throw new Error(`order save failed: ${res.status}`);
         }
-        localOrder.current = null;
+        savingOrder.current = null;
+        orderFreshFrom.current = fetchSeq.current + 1;
+        void fetchWorlds();
       } catch {
         q.next = null;
-        localOrder.current = null;
+        savingOrder.current = null;
         setAnnouncement('Could not save the world order. It has been put back.');
         void fetchWorlds();
       } finally {
@@ -212,12 +220,29 @@ export function WorldsSidebar({
   );
 
   const showOrder = useCallback((order: string[]): void => {
-    localOrder.current = order;
     setRows((prev) => (prev ? applyOrder(prev, order) : prev));
   }, []);
 
+  const previewOrder = useCallback(
+    (order: string[]): void => {
+      dragOrder.current = order;
+      showOrder(order);
+    },
+    [showOrder],
+  );
+
+  const cancelDrag = useCallback(
+    (startOrder: string[]): void => {
+      dragOrder.current = null;
+      showOrder(startOrder);
+    },
+    [showOrder],
+  );
+
   const commitOrder = useCallback(
     (order: string[], movedId: string): void => {
+      dragOrder.current = null;
+      savingOrder.current = order;
       showOrder(order);
       void saveOrder(order);
       const name = rows?.find((r) => r.id === movedId)?.name ?? 'World';
@@ -227,7 +252,13 @@ export function WorldsSidebar({
   );
 
   const ids = useMemo(() => rows?.map((r) => r.id) ?? [], [rows]);
-  const drag = useWorldDrag({ railRef, ids, onPreview: showOrder, onDrop: commitOrder });
+  const drag = useWorldDrag({
+    railRef,
+    ids,
+    onPreview: previewOrder,
+    onDrop: commitOrder,
+    onCancel: cancelDrag,
+  });
 
   const moveWithKeyboard = (id: string, delta: number): void => {
     const order = moveBy(ids, id, delta);
