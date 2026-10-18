@@ -107,7 +107,14 @@ function closer(a: Closeness, b: Closeness | undefined): boolean {
 
 type Role = 'admin' | 'editor' | 'viewer';
 
-type IndexEntry = { path: string; title: string; kind: string; names: string[] };
+type IndexEntry = {
+  path: string;
+  title: string;
+  kind: string;
+  /** Raw frontmatter, for callers that apply their own rules to an entry. */
+  frontmatterJson: string;
+  names: string[];
+};
 
 /** Every Note a role may see in a World, with its title and aliases,
  *  loaded once so many names can be matched against it. */
@@ -145,6 +152,7 @@ export function loadNameIndex(opts: { groupId: string; role: Role }): NameIndex 
       path: note.path,
       title: note.title,
       kind,
+      frontmatterJson: note.frontmatter_json,
       names: [note.title, ...(aliasesByPath.get(note.path) ?? [])],
     });
   }

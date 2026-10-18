@@ -840,6 +840,9 @@ describe('Similarly named Notes in a Wrap-up', () => {
   const FERRY_GUILD = 'Campaigns/Ashfall/Lore/the-ferry-guild.md';
   const THESSALY = 'Campaigns/Ashfall/Characters/thessaly.md';
   const KIXXISH = 'Campaigns/Ashfall/People/kixxish.md';
+  const PLAIN_LORE = 'World Lore/zorbelith.md';
+  const ODD_LORE = 'World Lore/quillfane.md';
+  const BARE_LORE = 'World Lore/vandrel.md';
 
   const proposal = (): WrapUpProposal => ({
     ...proposalFrom(SIM_SESSION, [
@@ -864,6 +867,9 @@ describe('Similarly named Notes in a Wrap-up', () => {
     seed({ path: BASSOS, title: 'Bassos', frontmatter: { kind: 'person', dm_only: true }, dmOnly: true });
     seed({ path: FERRY_GUILD, title: 'The Ferry Guild', frontmatter: { kind: 'lore' } });
     seed({ path: THESSALY, title: 'Thessalie', frontmatter: { kind: 'character' } });
+    seed({ path: PLAIN_LORE, title: 'Zorbelith', frontmatter: { kind: 'note' } });
+    seed({ path: ODD_LORE, title: 'Quillfane', frontmatter: { kind: 'mystery' } });
+    seed({ path: BARE_LORE, title: 'Vandrel', frontmatter: {} });
   });
 
   describe('offering', () => {
@@ -887,6 +893,25 @@ describe('Similarly named Notes in a Wrap-up', () => {
       const matched = proposalFrom(SIM_SESSION, [existing('Kixxish', KIXISH, 'person', 'Poled.')]);
 
       expect(similarNotesFor(groupId, 'viewer', matched)).toEqual({});
+    });
+  });
+
+  describe('offer and apply agree', () => {
+    it.each([
+      ['an explicit kind: note under World Lore/', 'Zorbelith', PLAIN_LORE],
+      ['an unknown kind under World Lore/', 'Quillfane', ODD_LORE],
+      ['an unkinded Note under World Lore/', 'Vandrel', BARE_LORE],
+    ])('%s is offered if and only if apply accepts it', async (_label, title, path) => {
+      const one = proposalFrom(SIM_SESSION, [fresh(title, 'lore', 'A thing.', 'Mentioned.')]);
+      const offered = (similarNotesFor(groupId, 'admin', one).m1 ?? []).some((s) => s.path === path);
+      const result = await applyWrapUp({
+        groupId, userId, role: 'admin', sessionPath: SIM_SESSION, proposal: one,
+        decisions: { accepted: ['m1'], asNew: [], useExisting: { m1: path } },
+      });
+      const accepted = result.applied.some((a) => a.path === path);
+
+      expect(offered).toBe(accepted);
+      expect(result.skipped.some((x) => x.reason === 'invalid_target')).toBe(!accepted);
     });
   });
 
