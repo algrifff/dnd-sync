@@ -141,7 +141,7 @@ export type { RingKind };
 
 /** A Relationship's colour comes from its group (RELATIONS in
  *  @compendium/shared). Family uses `candleText`, not `candle`: plain
- *  candlelight is about 1.9:1 against day parchment, too faint for a 1px
+ *  candlelight is about 2.5:1 against the day background, too faint for a 1px
  *  line, and it is also the colour of a hovered note's own links. */
 export const GROUP_COLOR: Record<RelationGroup, keyof Palette> = {
   friendly: 'moss',
