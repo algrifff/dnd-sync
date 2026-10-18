@@ -27,7 +27,24 @@
   /* Glyph ink for the worlds rail. The rail sits on --shadow, which is
      near-black in both themes, so this stays light at night too. */
   --rail-ink: #FAFAF7;
-  --rail-ink-rgb: 250 250 247;
+  /* World chips (world-chip.ts): a background and an initials ink per
+     chip. world-chip.test.ts holds each pair to 4.5:1 in both themes. */
+  --chip-wine: var(--wine);
+  --chip-wine-ink: var(--rail-ink);
+  --chip-moss: #7B8A5F;
+  --chip-moss-ink: var(--shadow);
+  --chip-sage: #738795;
+  --chip-sage-ink: var(--shadow);
+  --chip-candlelight: var(--candlelight);
+  --chip-candlelight-ink: var(--shadow);
+  --chip-embers: #A95127;
+  --chip-embers-ink: var(--rail-ink);
+  --chip-wisteria: var(--wisteria);
+  --chip-wisteria-ink: var(--rail-ink);
+  --chip-deep-water: var(--deep-water);
+  --chip-deep-water-ink: var(--rail-ink);
+  --chip-chestnut: #81644B;
+  --chip-chestnut-ink: var(--rail-ink);
 
   /* RGB triplets for rgba-style tints: rgb(var(--wine-rgb) / 0.12) */
   --parchment-rgb: 250 250 247;
@@ -60,7 +77,22 @@
   --deep-water: #6A8B9B;
   --chestnut: #AE8E73;
   --rail-ink: #FAFAF7;
-  --rail-ink-rgb: 250 250 247;
+  --chip-wine: #B36A73;
+  --chip-wine-ink: var(--shadow);
+  --chip-moss: var(--moss);
+  --chip-moss-ink: var(--shadow);
+  --chip-sage: var(--sage);
+  --chip-sage-ink: var(--shadow);
+  --chip-candlelight: var(--candlelight);
+  --chip-candlelight-ink: var(--shadow);
+  --chip-embers: var(--embers);
+  --chip-embers-ink: var(--shadow);
+  --chip-wisteria: var(--wisteria);
+  --chip-wisteria-ink: var(--shadow);
+  --chip-deep-water: var(--deep-water);
+  --chip-deep-water-ink: var(--shadow);
+  --chip-chestnut: var(--chestnut);
+  --chip-chestnut-ink: var(--shadow);
 
   --parchment-rgb: 25 25 24;
   --ink-rgb: 237 236 232;

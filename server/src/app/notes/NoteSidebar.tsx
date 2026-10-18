@@ -7,13 +7,16 @@ import Link from 'next/link';
 import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
 import { MiniGraph } from './MiniGraphLoader';
 import { ConnectionsPanel } from './ConnectionsPanel';
-import type { RelationRow } from './connections';
+import type { MentionRow, RelationRow } from './connections';
 
 export type OutlineItem = { level: number; text: string };
 
 export function NoteSidebar({
   path,
   relations,
+  mentions,
+  canEdit,
+  removableLinkPaths,
   backlinks,
   outgoingLinks,
   tags,
@@ -22,6 +25,9 @@ export function NoteSidebar({
 }: {
   path: string;
   relations: RelationRow[];
+  mentions: MentionRow[];
+  canEdit: boolean;
+  removableLinkPaths: string[];
   backlinks: BacklinkRow[];
   outgoingLinks: OutgoingLinkRow[];
   tags: string[];
@@ -32,6 +38,9 @@ export function NoteSidebar({
     <aside className="h-full overflow-y-auto border-l border-[var(--rule)] bg-[var(--parchment-sunk)]/40 px-4 py-4 text-sm">
       <ConnectionsPanel
         relations={relations}
+        mentions={mentions}
+        canEdit={canEdit}
+        removableLinkPaths={removableLinkPaths}
         backlinks={backlinks}
         outgoingLinks={outgoingLinks}
         currentPath={path}

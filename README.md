@@ -391,7 +391,7 @@ All routes live under `/api/`. ~70 endpoints; grouped:
 | Sessions (game) | `POST /api/sessions/mark-closed`, `GET`/`POST /api/sessions/wrap-up`, `GET /api/sessions/wrap-up/context`, `POST /api/sessions/wrap-up/apply` |
 | Tags | `GET /api/tags`, `GET /api/note-tags`, `GET /api/asset-tags` |
 | Assets | `POST /api/assets/upload`, `GET /api/assets/[id]`, `GET /api/assets/list`, `GET /api/assets/by-path` |
-| Backlinks | `POST /api/notes/backlink` |
+| Connections | `POST`/`DELETE /api/notes/relations` (a Relationship, or `relation: 'link'` for a plain link) |
 | MCP connector | `POST /api/mcp`, `GET /.well-known/oauth-protected-resource`, `GET /.well-known/oauth-authorization-server`, `POST /api/oauth/register`, `POST /api/oauth/authorize`, `POST /api/oauth/token`, `POST /api/oauth/revoke`, `DELETE /api/oauth/grants/[id]` |
 | Graph | `GET /api/graph`, `GET /api/graph/neighborhood/[...path]` |
 | Import (AI) | `POST /api/import`, `POST /api/import/[id]/analyse`, `POST /api/import/[id]/apply`, `POST /api/import/[id]/orchestrate` |
