@@ -60,6 +60,17 @@ describe('findUnlinkedMentions', () => {
     expect(find('editor', RHUN)).toEqual(['Lore/map.md']);
   });
 
+  it('skips a title too long to be a name, without scanning for it', () => {
+    const LONG = 'Lore/long-title.md';
+    const title = `${'aaaa '.repeat(20_000)}x`;
+    note(LONG, title, 'Nothing here.');
+    note('Lore/echo.md', 'Echo', `${'aaaa '.repeat(40_000)}x`);
+
+    const started = performance.now();
+    expect(find('editor', LONG)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
   it('trims a long snippet to roughly 80 characters around the match', () => {
     note('Lore/long.md', 'Long', `${'word '.repeat(40)}Volo ${'more '.repeat(40)}`);
 

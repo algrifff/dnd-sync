@@ -10,6 +10,9 @@ import { worldBodyPhraseMatch } from '@/lib/search';
 export type UnlinkedMention = { path: string; title: string; snippet: string };
 
 const MIN_TERM_LENGTH = 4;
+/** Longer titles and aliases are not names anyone writes in prose, and the
+ *  whole-word scan costs body length x term length, so they are skipped. */
+const MAX_TERM_LENGTH = 64;
 /** Candidate Notes read per page. FTS stems ("towering" matches "tower"),
  *  so it is looser than a whole-word match; pages are read newest first
  *  until `limit` real hits turn up or the candidates run out. */
@@ -136,7 +139,7 @@ export function findUnlinkedMentions(opts: {
   // NFC on both sides, so a decomposed accent (common in macOS vault
   // imports) matches its composed form.
   const terms = [...new Set([self.title, ...aliases].map((t) => t.trim().normalize('NFC')))].filter(
-    (t) => [...t].length >= MIN_TERM_LENGTH,
+    (t) => [...t].length >= MIN_TERM_LENGTH && [...t].length <= MAX_TERM_LENGTH,
   );
 
   const found = new Map<string, UnlinkedMention & { updatedAt: number }>();
