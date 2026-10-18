@@ -368,8 +368,8 @@ describe('submit_wrap_up relations', () => {
   it('tells the agent that related_to is the fallback and to propose only what the log states', () => {
     const tool = MCP_TOOLS.find((t) => t.name === 'submit_wrap_up')!;
 
-    expect(tool.description).toContain('related_to is the fallback');
-    expect(tool.description).toContain('only when the log itself states it');
+    expect(tool.description).toContain('Use related_to only when no other type fits');
+    expect(tool.description).toContain('only when the Session log states it');
   });
 });
 
