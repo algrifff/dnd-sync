@@ -71,7 +71,7 @@ describe('GET /api/notes/similar', () => {
   });
 
   it('answers 429 once the caller has used 60 lookups a minute', async () => {
-    similarNotesLimiter.recordSuccess(viewer.userId);
+    similarNotesLimiter.reset(viewer.userId);
     for (let i = 0; i < 60; i++) expect((await GET(request('Kixish', viewer))).status).toBe(200);
 
     const res = await GET(request('Kixish', viewer));
@@ -79,7 +79,7 @@ describe('GET /api/notes/similar', () => {
     expect(res.status).toBe(429);
     expect((await res.json()).error).toBe('rate_limited');
     expect(res.headers.get('Retry-After')).toBeTruthy();
-    similarNotesLimiter.recordSuccess(viewer.userId);
+    similarNotesLimiter.reset(viewer.userId);
   });
 
   it('answers a missing or empty name with no matches', async () => {

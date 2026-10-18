@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { adminLoginLimiter, oauthRegisterGlobalLimiter, webLoginLimiter, wsAuthLimiter } from './ratelimit';
+import { adminLoginLimiter, createWindowLimiter, oauthRegisterGlobalLimiter, webLoginLimiter, wsAuthLimiter } from './ratelimit';
 
 describe('webLoginLimiter', () => {
   it('allows by default', () => {
@@ -93,5 +93,27 @@ describe('oauthRegisterGlobalLimiter', () => {
     for (let i = 0; i < 200; i++) oauthRegisterGlobalLimiter.recordFailure('global-test', false);
 
     expect(oauthRegisterGlobalLimiter.check('global-test', false).allowed).toBe(false);
+  });
+});
+
+describe('createWindowLimiter', () => {
+  it('never locks 60 lookups a minute spread over several minutes', () => {
+    let t = 1_000_000;
+    const limiter = createWindowLimiter(60, 60_000, () => t);
+    for (let i = 0; i < 300; i++) {
+      expect(limiter.hit('u').allowed).toBe(true);
+      t += 1_000;
+    }
+  });
+
+  it('refuses the 61st hit in one window, then allows again after it elapses', () => {
+    let t = 5_000;
+    const limiter = createWindowLimiter(60, 60_000, () => t);
+    for (let i = 0; i < 60; i++) expect(limiter.hit('u').allowed).toBe(true);
+    t += 30_000;
+    expect(limiter.hit('u')).toEqual({ allowed: false, retryAfterMs: 30_000 });
+    expect(limiter.hit('other').allowed).toBe(true);
+    t += 30_000;
+    expect(limiter.hit('u').allowed).toBe(true);
   });
 });

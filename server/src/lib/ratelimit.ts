@@ -75,6 +75,42 @@ function createLimiter(maxFails: number, lockoutMs: number): Limiter {
   };
 }
 
+export type WindowLimiter = {
+  /** Counts one request under `key`; refuses it once `max` were counted
+   *  in the current window. */
+  hit(key: string): RateLimitDecision;
+  reset(key: string): void;
+};
+
+type Window = { count: number; startedAt: number };
+
+/** Fixed window of `max` requests per `windowMs` per key. Unlike
+ *  `createLimiter` it counts every request, not failures, and the count
+ *  resets once the window has elapsed. `now` is injectable for tests. */
+export function createWindowLimiter(max: number, windowMs: number, now: () => number = Date.now): WindowLimiter {
+  const windows = new Map<string, Window>();
+  return {
+    hit(key) {
+      const t = now();
+      let w = windows.get(key);
+      if (!w || t - w.startedAt >= windowMs) {
+        if (!w && windows.size >= MAX_BUCKETS) {
+          for (const [k, v] of windows) if (t - v.startedAt >= windowMs) windows.delete(k);
+          if (windows.size >= MAX_BUCKETS) windows.clear();
+        }
+        w = { count: 0, startedAt: t };
+        windows.set(key, w);
+      }
+      if (w.count >= max) return { allowed: false, retryAfterMs: w.startedAt + windowMs - t };
+      w.count += 1;
+      return { allowed: true };
+    },
+    reset(key) {
+      windows.delete(key);
+    },
+  };
+}
+
 // Existing WS-auth bucket. Kept at the same 30 / 5 min as before so the
 // plugin's burst-reconnect behaviour doesn't regress.
 export const wsAuthLimiter = createLimiter(30, 5 * 60_000);
@@ -94,7 +130,7 @@ export const assetUploadLimiter = createLimiter(30, 60_000);
 // Similar-name lookup while typing a new Note's name. Each call scans the
 // World's titles, so 60 per minute per user (debounced typing stays far
 // under it).
-export const similarNotesLimiter = createLimiter(60, 60_000);
+export const similarNotesLimiter = createWindowLimiter(60, 60_000);
 
 // Self-service signup. 5 per hour per IP — a real user creates one
 // account per device, anything faster is a script.

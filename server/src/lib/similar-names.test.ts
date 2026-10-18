@@ -36,6 +36,9 @@ beforeAll(async () => {
   seed('Sessions/kixish-day.md', 'Kixish', { kind: 'session' });
   seed('People/the-spy.md', 'Sylvanus Vex', { kind: 'person' }, { dmOnly: true });
   seed('Admin/scratch.md', 'Sylvanus Vexx', {}, { gmOnly: true });
+  seed('Places/room-12.md', 'Room 12', { kind: 'location' });
+  seed('People/goblin-1.md', 'Goblin 1', { kind: 'creature' });
+  seed('People/kixish-2.md', 'Kixxish 2', { kind: 'person' });
   seed('People/brann.md', 'Brann', { kind: 'person' });
   getDb().query('INSERT INTO aliases (group_id, alias, path) VALUES (?, ?, ?)').run(groupId, 'The Black Hand', 'People/gundran.md');
 });
@@ -61,6 +64,16 @@ describe('editDistance', () => {
 });
 
 describe('findSimilarNotes', () => {
+  it('does not treat names differing only in a number as a close spelling', () => {
+    expect(titles('Room 13')).toEqual([]);
+    expect(titles('Goblin 2')).toEqual([]);
+    expect(find('Room 12')[0]).toMatchObject({ title: 'Room 12', reason: 'same_name' });
+  });
+
+  it('still matches a misspelling when the numbers agree', () => {
+    expect(find('Kixish 2').map((m) => [m.title, m.reason])).toEqual([['Kixxish 2', 'close_spelling']]);
+  });
+
   it('matches a name equal once normalised, ranked first', () => {
     const [first] = find('diane');
 

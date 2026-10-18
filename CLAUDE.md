@@ -222,7 +222,7 @@ whole flow over HTTP) and the MCP Inspector:
 | `server/src/lib/relations.ts` | Relationships: `addRelation` (plus its manual link), visibility-gated `listRelations`, and the repoint/delete helpers every move and delete path calls |
 | `server/src/lib/ai/tools.ts` | AI tool definitions, unreferenced until the MCP connector adopts them |
 | `server/src/lib/wrap-up.ts` | Wrap-up: proposal shape, submit validation, candidate context, idempotent apply |
-| `server/src/lib/similar-names.ts` | Name similarity: `nameTokens`, `findSimilarNotes` (visibility-gated; same name, close spelling, containment) behind the new-Note warning and the Wrap-up `similar` field |
+| `server/src/lib/similar-names.ts` | Name similarity: `nameTokens`, `findSimilarNotes` (visibility-gated; same name, close spelling, or one near-identical word; containment deliberately excluded) behind the new-Note warning and the Wrap-up `similar` field |
 | `server/src/lib/note-edits.ts` | Lossless PM-JSON edits: `addHistoryEntry`, `linkMention`, `applyNoteEdit` |
 | `server/src/lib/import-orchestrate.ts` | "Smart Import" — the multi-phase pipeline the vault UI actually drives (assets → campaign → entities → quality) |
 | `server/src/lib/assets.ts` | Content-addressed asset storage — hash/mime dedup, `deleteAsset()` reference-checked delete |

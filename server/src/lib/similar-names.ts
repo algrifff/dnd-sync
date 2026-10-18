@@ -63,12 +63,20 @@ type Closeness = { reason: SimilarReason; distance: number };
 
 const RANK: Record<SimilarReason, number> = { same_name: 0, close_spelling: 1, similar_word: 2 };
 
+/** The all-digit tokens of a name, in order, as one comparable string. */
+function numbersOf(tokens: string[]): string {
+  return tokens.filter((t) => /^\p{N}+$/u.test(t)).join(' ');
+}
+
 /** How `candidate` resembles `wanted` (both from `nameTokens`), or null. */
 function compare(wanted: string[], candidate: string[]): Closeness | null {
   if (wanted.length === 0 || candidate.length === 0) return null;
   const a = wanted.join(' ');
   const b = candidate.join(' ');
   if (a === b) return { reason: 'same_name', distance: 0 };
+
+  // Room 12 vs Room 13 is a different Note, not a misspelling.
+  if (numbersOf(wanted) !== numbersOf(candidate)) return null;
 
   const shorter = Math.min(a.length, b.length);
   if (shorter >= 5) {
@@ -99,7 +107,7 @@ function closer(a: Closeness, b: Closeness | undefined): boolean {
 
 type Role = 'admin' | 'editor' | 'viewer';
 
-type IndexEntry = { path: string; title: string; kind: string; frontmatterJson: string; names: string[] };
+type IndexEntry = { path: string; title: string; kind: string; names: string[] };
 
 /** Every Note a role may see in a World, with its title and aliases,
  *  loaded once so many names can be matched against it. */
@@ -137,27 +145,20 @@ export function loadNameIndex(opts: { groupId: string; role: Role }): NameIndex 
       path: note.path,
       title: note.title,
       kind,
-      frontmatterJson: note.frontmatter_json,
       names: [note.title, ...(aliasesByPath.get(note.path) ?? [])],
     });
   }
   return index;
 }
 
-/** Entries of `index` resembling `name`, closest first. `accept` drops
- *  entries before the limit is applied. */
-export function matchName(
-  index: NameIndex,
-  name: string,
-  limit = 3,
-  accept?: (entry: { path: string; kind: string; frontmatterJson: string }) => boolean,
-): SimilarNote[] {
+/** Entries of `index` resembling `name`, closest first. Callers narrow
+ *  the index (by kind, say) before matching. */
+export function matchName(index: NameIndex, name: string, limit = 3): SimilarNote[] {
   const wanted = nameTokens(name);
   if (wanted.length === 0) return [];
 
   const found: Array<SimilarNote & Closeness> = [];
   for (const entry of index) {
-    if (accept && !accept(entry)) continue;
     let best: Closeness | undefined;
     for (const candidate of entry.names) {
       const c = compare(wanted, nameTokens(candidate));

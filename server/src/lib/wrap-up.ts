@@ -328,6 +328,13 @@ function mentionKindOf(path: string, frontmatterJson: string): MentionKind | nul
   return null;
 }
 
+/** Whether a Note of this indexed kind can take a Mention's History.
+ *  An unkinded Note under `World Lore/` counts as Lore. */
+function canReceiveMention(path: string, kind: string): boolean {
+  if ((MENTION_KINDS as readonly string[]).includes(kind)) return true;
+  return kind === 'note' && path.startsWith('World Lore/');
+}
+
 // ── Submitting a proposal ──────────────────────────────────────────────
 
 export type SubmitResult =
@@ -540,8 +547,8 @@ export function similarNotesFor(
   let index: NameIndex | undefined;
   for (const mention of proposal.mentions) {
     if (mention.match.type !== 'new') continue;
-    index ??= loadNameIndex({ groupId, role });
-    const matches = matchName(index, mention.match.title, 3, (e) => mentionKindOf(e.path, e.frontmatterJson) !== null);
+    index ??= loadNameIndex({ groupId, role }).filter((e) => canReceiveMention(e.path, e.kind));
+    const matches = matchName(index, mention.match.title, 3);
     if (matches.length > 0) out[mention.id] = matches;
   }
   return out;
