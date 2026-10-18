@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
 import { setupTestDb, teardownTestDb } from './test-utils';
-import { findUnlinkedMentions, findWholeWord } from './unlinked-mentions';
+import { findUnlinkedMentions, findWholeWord, mayContainTerm } from './unlinked-mentions';
 
 const G = randomUUID();
 const OTHER_WORLD = randomUUID();
@@ -160,6 +160,14 @@ describe('findUnlinkedMentions', () => {
     const [hit] = findUnlinkedMentions({ groupId: G, role: 'editor', path: VOLO });
 
     expect(hit?.snippet).toContain('Volo');
+  });
+});
+
+describe('mayContainTerm', () => {
+  it('skips a Note without the first word, case-insensitively', () => {
+    expect(mayContainTerm('Nothing to see here', 'Black Tower')).toBe(false);
+    expect(mayContainTerm('the BLACK door', 'Black Tower')).toBe(true);
+    expect(mayContainTerm('anything', '   ')).toBe(false);
   });
 });
 
