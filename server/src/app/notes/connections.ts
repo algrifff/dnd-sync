@@ -2,18 +2,14 @@
 // tested directly (docs/adr/0003-connections-panel-and-manual-relationships.md).
 
 import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
+import type { RelationView } from '@/lib/relations';
 
-/** The pieces of a Relationship the panel shows. Structural subset of
- *  `RelationView`, so the server component can pass those through. */
-export type RelationRow = {
-  relation: string;
-  label: string;
-  path: string;
-  title: string;
-  sessionPath: string | null;
-  sessionTitle: string | null;
-  createdBy: string | null;
-};
+/** The pieces of a Relationship the panel shows. Derived from
+ *  `RelationView`, so the two cannot drift. */
+export type RelationRow = Pick<
+  RelationView,
+  'relation' | 'label' | 'path' | 'title' | 'sessionPath' | 'sessionTitle' | 'createdBy'
+>;
 
 export type RelationGroup = { label: string; rows: RelationRow[] };
 
