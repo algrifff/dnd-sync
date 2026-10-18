@@ -13,6 +13,8 @@ import { NewWorldDialog } from '../../NewWorldDialog';
 import { NewCharacterDialog } from './NewCharacterDialog';
 import { SuggestionsPanel } from './SuggestionsPanel';
 import { useWorldSwitch } from '../WorldSwitch';
+import { MobileNavToggle } from '../../MobileNavToggle';
+import { worldColor, worldInitials } from '../../world-chip';
 import type { WorldRow } from '@/lib/groups';
 import type { UserCharacter } from '@/lib/userCharacters';
 import type { RecentForUserRow } from '@/lib/notes';
@@ -42,9 +44,12 @@ export function MeDashboard({
   return (
     <div className="flex h-full flex-col overflow-y-auto bg-[var(--parchment)]">
       <header className="border-b border-[var(--rule)] bg-[var(--vellum)] px-8 py-6">
-        <h1 className="font-serif text-2xl text-[var(--ink)]">
-          Welcome back, {displayName}
-        </h1>
+        <div className="flex items-center gap-2.5">
+          <MobileNavToggle />
+          <h1 className="font-serif text-2xl text-[var(--ink)]">
+            Welcome back, {displayName}
+          </h1>
+        </div>
         <p className="mt-1 text-sm text-[var(--ink-soft)]">
           Your worlds, your characters, and what you&rsquo;ve been working on.
         </p>
@@ -228,13 +233,11 @@ function EmptyState({
 }
 
 function WorldChip({ world }: { world: WorldRow }): React.JSX.Element {
-  const bg = colorFor(world.id);
-  const initials = initialsOf(world.name);
   const hasIcon = world.iconVersion > 0;
   return (
     <span
-      className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px] text-sm font-semibold text-[var(--parchment)]"
-      style={{ backgroundColor: hasIcon ? 'var(--ink)' : bg }}
+      className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[14px] text-sm font-semibold text-[var(--rail-ink)]"
+      style={{ backgroundColor: hasIcon ? 'var(--ink)' : worldColor(world.id) }}
     >
       {hasIcon ? (
         <img
@@ -243,7 +246,7 @@ function WorldChip({ world }: { world: WorldRow }): React.JSX.Element {
           className="h-full w-full object-cover"
         />
       ) : (
-        initials
+        worldInitials(world.name)
       )}
     </span>
   );
@@ -269,28 +272,6 @@ function CharacterPortrait({
       <UserRound size={18} aria-hidden />
     </span>
   );
-}
-
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
-}
-
-function colorFor(id: string): string {
-  const palette = [
-    'var(--wine)',
-    'var(--moss)',
-    'var(--sage)',
-    'var(--candlelight)',
-    'var(--embers)',
-  ];
-  let h = 0;
-  for (let i = 0; i < id.length; i++) {
-    h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  }
-  return palette[h % palette.length]!;
 }
 
 function formatRelative(ts: number): string {

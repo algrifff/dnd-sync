@@ -1,36 +1,39 @@
 'use client';
 
-// Discord-style worlds rail. 56 px column of circular icons, one per
-// world the user is a member of, with the active world highlighted
-// by a left-edge pill. A "+" at the bottom opens a small dialog to
-// create a new world; submitting switches the caller into it.
+// Discord-style worlds rail. 56 px column: the user's Home tile (/me)
+// on top, then one circular icon per world they belong to. A "+" at
+// the bottom opens a small dialog to create a new world; submitting
+// switches the caller into it.
 //
 // Worlds list is fetched from /api/worlds on mount. Switching posts
 // to /api/worlds/active then router.refresh()es so every server
 // component re-reads session.currentGroupId.
 //
-// IMPORTANT: the active pill is driven by the `worldId` prop (from
-// the server session), NOT by the `isActive` flag on the fetched
-// list. The fetched list is a mount-time snapshot — if we read
-// isActive from it, every switch after the first keeps the highlight
-// pinned to whatever world was active when the sidebar mounted.
+// Exactly one item is active. `activeWorldId` below is the single
+// source: the world being switched to while a switch is in flight,
+// else nothing on /me (Home is active), else the session's world.
+// It never reads the `isActive` flag on the fetched list, which is a
+// mount-time snapshot and would pin the highlight to whatever world
+// was active when the rail mounted.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { Check, Link2, Pencil, Plus } from 'lucide-react';
 import { useWorldSwitch } from './(app)/WorldSwitch';
 import { NewWorldDialog } from './NewWorldDialog';
+import { worldColor, worldInitials } from './world-chip';
 
 type World = {
   id: string;
   name: string;
   role: 'admin' | 'editor' | 'viewer';
-  isActive: boolean;
   /** 0 = no uploaded icon, fall back to initials chip. Non-zero acts
    *  as a cache-buster for /api/worlds/{id}/icon?v=N. */
   iconVersion: number;
 };
+
+const HOME_LABEL = 'Home — your worlds & characters';
 
 export function WorldsSidebar({
   csrfToken,
@@ -55,10 +58,10 @@ export function WorldsSidebar({
    *  for use inside MobileNavDrawer, which is itself `md:hidden`. */
   variant?: 'rail' | 'drawer';
 }): React.JSX.Element {
-  const { isPending, switchTo } = useWorldSwitch();
-  const router = useRouter();
+  const { isPending, pendingWorldId, switchTo } = useWorldSwitch();
   const pathname = usePathname();
   const onMe = pathname === '/me' || pathname.startsWith('/me/');
+  const activeWorldId = pendingWorldId ?? (onMe ? null : worldId);
   const [worlds, setWorlds] = useState<World[] | null>(null);
   const [creating, setCreating] = useState<boolean>(false);
   const [busy, setBusy] = useState<boolean>(false);
@@ -80,12 +83,9 @@ export function WorldsSidebar({
   }, []);
 
   // When the active world changes, re-pull the list so role flags,
-  // iconVersion bumps, and any newly-joined worlds stay current. We
-  // already render the active pill straight from the `worldId` prop,
-  // so the list's own isActive column isn't load-bearing anymore —
-  // but the rest of the row data still needs to match the new
-  // session. Skip the very first render because the mount-time fetch
-  // already kicked off above.
+  // iconVersion bumps, and any newly-joined worlds stay current. Skip
+  // the very first render because the mount-time fetch already kicked
+  // off above.
   const mountedOnce = useRef<boolean>(false);
   useEffect(() => {
     if (!mountedOnce.current) {
@@ -106,42 +106,17 @@ export function WorldsSidebar({
     }
   };
 
-  // Live active-state view of the worlds list. We keep the fetched
-  // list as-is and override `isActive` per-row from the server
-  // session's worldId, so that after a switch the highlight flips
-  // even before the (possibly debounced) re-fetch finishes.
-  const worldsWithLiveActive = useMemo<World[] | null>(
-    () =>
-      worlds == null
-        ? null
-        : worlds.map((w) => ({ ...w, isActive: w.id === worldId })),
-    [worlds, worldId],
-  );
-
-  const switchWorld = async (id: string): Promise<void> => {
+  const switchWorld = async (id: string, destination?: string): Promise<void> => {
     if (busy || isPending) return;
     setBusy(true);
     try {
-      await switchTo(id);
+      await switchTo(id, destination);
     } finally {
       setBusy(false);
     }
   };
 
-  // Clicking the pencil on any world both flips the active world
-  // (server-side) and lands the user on its settings page. Setting
-  // the active world to the one it already is is a harmless no-op on
-  // the server, so we can route every case through switchTo and keep
-  // the world rail mounted.
-  const editWorld = async (w: World): Promise<void> => {
-    if (busy || isPending) return;
-    setBusy(true);
-    try {
-      await switchTo(w.id, '/settings/world');
-    } finally {
-      setBusy(false);
-    }
-  };
+  const homeActive = activeWorldId === null;
 
   return (
     <>
@@ -153,47 +128,56 @@ export function WorldsSidebar({
             : 'hidden h-full w-[56px] shrink-0 flex-col items-center gap-1.5 bg-[var(--shadow)] py-2 md:flex'
         }
       >
-        <button
-          type="button"
-          onClick={() => router.push('/me')}
-          title="Compendium · personal overview"
-          aria-label="Compendium overview"
-          aria-pressed={onMe}
-          className={
-            'flex h-10 w-10 items-center justify-center overflow-hidden bg-[var(--ink)] text-[var(--parchment)] transition-all ' +
-            (onMe
-              ? 'rounded-[14px] ring-2 ring-[var(--parchment)]/20'
-              : 'rounded-full hover:rounded-[14px]')
-          }
-        >
-          <img
-            src="/og-image.png"
-            alt=""
-            className="h-full w-full object-cover"
-          />
-        </button>
-        <div className="h-px w-8 bg-[var(--ink-soft)]/40" aria-hidden />
-        {worldsWithLiveActive == null ? (
-          <div className="h-10 w-10 animate-pulse rounded-full bg-[var(--ink-soft)]/40" />
+        <div className="group relative">
+          <RailPill active={homeActive} />
+          <Link
+            href="/me"
+            title={HOME_LABEL}
+            aria-label={HOME_LABEL}
+            aria-current={homeActive ? 'page' : undefined}
+            className={
+              'flex h-10 w-10 items-center justify-center rounded-[14px] transition-colors duration-150 motion-reduce:transition-none ' +
+              (homeActive
+                ? 'bg-[var(--candlelight)] text-[var(--shadow)]'
+                : 'bg-[var(--candlelight)]/15 text-[var(--candlelight)] hover:bg-[var(--candlelight)]/30')
+            }
+          >
+            <HearthIcon />
+          </Link>
+        </div>
+        <div className="my-0.5 h-0.5 w-8 rounded-full bg-[var(--rail-ink)]/25" aria-hidden />
+        {worlds == null ? (
+          [0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-[var(--rail-ink)]/10 motion-reduce:animate-none"
+              aria-hidden
+            />
+          ))
         ) : (
-          worldsWithLiveActive.map((w) => (
+          worlds.map((w) => (
             <WorldIcon
               key={w.id}
               world={w}
+              active={w.id === activeWorldId}
+              pending={w.id === pendingWorldId}
               onClick={() => {
-                if (!w.isActive) void switchWorld(w.id);
+                if (w.id !== activeWorldId) void switchWorld(w.id);
               }}
-              onEdit={() => void editWorld(w)}
+              // Editing flips the active world (a harmless no-op when it
+              // already is) and lands on its settings page, all through
+              // switchTo so the rail stays mounted.
+              onEdit={() => void switchWorld(w.id, '/settings/world')}
             />
           ))
         )}
-        <div className="mt-1 h-px w-8 bg-[var(--ink-soft)]/40" aria-hidden />
+        <div className="mt-1 h-px w-8 bg-[var(--rail-ink)]/15" aria-hidden />
         <button
           type="button"
           onClick={() => setCreating(true)}
           title="New world"
           aria-label="New world"
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--ink-soft)]/40 text-[var(--parchment)] transition hover:rounded-[14px] hover:bg-[var(--moss)] hover:text-[var(--parchment)]"
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--rail-ink)]/10 text-[var(--rail-ink)] transition-all motion-reduce:transition-none hover:rounded-[14px] hover:bg-[var(--moss)]"
         >
           <Plus size={18} aria-hidden />
         </button>
@@ -223,41 +207,81 @@ export function WorldsSidebar({
   );
 }
 
+/** Left-edge indicator shared by Home and every world. Must sit inside
+ *  a `group` wrapper so hover and keyboard focus can grow it. */
+function RailPill({ active }: { active: boolean }): React.JSX.Element {
+  return (
+    <span
+      aria-hidden
+      className={
+        'pointer-events-none absolute -left-2 top-1/2 w-1 -translate-y-1/2 rounded-r-full bg-[var(--candlelight)] transition-[height] duration-150 motion-reduce:transition-none ' +
+        (active ? 'h-9' : 'h-0 group-hover:h-5 group-focus-within:h-5')
+      }
+    />
+  );
+}
+
+/** A fireplace (mantle, surround, lucide's flame inside): the user's own
+ *  hearth, as opposed to the worlds they visit. Drawn on lucide's
+ *  24px / 2px-stroke grid. */
+function HearthIcon(): React.JSX.Element {
+  return (
+    <svg
+      width={22}
+      height={22}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M2 4h20" />
+      <path d="M4 4v17h16V4" />
+      <path
+        transform="translate(6 8.5) scale(0.5)"
+        strokeWidth={4}
+        d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+      />
+    </svg>
+  );
+}
+
 function WorldIcon({
   world,
+  active,
+  pending,
   onClick,
   onEdit,
 }: {
   world: World;
+  active: boolean;
+  pending: boolean;
   onClick: () => void;
   onEdit: () => void;
 }): React.JSX.Element {
-  const initials = initialsOf(world.name);
-  const bg = colorFor(world.id);
   const canEdit = world.role === 'admin';
   const hasIcon = world.iconVersion > 0;
   return (
     <div className="group relative">
-      <span
-        aria-hidden
-        className={
-          'absolute -left-1.5 top-1/2 -translate-y-1/2 rounded-r-full bg-[var(--parchment)] transition-all ' +
-          (world.isActive ? 'h-8 w-1' : 'h-0 w-0.5')
-        }
-      />
+      <RailPill active={active} />
       <button
         type="button"
         onClick={onClick}
         title={`${world.name} · ${world.role}`}
         aria-label={world.name}
-        aria-pressed={world.isActive}
+        aria-current={active ? 'true' : undefined}
+        aria-busy={pending || undefined}
         className={
-          'flex h-10 w-10 items-center justify-center overflow-hidden text-sm font-semibold text-[var(--parchment)] transition-all ' +
-          (world.isActive
-            ? 'rounded-[14px] ring-2 ring-[var(--parchment)]/20'
-            : 'rounded-full hover:rounded-[14px]')
+          'flex h-10 w-10 items-center justify-center overflow-hidden text-sm font-semibold text-[var(--rail-ink)] transition-[border-radius] duration-150 motion-reduce:transition-none ' +
+          (pending
+            ? 'rail-pending rounded-[14px]'
+            : active
+              ? 'rounded-[14px] ring-2 ring-[var(--rail-ink)]/20'
+              : 'rounded-full hover:rounded-[14px] focus-visible:rounded-[14px]')
         }
-        style={{ backgroundColor: hasIcon ? 'var(--ink)' : bg }}
+        style={{ backgroundColor: hasIcon ? 'var(--ink)' : worldColor(world.id) }}
       >
         {hasIcon ? (
           <img
@@ -266,9 +290,13 @@ function WorldIcon({
             className="h-full w-full object-cover"
           />
         ) : (
-          initials
+          worldInitials(world.name)
         )}
       </button>
+      {/* The pencil overlaps the tile's corner, so it takes taps only while
+          shown by hover or keyboard focus. Not focus-within: a tap focuses
+          the tile between mousedown and mouseup, the pencil would take the
+          mouseup, and the click would land on neither button. */}
       {canEdit && (
         <button
           type="button"
@@ -278,15 +306,16 @@ function WorldIcon({
           }}
           title={`Edit ${world.name}`}
           aria-label={`Edit ${world.name}`}
-          className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-[var(--ink)] bg-[var(--parchment)] text-[var(--ink)] opacity-0 transition hover:scale-110 group-hover:opacity-100"
+          className="pointer-events-none absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full opacity-0 transition-opacity duration-150 motion-reduce:transition-none group-hover:pointer-events-auto group-hover:opacity-100 group-has-[:focus-visible]:pointer-events-auto group-has-[:focus-visible]:opacity-100"
         >
-          <Pencil size={9} aria-hidden />
+          <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[var(--shadow)] bg-[var(--rail-ink)] text-[var(--shadow)]">
+            <Pencil size={9} aria-hidden />
+          </span>
         </button>
       )}
     </div>
   );
 }
-
 
 function ShareLinkButton({
   worldId,
@@ -337,10 +366,10 @@ function ShareLinkButton({
       title={copied ? 'Link copied!' : 'Copy invite link'}
       aria-label={copied ? 'Link copied!' : 'Copy invite link'}
       className={
-        'flex h-10 w-10 items-center justify-center rounded-full transition-all ' +
+        'flex h-10 w-10 items-center justify-center rounded-full text-[var(--rail-ink)] transition-all motion-reduce:transition-none ' +
         (copied
-          ? 'bg-[var(--moss)] text-[var(--parchment)] ring-2 ring-[var(--moss)]/50'
-          : 'bg-[var(--ink-soft)]/40 text-[var(--parchment)] hover:rounded-[14px] hover:bg-[var(--moss)]')
+          ? 'bg-[var(--moss)] ring-2 ring-[var(--moss)]/50'
+          : 'bg-[var(--rail-ink)]/10 hover:rounded-[14px] hover:bg-[var(--moss)]')
       }
     >
       {copied ? <Check size={16} aria-hidden /> : <Link2 size={16} aria-hidden />}
@@ -367,7 +396,7 @@ function ProfileAvatar({
       href="/settings/profile"
       title={`Profile · ${displayName}`}
       aria-label="Profile settings"
-      className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full transition-all hover:rounded-[14px] hover:ring-2 hover:ring-[var(--parchment)]/20"
+      className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full transition-all motion-reduce:transition-none hover:rounded-[14px] hover:ring-2 hover:ring-[var(--rail-ink)]/20"
     >
       {hasAvatar ? (
         <img
@@ -377,7 +406,7 @@ function ProfileAvatar({
         />
       ) : (
         <span
-          className="flex h-full w-full items-center justify-center text-sm font-semibold text-[var(--parchment)]"
+          className="flex h-full w-full items-center justify-center text-sm font-semibold text-[var(--rail-ink)]"
           style={{ backgroundColor: accentColor }}
         >
           {initial}
@@ -385,31 +414,4 @@ function ProfileAvatar({
       )}
     </Link>
   );
-}
-
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
-}
-
-/** Deterministic background per world id so the same world always
- *  gets the same colour chip without persisting one on the row. */
-function colorFor(id: string): string {
-  const palette = [
-    'var(--wine)', // wine
-    'var(--moss)', // moss
-    'var(--sage)', // sage
-    'var(--candlelight)', // candlelight
-    'var(--embers)', // embers
-    '#6A5D8B', // wisteria
-    '#4A6B7B', // deep water
-    '#8E6E53', // chestnut
-  ];
-  let h = 0;
-  for (let i = 0; i < id.length; i++) {
-    h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  }
-  return palette[h % palette.length]!;
 }
