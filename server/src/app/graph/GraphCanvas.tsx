@@ -999,15 +999,26 @@ export function GraphCanvas({
                 setCounts({ nodes: g.order, edges: g.size });
               }
               // Persist to DB then signal remote peers to pull the new edge.
-              void fetch('/api/notes/backlink', {
+              // A refusal (the caller can't edit both Notes) takes the edge back.
+              void fetch('/api/notes/relations', {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
                   'X-CSRF-Token': csrfToken,
                 },
-                body: JSON.stringify({ fromPath: source, toPath: target }),
-              }).then(() => {
-                metaMap.set('graphDirty', Date.now());
+                body: JSON.stringify({ path: source, relation: 'link', otherPath: target }),
+              }).then((res) => {
+                if (res.ok) {
+                  metaMap.set('graphDirty', Date.now());
+                } else if (g.hasEdge(key)) {
+                  g.dropEdge(key);
+                  for (const id of [source, target]) {
+                    const d = g.degree(id);
+                    g.setNodeAttribute(id, 'degree', d);
+                    g.setNodeAttribute(id, 'size', nodeRenderRadius(id, d) * nodeScaleRef.current);
+                  }
+                  setCounts({ nodes: g.order, edges: g.size });
+                }
               });
             }
             return;
