@@ -185,7 +185,7 @@ describe('listRelations', () => {
     relate(VOLO, 'member_of', GUILD);
 
     expect(listRelations({ groupId, role: 'viewer', path: GUILD })).toEqual([
-      expect.objectContaining({ relation: 'has_member', label: 'has member', path: VOLO, title: 'Volo', sessionPath: SESSION }),
+      expect.objectContaining({ relation: 'has_member', label: 'has member', path: VOLO, title: 'Volo', sessionPath: SESSION, fromSession: true, sessionTitle: 'The Mill', createdBy: 'owner' }),
     ]);
     expect(listRelations({ groupId, role: 'viewer', path: VOLO })).toEqual([
       expect.objectContaining({ relation: 'member_of', label: 'member of', path: GUILD, title: 'Thieves Guild' }),
@@ -219,6 +219,7 @@ describe('listRelations', () => {
     relate(VOLO, 'works_for', XANATHAR, SECRET_SESSION);
 
     expect(listRelations({ groupId, role: 'viewer', path: VOLO })[0]?.sessionPath).toBeNull();
+    expect(listRelations({ groupId, role: 'viewer', path: VOLO })[0]?.fromSession).toBe(true);
     expect(listRelations({ groupId, role: 'editor', path: VOLO })[0]?.sessionPath).toBe(SECRET_SESSION);
   });
 });
@@ -356,6 +357,7 @@ describe('deleting a Note', () => {
     seed(SESSION, 'A Different Mill');
 
     expect(listRelations({ groupId, role: 'admin', path: VOLO })[0]?.sessionPath).toBeNull();
+    expect(listRelations({ groupId, role: 'admin', path: VOLO })[0]?.fromSession).toBe(false);
   });
 
   it('drops the Relationships of every Note in a deleted folder', async () => {

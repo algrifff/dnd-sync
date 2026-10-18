@@ -1,18 +1,19 @@
-// Right-rail sidebar: backlinks (flat list), tags, outline, mini-graph.
-// Server component for everything data-driven; the Add-link affordance
-// + mini-graph are tiny client islands.
+// Right-rail sidebar: connections, tags, outline, mini-graph.
+// Server component for everything data-driven; the connections panel
+// + mini-graph are client islands.
 
 import type { ReactElement } from 'react';
 import Link from 'next/link';
 import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
 import { MiniGraph } from './MiniGraphLoader';
-import { BacklinksPanel } from './BacklinksPanel';
-import { OutgoingLinksPanel } from './OutgoingLinksPanel';
+import { ConnectionsPanel } from './ConnectionsPanel';
+import type { RelationRow } from './connections';
 
 export type OutlineItem = { level: number; text: string };
 
 export function NoteSidebar({
   path,
+  relations,
   backlinks,
   outgoingLinks,
   tags,
@@ -20,6 +21,7 @@ export function NoteSidebar({
   csrfToken,
 }: {
   path: string;
+  relations: RelationRow[];
   backlinks: BacklinkRow[];
   outgoingLinks: OutgoingLinkRow[];
   tags: string[];
@@ -28,14 +30,10 @@ export function NoteSidebar({
 }): ReactElement {
   return (
     <aside className="h-full overflow-y-auto border-l border-[var(--rule)] bg-[var(--parchment-sunk)]/40 px-4 py-4 text-sm">
-      <BacklinksPanel
-        initialBacklinks={backlinks}
-        currentPath={path}
-        csrfToken={csrfToken}
-      />
-
-      <OutgoingLinksPanel
-        initialOutgoingLinks={outgoingLinks}
+      <ConnectionsPanel
+        relations={relations}
+        backlinks={backlinks}
+        outgoingLinks={outgoingLinks}
         currentPath={path}
         csrfToken={csrfToken}
       />
