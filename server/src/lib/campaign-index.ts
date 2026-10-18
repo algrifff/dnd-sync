@@ -342,9 +342,10 @@ export async function deriveFolderIndex(
 
 /** Drive the derive across every distinct affected folder for a list
  *  of paths. Each path's parent (when under Campaigns/<slug>/) is
- *  deduplicated and derived once. An `actor` also auto-creates
- *  any missing index.md unless it says `createMissing: false` (only fires when the folder still has
- *  content — empty source folders after a move stay un-indexed). */
+ *  deduplicated and derived once. An `actor` also auto-creates any
+ *  missing index.md, unless it says `createMissing: false`. Creation
+ *  only fires when the folder still has content, so empty source
+ *  folders after a move stay un-indexed. */
 export async function deriveFolderIndexesFor(
   groupId: string,
   paths: string[],
