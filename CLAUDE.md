@@ -74,7 +74,7 @@ Key tables:
 | `sessions` | HTTP-only session cookies + CSRF tokens |
 | `characters` | Derived index from note frontmatter — re-derived on every save |
 | `session_notes` | Session status (open → closed) and the pending Wrap-up proposal (`wrap_up_json`) |
-| `character_suggestions` | Wrap-up Suggestions (story + inventory) held for a Character's Player until they accept or dismiss — never applied directly |
+| `character_suggestions` | Wrap-up Suggestions (story + inventory) held for a Character's Player until they accept or dismiss — never applied directly. Listed and resolved across every World the user belongs to (`/api/suggestions`, Home), so no current World is needed |
 | `import_jobs` | AI import pipeline state — `uploaded` → `orchestrating_assets` → `orchestrating_campaign` → `orchestrating_entities` → `orchestrating_quality` → `applied` on the live Smart Import path (can pause at `waiting_for_answer`); `parsing` → `analysing` → `ready` is the legacy manual-review path, still valid statuses but not driven by the current UI |
 | `assets` | Binary files (images etc.) deduplicated by content hash |
 | `note_links` | Graph edges between notes (backlinks) |
@@ -223,6 +223,7 @@ whole flow over HTTP) and the MCP Inspector:
 | `server/src/app/world-rail.ts` | The worlds rail's client model: unread badges against the per-browser seen map, reorder, 1–9 shortcuts and remembered last pages, pure apart from its localStorage wrappers |
 | `server/src/lib/relations.ts` | Relationships: `addRelation` (plus its manual link), visibility-gated `listRelations`, and the repoint/delete helpers every move and delete path calls |
 | `server/src/lib/ai/tools.ts` | AI tool definitions, unreferenced until the MCP connector adopts them |
+| `server/src/lib/home.ts` | Cross-world reads for Home (`/me`): `listOpenSessionsForUser` (newest open Session per World) and `listCharacterWorlds`. Every row spans all the user's Worlds and is gated by their role in that Note's own World |
 | `server/src/lib/wrap-up.ts` | Wrap-up: proposal shape, submit validation, candidate context, idempotent apply |
 | `server/src/lib/similar-names.ts` | Name similarity: `nameTokens`, `findSimilarNotes` (visibility-gated; same name, close spelling, or one near-identical word; containment deliberately excluded) behind the new-Note warning and the Wrap-up `similar` field |
 | `server/src/lib/note-edits.ts` | Lossless PM-JSON edits: `addHistoryEntry`, `linkMention`, `applyNoteEdit` |

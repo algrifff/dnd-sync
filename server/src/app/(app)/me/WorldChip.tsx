@@ -1,7 +1,7 @@
 // A World's icon, or its colour and initials when it has none. The same
 // world wears the same chip on the rail and everywhere on Home.
 
-import { worldColor, worldInitials } from '../../world-chip';
+import { worldChipStyle, worldInitials } from '../../world-chip';
 
 export type ChipWorld = { id: string; name: string; iconVersion: number };
 
@@ -26,8 +26,8 @@ export function WorldChip({
   return (
     <span
       aria-hidden
-      className={`flex shrink-0 items-center justify-center overflow-hidden font-semibold leading-none text-[var(--rail-ink)] ${SIZES[size]}`}
-      style={{ backgroundColor: hasIcon ? 'var(--ink)' : worldColor(world.id) }}
+      className={`flex shrink-0 items-center justify-center overflow-hidden font-semibold leading-none ${SIZES[size]}`}
+      style={hasIcon ? { backgroundColor: 'var(--ink)' } : worldChipStyle(world.id)}
     >
       {hasIcon ? (
         <img
