@@ -6,7 +6,7 @@
 
 import { ScrollText } from 'lucide-react';
 import { useWorldSwitch } from '../WorldSwitch';
-import { WorldChip, type ChipWorld } from './WorldChip';
+import { WorldChip, chipWorldFor, type ChipWorld } from './WorldChip';
 import { noteHref } from './note-href';
 import type { OpenSession } from '@/lib/home';
 
@@ -27,7 +27,7 @@ export function OpenSessionsStrip({
       </h2>
       <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {sessions.map((s) => {
-          const world = worlds.find((w) => w.id === s.worldId) ?? { id: s.worldId, name: s.worldName, iconVersion: 0 };
+          const world = chipWorldFor(worlds, s.worldId, s.worldName);
           return (
             <li key={s.worldId}>
               <button

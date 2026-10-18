@@ -29,11 +29,19 @@ function seedNote(groupId: string, path: string, title: string, flags: Flags = {
   return id;
 }
 
-function seedSession(groupId: string, path: string, date: string, status: 'open' | 'closed', flags: Flags = {}): void {
+function seedSession(
+  groupId: string,
+  path: string,
+  date: string,
+  status: 'open' | 'closed',
+  flags: Flags = {},
+  savedAt: number = Date.parse(date),
+): void {
   seedNote(groupId, path, path, flags);
-  getDb()
-    .query('INSERT INTO session_notes (group_id, note_path, session_date, updated_at, status) VALUES (?, ?, ?, ?, ?)')
-    .run(groupId, path, date, Date.now(), status);
+  const db = getDb();
+  db.query('UPDATE notes SET updated_at = ? WHERE group_id = ? AND path = ?').run(savedAt, groupId, path);
+  db.query('INSERT INTO session_notes (group_id, note_path, session_date, updated_at, status) VALUES (?, ?, ?, ?, ?)')
+    .run(groupId, path, date, savedAt, status);
 }
 
 function member(groupId: string, userId: string, role: Role): void {
@@ -97,6 +105,15 @@ describe('open sessions on Home', () => {
     getDb().query('DELETE FROM group_members WHERE group_id = ? AND user_id = ?').run(SHARED, users.viewer);
 
     expect(listOpenSessionsForUser(users.viewer)).toEqual([]);
+  });
+
+  it('should show the most recently saved open Session when an older one has a free-form date', () => {
+    seedSession(HOME, 'log/flamerule.md', 'Flamerule 3', 'open', {}, Date.parse('2025-06-01'));
+    seedSession(HOME, 'log/tonight.md', '2026-10-18', 'open');
+
+    const home = listOpenSessionsForUser(users.viewer).find((r) => r.worldId === HOME);
+
+    expect(home?.path).toBe('log/tonight.md');
   });
 });
 

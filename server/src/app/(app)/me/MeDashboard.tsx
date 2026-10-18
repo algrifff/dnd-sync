@@ -104,6 +104,9 @@ export function MeDashboard({
                       <div className="truncate text-sm font-medium text-[var(--ink)]">
                         {c.name}
                       </div>
+                      <div className="text-[11px] uppercase tracking-wide text-[var(--ink-soft)]">
+                        {c.kind}
+                      </div>
                       {playedIn.length === 0 ? (
                         <div className="text-[11px] text-[var(--ink-muted)]">Not in a world yet</div>
                       ) : (

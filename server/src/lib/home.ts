@@ -19,7 +19,10 @@ export type OpenSession = {
 /** Worlds shown in the Open sessions strip at most. */
 export const MAX_OPEN_SESSION_WORLDS = 6;
 
-/** The newest open Session per World, newest World first. */
+/** The most recently saved open Session per World, newest World first.
+ *  Ranked by the Note's `updated_at`, never by `session_date`, which is
+ *  free-form `sheet.date` text, so an imported log
+ *  dated "Flamerule 3" would sort above tonight's ISO-dated Session. */
 export function listOpenSessionsForUser(userId: string): OpenSession[] {
   return getDb()
     .query<OpenSession, [string, number]>(
@@ -32,7 +35,7 @@ export function listOpenSessionsForUser(userId: string): OpenSession[] {
                 COUNT(*) OVER (PARTITION BY sn.group_id) AS openCount,
                 ROW_NUMBER() OVER (
                   PARTITION BY sn.group_id
-                  ORDER BY sn.session_date IS NULL, sn.session_date DESC, n.updated_at DESC
+                  ORDER BY n.updated_at DESC
                 ) AS rank
            FROM session_notes sn
            JOIN group_members gm ON gm.group_id = sn.group_id AND gm.user_id = ?

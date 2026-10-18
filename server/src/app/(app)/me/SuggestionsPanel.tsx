@@ -12,7 +12,7 @@ import { Loader2 } from 'lucide-react';
 import type { PendingSuggestion } from '@/lib/character-suggestions';
 import { itemsLabel } from '../../notes/wrap-up-review';
 import { useWorldSwitch } from '../WorldSwitch';
-import { WorldChip, type ChipWorld } from './WorldChip';
+import { WorldChip, chipWorldFor, type ChipWorld } from './WorldChip';
 import { noteHref } from './note-href';
 
 export function SuggestionsPanel({
@@ -85,7 +85,7 @@ export function SuggestionsPanel({
       <ul className="mt-3 space-y-2">
         {suggestions.map((s) => {
           const busy = busyId === s.id;
-          const world = worlds.find((w) => w.id === s.worldId) ?? { id: s.worldId, name: s.worldName, iconVersion: 0 };
+          const world = chipWorldFor(worlds, s.worldId, s.worldName);
           return (
             <li key={s.id} className="rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] p-3">
               <p className="flex items-center gap-1.5 text-[11px] text-[var(--ink-soft)]">

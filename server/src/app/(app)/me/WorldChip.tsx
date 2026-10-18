@@ -5,6 +5,11 @@ import { worldColor, worldInitials } from '../../world-chip';
 
 export type ChipWorld = { id: string; name: string; iconVersion: number };
 
+/** The listed World with this id, or an icon-less chip from its name. */
+export function chipWorldFor(worlds: readonly ChipWorld[], id: string, name: string): ChipWorld {
+  return worlds.find((w) => w.id === id) ?? { id, name, iconVersion: 0 };
+}
+
 const SIZES = {
   md: 'h-10 w-10 rounded-[14px] text-sm',
   sm: 'h-5 w-5 rounded-[7px] text-[9px]',
