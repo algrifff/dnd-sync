@@ -1,7 +1,7 @@
 'use client';
 
-// Persistent tab strip of open notes. Stored in localStorage so tabs
-// survive reloads; the tab matching the current URL is "active". Opening
+// Persistent tab strip of open notes. Stored in localStorage per world
+// so tabs survive reloads and each world keeps its own; the tab matching the current URL is "active". Opening
 // a note (any /notes/<path>) adds it to the list; X removes. Removing the
 // active tab routes to the next tab, or `/` if empty.
 //
@@ -14,7 +14,13 @@ import { X, FileText } from 'lucide-react';
 import { TREE_CHANGE_EVENT, TREE_CHANGE_REMOTE_EVENT } from '@/lib/tree-sync';
 import { setPersistentPaths } from './notes/provider-cache';
 
-const STORAGE_KEY = 'compendium.tabs.v1';
+// One list shared by every world, from before tabs were per world.
+// Opening a world pruned the other worlds' notes out of it.
+const LEGACY_STORAGE_KEY = 'compendium.tabs.v1';
+
+export function tabsStorageKey(groupId: string): string {
+  return `compendium.tabs.v2:${groupId}`;
+}
 
 type Tab = { path: string; title: string };
 
@@ -30,7 +36,11 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
   useEffect(() => {
     setMounted(true);
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      let raw = localStorage.getItem(tabsStorageKey(groupId));
+      if (raw === null) {
+        raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+      }
       const parsed = raw ? (JSON.parse(raw) as unknown) : null;
       if (Array.isArray(parsed)) {
         const clean = parsed.filter(
@@ -45,7 +55,7 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [groupId]);
 
   // Add / refresh the current note in the tab list.
   useEffect(() => {
@@ -70,11 +80,11 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
   useEffect(() => {
     if (!mounted) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs));
+      localStorage.setItem(tabsStorageKey(groupId), JSON.stringify(tabs));
     } catch {
       /* ignore */
     }
-  }, [tabs, mounted]);
+  }, [tabs, mounted, groupId]);
 
   // Prefetch every non-active open tab. Next.js caches the RSC payload
   // client-side for ~30s even on force-dynamic routes, so switching to

@@ -8,12 +8,11 @@
 
 import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-
-const TABS_STORAGE_KEY = 'compendium.tabs.v1';
+import { tabsStorageKey } from '../../../../NoteTabs';
 
 type StoredTab = { path: string; title: string };
 
-export function TabCleaner(): null {
+export function TabCleaner({ groupId }: { groupId: string }): null {
   const router = useRouter();
   const pathname = usePathname() ?? '';
 
@@ -22,7 +21,7 @@ export function TabCleaner(): null {
     const notePath = decode(pathname.slice('/notes/'.length));
 
     try {
-      const raw = localStorage.getItem(TABS_STORAGE_KEY);
+      const raw = localStorage.getItem(tabsStorageKey(groupId));
       const parsed = raw ? (JSON.parse(raw) as unknown) : null;
       if (Array.isArray(parsed)) {
         const next = parsed.filter(
@@ -32,7 +31,7 @@ export function TabCleaner(): null {
             typeof (t as StoredTab).path === 'string' &&
             (t as StoredTab).path !== notePath,
         );
-        localStorage.setItem(TABS_STORAGE_KEY, JSON.stringify(next));
+        localStorage.setItem(tabsStorageKey(groupId), JSON.stringify(next));
       }
     } catch {
       /* quota / private-mode / malformed — leave it */
@@ -41,7 +40,7 @@ export function TabCleaner(): null {
     // replace, not push — this URL is dead, Back shouldn't return to it.
     const t = setTimeout(() => router.replace('/home'), 1500);
     return () => clearTimeout(t);
-  }, [pathname, router]);
+  }, [pathname, router, groupId]);
 
   return null;
 }

@@ -11,7 +11,8 @@ import {
   useTransition,
   type ReactNode,
 } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { rememberablePath, writeLastPage } from '../world-rail';
 import { EVENTS, identify, setWorld, track } from '@/lib/analytics/client';
 
 type WorldSwitchContextValue = {
@@ -69,6 +70,17 @@ export function WorldSwitchProvider({
     setWorld(activeWorldId);
     track(EVENTS.WORLD_SELECTED, { world_id: activeWorldId });
   }, [activeWorldId]);
+
+  // Remember the page the user is on in the current world, so the rail
+  // can return them to it. Not mid-switch: the destination's pathname
+  // can commit before the session's new world id reaches this provider.
+  const pathname = usePathname();
+  const search = useSearchParams().toString();
+  useEffect(() => {
+    if (!activeWorldId || isPending || isSwitching) return;
+    const page = rememberablePath(pathname, search);
+    if (page) writeLastPage(activeWorldId, page);
+  }, [activeWorldId, pathname, search, isPending, isSwitching]);
 
   // Client-side switch. The active world lives in the session row on
   // the server; PATCH /api/worlds/active flips it, then we router-nav

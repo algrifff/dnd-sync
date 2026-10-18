@@ -5,35 +5,53 @@
 // the bottom opens a small dialog to create a new world; submitting
 // switches the caller into it.
 //
-// Worlds list is fetched from /api/worlds on mount. Switching posts
-// to /api/worlds/active then router.refresh()es so every server
-// component re-reads session.currentGroupId.
+// Worlds list is fetched from /api/worlds on mount, on window focus
+// and every minute while the tab is visible, so activity badges appear
+// without a reload. Switching posts to /api/worlds/active then
+// router.refresh()es so every server component re-reads
+// session.currentGroupId, landing on the last page the user had open
+// in that world.
 //
-// Exactly one item is active. `activeWorldId` below is the single
-// source: the world being switched to while a switch is in flight,
-// else nothing on /me (Home is active), else the session's world.
-// It never reads the `isActive` flag on the fetched list, which is a
-// mount-time snapshot and would pin the highlight to whatever world
-// was active when the rail mounted.
+// Each world renders from one RailWorld (world-rail.ts): the fetched
+// row joined with this browser's last-seen map and the active and
+// pending ids. Exactly one item is active. `activeWorldId` below is
+// the single source: the world being switched to while a switch is in
+// flight, else nothing on /me (Home is active), else the session's
+// world. It never reads the `isActive` flag on the fetched list, which
+// is a fetch-time snapshot and would pin the highlight to whatever
+// world was active then.
+//
+// Worlds reorder by drag (useWorldDrag) or Alt+ArrowUp/Down on a
+// focused world; Alt+1..9 opens the nth world and Alt+0 goes Home.
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { Check, Link2, Pencil, Plus } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { Check, Flame, Link2, Pencil, Plus } from 'lucide-react';
 import { useWorldSwitch } from './(app)/WorldSwitch';
 import { NewWorldDialog } from './NewWorldDialog';
+import { useWorldDrag } from './useWorldDrag';
 import { worldColor, worldInitials } from './world-chip';
-
-type World = {
-  id: string;
-  name: string;
-  role: 'admin' | 'editor' | 'viewer';
-  /** 0 = no uploaded icon, fall back to initials chip. Non-zero acts
-   *  as a cache-buster for /api/worlds/{id}/icon?v=N. */
-  iconVersion: number;
-};
+import {
+  applyOrder,
+  markSeen,
+  moveBy,
+  railShortcut,
+  railWorlds,
+  readLastPage,
+  readSeen,
+  reconcileSeen,
+  shortcutLabel,
+  writeSeen,
+  type RailWorld,
+  type SeenMap,
+  type WorldRow,
+} from './world-rail';
 
 const HOME_LABEL = 'Home — your worlds & characters';
+const HOME_SHORTCUT = shortcutLabel(0);
+const POLL_MS = 60_000;
+const MIN_REFETCH_GAP_MS = 5_000;
 
 export function WorldsSidebar({
   csrfToken,
@@ -55,72 +73,200 @@ export function WorldsSidebar({
   /** 'rail' (default) is the desktop Discord-style column — hidden
    *  below `md`, unchanged. 'drawer' renders the identical content as
    *  a plain always-visible flex column with no `hidden`/`md:` guard,
-   *  for use inside MobileNavDrawer, which is itself `md:hidden`. */
+   *  for use inside MobileNavDrawer, which is itself `md:hidden`. The
+   *  rail instance is always mounted, so it alone marks worlds seen
+   *  and owns the global shortcuts. */
   variant?: 'rail' | 'drawer';
 }): React.JSX.Element {
   const { isPending, pendingWorldId, switchTo } = useWorldSwitch();
+  const router = useRouter();
   const pathname = usePathname();
   const onMe = pathname === '/me' || pathname.startsWith('/me/');
   const activeWorldId = pendingWorldId ?? (onMe ? null : worldId);
-  const [worlds, setWorlds] = useState<World[] | null>(null);
+  const ownsRail = variant === 'rail';
+  const [rows, setRows] = useState<WorldRow[] | null>(null);
+  const [seen, setSeen] = useState<SeenMap>({});
   const [creating, setCreating] = useState<boolean>(false);
   const [busy, setBusy] = useState<boolean>(false);
+  const [announcement, setAnnouncement] = useState<string>('');
+  const railRef = useRef<HTMLElement | null>(null);
+  const hintId = useId();
+  // An order the user made that the server has not confirmed yet. A
+  // fetch landing meanwhile keeps it instead of snapping back.
+  const localOrder = useRef<string[] | null>(null);
+  const lastFetchAt = useRef<number>(0);
 
-  useEffect(() => {
-    void fetchWorlds();
-  }, []);
-
-  // Re-fetch the worlds list whenever the current world is edited
-  // elsewhere (for example the settings page dispatches this after a
-  // successful rename), so the sidebar's icon tooltip / aria-label stay
-  // in sync without a full reload.
-  useEffect(() => {
-    const onWorldUpdated = (): void => {
-      void fetchWorlds();
-    };
-    window.addEventListener('world-updated', onWorldUpdated);
-    return () => window.removeEventListener('world-updated', onWorldUpdated);
-  }, []);
-
-  // When the active world changes, re-pull the list so role flags,
-  // iconVersion bumps, and any newly-joined worlds stay current. Skip
-  // the very first render because the mount-time fetch already kicked
-  // off above.
-  const mountedOnce = useRef<boolean>(false);
-  useEffect(() => {
-    if (!mountedOnce.current) {
-      mountedOnce.current = true;
-      return;
-    }
-    void fetchWorlds();
-  }, [worldId]);
-
-  const fetchWorlds = async (): Promise<void> => {
+  const fetchWorlds = useCallback(async (): Promise<void> => {
+    lastFetchAt.current = Date.now();
     try {
       const res = await fetch('/api/worlds', { cache: 'no-store' });
       if (!res.ok) return;
-      const body = (await res.json()) as { worlds?: World[] };
-      setWorlds(body.worlds ?? []);
+      const body = (await res.json()) as { worlds?: WorldRow[] };
+      const fetched = body.worlds ?? [];
+      setRows(localOrder.current ? applyOrder(fetched, localOrder.current) : fetched);
     } catch {
-      /* keep loading state */
+      /* keep the current list */
     }
+  }, []);
+
+  // Mount, and again whenever the session's world changes, so role
+  // flags, iconVersion bumps and newly joined worlds stay current.
+  useEffect(() => {
+    void fetchWorlds();
+  }, [fetchWorlds, worldId]);
+
+  // The settings page dispatches this after a rename or icon change.
+  useEffect(() => {
+    const onWorldUpdated = (): void => void fetchWorlds();
+    window.addEventListener('world-updated', onWorldUpdated);
+    return () => window.removeEventListener('world-updated', onWorldUpdated);
+  }, [fetchWorlds]);
+
+  useEffect(() => {
+    const refresh = (): void => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastFetchAt.current < MIN_REFETCH_GAP_MS) return;
+      void fetchWorlds();
+    };
+    const timer = setInterval(refresh, POLL_MS);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [fetchWorlds]);
+
+  // The active world counts as seen on every fetch (which also runs
+  // when the tab regains focus), and the world being left counts as
+  // seen at the moment of leaving, so the user's own last edits there
+  // never come back as a badge.
+  const leaving = useRef<string | null>(activeWorldId);
+  useEffect(() => {
+    let next = readSeen();
+    if (ownsRail) {
+      const now = Date.now();
+      if (leaving.current && leaving.current !== activeWorldId) {
+        next = markSeen(next, leaving.current, now);
+      }
+      if (rows) next = reconcileSeen(next, rows, activeWorldId, now);
+      writeSeen(next);
+    }
+    leaving.current = activeWorldId;
+    setSeen(next);
+  }, [rows, activeWorldId, ownsRail]);
+
+  const items = useMemo<RailWorld[] | null>(
+    () => (rows ? railWorlds(rows, seen, activeWorldId, pendingWorldId) : null),
+    [rows, seen, activeWorldId, pendingWorldId],
+  );
+
+  const switchWorld = useCallback(
+    async (id: string, destination?: string): Promise<void> => {
+      if (busy || isPending) return;
+      setBusy(true);
+      try {
+        await switchTo(id, destination ?? readLastPage(id) ?? undefined);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, isPending, switchTo],
+  );
+
+  // One save in flight at a time; a reorder made meanwhile is sent
+  // when it lands, so the server never ends on an older order.
+  const saveQueue = useRef<{ inFlight: boolean; next: string[] | null }>({
+    inFlight: false,
+    next: null,
+  });
+  const saveOrder = useCallback(
+    async (order: string[]): Promise<void> => {
+      const q = saveQueue.current;
+      q.next = order;
+      if (q.inFlight) return;
+      q.inFlight = true;
+      try {
+        while (q.next) {
+          const worldIds = q.next;
+          q.next = null;
+          const res = await fetch('/api/worlds/order', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+            body: JSON.stringify({ worldIds }),
+          });
+          if (!res.ok) throw new Error(`order save failed: ${res.status}`);
+        }
+        localOrder.current = null;
+      } catch {
+        q.next = null;
+        localOrder.current = null;
+        setAnnouncement('Could not save the world order. It has been put back.');
+        void fetchWorlds();
+      } finally {
+        q.inFlight = false;
+      }
+    },
+    [csrfToken, fetchWorlds],
+  );
+
+  const showOrder = useCallback((order: string[]): void => {
+    localOrder.current = order;
+    setRows((prev) => (prev ? applyOrder(prev, order) : prev));
+  }, []);
+
+  const commitOrder = useCallback(
+    (order: string[], movedId: string): void => {
+      showOrder(order);
+      void saveOrder(order);
+      const name = rows?.find((r) => r.id === movedId)?.name ?? 'World';
+      setAnnouncement(`${name} moved to position ${order.indexOf(movedId) + 1} of ${order.length}.`);
+    },
+    [rows, saveOrder, showOrder],
+  );
+
+  const ids = useMemo(() => rows?.map((r) => r.id) ?? [], [rows]);
+  const drag = useWorldDrag({ railRef, ids, onPreview: showOrder, onDrop: commitOrder });
+
+  const moveWithKeyboard = (id: string, delta: number): void => {
+    const order = moveBy(ids, id, delta);
+    if (order.join() !== ids.join()) commitOrder(order, id);
+    // React moves the other items around the focused one, but keep focus
+    // on the moved world explicitly in case its node was re-inserted.
+    requestAnimationFrame(() =>
+      railRef.current
+        ?.querySelector<HTMLElement>(`[data-world-id="${CSS.escape(id)}"]`)
+        ?.focus(),
+    );
   };
 
-  const switchWorld = async (id: string, destination?: string): Promise<void> => {
-    if (busy || isPending) return;
-    setBusy(true);
-    try {
-      await switchTo(id, destination);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const latest = useRef({ items, switchWorld, router });
+  latest.current = { items, switchWorld, router };
+  useEffect(() => {
+    if (!ownsRail) return;
+    const onKey = (e: KeyboardEvent): void => {
+      const shortcut = railShortcut(e);
+      if (!shortcut || isEditable(e.target)) return;
+      e.preventDefault();
+      const { items: current, switchWorld: go, router: nav } = latest.current;
+      if (shortcut.kind === 'home') {
+        nav.push('/me');
+        return;
+      }
+      const target = current?.[shortcut.index];
+      if (target && !target.active) void go(target.row.id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [ownsRail]);
 
   const homeActive = activeWorldId === null;
 
   return (
     <>
       <aside
+        ref={railRef}
         aria-label="Worlds"
         className={
           variant === 'drawer'
@@ -129,11 +275,12 @@ export function WorldsSidebar({
         }
       >
         <div className="group relative">
-          <RailPill active={homeActive} />
+          <RailPill state={homeActive ? 'active' : 'idle'} />
           <Link
             href="/me"
-            title={HOME_LABEL}
+            title={`${HOME_LABEL} · ${HOME_SHORTCUT}`}
             aria-label={HOME_LABEL}
+            aria-keyshortcuts={HOME_SHORTCUT}
             aria-current={homeActive ? 'page' : undefined}
             className={
               'flex h-10 w-10 items-center justify-center rounded-[14px] transition-colors duration-150 motion-reduce:transition-none ' +
@@ -146,7 +293,7 @@ export function WorldsSidebar({
           </Link>
         </div>
         <div className="my-0.5 h-0.5 w-8 rounded-full bg-[var(--rail-ink)]/25" aria-hidden />
-        {worlds == null ? (
+        {items == null ? (
           [0, 1, 2].map((i) => (
             <div
               key={i}
@@ -155,22 +302,31 @@ export function WorldsSidebar({
             />
           ))
         ) : (
-          worlds.map((w) => (
+          items.map((item) => (
             <WorldIcon
-              key={w.id}
-              world={w}
-              active={w.id === activeWorldId}
-              pending={w.id === pendingWorldId}
+              key={item.row.id}
+              item={item}
+              dragging={drag.draggingId === item.row.id}
+              describedBy={hintId}
+              onPointerDown={(e) => drag.onPointerDown(e, item.row.id)}
+              onClickCapture={drag.onClickCapture}
               onClick={() => {
-                if (w.id !== activeWorldId) void switchWorld(w.id);
+                if (!item.active) void switchWorld(item.row.id);
               }}
+              onMove={(delta) => moveWithKeyboard(item.row.id, delta)}
               // Editing flips the active world (a harmless no-op when it
               // already is) and lands on its settings page, all through
               // switchTo so the rail stays mounted.
-              onEdit={() => void switchWorld(w.id, '/settings/world')}
+              onEdit={() => void switchWorld(item.row.id, '/settings/world')}
             />
           ))
         )}
+        <span id={hintId} className="sr-only">
+          Drag, or press Alt with the up or down arrow, to reorder.
+        </span>
+        <span role="status" aria-live="polite" className="sr-only">
+          {announcement}
+        </span>
         <div className="mt-1 h-px w-8 bg-[var(--rail-ink)]/15" aria-hidden />
         <button
           type="button"
@@ -199,7 +355,7 @@ export function WorldsSidebar({
           onClose={() => setCreating(false)}
           onCreated={(id) => {
             setCreating(false);
-            void switchWorld(id);
+            void switchWorld(id, '/home');
           }}
         />
       )}
@@ -207,15 +363,29 @@ export function WorldsSidebar({
   );
 }
 
+function isEditable(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.isContentEditable ||
+    target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') !==
+      null
+  );
+}
+
 /** Left-edge indicator shared by Home and every world. Must sit inside
- *  a `group` wrapper so hover and keyboard focus can grow it. */
-function RailPill({ active }: { active: boolean }): React.JSX.Element {
+ *  a `group` wrapper so hover and keyboard focus can grow it. Unread is
+ *  a short nub, the way a chat app marks a channel with new messages. */
+function RailPill({ state }: { state: 'active' | 'unread' | 'idle' }): React.JSX.Element {
   return (
     <span
       aria-hidden
       className={
         'pointer-events-none absolute -left-2 top-1/2 w-1 -translate-y-1/2 rounded-r-full bg-[var(--candlelight)] transition-[height] duration-150 motion-reduce:transition-none ' +
-        (active ? 'h-9' : 'h-0 group-hover:h-5 group-focus-within:h-5')
+        (state === 'active'
+          ? 'h-9'
+          : state === 'unread'
+            ? 'h-2 group-hover:h-5 group-focus-within:h-5'
+            : 'h-0 group-hover:h-5 group-focus-within:h-5')
       }
     />
   );
@@ -249,32 +419,56 @@ function HearthIcon(): React.JSX.Element {
 }
 
 function WorldIcon({
-  world,
-  active,
-  pending,
+  item,
+  dragging,
+  describedBy,
+  onPointerDown,
+  onClickCapture,
   onClick,
+  onMove,
   onEdit,
 }: {
-  world: World;
-  active: boolean;
-  pending: boolean;
+  item: RailWorld;
+  dragging: boolean;
+  describedBy: string;
+  onPointerDown: (e: React.PointerEvent<HTMLElement>) => void;
+  onClickCapture: (e: React.MouseEvent) => void;
   onClick: () => void;
+  onMove: (delta: number) => void;
   onEdit: () => void;
 }): React.JSX.Element {
+  const { row: world, active, pending } = item;
   const canEdit = world.role === 'admin';
   const hasIcon = world.iconVersion > 0;
   return (
-    <div className="group relative">
-      <RailPill active={active} />
+    <div
+      className={
+        'group relative transition-transform duration-150 motion-reduce:transition-none ' +
+        (dragging ? 'z-10 scale-110 opacity-90' : '')
+      }
+    >
+      <RailPill state={active ? 'active' : item.unread ? 'unread' : 'idle'} />
       <button
         type="button"
+        data-world-id={world.id}
+        onPointerDown={onPointerDown}
+        onClickCapture={onClickCapture}
         onClick={onClick}
-        title={`${world.name} · ${world.role}`}
-        aria-label={world.name}
+        onKeyDown={(e) => {
+          if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+          if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+          e.preventDefault();
+          onMove(e.key === 'ArrowUp' ? -1 : 1);
+        }}
+        title={item.title}
+        aria-label={item.label}
+        aria-describedby={describedBy}
+        aria-keyshortcuts={item.shortcut ? shortcutLabel(item.shortcut) : undefined}
         aria-current={active ? 'true' : undefined}
         aria-busy={pending || undefined}
         className={
-          'flex h-10 w-10 items-center justify-center overflow-hidden text-sm font-semibold text-[var(--rail-ink)] transition-[border-radius] duration-150 motion-reduce:transition-none ' +
+          'flex h-10 w-10 touch-manipulation select-none items-center justify-center overflow-hidden text-sm font-semibold text-[var(--rail-ink)] transition-[border-radius] duration-150 [-webkit-touch-callout:none] motion-reduce:transition-none ' +
+          (dragging ? 'cursor-grabbing shadow-lg ' : '') +
           (pending
             ? 'rail-pending rounded-[14px]'
             : active
@@ -287,12 +481,21 @@ function WorldIcon({
           <img
             src={`/api/worlds/${encodeURIComponent(world.id)}/icon?v=${world.iconVersion}`}
             alt=""
+            draggable={false}
             className="h-full w-full object-cover"
           />
         ) : (
           worldInitials(world.name)
         )}
       </button>
+      {item.live && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -bottom-1 -right-1 flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 border-[var(--shadow)] bg-[var(--candlelight)] text-[var(--shadow)]"
+        >
+          <Flame size={10} strokeWidth={2.75} />
+        </span>
+      )}
       {canEdit && (
         <button
           type="button"
