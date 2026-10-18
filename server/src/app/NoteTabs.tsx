@@ -1,9 +1,10 @@
 'use client';
 
-// Persistent tab strip of open notes. Stored in localStorage so tabs
-// survive reloads; the tab matching the current URL is "active". Opening
-// a note (any /notes/<path>) adds it to the list; X removes. Removing the
-// active tab routes to the next tab, or `/` if empty.
+// Persistent tab strip of open notes. Stored in localStorage per world
+// so tabs survive reloads and each world keeps its own; the tab matching
+// the current URL is "active". Opening a note (any /notes/<path>) adds
+// it to the list; X removes. Removing the active tab routes to the next
+// tab, or `/` if empty.
 //
 // Non-note routes (home, /tags, /admin/...) just render the tab strip as
 // a passive preview — the "active" dot moves off, but the tabs stay.
@@ -13,15 +14,19 @@ import { usePathname, useRouter } from 'next/navigation';
 import { X, FileText } from 'lucide-react';
 import { TREE_CHANGE_EVENT, TREE_CHANGE_REMOTE_EVENT } from '@/lib/tree-sync';
 import { setPersistentPaths } from './notes/provider-cache';
-
-const STORAGE_KEY = 'compendium.tabs.v1';
-
-type Tab = { path: string; title: string };
+import { readTabs, type StoredTab as Tab, writeTabs } from './note-tabs-storage';
+import { useWorldSwitch } from './(app)/WorldSwitch';
 
 export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
   const router = useRouter();
   const pathname = usePathname() ?? '';
   const activePath = decodeNotePath(pathname);
+  // Mid-switch the URL can already show the next world's note while this
+  // strip still belongs to the last world. The remount keyed on groupId
+  // picks the note up once the switch lands.
+  const { isPending: switching } = useWorldSwitch();
+  const switchingRef = useRef<boolean>(switching);
+  switchingRef.current = switching;
 
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [mounted, setMounted] = useState<boolean>(false);
@@ -29,27 +34,12 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
 
   useEffect(() => {
     setMounted(true);
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const parsed = raw ? (JSON.parse(raw) as unknown) : null;
-      if (Array.isArray(parsed)) {
-        const clean = parsed.filter(
-          (t): t is Tab =>
-            !!t &&
-            typeof t === 'object' &&
-            typeof (t as Tab).path === 'string' &&
-            typeof (t as Tab).title === 'string',
-        );
-        setTabs(clean);
-      }
-    } catch {
-      /* ignore */
-    }
-  }, []);
+    setTabs(readTabs(groupId));
+  }, [groupId]);
 
   // Add / refresh the current note in the tab list.
   useEffect(() => {
-    if (!activePath) return;
+    if (!activePath || switching) return;
     setTabs((prev) => {
       const idx = prev.findIndex((t) => t.path === activePath);
       const title = prettyTitle(activePath);
@@ -61,7 +51,7 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
       }
       return [...prev, { path: activePath, title }];
     });
-  }, [activePath]);
+  }, [activePath, switching]);
 
   // Keep ref in sync for synchronous reads inside async callbacks.
   tabsRef.current = tabs;
@@ -69,12 +59,8 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
   // Persist.
   useEffect(() => {
     if (!mounted) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs));
-    } catch {
-      /* ignore */
-    }
-  }, [tabs, mounted]);
+    writeTabs(groupId, tabs);
+  }, [tabs, mounted, groupId]);
 
   // Prefetch every non-active open tab. Next.js caches the RSC payload
   // client-side for ~30s even on force-dynamic routes, so switching to
@@ -116,6 +102,9 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
     if (!mounted) return;
     let cancelled = false;
     const validate = async (): Promise<void> => {
+      // The session already points at the next world, so /api/tree would
+      // prune this world's tabs against the wrong tree.
+      if (switchingRef.current) return;
       try {
         const headers: Record<string, string> = {};
         if (lastTreeEtagRef.current) {
@@ -125,7 +114,7 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
           headers,
           cache: 'no-store',
         });
-        if (cancelled) return;
+        if (cancelled || switchingRef.current) return;
         // 304 → tree unchanged, nothing to prune. Skip the JSON parse
         // and the entire walk + setTabs cycle.
         if (res.status === 304) return;

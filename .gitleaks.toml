@@ -1,0 +1,13 @@
+# gitleaks reads this from the repo root. It keeps every default rule and
+# only stops the generic-api-key rule matching our own localStorage key
+# names, such as 'compendium.tabs.v1'. Those are versioned key strings,
+# not secrets.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "localStorage key names (compendium.<name>.v<N>)"
+targetRules = ["generic-api-key"]
+regexTarget = "secret"
+regexes = ['''^compendium\.[A-Za-z]+\.v[0-9]+:?$''']
