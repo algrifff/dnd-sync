@@ -190,4 +190,10 @@ describe('findWholeWord', () => {
   it('rejects a match flanked by a word character', () => {
     expect(findWholeWord('Blacktower and Black Towers', 'Black Tower')).toBeNull();
   });
+
+  it('treats a combining mark after the term as part of the word', () => {
+    // "Zoë" written decomposed: e + U+0308, as macOS vault imports often are.
+    expect(findWholeWord('We met Zoë at dawn', 'Zoe')).toBeNull();
+    expect(findWholeWord('We met Zoe at dawn', 'Zoe')).not.toBeNull();
+  });
 });

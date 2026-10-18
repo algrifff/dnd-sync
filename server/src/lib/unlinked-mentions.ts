@@ -20,7 +20,7 @@ const SNIPPET_RADIUS = 40;
 
 type Candidate = { path: string; title: string; content_text: string; updated_at: number };
 
-const WORD_CHAR = /[\p{L}\p{N}_]/u;
+const WORD_CHAR = /[\p{L}\p{M}\p{N}_]/u;
 
 const isWordChar = (ch: string): boolean => ch !== '' && WORD_CHAR.test(ch);
 
