@@ -78,21 +78,21 @@ type Palette = {
 
 function readPalette(): Palette {
   const fallback: Palette = {
-    background: new THREE.Color('#0A0806'),
-    edge: new THREE.Color('#5A4F42'),
-    candlelight: new THREE.Color('#D4A85A'),
-    inkSoft: '#5A4F42',
-    ink: '#2A241E',
+    background: new THREE.Color('#0A0A09'),
+    edge: new THREE.Color('#4B4943'),
+    candlelight: new THREE.Color('#C99A45'),
+    inkSoft: '#4B4943',
+    ink: '#1D1C1A',
   };
   if (typeof document === 'undefined') return fallback;
   const cs = getComputedStyle(document.documentElement);
   const get = (name: string, def: string) => cs.getPropertyValue(name).trim() || def;
   return {
-    background: new THREE.Color(get('--parchment-deep', '#0A0806')),
-    edge: new THREE.Color(get('--ink-soft', '#5A4F42')),
-    candlelight: new THREE.Color(get('--candlelight', '#D4A85A')),
-    inkSoft: get('--ink-soft', '#5A4F42'),
-    ink: get('--ink', '#2A241E'),
+    background: new THREE.Color(get('--parchment-deep', '#0A0A09')),
+    edge: new THREE.Color(get('--ink-soft', '#4B4943')),
+    candlelight: new THREE.Color(get('--candlelight', '#C99A45')),
+    inkSoft: get('--ink-soft', '#4B4943'),
+    ink: get('--ink', '#1D1C1A'),
   };
 }
 
@@ -949,21 +949,21 @@ type LoadPhase = 'fetching' | 'placing' | 'ready' | 'error';
 // rest of this file use #FFFFFF.
 const STAR_PRESETS: Array<{ id: string; label: string; hex: string }> = [
   { id: 'white', label: 'Starlight', hex: '#FFFFFF' },
-  { id: 'candlelight', label: 'Candlelight', hex: '#D4A85A' },
-  { id: 'moss', label: 'Moss', hex: '#7B8A5F' },
-  { id: 'sage', label: 'Sage', hex: '#6B7F8E' },
+  { id: 'candlelight', label: 'Candlelight', hex: '#C99A45' },
+  { id: 'moss', label: 'Moss', hex: '#6F7F55' },
+  { id: 'sage', label: 'Sage', hex: '#607585' },
   { id: 'wine', label: 'Wine', hex: '#8B4A52' },
   { id: 'embers', label: 'Embers', hex: '#B5572A' },
   { id: 'wisteria', label: 'Wisteria', hex: '#6A5D8B' },
-  { id: 'ink', label: 'Ink', hex: '#2A241E' },
+  { id: 'ink', label: 'Ink', hex: '#1D1C1A' },
 ];
 
 const BG_PRESETS: Array<{ id: string; label: string; hex: string }> = [
-  { id: 'shadow', label: 'Shadow', hex: '#0A0806' },
-  { id: 'ink', label: 'Ink', hex: '#1E1A15' },
-  { id: 'vellum-night', label: 'Vellum (night)', hex: '#3A342E' },
-  { id: 'parchment', label: 'Parchment', hex: '#F4EDE0' },
-  { id: 'parchment-sunk', label: 'Parchment sunk', hex: '#EAE1CF' },
+  { id: 'shadow', label: 'Shadow', hex: '#0A0A09' },
+  { id: 'ink', label: 'Ink', hex: '#131312' },
+  { id: 'vellum-night', label: 'Vellum (night)', hex: '#232321' },
+  { id: 'parchment', label: 'Paper', hex: '#FAFAF7' },
+  { id: 'parchment-sunk', label: 'Paper sunk', hex: '#F2F1EC' },
   { id: 'wine', label: 'Wine', hex: '#3B1F22' },
   { id: 'sage', label: 'Sage', hex: '#1F2B33' },
 ];
@@ -991,7 +991,7 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
   const [phase, setPhase] = useState<LoadPhase>('fetching');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [starColor, setStarColor] = useState<string>('#FFFFFF');
-  const [bgColor, setBgColor] = useState<string>('#0A0806');
+  const [bgColor, setBgColor] = useState<string>('#0A0A09');
   const [labelVis, setLabelVis] = useState<number>(DEFAULT_LABEL_VIS);
   const [hoverLabels, setHoverLabels] = useState<boolean>(true);
   const [waveAmp, setWaveAmp] = useState<number>(DEFAULT_WAVE_AMP);
@@ -1376,7 +1376,7 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
         onBgChange={setBgColor}
         onColorReset={() => {
           setStarColor('#FFFFFF');
-          setBgColor('#0A0806');
+          setBgColor('#0A0A09');
         }}
         labelVis={labelVis}
         onLabelVisChange={setLabelVis}
@@ -1416,8 +1416,8 @@ export function GraphCanvas3D({ groupId }: { groupId: string }): React.ReactElem
             typeof crypto !== 'undefined' && 'randomUUID' in crypto
               ? crypto.randomUUID()
               : `g_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-          const palette = ['#D4A85A', '#7B8A5F', '#8B4A52', '#6B7F8E', '#B5572A', '#6A5D8B'];
-          const color = palette[groupsState.length % palette.length] ?? '#D4A85A';
+          const palette = ['#C99A45', '#6F7F55', '#8B4A52', '#607585', '#B5572A', '#6A5D8B'];
+          const color = palette[groupsState.length % palette.length] ?? '#C99A45';
           const g: Group = {
             id,
             name: `Group ${groupsState.length + 1}`,

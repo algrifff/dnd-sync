@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   canonicalPair,
+  forwardOf,
   inverseOf,
   parseRelation,
   RELATION_GROUPS,
@@ -83,5 +84,30 @@ describe('canonicalPair', () => {
 
   test('keeps the direction of a directed type', () => {
     expect(canonicalPair('b.md', 'member_of', 'a.md')).toEqual({ from: 'b.md', relation: 'member_of', to: 'a.md' });
+  });
+});
+
+describe('forwardOf', () => {
+  test('reads a stored type as itself', () => {
+    expect(forwardOf('member_of')).toEqual({ relation: 'member_of', swap: false });
+    expect(forwardOf('Ally of')).toEqual({ relation: 'ally_of', swap: false });
+  });
+
+  test('reads every inverse name as its forward type with the ends swapped', () => {
+    for (const type of RELATION_TYPES) {
+      const info = RELATIONS[type];
+      if (info.symmetric) continue;
+      expect(forwardOf(info.inverse)).toEqual({ relation: type, swap: true });
+    }
+    expect(forwardOf('contains')).toEqual({ relation: 'located_in', swap: true });
+  });
+
+  test('never swaps a symmetric type', () => {
+    expect(forwardOf('enemy_of')).toEqual({ relation: 'enemy_of', swap: false });
+  });
+
+  test('rejects anything else', () => {
+    expect(forwardOf('friends_with')).toBeNull();
+    expect(forwardOf(7)).toBeNull();
   });
 });

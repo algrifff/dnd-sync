@@ -700,7 +700,7 @@ function SubtitleInput({
         const trimmed = draft.trim();
         if (trimmed !== value.trim()) onCommit(trimmed);
       }}
-      className="min-w-[4ch] border-0 border-b-2 border-transparent bg-transparent p-0 font-serif text-base text-[var(--ink-soft)] outline-none placeholder:text-[var(--ink-muted)] hover:border-[var(--world-accent,#8A7E6B)] focus:border-[var(--world-accent,#8A7E6B)] focus:outline-0 focus:ring-0 focus-visible:outline-0"
+      className="min-w-[4ch] border-0 border-b-2 border-transparent bg-transparent p-0 font-serif text-base text-[var(--ink-soft)] outline-none placeholder:text-[var(--ink-muted)] hover:border-[var(--world-accent,var(--ink-muted))] focus:border-[var(--world-accent,var(--ink-muted))] focus:outline-0 focus:ring-0 focus-visible:outline-0"
     />
   );
 }

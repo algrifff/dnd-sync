@@ -43,7 +43,9 @@ export type AuditAction =
   | 'db.wipe'
   | 'character.assign_player'
   | 'campaign.reorder'
-  | 'campaign.destroy';
+  | 'campaign.destroy'
+  | 'relation.add'
+  | 'relation.remove';
 
 export type AuditEntry = {
   action: AuditAction;

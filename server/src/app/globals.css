@@ -4,32 +4,34 @@
    Both themes share variable names; only values differ. Any component
    referencing a palette colour must go through these vars, not hex. */
 :root {
-  --parchment: #F4EDE0;
-  --parchment-sunk: #EAE1CF;
-  --parchment-deep: #D9CCAF;
-  --vellum: #FBF5E8;
-  --ink: #2A241E;
-  --ink-soft: #5A4F42;
-  --ink-muted: #8A7E6B;
-  --rule: #D4C7AE;
-  --candlelight: #D4A85A;
-  --moss: #7B8A5F;
+  /* Paper white: a near-neutral sheet with only a breath of warmth,
+     so the accents carry the colour instead of the page. */
+  --parchment: #FAFAF7;
+  --parchment-sunk: #F2F1EC;
+  --parchment-deep: #E4E2DB;
+  --vellum: #FFFFFF;
+  --ink: #1D1C1A;
+  --ink-soft: #4B4943;
+  --ink-muted: #85827A;
+  --rule: #E3E1DA;
+  --candlelight: #C99A45;
+  --moss: #6F7F55;
   --wine: #8B4A52;
-  --sage: #6B7F8E;
+  --sage: #607585;
   --embers: #B5572A;
-  --shadow: #1E1A15;
+  --shadow: #1A1917;
   /* World-chip colours beyond the core palette (see world-chip.ts). */
   --wisteria: #6A5D8B;
   --deep-water: #4A6B7B;
   --chestnut: #8E6E53;
   /* Glyph ink for the worlds rail. The rail sits on --shadow, which is
      near-black in both themes, so this stays light at night too. */
-  --rail-ink: #F4EDE0;
+  --rail-ink: #FAFAF7;
   /* World chips (world-chip.ts): a background and an initials ink per
      chip. world-chip.test.ts holds each pair to 4.5:1 in both themes. */
   --chip-wine: var(--wine);
   --chip-wine-ink: var(--rail-ink);
-  --chip-moss: var(--moss);
+  --chip-moss: #7B8A5F;
   --chip-moss-ink: var(--shadow);
   --chip-sage: #738795;
   --chip-sage-ink: var(--shadow);
@@ -45,35 +47,36 @@
   --chip-chestnut-ink: var(--rail-ink);
 
   /* RGB triplets for rgba-style tints: rgb(var(--wine-rgb) / 0.12) */
-  --parchment-rgb: 244 237 224;
-  --ink-rgb: 42 36 30;
-  --ink-soft-rgb: 90 79 66;
+  --parchment-rgb: 250 250 247;
+  --ink-rgb: 29 28 26;
+  --ink-soft-rgb: 75 73 67;
   --wine-rgb: 139 74 82;
-  --candlelight-rgb: 212 168 90;
-  --moss-rgb: 123 138 95;
-  --sage-rgb: 107 127 142;
+  --candlelight-rgb: 201 154 69;
+  --moss-rgb: 111 127 85;
+  --sage-rgb: 96 117 133;
   --embers-rgb: 181 87 42;
 }
 
 [data-theme="night"] {
-  --parchment: #2A241E;
-  --parchment-sunk: #1E1A15;
-  --parchment-deep: #0A0806;
-  --vellum: #3A342E;
-  --ink: #F4EDE0;
-  --ink-soft: #D4C7AE;
-  --ink-muted: #8A7E6B;
-  --rule: #3A342E;
-  --candlelight: #E8B865;
+  /* Ink-black paper: neutral charcoal rather than brown. */
+  --parchment: #191918;
+  --parchment-sunk: #131312;
+  --parchment-deep: #0A0A09;
+  --vellum: #232321;
+  --ink: #EDECE8;
+  --ink-soft: #B9B7B0;
+  --ink-muted: #807D76;
+  --rule: #2E2D2A;
+  --candlelight: #E2B566;
   --moss: #9CAC7E;
-  --wine: #B16770;
+  --wine: #C07880;
   --sage: #8BA1B2;
   --embers: #D06E3E;
-  --shadow: #151210;
+  --shadow: #070707;
   --wisteria: #8A7DAB;
   --deep-water: #6A8B9B;
   --chestnut: #AE8E73;
-  --rail-ink: #F4EDE0;
+  --rail-ink: #FAFAF7;
   --chip-wine: #B36A73;
   --chip-wine-ink: var(--shadow);
   --chip-moss: var(--moss);
@@ -91,11 +94,11 @@
   --chip-chestnut: var(--chestnut);
   --chip-chestnut-ink: var(--shadow);
 
-  --parchment-rgb: 42 36 30;
-  --ink-rgb: 244 237 224;
-  --ink-soft-rgb: 212 199 174;
-  --wine-rgb: 177 103 112;
-  --candlelight-rgb: 232 184 101;
+  --parchment-rgb: 25 25 24;
+  --ink-rgb: 237 236 232;
+  --ink-soft-rgb: 185 183 176;
+  --wine-rgb: 192 120 128;
+  --candlelight-rgb: 226 181 102;
   --moss-rgb: 156 172 126;
   --sage-rgb: 139 161 178;
   --embers-rgb: 208 110 62;
@@ -140,15 +143,6 @@ html, body {
   display: none;
 }
 
-/* Subtle paper texture — inline data-URI so we don't need a round-trip
-   to /public for the main chrome. 6% opacity via blend mode. */
-.surface-paper {
-  background-image:
-    radial-gradient(circle at 12% 30%, rgba(180, 150, 100, 0.06) 0, transparent 30%),
-    radial-gradient(circle at 85% 70%, rgba(180, 150, 100, 0.05) 0, transparent 35%);
-  background-blend-mode: multiply;
-}
-
 /* ── Tiptap read-mode surface ──────────────────────────────────────── */
 
 .note-surface .ProseMirror {
@@ -169,7 +163,7 @@ html, body {
  * animation naturally. */
 .note-surface .ProseMirror .collab-caret {
   position: relative;
-  border-left: 2px solid var(--caret-color, #5A4F42);
+  border-left: 2px solid var(--caret-color, var(--ink-soft));
   border-right: 0;
   margin-left: -1px;
   margin-right: -1px;
@@ -185,9 +179,9 @@ html, body {
   font-size: 10px;
   font-weight: 600;
   line-height: 1.2;
-  color: #2A241E;
+  color: #1D1C1A;
   background-color: var(--caret-color-light, rgb(var(--ink-soft-rgb) / 0.35));
-  border: 1px solid var(--caret-color, #5A4F42);
+  border: 1px solid var(--caret-color, var(--ink-soft));
   white-space: nowrap;
   user-select: none;
   pointer-events: none;

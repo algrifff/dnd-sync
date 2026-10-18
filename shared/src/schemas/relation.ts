@@ -71,6 +71,19 @@ export function parseRelation(raw: unknown): RelationType | null {
   return (RELATION_TYPES as readonly string[]).includes(name) ? (name as RelationType) : null;
 }
 
+/** Reads a name from one Note's side as the stored form. `swap` is true
+ *  when the name is the inverse, so the two ends trade places: `contains`
+ *  from A to B is `B located_in A`. Null for an unknown name. A symmetric
+ *  type's name is its own inverse and never swaps. */
+export function forwardOf(raw: unknown): { relation: RelationType; swap: boolean } | null {
+  const type = parseRelation(raw);
+  if (type) return { relation: type, swap: false };
+  if (typeof raw !== 'string') return null;
+  const name = raw.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const found = RELATION_TYPES.find((t) => RELATIONS[t].inverse === name);
+  return found ? { relation: found, swap: true } : null;
+}
+
 export function inverseOf(type: RelationType): RelationName {
   return RELATIONS[type].inverse;
 }

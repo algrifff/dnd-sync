@@ -28,7 +28,7 @@ export default function AppLoading(): React.JSX.Element {
         {/* Main column skeleton */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="h-9 shrink-0 border-b border-[var(--rule)] bg-[var(--parchment)]" />
-          <div className="surface-paper mx-auto w-full max-w-4xl px-6 py-10">
+          <div className="mx-auto w-full max-w-4xl px-6 py-10">
             <div className="h-10 w-1/2 animate-pulse rounded bg-[var(--rule)]/60" />
             <div className="mt-3 h-4 w-1/3 animate-pulse rounded bg-[var(--rule)]/40" />
             <div className="mt-10 h-32 w-full animate-pulse rounded-[12px] bg-[var(--rule)]/30" />
