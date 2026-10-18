@@ -13,6 +13,7 @@ const rel = (label: string, path: string, title: string): RelationRow => ({
   path,
   title,
   sessionPath: null,
+  fromSession: false,
   sessionTitle: null,
   createdBy: null,
   canRemove: true,
@@ -97,22 +98,28 @@ describe('mergeLinks', () => {
 describe('relationProvenance', () => {
   it('prefers the Session', () => {
     expect(
-      relationProvenance({ sessionPath: 'Logs/s1.md', sessionTitle: 'The Mill', createdBy: 'Alex' }),
+      relationProvenance({ sessionPath: 'Logs/s1.md', fromSession: true, sessionTitle: 'The Mill', createdBy: 'Alex' }),
     ).toEqual({ kind: 'session', path: 'Logs/s1.md', title: 'The Mill' });
   });
 
   it('names the Session by its file when the title is empty', () => {
     expect(
-      relationProvenance({ sessionPath: 'Logs/s1.md', sessionTitle: '', createdBy: 'Alex' }),
+      relationProvenance({ sessionPath: 'Logs/s1.md', fromSession: true, sessionTitle: '', createdBy: 'Alex' }),
     ).toEqual({ kind: 'session', path: 'Logs/s1.md', title: 's1' });
   });
 
+  it('says "from a Session" without a link when the Session is not visible', () => {
+    expect(
+      relationProvenance({ sessionPath: null, fromSession: true, sessionTitle: null, createdBy: 'Alex' }),
+    ).toEqual({ kind: 'hidden-session' });
+  });
+
   it('falls back to who added it, then to nothing', () => {
-    expect(relationProvenance({ sessionPath: null, sessionTitle: null, createdBy: 'Alex' })).toEqual({
+    expect(relationProvenance({ sessionPath: null, fromSession: false, sessionTitle: null, createdBy: 'Alex' })).toEqual({
       kind: 'author',
       name: 'Alex',
     });
-    expect(relationProvenance({ sessionPath: null, sessionTitle: null, createdBy: null })).toBeNull();
+    expect(relationProvenance({ sessionPath: null, fromSession: false, sessionTitle: null, createdBy: null })).toBeNull();
   });
 });
 

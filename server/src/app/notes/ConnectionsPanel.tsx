@@ -328,6 +328,8 @@ function RelationItem({
                 {provenance.title}
               </Link>
             </>
+          ) : provenance.kind === 'hidden-session' ? (
+            <>from a Session</>
           ) : (
             <>added by {provenance.name}</>
           )}

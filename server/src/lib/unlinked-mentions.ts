@@ -15,7 +15,7 @@ const MIN_TERM_LENGTH = 4;
  *  until `limit` real hits turn up or the candidates run out. */
 const PAGE_SIZE = 200;
 /** Hard stop on candidates read per term, so a very common name is bounded. */
-const MAX_CANDIDATES_PER_TERM = 5000;
+const MAX_CANDIDATES_PER_TERM = 1000;
 const SNIPPET_RADIUS = 40;
 
 type Candidate = { path: string; title: string; content_text: string; updated_at: number };
@@ -31,42 +31,75 @@ const isSpace = (ch: string | undefined): boolean => ch !== undefined && WHITESP
 const sameChar = (a: string, b: string): boolean =>
   a === b || a.toLocaleLowerCase() === b.toLocaleLowerCase();
 
+/** Cheap prefilter run before any per-character work: a Note can only
+ *  hold `term` if its lowercased text contains the term's first word. */
+export function mayContainTerm(text: string, term: string): boolean {
+  const first = term.split(/\s+/u).find(Boolean);
+  return first !== undefined && text.toLowerCase().includes(first.toLowerCase());
+}
+
+const codePointAt = (text: string, i: number): string =>
+  i < text.length ? String.fromCodePoint(text.codePointAt(i)!) : '';
+
+/** The character ending just before `i` ('' at the start). */
+const charBefore = (text: string, i: number): string => {
+  if (i <= 0) return '';
+  const lo = text.charCodeAt(i - 1);
+  if (lo >= 0xdc00 && lo <= 0xdfff && i >= 2) {
+    const hi = text.charCodeAt(i - 2);
+    if (hi >= 0xd800 && hi <= 0xdbff) return text.slice(i - 2, i);
+  }
+  return text[i - 1]!;
+};
+
+/** End index (exclusive) of `needle` matched at `start` in `text`, or -1. */
+function matchAt(text: string, start: number, needle: string[]): number {
+  let ti = start;
+  for (const want of needle) {
+    if (want === ' ') {
+      if (!isSpace(codePointAt(text, ti))) return -1;
+      while (ti < text.length && isSpace(codePointAt(text, ti))) ti += codePointAt(text, ti).length;
+    } else {
+      const ch = codePointAt(text, ti);
+      if (ch === '' || !sameChar(ch, want)) return -1;
+      ti += ch.length;
+    }
+  }
+  return ti;
+}
+
 /** First whole-word, case-insensitive occurrence of `term` in `text`: not
- *  flanked by a letter, digit or underscore. Walks the original text one
- *  character at a time (no lowercased copy, so `İ` cannot shift offsets);
- *  any run of whitespace in the text, a newline or NBSP included, matches
- *  the gap between two words of the term. No regex is built from `term`.
- *  `index` and `length` are in the ORIGINAL text. */
+ *  flanked by a letter, digit or underscore. Candidate starts come from an
+ *  `indexOf` of the lowercased first word when lowercasing keeps the text's
+ *  length (the usual case), else from a scan of every character; either way
+ *  each candidate is verified against the ORIGINAL text, so `İ` cannot shift
+ *  offsets. Any run of whitespace in the text, a newline or NBSP included,
+ *  matches the gap between two words of the term. No regex is built from
+ *  `term`. `index` and `length` are in the ORIGINAL text. */
 export function findWholeWord(text: string, term: string): { index: number; length: number } | null {
   const words = term.split(/\s+/u).filter(Boolean);
   if (words.length === 0) return null;
   const needle = Array.from(words.join(' '));
-  const chars = Array.from(text);
-  const offsets: number[] = [];
-  let at = 0;
-  for (const ch of chars) {
-    offsets.push(at);
-    at += ch.length;
-  }
-  offsets.push(at);
 
-  for (let i = 0; i < chars.length; i++) {
-    if (isSpace(chars[i]) || !sameChar(chars[i]!, needle[0]!)) continue;
-    let ti = i;
-    let ok = true;
-    for (let n = 0; n < needle.length && ok; n++) {
-      if (needle[n] === ' ') {
-        if (!isSpace(chars[ti])) ok = false;
-        while (isSpace(chars[ti])) ti++;
-      } else if (ti < chars.length && sameChar(chars[ti]!, needle[n]!)) {
-        ti++;
-      } else {
-        ok = false;
-      }
+  const accept = (i: number): { index: number; length: number } | null => {
+    const end = matchAt(text, i, needle);
+    if (end < 0) return null;
+    if (isWordChar(charBefore(text, i)) || isWordChar(codePointAt(text, end))) return null;
+    return { index: i, length: end - i };
+  };
+
+  const lowered = text.toLowerCase();
+  if (lowered.length === text.length) {
+    const first = words[0]!.toLowerCase();
+    for (let i = lowered.indexOf(first); i !== -1; i = lowered.indexOf(first, i + 1)) {
+      const m = accept(i);
+      if (m) return m;
     }
-    if (!ok) continue;
-    if (isWordChar(chars[i - 1] ?? '') || isWordChar(chars[ti] ?? '')) continue;
-    return { index: offsets[i]!, length: offsets[ti]! - offsets[i]! };
+    return null;
+  }
+  for (let i = 0; i < text.length; i += codePointAt(text, i).length) {
+    const m = accept(i);
+    if (m) return m;
   }
   return null;
 }
@@ -126,6 +159,7 @@ export function findUnlinkedMentions(opts: {
         )
         .all(match, groupId, path, path, path, PAGE_SIZE, offset);
       for (const r of rows) {
+        if (!mayContainTerm(r.content_text, term)) continue;
         const m = findWholeWord(r.content_text, term);
         if (!m) continue;
         termHits++;
