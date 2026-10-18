@@ -12,6 +12,7 @@ import { buildSessionCookies, createSession, type Session } from '@/lib/session'
 import { GET as getPending, POST as submit } from './route';
 import { GET as getContext } from './context/route';
 import { POST as apply } from './apply/route';
+import { GET as listPending } from './pending/route';
 
 const SESSION = 'Campaigns/Ashfall/Adventure Log/2026-10-11-the-mill.md';
 const SECRET_SESSION = 'Campaigns/Ashfall/Adventure Log/2026-10-12-the-vault.md';
@@ -482,5 +483,28 @@ describe('Relationships through the Wrap-up routes', () => {
     expect(await same.json()).toEqual({ error: 'invalid_relation', reason: 'relations.0: both ends are the same Note' });
     expect(badType.status).toBe(400);
     expect(((await badType.json()) as { error: string }).error).toBe('invalid_body');
+  });
+});
+
+describe('GET /api/sessions/wrap-up/pending', () => {
+  const pendingUrl = 'http://localhost/api/sessions/wrap-up/pending';
+  type Pending = { pending: Array<{ sessionPath: string; title: string; mentions: number }> };
+
+  it('rejects anonymous callers', async () => {
+    expect((await listPending(get(pendingUrl, null))).status).toBe(401);
+  });
+
+  it('lists a Secret Session to a Co-GM but never to a Player', async () => {
+    await submitOk(coGm, proposal());
+    await submitOk(coGm, proposal(SECRET_SESSION));
+
+    const forPlayer = (await (await listPending(get(pendingUrl, player))).json()) as Pending;
+    const forCoGm = (await (await listPending(get(pendingUrl, coGm))).json()) as Pending;
+
+    const playerPaths = forPlayer.pending.map((p) => p.sessionPath);
+    expect(playerPaths).toContain(SESSION);
+    expect(playerPaths).not.toContain(SECRET_SESSION);
+    expect(forPlayer.pending.find((p) => p.sessionPath === SESSION)!.title).toBe('The Mill');
+    expect(forCoGm.pending.map((p) => p.sessionPath)).toEqual(expect.arrayContaining([SESSION, SECRET_SESSION]));
   });
 });

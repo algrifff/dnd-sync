@@ -519,20 +519,28 @@ export type PendingWrapUp = {
  *  `role` may see, newest first, counted as `loadPendingWrapUp` would
  *  show it. Backs the header's "Wrap-up ready" notice. */
 export function listPendingWrapUps(groupId: string, role: Role): PendingWrapUp[] {
+  // One join gates every Session at once; only visible ones pay for
+  // loadPendingWrapUp's per-mention checks.
   const rows = getDb()
-    .query<{ note_path: string }, [string]>(
-      `SELECT note_path FROM session_notes WHERE group_id=? AND wrap_up_json IS NOT NULL`,
+    .query<
+      { path: string; title: string; frontmatter_json: string; dm_only: number; gm_only: number },
+      [string]
+    >(
+      `SELECT n.path, n.title, n.frontmatter_json, n.dm_only, n.gm_only
+         FROM session_notes s
+         JOIN notes n ON n.group_id = s.group_id AND n.path = s.note_path
+        WHERE s.group_id = ? AND s.wrap_up_json IS NOT NULL`,
     )
     .all(groupId);
+  const vis = visibilityFor(role);
   const out: PendingWrapUp[] = [];
-  for (const { note_path } of rows) {
-    const lookup = loadVisibleSession(groupId, role, note_path);
-    if (lookup.status !== 'ok') continue;
-    const proposal = loadPendingWrapUp(groupId, role, note_path);
+  for (const row of rows) {
+    if (isHidden(row, vis) || frontmatterKind(row.frontmatter_json) !== 'session') continue;
+    const proposal = loadPendingWrapUp(groupId, role, row.path);
     if (!proposal) continue;
     out.push({
-      sessionPath: note_path,
-      title: lookup.note.title,
+      sessionPath: row.path,
+      title: row.title,
       generatedAt: proposal.generatedAt,
       mentions: proposal.mentions.length,
       relations: proposal.relations.length,

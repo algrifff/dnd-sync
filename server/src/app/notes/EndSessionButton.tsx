@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Check, ScrollText, X } from 'lucide-react';
 import { broadcastTreeChange } from '@/lib/tree-sync';
 import { EVENTS, track } from '@/lib/analytics/client';
@@ -27,16 +27,18 @@ export function EndSessionButton({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState<{ outcome: WrapUpOutcome | null } | null>(null);
+  const wantsReview = useSearchParams().has(REVIEW_PARAM);
 
-  // Arrived from the header's Wrap-up notice (`?review=1`): open the
-  // review straight away and drop the flag so a reload doesn't reopen it.
+  // Arrived from the header's Wrap-up notice (`?review=1`), including a
+  // soft navigation to the Session already open: open the review straight
+  // away and drop the flag so a reload doesn't reopen it.
   useEffect(() => {
+    if (!wantsReview) return;
     const url = new URL(window.location.href);
-    if (!url.searchParams.has(REVIEW_PARAM)) return;
     url.searchParams.delete(REVIEW_PARAM);
     window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
     if (hasPendingWrapUp) setOpen(true);
-  }, [sessionPath, hasPendingWrapUp]);
+  }, [wantsReview, hasPendingWrapUp]);
 
   function handleDone(outcome: WrapUpOutcome | null): void {
     track(EVENTS.END_SESSION_CONFIRMED, {
