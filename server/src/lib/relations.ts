@@ -61,6 +61,10 @@ export type RelationView = {
   title: string;
   /** The Session that established it, when the reader may see it. */
   sessionPath: string | null;
+  /** The Session's title, when `sessionPath` is set. */
+  sessionTitle: string | null;
+  /** Display name of the person who added it, when known. */
+  createdBy: string | null;
   createdAt: number;
 };
 
@@ -70,6 +74,8 @@ type Row = {
   path: string;
   title: string;
   session_path: string | null;
+  session_title: string | null;
+  created_by_name: string | null;
   created_at: number;
 };
 
@@ -83,11 +89,14 @@ export function listRelations(opts: { groupId: string; role: Role; path: string 
   const side = (outgoing: 0 | 1): string => {
     const [me, other] = outgoing ? ['from_path', 'to_path'] : ['to_path', 'from_path'];
     return `SELECT ${outgoing} AS outgoing, r.relation AS relation, o.path AS path, o.title AS title,
-                   s.path AS session_path, r.created_at
+                   s.path AS session_path, s.title AS session_title,
+                   COALESCE(NULLIF(u.display_name, ''), u.username) AS created_by_name,
+                   r.created_at
               FROM note_relations r
               JOIN notes me ON me.group_id = r.group_id AND me.path = r.${me}${hidden('me')}
               JOIN notes o ON o.group_id = r.group_id AND o.path = r.${other}${hidden('o')}
               LEFT JOIN notes s ON s.group_id = r.group_id AND s.path = r.session_path${hidden('s')}
+              LEFT JOIN users u ON u.id = r.created_by
              WHERE r.group_id = ? AND r.${me} = ?`;
   };
   const rows = getDb()
@@ -101,6 +110,8 @@ export function listRelations(opts: { groupId: string; role: Role; path: string 
     path: r.path,
     title: r.title,
     sessionPath: r.session_path,
+    sessionTitle: r.session_title,
+    createdBy: r.created_by_name,
     createdAt: r.created_at,
   }));
 }

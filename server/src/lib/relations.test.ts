@@ -185,7 +185,7 @@ describe('listRelations', () => {
     relate(VOLO, 'member_of', GUILD);
 
     expect(listRelations({ groupId, role: 'viewer', path: GUILD })).toEqual([
-      expect.objectContaining({ relation: 'has_member', label: 'has member', path: VOLO, title: 'Volo', sessionPath: SESSION }),
+      expect.objectContaining({ relation: 'has_member', label: 'has member', path: VOLO, title: 'Volo', sessionPath: SESSION, sessionTitle: 'The Mill', createdBy: 'owner' }),
     ]);
     expect(listRelations({ groupId, role: 'viewer', path: VOLO })).toEqual([
       expect.objectContaining({ relation: 'member_of', label: 'member of', path: GUILD, title: 'Thieves Guild' }),
