@@ -61,6 +61,9 @@ export type RelationView = {
   title: string;
   /** The Session that established it, when the reader may see it. */
   sessionPath: string | null;
+  /** True when a Session established it, whether or not the reader may see
+   *  that Session (`sessionPath` is null for one they may not). */
+  fromSession: boolean;
   /** The Session's title, when `sessionPath` is set. */
   sessionTitle: string | null;
   /** Display name of the person who added it, when known. */
@@ -74,6 +77,7 @@ type Row = {
   path: string;
   title: string;
   session_path: string | null;
+  stored_session_path: string | null;
   session_title: string | null;
   created_by_name: string | null;
   created_at: number;
@@ -89,7 +93,7 @@ export function listRelations(opts: { groupId: string; role: Role; path: string 
   const side = (outgoing: 0 | 1): string => {
     const [me, other] = outgoing ? ['from_path', 'to_path'] : ['to_path', 'from_path'];
     return `SELECT ${outgoing} AS outgoing, r.relation AS relation, o.path AS path, o.title AS title,
-                   s.path AS session_path, s.title AS session_title,
+                   s.path AS session_path, r.session_path AS stored_session_path, s.title AS session_title,
                    COALESCE(NULLIF(u.display_name, ''), u.username) AS created_by_name,
                    r.created_at
               FROM note_relations r
@@ -110,6 +114,7 @@ export function listRelations(opts: { groupId: string; role: Role; path: string 
     path: r.path,
     title: r.title,
     sessionPath: r.session_path,
+    fromSession: r.stored_session_path !== null,
     sessionTitle: r.session_title,
     createdBy: r.created_by_name,
     createdAt: r.created_at,
