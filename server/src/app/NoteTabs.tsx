@@ -14,6 +14,7 @@ import { X, FileText } from 'lucide-react';
 import { TREE_CHANGE_EVENT, TREE_CHANGE_REMOTE_EVENT } from '@/lib/tree-sync';
 import { setPersistentPaths } from './notes/provider-cache';
 import { adoptsLegacyTabs, LEGACY_TABS_KEY, tabsStorageKey } from './note-tabs-storage';
+import { useWorldSwitch } from './(app)/WorldSwitch';
 
 type Tab = { path: string; title: string };
 
@@ -21,6 +22,12 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
   const router = useRouter();
   const pathname = usePathname() ?? '';
   const activePath = decodeNotePath(pathname);
+  // Mid-switch the URL can already show the next world's note while this
+  // strip still belongs to the last world. The remount keyed on groupId
+  // picks the note up once the switch lands.
+  const { isPending: switching } = useWorldSwitch();
+  const switchingRef = useRef<boolean>(switching);
+  switchingRef.current = switching;
 
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [mounted, setMounted] = useState<boolean>(false);
@@ -53,7 +60,7 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
 
   // Add / refresh the current note in the tab list.
   useEffect(() => {
-    if (!activePath) return;
+    if (!activePath || switching) return;
     setTabs((prev) => {
       const idx = prev.findIndex((t) => t.path === activePath);
       const title = prettyTitle(activePath);
@@ -65,7 +72,7 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
       }
       return [...prev, { path: activePath, title }];
     });
-  }, [activePath]);
+  }, [activePath, switching]);
 
   // Keep ref in sync for synchronous reads inside async callbacks.
   tabsRef.current = tabs;
@@ -120,6 +127,9 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
     if (!mounted) return;
     let cancelled = false;
     const validate = async (): Promise<void> => {
+      // The session already points at the next world, so /api/tree would
+      // prune this world's tabs against the wrong tree.
+      if (switchingRef.current) return;
       try {
         const headers: Record<string, string> = {};
         if (lastTreeEtagRef.current) {
@@ -129,7 +139,7 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
           headers,
           cache: 'no-store',
         });
-        if (cancelled) return;
+        if (cancelled || switchingRef.current) return;
         // 304 → tree unchanged, nothing to prune. Skip the JSON parse
         // and the entire walk + setTabs cycle.
         if (res.status === 304) return;
