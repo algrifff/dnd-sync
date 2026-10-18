@@ -1,8 +1,8 @@
 'use client';
 
-// Client dashboard rendered inside /me. The world grid, character
-// grid, and recent activity feed are all server-driven (props come
-// from the server page), but creation dialogs and navigation live
+// Client dashboard rendered inside /me. The open sessions, world grid,
+// character grid, and recent activity feed are all server-driven (props
+// come from the server page), but creation dialogs and navigation live
 // here so they can be interactive without a full page reload.
 
 import { useState } from 'react';
@@ -12,24 +12,32 @@ import { Plus, UserRound } from 'lucide-react';
 import { NewWorldDialog } from '../../NewWorldDialog';
 import { NewCharacterDialog } from './NewCharacterDialog';
 import { SuggestionsPanel } from './SuggestionsPanel';
+import { OpenSessionsStrip } from './OpenSessionsStrip';
+import { WorldChip } from './WorldChip';
+import { noteHref } from './note-href';
 import { useWorldSwitch } from '../WorldSwitch';
 import { MobileNavToggle } from '../../MobileNavToggle';
-import { worldColor, worldInitials } from '../../world-chip';
 import type { WorldRow } from '@/lib/groups';
 import type { UserCharacter } from '@/lib/userCharacters';
 import type { RecentForUserRow } from '@/lib/notes';
+import type { OpenSession } from '@/lib/home';
 
 export function MeDashboard({
   csrfToken,
   displayName,
   worlds,
   characters,
+  characterWorlds,
+  openSessions,
   recent,
 }: {
   csrfToken: string;
   displayName: string;
   worlds: WorldRow[];
   characters: UserCharacter[];
+  /** Character id → the ids of the Worlds it is played in. */
+  characterWorlds: Record<string, string[]>;
+  openSessions: OpenSession[];
   recent: RecentForUserRow[];
 }): React.JSX.Element {
   const router = useRouter();
@@ -56,7 +64,9 @@ export function MeDashboard({
       </header>
 
       <main className="flex-1 px-8 py-6">
-        <SuggestionsPanel csrfToken={csrfToken} />
+        <OpenSessionsStrip sessions={openSessions} worlds={worlds} />
+
+        <SuggestionsPanel csrfToken={csrfToken} worlds={worlds} />
 
         <section className="mb-10">
           <div className="mb-3 flex items-center justify-between">
@@ -79,23 +89,41 @@ export function MeDashboard({
             />
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {characters.map((c) => (
-                <Link
-                  key={c.id}
-                  href={`/me/characters/${encodeURIComponent(c.id)}`}
-                  className="flex items-center gap-3 rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] p-3 transition hover:border-[var(--candlelight)]"
-                >
-                  <CharacterPortrait character={c} />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-[var(--ink)]">
-                      {c.name}
+              {characters.map((c) => {
+                const playedIn = (characterWorlds[c.id] ?? [])
+                  .map((id) => worlds.find((w) => w.id === id))
+                  .filter((w): w is WorldRow => w !== undefined);
+                return (
+                  <Link
+                    key={c.id}
+                    href={`/me/characters/${encodeURIComponent(c.id)}`}
+                    className="flex items-center gap-3 rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] p-3 transition hover:border-[var(--candlelight)]"
+                  >
+                    <CharacterPortrait character={c} />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-[var(--ink)]">
+                        {c.name}
+                      </div>
+                      <div className="text-[11px] uppercase tracking-wide text-[var(--ink-soft)]">
+                        {c.kind}
+                      </div>
+                      {playedIn.length === 0 ? (
+                        <div className="text-[11px] text-[var(--ink-muted)]">Not in a world yet</div>
+                      ) : (
+                        <div
+                          className="mt-0.5 flex flex-wrap gap-1"
+                          title={`Plays in ${playedIn.map((w) => w.name).join(', ')}`}
+                        >
+                          <span className="sr-only">Plays in {playedIn.map((w) => w.name).join(', ')}</span>
+                          {playedIn.map((w) => (
+                            <WorldChip key={w.id} world={w} size="sm" />
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <div className="text-[11px] uppercase tracking-wide text-[var(--ink-soft)]">
-                      {c.kind}
-                    </div>
-                  </div>
-                </Link>
-              ))}
+                  </Link>
+                );
+              })}
             </div>
           )}
         </section>
@@ -191,13 +219,7 @@ function RecentLink({ row }: { row: RecentForUserRow }): React.JSX.Element {
     <button
       type="button"
       onClick={() => {
-        void switchTo(
-          row.groupId,
-          `/notes/${row.path
-            .split('/')
-            .map(encodeURIComponent)
-            .join('/')}`,
-        );
+        void switchTo(row.groupId, noteHref(row.path));
       }}
       className="flex w-full items-baseline justify-between gap-4 px-3 py-2 text-left transition hover:bg-[var(--parchment)]"
     >
@@ -229,26 +251,6 @@ function EmptyState({
         {action}
       </button>
     </div>
-  );
-}
-
-function WorldChip({ world }: { world: WorldRow }): React.JSX.Element {
-  const hasIcon = world.iconVersion > 0;
-  return (
-    <span
-      className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[14px] text-sm font-semibold text-[var(--rail-ink)]"
-      style={{ backgroundColor: hasIcon ? 'var(--ink)' : worldColor(world.id) }}
-    >
-      {hasIcon ? (
-        <img
-          src={`/api/worlds/${encodeURIComponent(world.id)}/icon?v=${world.iconVersion}`}
-          alt=""
-          className="h-full w-full object-cover"
-        />
-      ) : (
-        worldInitials(world.name)
-      )}
-    </span>
   );
 }
 
