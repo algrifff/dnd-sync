@@ -82,6 +82,15 @@ describe('relsOnPair', () => {
     expect(relsOnPair([ally, works, enemy], works)).toEqual([works, ally]);
   });
 
+  test('lists a Relationship once when a scene change draws it twice, but keeps both directions of one type', () => {
+    const [a, b] = ['Volo', 'Xanathar'];
+    const ally = { s: a, t: b, type: 'ally_of' };
+    const works = { s: a, t: b, type: 'works_for' };
+    const worksBack = { s: b, t: a, type: 'works_for' };
+
+    expect(relsOnPair([ally, works, works, worksBack, worksBack], ally)).toEqual([ally, works, worksBack]);
+  });
+
   test('returns only the hit when it is the one Relationship on its path', () => {
     const r = { s: 'Volo', t: 'Xanathar', type: 'ally_of' };
 

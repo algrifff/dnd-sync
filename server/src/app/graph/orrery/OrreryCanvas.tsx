@@ -206,7 +206,7 @@ function renderTip(h: Hover, palette: Palette, model: Model, campNames: Record<s
     return (
       <>
         {h.rs.map((r) => (
-          <div key={r.type} className={s.relTip}>
+          <div key={`${r.type}|${r.s.id}`} className={s.relTip}>
             {r.s.title} · <em style={{ color: relColor(palette, r.type) }}>{relLabel(r.type, true)}</em> · {r.t.title}
           </div>
         ))}

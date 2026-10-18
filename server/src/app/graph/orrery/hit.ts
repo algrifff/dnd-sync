@@ -116,12 +116,17 @@ export function pickAt<N, R>(nodes: Iterable<NodeHit<N>>, paths: Iterable<PathHi
 
 /** `hit` first, then every other Relationship between the same two notes,
  *  in either direction: they share one drawn path, so hovering it is
- *  hovering all of them. */
-export function relsOnPair<R extends { s: unknown; t: unknown }>(all: Iterable<R>, hit: R): R[] {
-  const rest: R[] = [];
+ *  hovering all of them. Each type and direction is listed once, since a
+ *  scene change draws the outgoing and incoming scenes together. */
+export function relsOnPair<R extends { s: unknown; t: unknown; type: unknown }>(all: Iterable<R>, hit: R): R[] {
+  const key = (r: R): string => `${String(r.type)}|${r.s === hit.s ? '>' : '<'}`;
+  const seen = new Set([key(hit)]);
+  const out = [hit];
   for (const r of all) {
-    if (r === hit) continue;
-    if ((r.s === hit.s && r.t === hit.t) || (r.s === hit.t && r.t === hit.s)) rest.push(r);
+    const onPair = (r.s === hit.s && r.t === hit.t) || (r.s === hit.t && r.t === hit.s);
+    if (!onPair || seen.has(key(r))) continue;
+    seen.add(key(r));
+    out.push(r);
   }
-  return [hit, ...rest];
+  return out;
 }
