@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
 import { setupTestDb, teardownTestDb } from './test-utils';
-import { findUnlinkedMentions } from './unlinked-mentions';
+import { findUnlinkedMentions, findWholeWord } from './unlinked-mentions';
 
 const G = randomUUID();
 const OTHER_WORLD = randomUUID();
@@ -139,5 +139,47 @@ describe('findUnlinkedMentions', () => {
     note('Places/Tower.md', 'Tower', 'A stone keep.');
 
     expect(find('editor', 'Places/Tower.md')).toEqual(['Lore/old.md']);
+  });
+
+  it('matches a multi-word title across a newline, a double space or an NBSP', () => {
+    note('Places/Black Tower.md', 'Black Tower', 'A dark keep.');
+    note('Lore/newline.md', 'Newline', 'We reached the Black\nTower at dusk.');
+    note('Lore/double.md', 'Double', 'We reached the black  tower at dusk.');
+    note('Lore/nbsp.md', 'Nbsp', 'We reached the Black Tower at dusk.');
+
+    expect(find('editor', 'Places/Black Tower.md').sort()).toEqual([
+      'Lore/double.md',
+      'Lore/nbsp.md',
+      'Lore/newline.md',
+    ]);
+  });
+
+  it('cuts the snippet from the right place after characters that lowercase longer', () => {
+    note('Lore/dotted.md', 'Dotted', `${'İ'.repeat(60)} then we met Volo at the inn.`);
+
+    const [hit] = findUnlinkedMentions({ groupId: G, role: 'editor', path: VOLO });
+
+    expect(hit?.snippet).toContain('Volo');
+  });
+});
+
+describe('findWholeWord', () => {
+  it('returns indexes into the original text even when lowercasing changes its length', () => {
+    const text = `${'İ'.repeat(60)} Volo`;
+    const m = findWholeWord(text, 'volo');
+
+    expect(m).not.toBeNull();
+    expect(text.slice(m!.index, m!.index + m!.length)).toBe('Volo');
+  });
+
+  it('spans the whole whitespace run in the text', () => {
+    const text = 'the Black \n Tower.';
+    const m = findWholeWord(text, 'Black Tower');
+
+    expect(text.slice(m!.index, m!.index + m!.length)).toBe('Black \n Tower');
+  });
+
+  it('rejects a match flanked by a word character', () => {
+    expect(findWholeWord('Blacktower and Black Towers', 'Black Tower')).toBeNull();
   });
 });
