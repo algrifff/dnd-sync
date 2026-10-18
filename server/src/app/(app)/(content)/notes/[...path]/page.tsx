@@ -87,6 +87,11 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
     canRemove: canEditThis && canEditDoc(r.path, session),
   }));
 
+  // A link can be removed by someone who can edit both its Notes.
+  const removableLinkPaths = [...new Set([...backlinks.map((b) => b.from_path), ...outgoingLinks.map((l) => l.to_path)])].filter(
+    (p) => canEditThis && canEditDoc(p, session),
+  );
+
   // A mention can be linked by someone who can edit both Notes.
   const mentions: MentionRow[] = mentionViews.map((m) => ({
     ...m,
@@ -274,6 +279,7 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
             relations={relations}
             mentions={mentions}
             canEdit={canEditThis}
+            removableLinkPaths={removableLinkPaths}
             backlinks={backlinks}
             outgoingLinks={outgoingLinks}
             tags={tags}

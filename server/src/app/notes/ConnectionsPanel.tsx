@@ -43,6 +43,7 @@ export function ConnectionsPanel({
   currentPath,
   csrfToken,
   canEdit,
+  removableLinkPaths,
 }: {
   relations: RelationRow[];
   mentions: MentionRow[];
@@ -52,6 +53,8 @@ export function ConnectionsPanel({
   csrfToken: string;
   /** The caller can edit this Note, so may add connections to it. */
   canEdit: boolean;
+  /** Other Notes whose link the caller may remove (can edit both). */
+  removableLinkPaths: string[];
 }): React.JSX.Element {
   const router = useRouter();
   const [rows, setRows] = useState<RelationRow[]>(relations);
@@ -60,19 +63,33 @@ export function ConnectionsPanel({
   }, [relations]);
   const groups = useMemo(() => groupRelations(rows), [rows]);
 
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const removeRelation = useCallback(
     (row: RelationRow): void => {
+      setRemoveError(null);
       setRows((prev) => prev.filter((r) => !(r.path === row.path && r.relation === row.relation)));
+      const restore = (): void => {
+        setRows((prev) =>
+          prev.some((r) => r.path === row.path && r.relation === row.relation) ? prev : [...prev, row],
+        );
+        setRemoveError(`Could not remove the connection with ${row.title || baseName(row.path)}.`);
+      };
       void fetch('/api/notes/relations', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
         body: JSON.stringify({ path: currentPath, relation: row.relation, otherPath: row.path }),
-      }).finally(() => {
-        router.refresh();
-      });
+      })
+        .then((res) => {
+          if (!res.ok) restore();
+        })
+        .catch(restore)
+        .finally(() => {
+          router.refresh();
+        });
     },
     [csrfToken, currentPath, router],
   );
+  const removable = useMemo(() => new Set(removableLinkPaths), [removableLinkPaths]);
   const serverLinks = useMemo(
     () =>
       mergeLinks({
@@ -80,8 +97,9 @@ export function ConnectionsPanel({
         backlinks,
         outgoing: outgoingLinks,
         exclude: new Set(relations.map((r) => r.path)),
+        removable,
       }),
-    [currentPath, backlinks, outgoingLinks, relations],
+    [currentPath, backlinks, outgoingLinks, relations, removable],
   );
   const [links, setLinks] = useState<LinkRow[]>(serverLinks);
 
@@ -92,18 +110,28 @@ export function ConnectionsPanel({
 
   const removeLink = useCallback(
     (row: LinkRow): void => {
+      setRemoveError(null);
       setLinks((prev) => prev.filter((l) => l.path !== row.path));
+      const restore = (): void => {
+        setLinks((prev) => (prev.some((l) => l.path === row.path) ? prev : [...prev, row]));
+        setRemoveError(`Could not remove the link with ${row.title || baseName(row.path)}.`);
+      };
       void Promise.all(
         row.edges.map((edge) =>
-          fetch('/api/notes/backlink', {
+          fetch('/api/notes/relations', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-            body: JSON.stringify(edge),
+            body: JSON.stringify({ path: edge.fromPath, relation: 'link', otherPath: edge.toPath }),
           }),
         ),
-      ).finally(() => {
-        router.refresh();
-      });
+      )
+        .then((responses) => {
+          if (responses.some((res) => !res.ok)) restore();
+        })
+        .catch(restore)
+        .finally(() => {
+          router.refresh();
+        });
     },
     [csrfToken, router],
   );
@@ -151,6 +179,12 @@ export function ConnectionsPanel({
 
       {empty && <p className="text-xs text-[var(--ink-soft)]/80">No connections yet.</p>}
 
+      {removeError && (
+        <p role="alert" className="mb-1 text-[11px] text-[var(--wine)]">
+          {removeError}
+        </p>
+      )}
+
       {groups.length > 0 && (
         <div className="mb-3">
           <SubHeading>Relationships</SubHeading>
@@ -188,15 +222,17 @@ export function ConnectionsPanel({
                 >
                   {l.title || baseName(l.path)}
                 </Link>
-                <button
-                  type="button"
-                  onClick={() => removeLink(l)}
-                  title={`Remove link with ${baseName(l.path)}`}
-                  aria-label={`Remove link with ${baseName(l.path)}`}
-                  className="ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--ink-soft)] opacity-0 transition hover:bg-[var(--wine)]/15 hover:text-[var(--wine)] focus-visible:opacity-100 group-hover:opacity-100"
-                >
-                  <X size={10} aria-hidden />
-                </button>
+                {l.canRemove && (
+                  <button
+                    type="button"
+                    onClick={() => removeLink(l)}
+                    title={`Remove link with ${baseName(l.path)}`}
+                    aria-label={`Remove link with ${baseName(l.path)}`}
+                    className="ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--ink-soft)] opacity-0 transition hover:bg-[var(--wine)]/15 hover:text-[var(--wine)] focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    <X size={10} aria-hidden />
+                  </button>
+                )}
               </li>
             ))}
           </ul>

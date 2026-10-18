@@ -1,13 +1,14 @@
 // POST   /api/notes/relations — add a connection between two Notes.
-// DELETE /api/notes/relations — remove a Relationship.
+// DELETE /api/notes/relations — remove a Relationship, or a plain link.
 //
 // A person adding or removing a Relationship counts as the review that
 // ADR 0002 asks for (docs/adr/0003-connections-panel-and-manual-
 // relationships.md). `relation` is read from `path`'s side and may be an
 // inverse name (`contains`, `employs`, `has_member`...): it is mapped to
 // its forward type with the ends swapped, so one fact is one stored row.
-// `'link'` (POST only) inserts the plain manual note_links row and no
-// Relationship.
+// `'link'` inserts (POST) or deletes (DELETE) the plain note_links row
+// `path -> otherPath` as given, and touches no Relationship. A link that is
+// already gone deletes as 200 `unchanged`.
 //
 // The caller must be able to edit BOTH Notes (canEditDoc), the same rule
 // the editor uses. A Note that is missing, in another world or hidden by
@@ -23,7 +24,7 @@ import { verifyCsrf } from '@/lib/csrf';
 import { logAudit } from '@/lib/audit';
 import { isNoteVisible } from '@/lib/notes';
 import { canEditDoc } from '@/lib/note-permissions';
-import { addManualLink, addRelation, removeRelation } from '@/lib/relations';
+import { addManualLink, addRelation, removeLink, removeRelation } from '@/lib/relations';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,11 +81,22 @@ export async function DELETE(req: NextRequest): Promise<Response> {
   const body = await parseBody(req);
   if (body instanceof Response) return body;
 
-  const forward = forwardOf(body.relation);
-  if (!forward) return json({ error: 'invalid_relation' }, 400);
+  const isLink = body.relation === 'link';
+  const forward = isLink ? null : forwardOf(body.relation);
+  if (!isLink && !forward) return json({ error: 'invalid_relation' }, 400);
 
   const denied = checkNotes(session, body);
   if (denied) return denied;
+
+  if (!forward) {
+    const { removed } = removeLink({
+      groupId: session.currentGroupId,
+      from: body.path,
+      to: body.otherPath,
+    });
+    if (removed) audit('relation.remove', session, { from: body.path, relation: 'link', to: body.otherPath });
+    return json({ ok: true, status: removed ? 'removed' : 'unchanged' });
+  }
 
   const ends = orient(body, forward);
   const { status } = removeRelation({ groupId: session.currentGroupId, ...ends });

@@ -32,6 +32,8 @@ export type LinkRow = {
   direction: LinkDirection;
   /** The `note_links` edges the × removes, as `{ fromPath, toPath }`. */
   edges: Array<{ fromPath: string; toPath: string }>;
+  /** The caller can edit both Notes, so may remove the link (computed on the server). */
+  canRemove: boolean;
 };
 
 export const ARROWS: Record<LinkDirection, string> = { out: '→', in: '←', both: '↔' };
@@ -61,8 +63,10 @@ export function mergeLinks(opts: {
   backlinks: readonly BacklinkRow[];
   outgoing: readonly OutgoingLinkRow[];
   exclude?: ReadonlySet<string>;
+  /** Paths of Notes the caller may remove a link to; others get no ×. */
+  removable?: ReadonlySet<string>;
 }): LinkRow[] {
-  const { currentPath, exclude } = opts;
+  const { currentPath, exclude, removable } = opts;
   const rows = new Map<string, LinkRow>();
   const upsert = (path: string, title: string, dir: 'out' | 'in'): void => {
     if (path === currentPath || exclude?.has(path)) return;
@@ -70,7 +74,7 @@ export function mergeLinks(opts: {
       dir === 'out' ? { fromPath: currentPath, toPath: path } : { fromPath: path, toPath: currentPath };
     const existing = rows.get(path);
     if (!existing) {
-      rows.set(path, { path, title, direction: dir, edges: [edge] });
+      rows.set(path, { path, title, direction: dir, edges: [edge], canRemove: removable?.has(path) ?? false });
       return;
     }
     if (existing.direction !== dir) existing.direction = 'both';

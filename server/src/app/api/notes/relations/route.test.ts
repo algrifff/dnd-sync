@@ -220,4 +220,41 @@ describe('DELETE /api/notes/relations', () => {
     expect((await remove(pat, VOLO, 'works_for', SECRET)).status).toBe(404);
     expect(stored()).toHaveLength(1);
   });
+
+  it("removes a plain link in the direction given, for a Player who created both Notes", async () => {
+    expect((await add(pat, MINE, 'link', MINE_TOO)).status).toBe(201);
+    expect(linkRow(MINE, MINE_TOO)).toEqual({ is_manual: 1 });
+
+    const res = await remove(pat, MINE, 'link', MINE_TOO);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, status: 'removed' });
+    expect(linkRow(MINE, MINE_TOO)).toBeFalsy();
+    expect(audits('relation.remove')).toEqual([
+      { actor: patId, details: { from: MINE, relation: 'link', to: MINE_TOO } },
+    ]);
+  });
+
+  it('removes only the direction named, and treats a missing link as unchanged', async () => {
+    await add(gm, VOLO, 'link', GUILD);
+    await add(gm, GUILD, 'link', VOLO);
+
+    expect((await remove(gm, VOLO, 'link', GUILD)).status).toBe(200);
+    expect(linkRow(VOLO, GUILD)).toBeFalsy();
+    expect(linkRow(GUILD, VOLO)).toEqual({ is_manual: 1 });
+
+    const again = await remove(gm, VOLO, 'link', GUILD);
+    expect(await again.json()).toEqual({ ok: true, status: 'unchanged' });
+    expect(audits('relation.remove')).toHaveLength(1);
+  });
+
+  it('refuses a Player removing a link when they cannot edit one end, keeping it', async () => {
+    await add(gm, MINE, 'link', VOLO);
+
+    const res = await remove(pat, MINE, 'link', VOLO);
+
+    expect(res.status).toBe(403);
+    expect(linkRow(MINE, VOLO)).toEqual({ is_manual: 1 });
+    expect((await remove(pat, MINE, 'link', SECRET)).status).toBe(404);
+  });
 });

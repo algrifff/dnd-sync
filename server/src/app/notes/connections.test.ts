@@ -73,6 +73,20 @@ describe('mergeLinks', () => {
     expect(rows.map((r) => r.path)).toEqual(['b.md']);
   });
 
+  it('marks only the removable paths', () => {
+    const rows = mergeLinks({
+      currentPath: me,
+      outgoing: [{ to_path: 'a.md', title: 'A', is_manual: 1 }],
+      backlinks: [{ from_path: 'b.md', title: 'B', is_manual: 1 }],
+      removable: new Set(['b.md']),
+    });
+
+    expect(rows.map((r) => [r.path, r.canRemove])).toEqual([
+      ['a.md', false],
+      ['b.md', true],
+    ]);
+  });
+
   it('ignores a self link', () => {
     expect(
       mergeLinks({ currentPath: me, outgoing: [{ to_path: me, title: 'Me', is_manual: 0 }], backlinks: [] }),

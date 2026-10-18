@@ -61,6 +61,15 @@ export function addManualLink(opts: { groupId: string; from: string; to: string 
   return { added: changes > 0 };
 }
 
+/** Deletes the plain `from -> to` link, manual or body-derived. A body-derived
+ *  one comes back on the next save of `from` while its wikilink remains. */
+export function removeLink(opts: { groupId: string; from: string; to: string }): { removed: boolean } {
+  const changes = getDb()
+    .query('DELETE FROM note_links WHERE group_id = ? AND from_path = ? AND to_path = ?')
+    .run(opts.groupId, opts.from, opts.to).changes;
+  return { removed: changes > 0 };
+}
+
 /** Removes the one stored row for `from relation to`, canonicalised like
  *  `addRelation`. The plain link it came with stays. */
 export function removeRelation(opts: {
