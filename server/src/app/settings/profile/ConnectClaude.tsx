@@ -54,9 +54,9 @@ export function ConnectClaude({
           ))}
         </div>
         <div role="tabpanel" className="space-y-2 pt-3 text-sm text-[var(--ink)]">
-          <p>{active.steps[0]}</p>
+          <p>{active.intro}</p>
           {active.commands?.map((c) => <CopyField key={c} value={c} label="Copy command" mono />)}
-          {active.steps.slice(1).map((s) => (
+          {active.after.map((s) => (
             <p key={s}>{s}</p>
           ))}
         </div>

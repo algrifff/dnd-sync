@@ -5,18 +5,43 @@
 export type ConnectTarget = {
   id: 'claude' | 'claude-code' | 'codex';
   label: string;
-  steps: string[];
+  /** The paragraph shown before the commands. */
+  intro: string;
   /** Terminal commands, run in order. Absent for app-only setups. */
   commands?: string[];
+  /** Paragraphs shown after the commands. */
+  after: string[];
 };
+
+const HOST_PATTERN = /^(?:[a-z0-9.-]+|\[[0-9a-f:.]+\])$/;
+
+/**
+ * The MCP URL if it is safe to paste into a terminal command, else null.
+ * It must be an http(s) URL whose host is plain (letters, digits, dots,
+ * hyphens, or a bracketed IPv6 literal), with no credentials, and whose
+ * path is exactly /api/mcp. Anything else means PUBLIC_APP_URL is unset or wrong.
+ */
+export function safeMcpUrl(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+  if (!HOST_PATTERN.test(parsed.hostname)) return null;
+  if (parsed.username !== '' || parsed.password !== '') return null;
+  if (parsed.pathname !== '/api/mcp') return null;
+  return parsed.href;
+}
 
 export function connectTargets(mcpUrl: string): ConnectTarget[] {
   return [
     {
       id: 'claude',
       label: 'Claude app',
-      steps: [
-        'In claude.ai or Claude Desktop, open Settings → Connectors.',
+      intro: 'In claude.ai or Claude Desktop, open Settings → Connectors.',
+      after: [
         'Choose "Add custom connector", name it Compendium and paste the link above.',
         'Click Connect, sign in to Compendium and pick the World to share.',
         'The connector then works in Claude on the web, desktop and mobile.',
@@ -25,19 +50,18 @@ export function connectTargets(mcpUrl: string): ConnectTarget[] {
     {
       id: 'claude-code',
       label: 'Claude Code',
-      steps: [
-        'Run this in a terminal:',
+      intro: 'Run this in a terminal:',
+      commands: [`claude mcp add --transport http compendium '${mcpUrl}'`],
+      after: [
         'Then start claude, type /mcp, pick compendium and choose Authenticate. Your browser opens to sign in and pick the World.',
       ],
-      commands: [`claude mcp add --transport http compendium ${mcpUrl}`],
     },
     {
       id: 'codex',
       label: 'Codex',
-      steps: [
-        'Run these in a terminal. The second one opens your browser to sign in and pick the World.',
-      ],
-      commands: [`codex mcp add compendium --url ${mcpUrl}`, 'codex mcp login compendium'],
+      intro: 'Run these in a terminal. The second one opens your browser to sign in and pick the World.',
+      commands: [`codex mcp add compendium --url '${mcpUrl}'`, 'codex mcp login compendium'],
+      after: [],
     },
   ];
 }

@@ -10,6 +10,7 @@ import { ProfileForm } from '@/app/settings/profile/ProfileForm';
 import { PasswordForm } from '@/app/settings/profile/PasswordForm';
 import { ConnectedApps } from '@/app/settings/profile/ConnectedApps';
 import { ConnectClaude } from '@/app/settings/profile/ConnectClaude';
+import { safeMcpUrl } from '@/app/settings/profile/connect-claude';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +23,7 @@ export default async function ProfilePage(): Promise<ReactElement> {
   const session = readSession(cookieHeader);
   if (!session) redirect('/login?next=/settings/profile');
 
-  const mcpUrl = publicUrls(await headers()).mcpResource;
+  const mcpUrl = safeMcpUrl(publicUrls(await headers()).mcpResource);
   const worldName = getWorldHeader(session.currentGroupId).name;
 
   return (
@@ -60,7 +61,14 @@ export default async function ProfilePage(): Promise<ReactElement> {
           Let your own Claude (or Codex) read this World and draft Session Wrap-ups. It uses
           your own subscription and sees only the Notes you can see.
         </p>
-        <ConnectClaude mcpUrl={mcpUrl} worldName={worldName} />
+        {mcpUrl ? (
+          <ConnectClaude mcpUrl={mcpUrl} worldName={worldName} />
+        ) : (
+          <p className="text-sm text-[var(--ink-soft)]">
+            The server&rsquo;s public address is not configured, so the connection steps are hidden.
+            Ask the server admin to set PUBLIC_APP_URL.
+          </p>
+        )}
       </section>
 
       <section className="rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-5">
