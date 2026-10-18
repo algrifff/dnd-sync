@@ -126,9 +126,12 @@ export async function moveFolder(args: {
     db.exec('PRAGMA defer_foreign_keys = 1');
     const movedAt = Date.now();
     for (const m of moved) {
-      db.query('UPDATE notes SET path = ?, updated_at = ? WHERE group_id = ? AND path = ?').run(
+      db.query(
+        'UPDATE notes SET path = ?, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
+      ).run(
         m.to,
         movedAt,
+        userId,
         groupId,
         m.from,
       );
@@ -249,7 +252,7 @@ export async function moveFolder(args: {
   ];
   if (renames.length > 0 && linkers.length > 0) {
     try {
-      const touched = rewriteWikilinksForLinkers(groupId, linkers, renames);
+      const touched = rewriteWikilinksForLinkers(groupId, linkers, renames, userId);
       for (const linker of touched) await closeDocumentConnections(groupId, linker);
     } catch (err) {
       console.error('[move-folder] wikilink rewrite failed:', err);

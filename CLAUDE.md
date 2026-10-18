@@ -219,6 +219,7 @@ whole flow over HTTP) and the MCP Inspector:
 | `server/src/lib/superadmin.ts` | `ADMIN_TOKEN` check for the `/admin/*` `__sa` cookie |
 | `server/src/lib/session.ts` | Session CRUD, CSRF, expiry cleanup |
 | `server/src/lib/notes.ts` | Note CRUD, backlink derivation, FTS sync |
+| `server/src/lib/groups.ts` | Worlds: `listWorldsForSession` (rail order plus role-gated `latestActivityAt` / `openSession`) and `setWorldOrder`, behind `GET /api/worlds` and `PUT /api/worlds/order`. `latestActivityAt` skips the caller's own writes by `notes.updated_by`, so every write that bumps `notes.updated_at` must also stamp `updated_by` with the acting user |
 | `server/src/lib/relations.ts` | Relationships: `addRelation` (plus its manual link), visibility-gated `listRelations`, and the repoint/delete helpers every move and delete path calls |
 | `server/src/lib/ai/tools.ts` | AI tool definitions, unreferenced until the MCP connector adopts them |
 | `server/src/lib/wrap-up.ts` | Wrap-up: proposal shape, submit validation, candidate context, idempotent apply |

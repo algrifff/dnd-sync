@@ -113,21 +113,29 @@ export function uniqueFoldersFor(paths: string[]): string[] {
   return [...out];
 }
 
+export type FolderIndexActor = { userId: string; createMissing?: boolean };
+
 /** Re-derive the managed callout in `<folderPath>/index.md` from the
  *  current set of direct children.
  *
- *  When `ensureWith` is supplied AND the folder actually has content
- *  (a non-hidden note or a folder marker under it), the index.md is auto-created
- *  if missing so the AI tool / import pipeline doesn't have to know
- *  about every brand-new subfolder it just spawned a note in.
+ *  `actor` is the user whose write triggered the derive. Its id is
+ *  stamped as the index note's `updated_by`, so the rail does not
+ *  report a user's own move or delete back to them as new activity.
+ *  With no actor (the boot backfill) the stamp is NULL, which counts
+ *  as activity for every member.
  *
- *  No-op when there's no index.md and no ensureWith — covers the
- *  delete path where we don't want to resurrect an index for a folder
- *  that was just removed. */
+ *  When an actor is supplied (unless `createMissing: false`) AND the
+ *  folder actually has content (a non-hidden note or a folder marker
+ *  under it), the index.md is auto-created if missing so the AI tool /
+ *  import pipeline doesn't have to know about every brand-new
+ *  subfolder it just spawned a note in.
+ *
+ *  Delete and visibility paths pass `createMissing: false`, so an
+ *  index is never resurrected for a folder that was just removed. */
 export async function deriveFolderIndex(
   groupId: string,
   folderPath: string,
-  ensureWith?: { userId: string },
+  actor?: FolderIndexActor,
 ): Promise<void> {
   if (!isUnderCampaign(folderPath)) return;
 
@@ -155,10 +163,16 @@ export async function deriveFolderIndex(
       .get(groupId, indexPath) ?? null);
 
   let indexRow = queryIndex();
-  if (!indexRow && ensureWith && folderHasContent(groupId, folderPath)) {
+  const updatedBy = actor?.userId ?? null;
+  if (
+    !indexRow &&
+    actor &&
+    actor.createMissing !== false &&
+    folderHasContent(groupId, folderPath)
+  ) {
     ensureIndexNote(
       groupId,
-      ensureWith.userId,
+      actor.userId,
       folderPath,
       prettifyFolderName(folderPath),
     );
@@ -204,8 +218,8 @@ export async function deriveFolderIndex(
   // derive.ts) is left alone.
   if (fmChanged) {
     db.query(
-      'UPDATE notes SET frontmatter_json = ?, updated_at = ? WHERE group_id = ? AND path = ?',
-    ).run(nextFmJson, Date.now(), groupId, indexPath);
+      'UPDATE notes SET frontmatter_json = ?, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
+    ).run(nextFmJson, Date.now(), updatedBy, groupId, indexPath);
   }
   const insertTag = db.query(
     'INSERT OR IGNORE INTO tags (group_id, path, tag) VALUES (?, ?, ?)',
@@ -271,7 +285,8 @@ export async function deriveFolderIndex(
             content_md   = ?,
             yjs_state    = ?,
             byte_size    = ?,
-            updated_at   = ?
+            updated_at   = ?,
+            updated_by   = ?
       WHERE group_id = ? AND path = ?`,
   ).run(
     newJson,
@@ -280,6 +295,7 @@ export async function deriveFolderIndex(
     yjsState,
     newMd.length,
     Date.now(),
+    updatedBy,
     groupId,
     indexPath,
   );
@@ -326,17 +342,17 @@ export async function deriveFolderIndex(
 
 /** Drive the derive across every distinct affected folder for a list
  *  of paths. Each path's parent (when under Campaigns/<slug>/) is
- *  deduplicated and derived once. Pass `ensureWith` to auto-create
- *  any missing index.md (only fires when the folder still has
+ *  deduplicated and derived once. An `actor` also auto-creates
+ *  any missing index.md unless it says `createMissing: false` (only fires when the folder still has
  *  content — empty source folders after a move stay un-indexed). */
 export async function deriveFolderIndexesFor(
   groupId: string,
   paths: string[],
-  ensureWith?: { userId: string },
+  actor?: FolderIndexActor,
 ): Promise<void> {
   for (const folder of uniqueFoldersFor(paths)) {
     try {
-      await deriveFolderIndex(groupId, folder, ensureWith);
+      await deriveFolderIndex(groupId, folder, actor);
     } catch (err) {
       console.error('[folder-index] derive failed for', folder, err);
     }

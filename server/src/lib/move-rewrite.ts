@@ -50,6 +50,7 @@ export function rewriteWikilinksForLinkers(
   groupId: string,
   linkers: string[],
   renames: Rename[],
+  userId: string,
 ): string[] {
   if (linkers.length === 0 || renames.length === 0) return [];
 
@@ -104,9 +105,10 @@ export function rewriteWikilinksForLinkers(
               content_md   = ?,
               yjs_state    = ?,
               byte_size    = ?,
-              updated_at   = ?
+              updated_at   = ?,
+              updated_by   = ?
         WHERE group_id = ? AND path = ?`,
-    ).run(newJson, newText, newMd, state, newMd.length, now, groupId, linker);
+    ).run(newJson, newText, newMd, state, newMd.length, now, userId, groupId, linker);
 
     // note_links also need rewriting for this linker — the existing
     // route updates note_links for the MOVED rows' own from/to, but

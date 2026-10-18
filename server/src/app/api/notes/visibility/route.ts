@@ -78,7 +78,10 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   await closeDocumentConnections(session.currentGroupId, body.path);
 
   // The parent folder index lists only notes visible to viewers.
-  await deriveFolderIndexesFor(session.currentGroupId, [body.path]);
+  await deriveFolderIndexesFor(session.currentGroupId, [body.path], {
+    userId: session.userId,
+    createMissing: false,
+  });
 
   return json({ ok: true, dmOnly: body.dmOnly });
 }
