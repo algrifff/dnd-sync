@@ -45,10 +45,11 @@ export function syncMasterToNotes(userCharacterId: string): void {
         portrait_url: string | null;
         body_json: string | null;
         body_md: string | null;
+        owner_user_id: string;
       },
       [string]
     >(
-      'SELECT name, sheet_json, portrait_url, body_json, body_md FROM user_characters WHERE id = ?',
+      'SELECT name, sheet_json, portrait_url, body_json, body_md, owner_user_id FROM user_characters WHERE id = ?',
     )
     .get(userCharacterId);
   if (!uc) return;
@@ -130,21 +131,24 @@ export function syncMasterToNotes(userCharacterId: string): void {
         }
       }
 
+      // Only the owner writes a master, so the owner is the actor.
       if (nextContentJson && nextYjsState) {
         db.query(
-          `UPDATE notes SET frontmatter_json = ?, content_json = ?, content_md = ?, yjs_state = ?, updated_at = ? WHERE id = ?`,
+          `UPDATE notes SET frontmatter_json = ?, content_json = ?, content_md = ?, yjs_state = ?,
+                            updated_at = ?, updated_by = ? WHERE id = ?`,
         ).run(
           JSON.stringify(nextFm),
           nextContentJson,
           nextBodyMd ?? '',
           nextYjsState,
           Date.now(),
+          uc.owner_user_id,
           b.note_id,
         );
       } else {
         db.query(
-          `UPDATE notes SET frontmatter_json = ?, updated_at = ? WHERE id = ?`,
-        ).run(JSON.stringify(nextFm), Date.now(), b.note_id);
+          `UPDATE notes SET frontmatter_json = ?, updated_at = ?, updated_by = ? WHERE id = ?`,
+        ).run(JSON.stringify(nextFm), Date.now(), uc.owner_user_id, b.note_id);
       }
       try {
         deriveAllIndexes({

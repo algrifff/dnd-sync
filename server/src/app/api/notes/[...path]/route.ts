@@ -104,7 +104,10 @@ export async function DELETE(req: NextRequest, ctx: RouteCtx): Promise<Response>
   const parent = parentFolderUnderCampaign(path);
   if (parent) {
     try {
-      await deriveFolderIndex(session.currentGroupId, parent);
+      await deriveFolderIndex(session.currentGroupId, parent, {
+        userId: session.userId,
+        createMissing: false,
+      });
     } catch (err) {
       console.error('[notes/delete] folder index refresh failed:', err);
     }

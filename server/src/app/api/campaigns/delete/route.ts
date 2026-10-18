@@ -152,6 +152,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   await deriveFolderIndexesFor(
     groupId,
     [folderPath, ...notes.map((n) => n.path)],
+    { userId: session.userId, createMissing: false },
   );
 
   logAudit({

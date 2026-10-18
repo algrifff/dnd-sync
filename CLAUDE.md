@@ -57,7 +57,7 @@ globally (`npm i -g bun@1.4.3`) — don't rely on `npx bun`, which resolves the 
 - The Dockerfile is a single stage on `oven/bun:1.4.3` (keep it in step with `mise.toml`); it installs `poppler-utils` for PDF import, runs `next build`, and starts `bun run server.ts`
 - Anything that must run under Node (there is nothing today) cannot import `lib/db.ts`
 
-## Data model (51 migrations, versions 1–53 — append only, never edit existing)
+## Data model (52 migrations, versions 1–54 — append only, never edit existing)
 
 Numbering isn't contiguous — a couple of version numbers (21, 22) were
 never shipped, so "latest version" and "migration count" are two
@@ -70,7 +70,7 @@ Key tables:
 | `notes` | All content — path, ProseMirror JSON, Yjs state, frontmatter, `dm_only` + `gm_only` visibility flags |
 | `users` | Web app accounts — email, password_hash (Argon2), avatar |
 | `groups` | Worlds/campaigns — the multi-tenancy container |
-| `group_members` | User ↔ group with role: `admin`, `editor`, `viewer` |
+| `group_members` | User ↔ group with role: `admin`, `editor`, `viewer`, plus the user's own worlds-rail `sort_order` (v54, NULL sorts last by name; written by `PUT /api/worlds/order`) |
 | `sessions` | HTTP-only session cookies + CSRF tokens |
 | `characters` | Derived index from note frontmatter — re-derived on every save |
 | `session_notes` | Session status (open → closed) and the pending Wrap-up proposal (`wrap_up_json`) |
@@ -219,6 +219,7 @@ whole flow over HTTP) and the MCP Inspector:
 | `server/src/lib/superadmin.ts` | `ADMIN_TOKEN` check for the `/admin/*` `__sa` cookie |
 | `server/src/lib/session.ts` | Session CRUD, CSRF, expiry cleanup |
 | `server/src/lib/notes.ts` | Note CRUD, backlink derivation, FTS sync |
+| `server/src/lib/groups.ts` | Worlds: `listWorldsForSession` (rail order plus role-gated `latestActivityAt` / `openSession`) and `setWorldOrder`, behind `GET /api/worlds` and `PUT /api/worlds/order`. `latestActivityAt` skips the caller's own writes by `notes.updated_by`, so every write that bumps `notes.updated_at` must also stamp `updated_by` with the acting user |
 | `server/src/lib/relations.ts` | Relationships: `addRelation` (plus its manual link), visibility-gated `listRelations`, and the repoint/delete helpers every move and delete path calls |
 | `server/src/lib/ai/tools.ts` | AI tool definitions, unreferenced until the MCP connector adopts them |
 | `server/src/lib/wrap-up.ts` | Wrap-up: proposal shape, submit validation, candidate context, idempotent apply |
