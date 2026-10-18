@@ -119,4 +119,25 @@ describe('findUnlinkedMentions', () => {
     expect(find('editor', VOLO, 3)).toEqual(['Lore/n4.md', 'Lore/n3.md', 'Lore/n2.md']);
     expect(find()).toHaveLength(5);
   });
+
+  it('finds a real mention that follows a hit preceded by a letter', () => {
+    note('Lore/mixed.md', 'Mixed', 'The Volonte family arrived. Later we met Volo at the inn.');
+
+    expect(find()).toEqual(['Lore/mixed.md']);
+  });
+
+  it('ignores a term embedded in a longer word, and treats regex characters literally', () => {
+    note('Lore/embedded.md', 'Embedded', 'Volonte and Xvolo and volo_x only.');
+    note('Lore/dot.md', 'Dot', 'A. B. (c)+ is not Volo.');
+
+    expect(find()).toEqual(['Lore/dot.md']);
+  });
+
+  it('is not crowded out by more than 200 newer stemmed near-misses', () => {
+    note('Lore/old.md', 'Old', 'We climbed the Tower at dawn.');
+    for (let n = 0; n < 230; n++) note(`Lore/towering-${n}.md`, `T${n}`, 'A towering figure loomed.');
+    note('Places/Tower.md', 'Tower', 'A stone keep.');
+
+    expect(find('editor', 'Places/Tower.md')).toEqual(['Lore/old.md']);
+  });
 });

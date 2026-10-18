@@ -108,7 +108,7 @@ export type VisibilityOpts = { hideDmOnly?: boolean; hideGmOnly?: boolean };
  *  every hidden note back. */
 export type Visibility = { hideDmOnly: boolean; hideGmOnly: boolean };
 
-type MemberRole = 'admin' | 'editor' | 'viewer';
+export type MemberRole = 'admin' | 'editor' | 'viewer';
 const MEMBER_ROLES: readonly MemberRole[] = ['admin', 'editor', 'viewer'];
 
 /** The canonical role → visibility mapping. Every REST / RSC read path

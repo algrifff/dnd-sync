@@ -8,7 +8,7 @@ import {
 } from './connections';
 
 const rel = (label: string, path: string, title: string): RelationRow => ({
-  relation: label.replace(/ /g, '_'),
+  relation: label.replace(/ /g, '_') as RelationRow['relation'],
   label,
   path,
   title,
