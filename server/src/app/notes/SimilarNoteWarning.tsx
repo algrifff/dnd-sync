@@ -48,8 +48,11 @@ export function SimilarNoteWarning({
   matches,
   onOpen,
   onCreateAnyway,
+  disabled = false,
 }: {
   matches: SimilarNote[];
+  /** True while the Note is being created: "Create anyway" is inert. */
+  disabled?: boolean;
   /** Called as the link to an existing Note is followed. */
   onOpen: () => void;
   onCreateAnyway: () => void;
@@ -79,7 +82,8 @@ export function SimilarNoteWarning({
             type="button"
             onMouseDown={keepFocus}
             onClick={onCreateAnyway}
-            className="font-medium text-[var(--ink-soft)] underline-offset-2 hover:underline"
+            disabled={disabled}
+            className="font-medium text-[var(--ink-soft)] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
           >
             Create anyway
           </button>

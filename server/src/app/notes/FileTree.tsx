@@ -1768,8 +1768,10 @@ function NewEntryRow({
       >
         <SimilarNoteWarning
           matches={similar}
+          disabled={disabled}
           onOpen={onCancel}
           onCreateAnyway={() => {
+            if (disabled) return;
             const trimmed = value.trim();
             if (trimmed) onSubmit(trimmed);
           }}

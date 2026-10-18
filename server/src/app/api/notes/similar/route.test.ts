@@ -5,6 +5,7 @@ import { getDb } from '@/lib/db';
 import { setupTestDb, teardownTestDb } from '@/lib/test-utils';
 import { createUser, DEFAULT_GROUP_ID } from '@/lib/users';
 import { buildSessionCookies, createSession, type Session } from '@/lib/session';
+import { similarNotesLimiter } from '@/lib/ratelimit';
 import { GET } from './route';
 
 let viewer: Session;
@@ -59,6 +60,26 @@ describe('GET /api/notes/similar', () => {
     const res = await GET(request('Basos', viewer));
 
     expect(await res.json()).toEqual({ matches: [] });
+  });
+
+  it('ignores a name over 200 characters', async () => {
+    const res = await GET(request('Kixish'.padEnd(201, 'x'), viewer));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ matches: [] });
+    expect(await (await GET(request('Kixish'.padEnd(200, 'x'), viewer))).json()).toEqual({ matches: [] });
+  });
+
+  it('answers 429 once the caller has used 60 lookups a minute', async () => {
+    similarNotesLimiter.recordSuccess(viewer.userId);
+    for (let i = 0; i < 60; i++) expect((await GET(request('Kixish', viewer))).status).toBe(200);
+
+    const res = await GET(request('Kixish', viewer));
+
+    expect(res.status).toBe(429);
+    expect((await res.json()).error).toBe('rate_limited');
+    expect(res.headers.get('Retry-After')).toBeTruthy();
+    similarNotesLimiter.recordSuccess(viewer.userId);
   });
 
   it('answers a missing or empty name with no matches', async () => {

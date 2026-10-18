@@ -91,6 +91,11 @@ export const adminUploadLimiter = createLimiter(5, 60 * 60_000);
 // drag-drop of session images without tripping.
 export const assetUploadLimiter = createLimiter(30, 60_000);
 
+// Similar-name lookup while typing a new Note's name. Each call scans the
+// World's titles, so 60 per minute per user (debounced typing stays far
+// under it).
+export const similarNotesLimiter = createLimiter(60, 60_000);
+
 // Self-service signup. 5 per hour per IP — a real user creates one
 // account per device, anything faster is a script.
 export const signupLimiter = createLimiter(5, 60 * 60_000);

@@ -23,7 +23,7 @@ import { z } from 'zod';
 import { parseKind, RelationType } from '@compendium/shared';
 import { getDb } from '@/lib/db';
 import { addRelation } from '@/lib/relations';
-import { findSimilarNotes, type SimilarNote } from '@/lib/similar-names';
+import { loadNameIndex, matchName, type NameIndex, type SimilarNote } from '@/lib/similar-names';
 import { loadNote, visibilityFor, type NoteRow } from '@/lib/notes';
 import { getCampaignBySlug } from '@/lib/characters';
 import { canonicalPath } from '@/lib/ai/paths';
@@ -526,9 +526,6 @@ export function existingTitles(groupId: string, proposal: WrapUpProposal): Recor
   return out;
 }
 
-/** Matches fetched per mention before the unusable kinds are dropped. */
-const SIMILAR_SCAN = 12;
-
 /** For each mention that would create a new Note, the visible Notes with
  *  a close name that could take its History instead (at most 3, only
  *  kinds a mention can land on). Keyed by mention id; mentions with none
@@ -540,14 +537,11 @@ export function similarNotesFor(
   proposal: WrapUpProposal,
 ): Record<string, SimilarNote[]> {
   const out: Record<string, SimilarNote[]> = {};
+  let index: NameIndex | undefined;
   for (const mention of proposal.mentions) {
     if (mention.match.type !== 'new') continue;
-    const matches = findSimilarNotes({ groupId, role, name: mention.match.title, limit: SIMILAR_SCAN })
-      .filter((m) => {
-        const note = loadNote(groupId, m.path);
-        return note !== null && mentionKindOf(note.path, note.frontmatter_json) !== null;
-      })
-      .slice(0, 3);
+    index ??= loadNameIndex({ groupId, role });
+    const matches = matchName(index, mention.match.title, 3, (e) => mentionKindOf(e.path, e.frontmatterJson) !== null);
     if (matches.length > 0) out[mention.id] = matches;
   }
   return out;

@@ -3,7 +3,6 @@
 // favours a few good guesses over completeness. Containment (Kingsport
 // vs Kingsport Docks) is deliberately not a match: on the production
 // snapshot nearly all of those were a place inside a place.
-// See docs/adr/0003-connections-panel-and-manual-relationships.md.
 
 import { parseKind } from '@compendium/shared';
 import { getDb } from '@/lib/db';
@@ -38,21 +37,26 @@ export function nameTokens(name: string): string[] {
     .filter((t) => t && !STOP_WORDS.has(t));
 }
 
-/** Damerau-Levenshtein (optimal string alignment) distance. */
+/** Damerau-Levenshtein (optimal string alignment) distance. Keeps three
+ *  rows (previous-previous, previous, current) instead of the full table. */
 export function editDistance(a: string, b: string): number {
-  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) =>
-    Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
-  );
+  const w = b.length + 1;
+  let prev2 = new Array<number>(w).fill(0);
+  let prev = Array.from({ length: w }, (_, j) => j);
+  let cur = new Array<number>(w).fill(0);
   for (let i = 1; i <= a.length; i++) {
+    cur[0] = i;
     for (let j = 1; j <= b.length; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      d[i]![j] = Math.min(d[i - 1]![j]! + 1, d[i]![j - 1]! + 1, d[i - 1]![j - 1]! + cost);
+      let v = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + cost);
       if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
-        d[i]![j] = Math.min(d[i]![j]!, d[i - 2]![j - 2]! + 1);
+        v = Math.min(v, prev2[j - 2]! + 1);
       }
+      cur[j] = v;
     }
+    [prev2, prev, cur] = [prev, cur, prev2];
   }
-  return d[a.length]![b.length]!;
+  return prev[b.length]!;
 }
 
 type Closeness = { reason: SimilarReason; distance: number };
@@ -68,8 +72,11 @@ function compare(wanted: string[], candidate: string[]): Closeness | null {
 
   const shorter = Math.min(a.length, b.length);
   if (shorter >= 5) {
-    const distance = editDistance(a, b);
-    if (distance <= (shorter >= 10 ? 2 : 1)) return { reason: 'close_spelling', distance };
+    const allowed = shorter >= 10 ? 2 : 1;
+    if (Math.abs(a.length - b.length) <= allowed) {
+      const distance = editDistance(a, b);
+      if (distance <= allowed) return { reason: 'close_spelling', distance };
+    }
   }
 
   // One long word spelled almost the same (Gundren / Gundran Rockseeker).
@@ -77,7 +84,7 @@ function compare(wanted: string[], candidate: string[]): Closeness | null {
   for (const x of wanted) {
     if (x.length < 5) continue;
     for (const y of candidate) {
-      if (y.length >= 5 && x !== y && editDistance(x, y) <= 1) {
+      if (y.length >= 5 && x !== y && Math.abs(x.length - y.length) <= 1 && editDistance(x, y) <= 1) {
         return { reason: 'similar_word', distance: 1 };
       }
     }
@@ -90,16 +97,15 @@ function closer(a: Closeness, b: Closeness | undefined): boolean {
   return RANK[a.reason] !== RANK[b.reason] ? RANK[a.reason] < RANK[b.reason] : a.distance < b.distance;
 }
 
-/** Notes `role` may see whose title or alias resembles `name`, closest
- *  first. Every kind but Sessions and drawings. */
-export function findSimilarNotes(opts: {
-  groupId: string;
-  role: 'admin' | 'editor' | 'viewer';
-  name: string;
-  limit?: number;
-}): SimilarNote[] {
-  const wanted = nameTokens(opts.name);
-  if (wanted.length === 0) return [];
+type Role = 'admin' | 'editor' | 'viewer';
+
+type IndexEntry = { path: string; title: string; kind: string; frontmatterJson: string; names: string[] };
+
+/** Every Note a role may see in a World, with its title and aliases,
+ *  loaded once so many names can be matched against it. */
+export type NameIndex = IndexEntry[];
+
+export function loadNameIndex(opts: { groupId: string; role: Role }): NameIndex {
   const db = getDb();
   const hidden = hiddenNotesSql('n', visibilityFor(opts.role));
 
@@ -116,19 +122,48 @@ export function findSimilarNotes(opts: {
     )
     .all(opts.groupId);
 
-  const namesByPath = new Map<string, string[]>();
-  for (const a of aliases) namesByPath.set(a.path, [...(namesByPath.get(a.path) ?? []), a.alias]);
+  const aliasesByPath = new Map<string, string[]>();
+  for (const a of aliases) {
+    const list = aliasesByPath.get(a.path);
+    if (list) list.push(a.alias);
+    else aliasesByPath.set(a.path, [a.alias]);
+  }
 
-  const found: Array<SimilarNote & Closeness> = [];
+  const index: NameIndex = [];
   for (const note of notes) {
     const kind = kindOf(note.frontmatter_json);
     if (SKIPPED_KINDS.has(kind)) continue;
+    index.push({
+      path: note.path,
+      title: note.title,
+      kind,
+      frontmatterJson: note.frontmatter_json,
+      names: [note.title, ...(aliasesByPath.get(note.path) ?? [])],
+    });
+  }
+  return index;
+}
+
+/** Entries of `index` resembling `name`, closest first. `accept` drops
+ *  entries before the limit is applied. */
+export function matchName(
+  index: NameIndex,
+  name: string,
+  limit = 3,
+  accept?: (entry: { path: string; kind: string; frontmatterJson: string }) => boolean,
+): SimilarNote[] {
+  const wanted = nameTokens(name);
+  if (wanted.length === 0) return [];
+
+  const found: Array<SimilarNote & Closeness> = [];
+  for (const entry of index) {
+    if (accept && !accept(entry)) continue;
     let best: Closeness | undefined;
-    for (const candidate of [note.title, ...(namesByPath.get(note.path) ?? [])]) {
+    for (const candidate of entry.names) {
       const c = compare(wanted, nameTokens(candidate));
       if (c && closer(c, best)) best = c;
     }
-    if (best) found.push({ path: note.path, title: note.title, kind, ...best });
+    if (best) found.push({ path: entry.path, title: entry.title, kind: entry.kind, ...best });
   }
 
   found.sort(
@@ -138,7 +173,19 @@ export function findSimilarNotes(opts: {
       x.title.localeCompare(y.title) ||
       x.path.localeCompare(y.path),
   );
-  return found.slice(0, opts.limit ?? 3).map(({ path, title, kind, reason }) => ({ path, title, kind, reason }));
+  return found.slice(0, limit).map(({ path, title, kind, reason }) => ({ path, title, kind, reason }));
+}
+
+/** Notes `role` may see whose title or alias resembles `name`, closest
+ *  first. Every kind but Sessions and drawings. */
+export function findSimilarNotes(opts: {
+  groupId: string;
+  role: Role;
+  name: string;
+  limit?: number;
+}): SimilarNote[] {
+  if (nameTokens(opts.name).length === 0) return [];
+  return matchName(loadNameIndex(opts), opts.name, opts.limit);
 }
 
 function kindOf(frontmatterJson: string): string {
