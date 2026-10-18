@@ -8,7 +8,7 @@ import type { RelationView } from '@/lib/relations';
  *  `RelationView`, so the two cannot drift. */
 export type RelationRow = Pick<
   RelationView,
-  'relation' | 'label' | 'path' | 'title' | 'sessionPath' | 'sessionTitle' | 'createdBy'
+  'relation' | 'label' | 'path' | 'title' | 'sessionPath' | 'fromSession' | 'sessionTitle' | 'createdBy'
 >;
 
 export type RelationGroup = { label: string; rows: RelationRow[] };
@@ -74,11 +74,16 @@ export function mergeLinks(opts: {
 
 /** The caption under a Relationship row: its Session, else who added it. */
 export function relationProvenance(
-  r: Pick<RelationRow, 'sessionPath' | 'sessionTitle' | 'createdBy'>,
-): { kind: 'session'; path: string; title: string } | { kind: 'author'; name: string } | null {
+  r: Pick<RelationRow, 'sessionPath' | 'fromSession' | 'sessionTitle' | 'createdBy'>,
+):
+  | { kind: 'session'; path: string; title: string }
+  | { kind: 'hidden-session' }
+  | { kind: 'author'; name: string }
+  | null {
   if (r.sessionPath) {
     return { kind: 'session', path: r.sessionPath, title: r.sessionTitle || baseName(r.sessionPath) };
   }
+  if (r.fromSession) return { kind: 'hidden-session' };
   return r.createdBy ? { kind: 'author', name: r.createdBy } : null;
 }
 

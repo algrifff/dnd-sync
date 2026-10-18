@@ -255,6 +255,8 @@ function RelationItem({ row }: { row: RelationRow }): React.JSX.Element {
                 {provenance.title}
               </Link>
             </>
+          ) : provenance.kind === 'hidden-session' ? (
+            <>from a Session</>
           ) : (
             <>added by {provenance.name}</>
           )}
