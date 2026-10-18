@@ -33,7 +33,7 @@ Decisions: `docs/adr/0003-connections-panel-and-manual-relationships.md`, buildi
 
 ## PR 3: Add and remove connections (`feat/connection-editing`, stacked on PR 2)
 
-- Move `canEditDoc` (and its helpers `isNonNoteDoc`, `isPcOwnedBy` as needed) from `collab/server.ts` into `server/src/lib/note-permissions.ts`. `collab/server.ts` imports it from there. No behaviour change; the existing collab tests must still pass.
+- Move `canEditDoc` (and its helpers `isNonNoteDoc`, `isPcOwnedBy` as needed) from `collab/server.ts` into `server/src/lib/note-permissions.ts`. `collab/server.ts` and `app/api/sessions/player-sessions.test.ts` import it from there. No behaviour change; the existing collab tests must still pass. The note page (`app/(app)/(content)/notes/[...path]/page.tsx`) and the new route both use this one helper for every Connections-panel permission, so there is one edit rule.
 - `lib/relations.ts`: add `removeRelation({ groupId, from, relation, to })`, which canonicalises like `addRelation` and deletes the one row. It leaves `note_links` alone and reports `removed` or `missing`.
 - Route `server/src/app/api/notes/relations/route.ts`, following the API conventions in `CLAUDE.md`:
   - `POST { path, relation: RelationName | 'link', otherPath }` adds a connection.
@@ -42,9 +42,10 @@ Decisions: `docs/adr/0003-connections-panel-and-manual-relationships.md`, buildi
   - `'link'` inserts the plain `is_manual` `note_links` row only.
   - Permissions: first, a Note hidden from the caller, or missing, returns 404 `not_found`. Only then check `canEditDoc` on **both** Notes, otherwise 403 `forbidden`. This order means a 403 never confirms that a hidden Note exists. Both Notes must be in the caller's world. `sessionPath` is null and `userId` is the caller.
   - `logAudit` on every add and remove, with action names `relation.add` / `relation.remove` and the details `{ from, relation, to }`.
-- UI: one "Add connection" button at the top of `ConnectionsPanel`. It opens a small popover with a Note search (reuse the search the current `AddBacklink` / `AddOutgoingLink` use) and a type `<select>`. The first option is "just linked"; then every type and every inverse, labelled from this Note's side (`RELATIONS[t].label` / `.inverseLabel`). Hide the button when the caller cannot edit this Note.
+- UI: one "Add connection" button at the top of `ConnectionsPanel`. It opens a small popover with a Note search (reuse the search the current `AddBacklink` / `AddOutgoingLink` use) and a type `<select>`. The first option is "just linked"; then every type, plus the inverse of each non-symmetric type (`ally_of`, `enemy_of` and `related_to` are their own inverse and appear once), labelled from this Note's side (`RELATIONS[t].label` / `.inverseLabel`). Hide the button when the caller cannot edit this Note.
 - Relationship rows get a × (shown only when the caller can edit both Notes; pass a per-row `canRemove` from the server) that calls DELETE with no confirmation, optimistically removes the row, then refreshes.
 - Remove `AddBacklink.tsx` / `AddOutgoingLink.tsx` once nothing imports them.
+- Docs: in `CLAUDE.md`, add Key files rows for `lib/note-permissions.ts` and `api/notes/relations/route.ts`, and update the `note_relations` row: Relationships are authored by a reviewed Wrap-up or by hand on the Note page (ADR 0003). PR 2 adds a row for `lib/unlinked-mentions.ts`.
 - Tests: route tests for add of a forward type, add of an inverse (stored as the canonical forward row), add of `link`, symmetric add from either end being `unchanged`, remove keeps the `note_links` row, 403 when the caller can't edit one end (a viewer on a Note they didn't create), 404 for a hidden Note, and an audit row written.
 
 ## PR 4: "Already exists" warning (`feat/similar-name-warning`, base `main`)

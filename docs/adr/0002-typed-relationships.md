@@ -53,6 +53,6 @@ Update, 2026-10-18: ADR 0003 lets a person add or remove a Relationship from the
 
 ## Consequences
 
-- Relationships appear in the graph only through their link, and carry their type only in the new MCP reads and the review dialog until a Note-page panel exists.
+- Relationships appear in the graph only through their link, and carry their type only in the new MCP reads and the review dialog until a Note-page panel exists. (ADR 0003 adds that panel and manual editing.)
 - Every code path that renames, moves, duplicates or deletes a Note must carry its `note_relations` rows with it, exactly as it already does for `note_links`. The plan lists them.
 - The type list is part of the MCP tool schema, so a new type is a visible change to every connected agent.
