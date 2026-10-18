@@ -10,6 +10,9 @@ import { readSession } from '@/lib/session';
 import { listWorldsForSession } from '@/lib/groups';
 import { listRecentForUser } from '@/lib/notes';
 import { listUserCharacters } from '@/lib/userCharacters';
+import { MobileNavProvider } from '../../MobileNavContext';
+import { MobileNavInertBoundary } from '../../MobileNavInertBoundary';
+import { MobileNavDrawer } from '../../MobileNavDrawer';
 import { MeDashboard } from './MeDashboard';
 
 export const dynamic = 'force-dynamic';
@@ -28,12 +31,25 @@ export default async function MePage(): Promise<ReactElement> {
   const recent = listRecentForUser(session.userId, 20);
 
   return (
-    <MeDashboard
-      csrfToken={session.csrfToken}
-      displayName={session.displayName}
-      worlds={worlds}
-      characters={characters}
-      recent={recent}
-    />
+    <MobileNavProvider>
+      <MobileNavInertBoundary className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <MeDashboard
+          csrfToken={session.csrfToken}
+          displayName={session.displayName}
+          worlds={worlds}
+          characters={characters}
+          recent={recent}
+        />
+      </MobileNavInertBoundary>
+      <MobileNavDrawer
+        csrfToken={session.csrfToken}
+        userId={session.userId}
+        displayName={session.displayName}
+        accentColor={session.accentColor}
+        avatarVersion={session.avatarVersion}
+        role={session.role}
+        worldId={session.currentGroupId}
+      />
+    </MobileNavProvider>
   );
 }

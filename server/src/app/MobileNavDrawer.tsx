@@ -46,8 +46,9 @@ export function MobileNavDrawer({
   role: 'admin' | 'editor' | 'viewer';
   worldId: string;
   /** File-tree sidebar body — the same element passed to the desktop
-   *  <CollapsibleSidebar>. Only mounted here while the drawer is open. */
-  children: ReactNode;
+   *  <CollapsibleSidebar>. Only mounted here while the drawer is open.
+   *  Omitted on /me, which has no world tree: the drawer is the rail. */
+  children?: ReactNode;
 }): React.JSX.Element | null {
   const nav = useMobileNav();
   const pathname = usePathname();
@@ -134,7 +135,8 @@ export function MobileNavDrawer({
         aria-modal="true"
         aria-label="Navigation"
         className={
-          'fixed inset-y-0 left-0 z-50 flex h-full w-[min(340px,85vw)] shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none ' +
+          'fixed inset-y-0 left-0 z-50 flex h-full shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none ' +
+          (children ? 'w-[min(340px,85vw)] ' : 'w-[56px] ') +
           (open ? 'translate-x-0' : '-translate-x-full')
         }
       >
@@ -151,20 +153,22 @@ export function MobileNavDrawer({
               worldId={worldId}
             />
           )}
-          <div className="flex h-full min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--parchment-sunk)]/60">
-            <div className="flex shrink-0 items-center justify-end px-2 pt-2">
-              <button
-                type="button"
-                onClick={() => nav.setOpen(false)}
-                title="Close navigation"
-                aria-label="Close navigation"
-                className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[var(--ink-soft)] transition hover:bg-[var(--rule)] hover:text-[var(--ink)]"
-              >
-                <X size={14} aria-hidden />
-              </button>
+          {children && (
+            <div className="flex h-full min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--parchment-sunk)]/60">
+              <div className="flex shrink-0 items-center justify-end px-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => nav.setOpen(false)}
+                  title="Close navigation"
+                  aria-label="Close navigation"
+                  className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[var(--ink-soft)] transition hover:bg-[var(--rule)] hover:text-[var(--ink)]"
+                >
+                  <X size={14} aria-hidden />
+                </button>
+              </div>
+              {open && children}
             </div>
-            {open && children}
-          </div>
+          )}
         </div>
       </div>
     </div>

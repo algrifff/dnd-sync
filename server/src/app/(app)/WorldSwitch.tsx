@@ -16,6 +16,9 @@ import { EVENTS, identify, setWorld, track } from '@/lib/analytics/client';
 
 type WorldSwitchContextValue = {
   isPending: boolean;
+  /** The world being switched to, from the click until the refreshed
+   *  page lands. The rail marks it active straight away. */
+  pendingWorldId: string | null;
   switchTo: (id: string, destination?: string) => Promise<boolean>;
 };
 
@@ -37,6 +40,7 @@ export function WorldSwitchProvider({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isSwitching, setIsSwitching] = useState<boolean>(false);
+  const [pendingWorldId, setPendingWorldId] = useState<string | null>(null);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingDestRef = useRef<string>('/home');
   const lastReportedWorldRef = useRef<string | null>(null);
@@ -95,6 +99,7 @@ export function WorldSwitchProvider({
     async (id: string, destination: string = '/home'): Promise<boolean> => {
       if (isPending || isSwitching) return false;
       setIsSwitching(true);
+      setPendingWorldId(id);
       try {
         const res = await fetch('/api/worlds/active', {
           method: 'PATCH',
@@ -126,17 +131,21 @@ export function WorldSwitchProvider({
     [csrfToken, isPending, isSwitching, router],
   );
 
-  // Clear the fallback timer once the transition resolves normally.
+  // Once the transition resolves (or the PATCH failed), the session's
+  // world is the source of truth again: drop the optimistic marker and
+  // the fallback timer.
   useEffect(() => {
-    if (!isPending && fallbackTimerRef.current) {
+    if (isPending || isSwitching) return;
+    setPendingWorldId(null);
+    if (fallbackTimerRef.current) {
       clearTimeout(fallbackTimerRef.current);
       fallbackTimerRef.current = null;
     }
-  }, [isPending]);
+  }, [isPending, isSwitching]);
 
   const value = useMemo<WorldSwitchContextValue>(
-    () => ({ isPending: isPending || isSwitching, switchTo }),
-    [isPending, isSwitching, switchTo],
+    () => ({ isPending: isPending || isSwitching, pendingWorldId, switchTo }),
+    [isPending, isSwitching, pendingWorldId, switchTo],
   );
 
   return (
@@ -152,14 +161,27 @@ export function useWorldSwitch(): WorldSwitchContextValue {
   return ctx;
 }
 
+/** A switch that lands within this window never shows the overlay; the
+ *  rail's own pending marker is feedback enough. */
+const OVERLAY_DELAY_MS = 300;
+
 export function WorldSwitchOverlay(): React.JSX.Element {
   const { isPending } = useWorldSwitch();
+  const [visible, setVisible] = useState<boolean>(false);
+  useEffect(() => {
+    if (!isPending) {
+      setVisible(false);
+      return;
+    }
+    const timer = setTimeout(() => setVisible(true), OVERLAY_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [isPending]);
   return (
     <div
-      aria-hidden={!isPending}
+      aria-hidden={!visible}
       className={
-        'pointer-events-none absolute inset-0 z-40 flex items-center justify-center transition-opacity duration-150 ' +
-        (isPending ? 'opacity-100' : 'opacity-0')
+        'pointer-events-none absolute inset-0 z-40 flex items-center justify-center transition-opacity duration-150 motion-reduce:transition-none ' +
+        (visible ? 'opacity-100' : 'opacity-0')
       }
     >
       <div className="absolute inset-0 bg-[var(--parchment)]/60 backdrop-blur-[1px]" />

@@ -18,6 +18,14 @@
   --sage: #6B7F8E;
   --embers: #B5572A;
   --shadow: #1E1A15;
+  /* World-chip colours beyond the core palette (see world-chip.ts). */
+  --wisteria: #6A5D8B;
+  --deep-water: #4A6B7B;
+  --chestnut: #8E6E53;
+  /* Glyph ink for the worlds rail. The rail sits on --shadow, which is
+     near-black in both themes, so this stays light at night too. */
+  --rail-ink: #F4EDE0;
+  --rail-ink-rgb: 244 237 224;
 
   /* RGB triplets for rgba-style tints: rgb(var(--wine-rgb) / 0.12) */
   --parchment-rgb: 244 237 224;
@@ -45,6 +53,11 @@
   --sage: #8BA1B2;
   --embers: #D06E3E;
   --shadow: #151210;
+  --wisteria: #8A7DAB;
+  --deep-water: #6A8B9B;
+  --chestnut: #AE8E73;
+  --rail-ink: #F4EDE0;
+  --rail-ink-rgb: 244 237 224;
 
   --parchment-rgb: 42 36 30;
   --ink-rgb: 244 237 224;
@@ -667,4 +680,18 @@ html, body {
   .wu-seal svg { animation: none; stroke-dashoffset: 0; }
   .wu-row, .wu-tick__box, .wu-tick__check, .wu-tick__off, .wu-seg button { transition: none; }
   .wu-row:active .wu-tick__input:not(:disabled) + .wu-tick__box { transform: none; }
+}
+
+/* Worlds rail: the clicked world reads as active at once while the
+   switch is in flight, with a soft candlelight ring breathing round it. */
+@keyframes rail-pending-ring {
+  0%, 100% { box-shadow: 0 0 0 2px rgb(var(--candlelight-rgb) / 0.85); }
+  50% { box-shadow: 0 0 0 3px rgb(var(--candlelight-rgb) / 0.25); }
+}
+.rail-pending { animation: rail-pending-ring 1.1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .rail-pending {
+    animation: none;
+    box-shadow: 0 0 0 2px rgb(var(--candlelight-rgb) / 0.85);
+  }
 }
