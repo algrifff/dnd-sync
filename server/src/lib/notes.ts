@@ -141,7 +141,7 @@ export function hiddenNotesSql(alias: string, vis: Visibility): string {
 /** SQL predicate: note `<n>` is visible to the member row `<m>` under
  *  that member's own role. Built from `visibilityFor` so the mapping
  *  stays in one place; a role outside MEMBER_ROLES matches nothing. */
-function visibleToMemberSql(n: string, m: string): string {
+export function visibleToMemberSql(n: string, m: string): string {
   return MEMBER_ROLES.map(
     (role) => `(${m}.role = '${role}'${hiddenNotesSql(n, visibilityFor(role))})`,
   ).join(' OR ');

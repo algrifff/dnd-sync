@@ -1,18 +1,28 @@
 'use client';
 
-// "Suggestions for you": what Wrap-ups have offered the Player's
-// Characters. Each one waits here until the Player accepts it (a History
-// entry plus any items) or dismisses it. Nothing about a Character
+// "Suggestions for you": what Wrap-ups in any of the Player's Worlds
+// have offered their Characters. Each one waits here until the Player
+// accepts it (a History entry plus any items) or dismisses it, from
+// Home, whichever World they last opened. Nothing about a Character
 // changes until then, and game stats never do. Renders nothing when
 // there is nothing to decide.
 
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 import type { PendingSuggestion } from '@/lib/character-suggestions';
 import { itemsLabel } from '../../notes/wrap-up-review';
+import { useWorldSwitch } from '../WorldSwitch';
+import { WorldChip, type ChipWorld } from './WorldChip';
+import { noteHref } from './note-href';
 
-export function SuggestionsPanel({ csrfToken }: { csrfToken: string }): React.JSX.Element | null {
+export function SuggestionsPanel({
+  csrfToken,
+  worlds,
+}: {
+  csrfToken: string;
+  worlds: ChipWorld[];
+}): React.JSX.Element | null {
+  const { switchTo } = useWorldSwitch();
   const [suggestions, setSuggestions] = useState<PendingSuggestion[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,15 +85,21 @@ export function SuggestionsPanel({ csrfToken }: { csrfToken: string }): React.JS
       <ul className="mt-3 space-y-2">
         {suggestions.map((s) => {
           const busy = busyId === s.id;
+          const world = worlds.find((w) => w.id === s.worldId) ?? { id: s.worldId, name: s.worldName, iconVersion: 0 };
           return (
             <li key={s.id} className="rounded-[10px] border border-[var(--rule)] bg-[var(--vellum)] p-3">
-              <p className="text-sm font-medium text-[var(--ink)]">
-                <Link
-                  href={`/notes/${s.characterPath.split('/').map(encodeURIComponent).join('/')}`}
-                  className="hover:underline"
+              <p className="flex items-center gap-1.5 text-[11px] text-[var(--ink-soft)]">
+                <WorldChip world={world} size="sm" />
+                {s.worldName}
+              </p>
+              <p className="mt-1 text-sm font-medium text-[var(--ink)]">
+                <button
+                  type="button"
+                  onClick={() => void switchTo(s.worldId, noteHref(s.characterPath))}
+                  className="text-left hover:underline"
                 >
                   {s.characterTitle}
-                </Link>{' '}
+                </button>{' '}
                 <span className="font-normal text-[var(--ink-soft)]">· {s.sessionTitle}</span>
               </p>
               {s.story && <p className="mt-1 text-sm text-[var(--ink)]">{s.story}</p>}

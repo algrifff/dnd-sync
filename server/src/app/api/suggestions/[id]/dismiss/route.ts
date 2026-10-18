@@ -1,6 +1,7 @@
 // POST /api/suggestions/:id/dismiss — drop the Suggestion and leave the
 // Character as it is. Dismissing again changes nothing. Only the
-// Character's Player can: anyone else gets 404. 409 already_accepted.
+// Character's Player can, from whichever World is current: anyone else
+// gets 404. 409 already_accepted.
 
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
@@ -20,12 +21,7 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
     if (csrf) return csrf;
 
     const { id } = await ctx.params;
-    const result = dismissSuggestion({
-      groupId: session.currentGroupId,
-      role: session.role,
-      userId: session.userId,
-      id,
-    });
+    const result = dismissSuggestion({ userId: session.userId, id });
     switch (result.status) {
       case 'not_found':
         return json({ error: 'not_found' }, 404);

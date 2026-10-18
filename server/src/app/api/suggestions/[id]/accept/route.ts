@@ -1,7 +1,9 @@
 // POST /api/suggestions/:id/accept — add the Suggestion to the Character: a
 // History entry for its story and its items in the inventory. Never
 // stats. Accepting again changes nothing. Only the Character's Player
-// can: anyone else gets 404, as does a hidden Character or Session.
+// can, from whichever World is current: the Suggestion's own World and
+// their role there decide. Anyone else gets 404, as does a hidden
+// Character or Session, or a World they have left.
 // 409 already_dismissed / invalid_sheet / edit_failed.
 
 import type { NextRequest } from 'next/server';
@@ -22,12 +24,7 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
     if (csrf) return csrf;
 
     const { id } = await ctx.params;
-    const result = await acceptSuggestion({
-      groupId: session.currentGroupId,
-      role: session.role,
-      userId: session.userId,
-      id,
-    });
+    const result = await acceptSuggestion({ userId: session.userId, id });
     switch (result.status) {
       case 'not_found':
         return json({ error: 'not_found' }, 404);
