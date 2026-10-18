@@ -817,7 +817,8 @@ describe('Relationships in a Wrap-up', () => {
 
       const result = await run(twins, { accepted: ['m1', 'm2'], asNew: ['m2'], acceptedRelations: ['r7', 'r404'] });
 
-      expect(result.applied.map((a) => a.path)).toEqual([bell, bell]);
+      expect(result.applied.map((a) => a.path)).toEqual([bell]);
+      expect(result.skipped).toContainEqual({ id: 'm2', reason: 'duplicate_target' });
       expect(result.relationsSkipped).toEqual([{ id: 'r7', reason: 'same_note' }, { id: 'r404', reason: 'unknown_relation' }]);
       expect(relationsOf(bell)).toEqual([]);
     });
@@ -961,5 +962,26 @@ describe('Similarly named Notes in a Wrap-up', () => {
       expect(result.applied).toEqual([]);
       expect(result.skipped).toEqual([]);
     });
+
+    it('reports a mention sent to a Note another mention already wrote as skipped, and still resolves its Relationships', async () => {
+      const both: WrapUpProposal = {
+        ...proposalFrom(SIM_SESSION, [
+          fresh('Kixxish', 'person', 'A ferryman.', 'Poled the party across.'),
+          existing('Kixish', KIXISH, 'person', 'Haggled over the fare.'),
+        ]),
+        relations: [{ id: 'r1', from: { type: 'mention', mentionId: 'm2' }, relation: 'works_for', to: { type: 'existing', path: FERRY_GUILD } }],
+      };
+
+      const result = await applyWrapUp({
+        groupId, userId, role: 'viewer', sessionPath: SIM_SESSION, proposal: both,
+        decisions: { accepted: ['m1', 'm2'], asNew: [], acceptedRelations: ['r1'], useExisting: { m1: KIXISH } },
+      });
+
+      expect(result.applied.map((a) => [a.id, a.path])).toEqual([['m1', KIXISH]]);
+      expect(result.skipped).toEqual([{ id: 'm2', reason: 'duplicate_target' }]);
+      expect(result.relationsAdded.map((r) => r.id)).toEqual(['r1']);
+      expect(noteExists(KIXXISH)).toBe(false);
+    });
+
   });
 });

@@ -564,7 +564,10 @@ export type WrapUpDecisions = {
   useExisting?: Record<string, string>;
 };
 
-/** `invalid_target`: the Note chosen with `useExisting` cannot receive
+/** `duplicate_target`: an earlier accepted mention in this apply already
+ *  wrote this Session's History entry on the same Note (e.g. "Use Kixish
+ *  instead" next to a mention of Kixish itself); its Relationships still
+ *  resolve to that Note. `invalid_target`: the Note chosen with `useExisting` cannot receive
  *  History (a Character, a Session, a plain Note). `edit_failed`: the
  *  Note could not take the History entry (it vanished or refused the
  *  edit). `invalid_title`: nothing to name a new Note by. */
@@ -572,6 +575,7 @@ export type SkipReason =
   | 'unknown_mention'
   | 'not_visible'
   | 'invalid_target'
+  | 'duplicate_target'
   | 'edit_failed'
   | 'invalid_title';
 
@@ -621,6 +625,9 @@ export async function applyWrapUp(opts: {
 
   const applied: AppliedMention[] = [];
   const skipped: ApplyResult['skipped'] = [];
+  // Every mention that landed on a Note, including duplicates folded into
+  // an earlier one, so Relationships on either resolve.
+  const landed = new Map<string, string>();
   for (const id of new Set(opts.decisions.accepted)) {
     const mention = byId.get(id);
     if (!mention) {
@@ -635,6 +642,11 @@ export async function applyWrapUp(opts: {
       skipped.push({ id, reason: target.status });
       continue;
     }
+    if (applied.some((a) => a.path === target.path)) {
+      skipped.push({ id, reason: 'duplicate_target' });
+      landed.set(id, target.path);
+      continue;
+    }
     const edit = await applyNoteEdit({
       groupId,
       path: target.path,
@@ -647,6 +659,7 @@ export async function applyWrapUp(opts: {
       continue;
     }
     applied.push({ id, path: target.path, created: target.created });
+    landed.set(id, target.path);
   }
 
   if (applied.length) {
@@ -670,7 +683,7 @@ export async function applyWrapUp(opts: {
     sessionPath,
     proposal,
     accepted: opts.decisions.acceptedRelations ?? [],
-    landed: new Map(applied.map((a) => [a.id, a.path])),
+    landed,
     isVisible,
   });
 
