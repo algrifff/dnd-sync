@@ -24,21 +24,51 @@ const WORD_CHAR = /[\p{L}\p{N}_]/u;
 
 const isWordChar = (ch: string): boolean => ch !== '' && WORD_CHAR.test(ch);
 
+const WHITESPACE = /\s/u;
+
+const isSpace = (ch: string | undefined): boolean => ch !== undefined && WHITESPACE.test(ch);
+
+const sameChar = (a: string, b: string): boolean =>
+  a === b || a.toLocaleLowerCase() === b.toLocaleLowerCase();
+
 /** First whole-word, case-insensitive occurrence of `term` in `text`: not
- *  flanked by a letter, digit or underscore. No regex is built from `term`. */
-function findWholeWord(text: string, term: string): { index: number; length: number } | null {
-  const haystack = text.toLocaleLowerCase();
-  const needle = term.toLocaleLowerCase();
-  if (!needle) return null;
-  let from = 0;
-  for (;;) {
-    const i = haystack.indexOf(needle, from);
-    if (i === -1) return null;
-    const before = i > 0 ? (Array.from(haystack.slice(Math.max(0, i - 2), i)).pop() ?? '') : '';
-    const after = Array.from(haystack.slice(i + needle.length, i + needle.length + 2))[0] ?? '';
-    if (!isWordChar(before) && !isWordChar(after)) return { index: i, length: needle.length };
-    from = i + 1;
+ *  flanked by a letter, digit or underscore. Walks the original text one
+ *  character at a time (no lowercased copy, so `İ` cannot shift offsets);
+ *  any run of whitespace in the text, a newline or NBSP included, matches
+ *  the gap between two words of the term. No regex is built from `term`.
+ *  `index` and `length` are in the ORIGINAL text. */
+export function findWholeWord(text: string, term: string): { index: number; length: number } | null {
+  const words = term.split(/\s+/u).filter(Boolean);
+  if (words.length === 0) return null;
+  const needle = Array.from(words.join(' '));
+  const chars = Array.from(text);
+  const offsets: number[] = [];
+  let at = 0;
+  for (const ch of chars) {
+    offsets.push(at);
+    at += ch.length;
   }
+  offsets.push(at);
+
+  for (let i = 0; i < chars.length; i++) {
+    if (isSpace(chars[i]) || !sameChar(chars[i]!, needle[0]!)) continue;
+    let ti = i;
+    let ok = true;
+    for (let n = 0; n < needle.length && ok; n++) {
+      if (needle[n] === ' ') {
+        if (!isSpace(chars[ti])) ok = false;
+        while (isSpace(chars[ti])) ti++;
+      } else if (ti < chars.length && sameChar(chars[ti]!, needle[n]!)) {
+        ti++;
+      } else {
+        ok = false;
+      }
+    }
+    if (!ok) continue;
+    if (isWordChar(chars[i - 1] ?? '') || isWordChar(chars[ti] ?? '')) continue;
+    return { index: offsets[i]!, length: offsets[ti]! - offsets[i]! };
+  }
+  return null;
 }
 
 function snippetAround(text: string, index: number, length: number): string {

@@ -79,7 +79,7 @@ Key tables:
 | `assets` | Binary files (images etc.) deduplicated by content hash |
 | `note_links` | Graph edges between notes (backlinks) |
 | `note_relations` | Typed Relationships (v52): `from_path relation to_path` from the fixed list in `shared/src/schemas/relation.ts`, with the Session that established it. Authored, never derived; only `lib/relations.ts` reads or writes it, and every rename/move/delete carries its rows |
-| `notes_fts` | FTS5 full-text search index, auto-synced by triggers on `notes` (including path moves). `path` and `group_id` are indexed (v48), so build every MATCH with `worldFtsMatch()` from `lib/search.ts`, never write to it directly |
+| `notes_fts` | FTS5 full-text search index, auto-synced by triggers on `notes` (including path moves). `path` and `group_id` are indexed (v48), so build every MATCH with `worldFtsMatch()` (or `worldBodyPhraseMatch()` for a phrase in the body only) from `lib/search.ts`, never write to it directly |
 | `group_invite_tokens` | Shareable world join links |
 | `audit_log` | Admin action history |
 | `oauth_clients` | MCP connector clients (v50): `kind='dcr'` rows from `POST /api/oauth/register`, `kind='cimd'` rows caching a fetched Client ID Metadata Document whose URL is the `client_id` |
@@ -220,6 +220,7 @@ whole flow over HTTP) and the MCP Inspector:
 | `server/src/lib/session.ts` | Session CRUD, CSRF, expiry cleanup |
 | `server/src/lib/notes.ts` | Note CRUD, backlink derivation, FTS sync |
 | `server/src/lib/relations.ts` | Relationships: `addRelation` (plus its manual link), visibility-gated `listRelations`, and the repoint/delete helpers every move and delete path calls |
+| `server/src/lib/unlinked-mentions.ts` | Unlinked mentions: Notes that name this Note's title or an alias as a whole word without linking to it. FTS finds candidates (`worldBodyPhraseMatch`), then a regex-free scan of the original text confirms the word and builds the snippet; read-only |
 | `server/src/lib/ai/tools.ts` | AI tool definitions, unreferenced until the MCP connector adopts them |
 | `server/src/lib/wrap-up.ts` | Wrap-up: proposal shape, submit validation, candidate context, idempotent apply |
 | `server/src/lib/note-edits.ts` | Lossless PM-JSON edits: `addHistoryEntry`, `linkMention`, `applyNoteEdit` |
