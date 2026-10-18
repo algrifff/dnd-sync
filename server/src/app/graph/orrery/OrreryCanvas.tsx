@@ -203,15 +203,18 @@ function renderTip(h: Hover, palette: Palette, model: Model, campNames: Record<s
     );
   }
   if (h.type === 'rel') {
-    const { r } = h;
     return (
-      <div className={s.relTip}>
-        {r.s.title} · <em style={{ color: relColor(palette, r.type) }}>{relLabel(r.type, true)}</em> · {r.t.title}
-      </div>
+      <>
+        {h.rs.map((r) => (
+          <div key={r.type} className={s.relTip}>
+            {r.s.title} · <em style={{ color: relColor(palette, r.type) }}>{relLabel(r.type, true)}</em> · {r.t.title}
+          </div>
+        ))}
+      </>
     );
   }
   const n = h.n;
-  const kind =n.isIndex ? (n.role === 'camp' ? 'Campaign index' : 'Index note') : kindSingular(n.kind);
+  const kind = n.isIndex ? (n.role === 'camp' ? 'Campaign index' : 'Index note') : kindSingular(n.kind);
   const camp = campaignLabel(n.campaign, campNames);
   return (
     <>

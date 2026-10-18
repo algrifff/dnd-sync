@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { distToPath, pickAt, pickPath, REL_HIT_PX, type NodeHit, type PathHit } from './hit';
+import { distToPath, pickAt, pickPath, REL_HIT_PX, relsOnPair, type NodeHit, type PathHit } from './hit';
 
 // A quadratic bowing down from (0,0) to (200,0) through (100,50) at its middle.
 const BOW = [0, 0, 100, 100, 200, 0];
@@ -69,5 +69,22 @@ describe('pickAt', () => {
 
   test('is null over empty space', () => {
     expect(pickAt([], rels, 100, 300)).toBeNull();
+  });
+});
+
+describe('relsOnPair', () => {
+  test('returns the hit first, then every other Relationship between the same two notes, either way round', () => {
+    const [a, b, c] = ['Volo', 'Xanathar', 'Jarlaxle'];
+    const ally = { s: a, t: b, type: 'ally_of' };
+    const works = { s: b, t: a, type: 'works_for' };
+    const enemy = { s: a, t: c, type: 'enemy_of' };
+
+    expect(relsOnPair([ally, works, enemy], works)).toEqual([works, ally]);
+  });
+
+  test('returns only the hit when it is the one Relationship on its path', () => {
+    const r = { s: 'Volo', t: 'Xanathar', type: 'ally_of' };
+
+    expect(relsOnPair([r], r)).toEqual([r]);
   });
 });

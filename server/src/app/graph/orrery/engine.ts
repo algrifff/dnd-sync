@@ -34,7 +34,7 @@ import {
   type Wheel,
 } from './layout';
 import { drawRel as drawRelShared, endMarker as endMarkerShared, pathPts, strokeBatch as strokeBatchShared, type Stroke } from './draw';
-import { pickAt, type NodeHit, type PathHit } from './hit';
+import { pickAt, relsOnPair, type NodeHit, type PathHit } from './hit';
 import {
   advanceHover,
   CAPTION_SCALE,
@@ -57,7 +57,7 @@ import {
   kindSingular,
   kindTextColor,
   REL_STYLE,
-  relColor as relColorShared,
+  relColor,
   relLabel,
   type Fonts,
   type Palette,
@@ -67,7 +67,8 @@ export type LinkMode = 'grouped' | 'all';
 
 export type Hover =
   | { type: 'node'; n: ONode }
-  | { type: 'rel'; r: ORel }
+  /** Every Relationship between the pair under the pointer: two can share one path. */
+  | { type: 'rel'; rs: ORel[] }
   | { type: 'sector'; camp: string; all: number };
 
 /** Where a hovered node's dot and name are on screen, so the card can stay clear of both. */
@@ -519,7 +520,6 @@ export function createEngine(
     return total / rs;
   }
   const pathP = (p: readonly number[]): void => pathPts(ctx, p);
-  const relColor = (type: RelationType): string => relColorShared(C, type);
   const endMarker = (p: readonly number[], type: RelationType, rTarget: number): void => endMarkerShared(ctx, C, p, type, rTarget);
   const strokeBatch = (list: Stroke[], color: string, width: number, alphaMul = 1, dash: number[] = []): void =>
     strokeBatchShared(ctx, list, color, width, alphaMul, dash);
@@ -537,7 +537,7 @@ export function createEngine(
     }
     const def = REL_STYLE[r.type];
     ctx.globalAlpha = alpha;
-    ctx.strokeStyle = relColor(r.type);
+    ctx.strokeStyle = relColor(C, r.type);
     ctx.lineWidth = def.w * wMul;
     ctx.setLineDash(def.dash);
     ctx.beginPath();
@@ -565,9 +565,10 @@ export function createEngine(
   /** The hovered Relationship, drawn again on top: full strength, wider. */
   function drawHoveredRel(): void {
     if (S.hover?.type !== 'rel') return;
-    const r = S.hover.r;
-    const hit = relHits.find((h) => h.item === r);
-    if (hit) drawRel(r, hit.p, 1, 2);
+    for (const r of S.hover.rs) {
+      const hit = relHits.find((h) => h.item === r);
+      if (hit) drawRel(r, hit.p, 1, 2);
+    }
   }
   const pt = (n: ONode): [number, number] => [SX(cur(n).x), SY(cur(n).y)];
   /** World-space control points to screen space. */
@@ -1134,7 +1135,7 @@ export function createEngine(
         const lx = SX(Math.cos(th) * dist * along);
         const ly = SY(Math.sin(th) * dist * along);
         const txt = relLabelText(c, rs);
-        const col = relColorShared(C, rs[0]!.type);
+        const col = relColor(C, rs[0]!.type);
         setFont(SERIF(10 * CAPTION_SCALE, 'italic'), 0);
         const w = ctx.measureText(txt).width;
         const ux = Math.cos(th);
@@ -1222,15 +1223,17 @@ export function createEngine(
   }
 
   // ── picking + pointer input
-  function pick(mx: number, my: number): Hover | null {
+  /** What is under the pointer. Lines only count for hover (`lines`): a click
+   *  goes to the node or sector beneath, so a line never blocks drilling in. */
+  function pick(mx: number, my: number, lines = true): Hover | null {
     const dots: NodeHit<ONode>[] = [];
     for (const n of nodes) {
       if (cur(n).a < 0.25 || to(n).a < 0.25) continue;
       dots.push({ x: SX(cur(n).x), y: SY(cur(n).y), r: Math.max(dotR(cur(n).r), n.isIndex ? 5 : 2.5) + 3.5, item: n });
     }
-    const hit = pickAt(dots, relHits, mx, my);
+    const hit = pickAt(dots, lines ? relHits : [], mx, my);
     if (hit?.type === 'node') return { type: 'node', n: hit.item };
-    if (hit?.type === 'rel') return { type: 'rel', r: hit.item };
+    if (hit?.type === 'rel') return { type: 'rel', rs: relsOnPair(relHits.map((h) => h.item), hit.item) };
     if (scene && scene.type === 'wheel') {
       const wx = (mx - view.t.x) / view.t.k;
       const wy = (my - view.t.y) / view.t.k;
@@ -1249,7 +1252,7 @@ export function createEngine(
   const sameHover = (a: Hover | null, b: Hover | null): boolean => {
     if (!a || !b) return a === b;
     if (a.type === 'node') return b.type === 'node' && a.n === b.n;
-    if (a.type === 'rel') return b.type === 'rel' && a.r === b.r;
+    if (a.type === 'rel') return b.type === 'rel' && a.rs[0] === b.rs[0];
     return b.type === 'sector' && a.camp === b.camp;
   };
 
@@ -1264,7 +1267,7 @@ export function createEngine(
   const setHover = (h: Hover | null, x: number, y: number): void => {
     const same = sameHover(h, S.hover);
     S.hover = h;
-    canvas.style.cursor = h && h.type !== 'rel' ? 'pointer' : 'default';
+    canvas.style.cursor = h?.type === 'rel' ? (pick(x, y, false) ? 'pointer' : 'default') : h ? 'pointer' : 'default';
     const pl = h?.type === 'node' && scene ? hoverPlan(h.n) : null;
     hooks.onHover(h, x, y, pl ? { x: pl.x, y: pl.y, r: pl.r, side: pl.side } : undefined);
     if (!same) {
@@ -1342,7 +1345,7 @@ export function createEngine(
       return;
     }
     const p = local(ev);
-    const h = pick(p.x, p.y);
+    const h = pick(p.x, p.y, false);
     if (!h || h.type === 'rel') return;
     if (h.type === 'sector') return api.drill(h.camp);
     if (scene?.type === 'wheel' && h.n.isIndex && h.n.role === 'camp') return api.drill(h.n.campaign);
