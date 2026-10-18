@@ -55,7 +55,7 @@ export function connectTargets(mcpUrl: string): ConnectTarget[] {
       id: 'claude-code',
       label: 'Claude Code',
       intro: 'Run this in a terminal:',
-      commands: [`claude mcp add --transport http compendium '${mcpUrl}'`],
+      commands: [`claude mcp add --transport http compendium "${mcpUrl}"`],
       after: [
         'Then start claude, type /mcp, pick compendium and choose Authenticate. Your browser opens to sign in and pick the World.',
       ],
@@ -64,7 +64,7 @@ export function connectTargets(mcpUrl: string): ConnectTarget[] {
       id: 'codex',
       label: 'Codex',
       intro: 'Run these in a terminal. The second one opens your browser to sign in and pick the World.',
-      commands: [`codex mcp add compendium --url '${mcpUrl}'`, 'codex mcp login compendium'],
+      commands: [`codex mcp add compendium --url "${mcpUrl}"`, 'codex mcp login compendium'],
       after: [],
     },
   ];

@@ -4,13 +4,13 @@ import { connectTargets, safeMcpUrl } from './connect-claude';
 const URL = 'https://compendium.example/api/mcp';
 
 describe('connectTargets', () => {
-  test('every terminal setup registers the exact MCP URL, single-quoted', () => {
+  test('every terminal setup registers the exact MCP URL, double-quoted so it works in cmd, PowerShell and POSIX shells', () => {
     const targets = connectTargets(URL);
     const adders = targets.flatMap((t) => t.commands ?? []).filter((c) => c.includes(' add '));
 
     expect(adders).toEqual([
-      `claude mcp add --transport http compendium '${URL}'`,
-      `codex mcp add compendium --url '${URL}'`,
+      `claude mcp add --transport http compendium "${URL}"`,
+      `codex mcp add compendium --url "${URL}"`,
     ]);
   });
 
@@ -18,7 +18,7 @@ describe('connectTargets', () => {
     const codex = connectTargets(URL).find((t) => t.id === 'codex');
 
     expect(codex?.commands).toEqual([
-      `codex mcp add compendium --url '${URL}'`,
+      `codex mcp add compendium --url "${URL}"`,
       'codex mcp login compendium',
     ]);
   });
