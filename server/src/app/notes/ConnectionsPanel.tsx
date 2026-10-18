@@ -1,7 +1,9 @@
 'use client';
 
 // One "Connections" panel for the note sidebar: typed Relationships, then
-// plain Links (one list with a direction arrow). Replaces the separate
+// plain Links (one list with a direction arrow), then Unlinked mentions
+// (Notes naming this one without linking; "Link" adds the plain manual
+// link and never edits their text). Replaces the separate
 // Backlinks and Links-to panels (docs/adr/0003-connections-panel-and-
 // manual-relationships.md). Sections with no rows are hidden. The x on a
 // link row removes the plain link edge(s) and drops the row at once;
@@ -12,6 +14,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
+import type { UnlinkedMention } from '@/lib/unlinked-mentions';
 import { AddBacklink } from './AddBacklink';
 import { AddOutgoingLink } from './AddOutgoingLink';
 import {
@@ -35,12 +38,17 @@ const ARROW_TITLES = {
 
 export function ConnectionsPanel({
   relations,
+  mentions,
+  canLinkMentions,
   backlinks,
   outgoingLinks,
   currentPath,
   csrfToken,
 }: {
   relations: RelationRow[];
+  mentions: UnlinkedMention[];
+  /** Viewers cannot add links, so they see mentions without the button. */
+  canLinkMentions: boolean;
   backlinks: BacklinkRow[];
   outgoingLinks: OutgoingLinkRow[];
   currentPath: string;
@@ -83,7 +91,26 @@ export function ConnectionsPanel({
     [csrfToken, router],
   );
 
-  const empty = groups.length === 0 && links.length === 0;
+  const [unlinked, setUnlinked] = useState<UnlinkedMention[]>(mentions);
+  useEffect(() => {
+    setUnlinked(mentions);
+  }, [mentions]);
+
+  const linkMention = useCallback(
+    (m: UnlinkedMention): void => {
+      setUnlinked((prev) => prev.filter((x) => x.path !== m.path));
+      void fetch('/api/notes/backlink', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ fromPath: m.path, toPath: currentPath }),
+      }).finally(() => {
+        router.refresh();
+      });
+    },
+    [csrfToken, currentPath, router],
+  );
+
+  const empty = groups.length === 0 && links.length === 0 && unlinked.length === 0;
 
   return (
     <section className="mb-6">
@@ -145,6 +172,40 @@ export function ConnectionsPanel({
                 >
                   <X size={10} aria-hidden />
                 </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {unlinked.length > 0 && (
+        <div className="mb-3">
+          <SubHeading>Unlinked mentions</SubHeading>
+          <ul className="space-y-1.5">
+            {unlinked.map((m) => (
+              <li key={m.path} className="flex items-start gap-2 text-xs">
+                <div className="min-w-0 flex-1">
+                  <Link
+                    href={'/notes/' + encodePath(m.path)}
+                    title={m.path}
+                    className={'block truncate ' + LINK_CLASS}
+                  >
+                    {m.title || baseName(m.path)}
+                  </Link>
+                  <p className="text-[11px] text-[var(--ink-muted)] [overflow-wrap:anywhere]">
+                    {m.snippet}
+                  </p>
+                </div>
+                {canLinkMentions && (
+                  <button
+                    type="button"
+                    onClick={() => linkMention(m)}
+                    title={`Link ${m.title || baseName(m.path)} to this note`}
+                    className="shrink-0 rounded-[4px] border border-[var(--rule)] px-1.5 py-0.5 text-[11px] text-[var(--ink-soft)] transition hover:border-[var(--candlelight)] hover:text-[var(--ink)]"
+                  >
+                    Link
+                  </button>
+                )}
               </li>
             ))}
           </ul>

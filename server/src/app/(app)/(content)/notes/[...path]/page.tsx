@@ -14,6 +14,7 @@ import {
 import { getTemplate, type NoteTemplate, type TemplateKind } from '@/lib/templates';
 import { getWorldHeader } from '@/lib/groups';
 import { listRelations } from '@/lib/relations';
+import { findUnlinkedMentions } from '@/lib/unlinked-mentions';
 import { lockedFolderTitleFor } from '@/lib/folder-rename';
 import { NoteMenu } from '../../../../notes/NoteMenu';
 import { NoteWorkspace } from '../../../../notes/NoteWorkspace';
@@ -59,11 +60,14 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   // slow query before a fast one can start. Tree + kindMap are owned
   // by the parent (content)/layout so this page only fetches the
   // note-specific payloads.
-  const [worldHeader, relations, backlinks, outgoingLinks, tags, creator] =
+  const [worldHeader, relations, mentions, backlinks, outgoingLinks, tags, creator] =
     await Promise.all([
       Promise.resolve(getWorldHeader(session.currentGroupId)),
       Promise.resolve(
         listRelations({ groupId: session.currentGroupId, role: session.role, path }),
+      ),
+      Promise.resolve(
+        findUnlinkedMentions({ groupId: session.currentGroupId, role: session.role, path }),
       ),
       Promise.resolve(loadBacklinks(session.currentGroupId, path, vis)),
       Promise.resolve(loadOutgoingLinks(session.currentGroupId, path, vis)),
@@ -254,6 +258,8 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
           <NoteSidebar
             path={path}
             relations={relations}
+            mentions={mentions}
+            canLinkMentions={session.role !== 'viewer'}
             backlinks={backlinks}
             outgoingLinks={outgoingLinks}
             tags={tags}
