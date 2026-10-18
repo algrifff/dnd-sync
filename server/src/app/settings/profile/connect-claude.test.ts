@@ -55,4 +55,14 @@ describe('safeMcpUrl', () => {
     expect(safeMcpUrl('https://compendium.example/other')).toBeNull();
     expect(safeMcpUrl('not a url')).toBeNull();
   });
+
+  test('rejects a query or fragment, which could break out of the shell quotes', () => {
+    expect(safeMcpUrl("https://evil.example/api/mcp#'$(id)'")).toBeNull();
+    expect(safeMcpUrl('https://compendium.example/api/mcp?x=1')).toBeNull();
+  });
+
+  test('rejects a URL that is not already canonical, so it still matches the MCP resource', () => {
+    expect(safeMcpUrl('https://Compendium.example/api/mcp')).toBeNull();
+    expect(safeMcpUrl('https://compendium.example:443/api/mcp')).toBeNull();
+  });
 });

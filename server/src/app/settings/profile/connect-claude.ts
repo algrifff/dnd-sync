@@ -32,7 +32,11 @@ export function safeMcpUrl(url: string): string | null {
   if (!HOST_PATTERN.test(parsed.hostname)) return null;
   if (parsed.username !== '' || parsed.password !== '') return null;
   if (parsed.pathname !== '/api/mcp') return null;
-  return parsed.href;
+  if (parsed.search !== '' || parsed.hash !== '') return null;
+  // Only a URL that is already in canonical form: anything URL parsing would
+  // rewrite (case, default port, escapes) would no longer match the MCP
+  // resource tokens are bound to, and could hide characters the shell reads.
+  return parsed.href === url ? url : null;
 }
 
 export function connectTargets(mcpUrl: string): ConnectTarget[] {
