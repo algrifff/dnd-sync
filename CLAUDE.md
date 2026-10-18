@@ -233,6 +233,7 @@ whole flow over HTTP) and the MCP Inspector:
 | `server/src/lib/mcp/server.ts` | Per-request stateless Streamable HTTP MCP server over that registry |
 | `server/src/app/api/mcp/route.ts` | Bearer gate + 401 challenge in front of the MCP server |
 | `server/scripts/mcp-smoke.ts` | Live end-to-end check of the connector over HTTP |
+| `server/src/app/settings/profile/connect-claude.ts` | In-app "Connect Claude" guide data (Profile settings): per-client steps and commands, and `safeMcpUrl`, which refuses to print a link that is not a canonical http(s) `/api/mcp` URL so a forged host cannot reach a pasted shell command |
 | `server/scripts/suggest-relations.ts` | Read-only: prints candidate `member_of` / `located_in` Relationships from Person and Creature `faction` / `location` frontmatter (logic in `lib/relation-suggestions.ts`) |
 | `server/src/collab/server.ts` | Hocuspocus server for web editing |
 | `server/server.ts` | Entry point — Next.js + WebSocket on the same port |
