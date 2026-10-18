@@ -15,6 +15,7 @@ import { getDb } from '@/lib/db';
 import { pmToMarkdown } from '@/lib/pm-to-md';
 import { extractPlaintext, type PmNode } from '@/lib/md-to-pm';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
+import { collectLinksAndTags } from '@/lib/pm-links';
 
 export type DerivedNote = {
   title: string;
@@ -208,28 +209,5 @@ function isDmOnly(fmJson: string): boolean {
     return fm?.dmOnly === true || fm?.dm_only === true;
   } catch {
     return false;
-  }
-}
-
-/** The wikilink / embed targets and inline tags of a ProseMirror doc. */
-export function collectLinksAndTags(doc: PmNode): { wikilinks: string[]; tags: string[] } {
-  const links = new Set<string>();
-  const tags = new Set<string>();
-  walk(doc);
-  return { wikilinks: [...links], tags: [...tags] };
-
-  function walk(n: PmNode): void {
-    if (n.type === 'wikilink') {
-      const target = String(n.attrs?.target ?? '');
-      const orphan = Boolean(n.attrs?.orphan);
-      links.add(orphan ? `__orphan__:${target}` : target);
-    } else if (n.type === 'embedNote') {
-      const target = String(n.attrs?.target ?? '');
-      if (target) links.add(target);
-    } else if (n.type === 'tagMention') {
-      const t = String(n.attrs?.tag ?? '').toLowerCase();
-      if (t) tags.add(t);
-    }
-    if (Array.isArray(n.content)) for (const c of n.content) walk(c);
   }
 }

@@ -81,22 +81,12 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
     ]);
 
   const accentColor = worldHeader.headerColor;
-  // A Relationship can be removed by someone who can edit both its Notes.
-  const relations: RelationRow[] = relationViews.map((r) => ({
-    ...r,
-    canRemove: canEditThis && canEditDoc(r.path, session),
-  }));
-
-  // A link can be removed by someone who can edit both its Notes.
-  const removableLinkPaths = [...new Set([...backlinks.map((b) => b.from_path), ...outgoingLinks.map((l) => l.to_path)])].filter(
-    (p) => canEditThis && canEditDoc(p, session),
-  );
-
-  // A mention can be linked by someone who can edit both Notes.
-  const mentions: MentionRow[] = mentionViews.map((m) => ({
-    ...m,
-    canLink: canEditThis && canEditDoc(m.path, session),
-  }));
+  // Connecting or disconnecting two Notes needs edit rights on both.
+  const canEditBoth = (other: string): boolean => canEditThis && canEditDoc(other, session);
+  const relations: RelationRow[] = relationViews.map((r) => ({ ...r, canRemove: canEditBoth(r.path) }));
+  const linkedPaths = new Set([...backlinks.map((b) => b.from_path), ...outgoingLinks.map((l) => l.to_path)]);
+  const removableLinkPaths = [...linkedPaths].filter(canEditBoth);
+  const mentions: MentionRow[] = mentionViews.map((m) => ({ ...m, canLink: canEditBoth(m.path) }));
 
   // Parse frontmatter ONCE — character resolution, session detection,
   // and campaign-slug extraction all used to re-parse the same JSON.
