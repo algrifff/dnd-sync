@@ -74,6 +74,40 @@ html, body {
   color: var(--ink);
 }
 
+:root { color-scheme: light; }
+[data-theme="night"] { color-scheme: dark; }
+
+/* Scrollbars: a faint ink thumb on no track. The thumb is drawn 4px
+   wide inside a 10px gutter (transparent border + padding-box clip) so
+   it stays easy to grab. Chromium ignores ::-webkit-scrollbar once
+   scrollbar-color is set, so the standard properties are Firefox-only. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--ink-rgb) / 0.18) transparent;
+  }
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--ink-rgb) / 0.18);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(var(--ink-rgb) / 0.35);
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+
 /* Subtle paper texture — inline data-URI so we don't need a round-trip
    to /public for the main chrome. 6% opacity via blend mode. */
 .surface-paper {
