@@ -5,7 +5,7 @@
 
 import type { RelationType } from '@compendium/shared';
 import { clamp, type ORel } from './layout';
-import { REL_STYLE, type Palette } from './palette';
+import { REL_STYLE, relColor, type Palette } from './palette';
 
 export type Stroke = { p: number[]; a: number };
 
@@ -47,8 +47,6 @@ export function strokeBatch(
   ctx.setLineDash([]);
 }
 
-export const relColor = (C: Palette, type: RelationType): string => C[REL_STYLE[type].color];
-
 /** Arrow chevron or an "owns" diamond at the target end of a relation. */
 export function endMarker(ctx: CanvasRenderingContext2D, C: Palette, p: readonly number[], type: RelationType, rTarget: number): void {
   const def = REL_STYLE[type];
@@ -87,7 +85,7 @@ export function drawRel(
   ctx: CanvasRenderingContext2D,
   C: Palette,
   r: ORel,
-  p: number[],
+  p: readonly number[],
   alpha: number,
   rTarget: number,
   wMul = 1,

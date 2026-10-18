@@ -71,11 +71,14 @@
 .rel svg { flex: none; }
 .rel em { font-style: normal; color: var(--ink-muted); font-size: 10px; margin-left: auto; font-family: var(--sans); }
 .rel.off { opacity: .35; }
+.relGroup { font-size: 8.5px; margin: 5px 0 1px; }
 
 /* tooltip + card */
 .tip { position: absolute; pointer-events: none; background: var(--vellum); border: 1px solid var(--rule); padding: 7px 9px; max-width: 240px; font-size: 12px; }
 .tip .t { font-size: 14px; line-height: 1.2; margin: 2px 0 3px; }
 .tip .m { font-family: var(--sans); font-size: 10.5px; color: var(--ink-muted); }
+.relTip { font-size: 12px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.relTip em { font-style: italic; }
 .card { position: absolute; right: 22px; bottom: 22px; width: 268px; background: var(--vellum); border: 1px solid var(--rule); padding: 13px 15px; max-height: 44vh; overflow: auto; border-radius: 2px; }
 .card h2 { font-weight: 400; font-size: 21px; line-height: 1.12; margin: 4px 0 6px; }
 .card .m { font-family: var(--sans); font-size: 10.5px; color: var(--ink-muted); margin-bottom: 8px; }

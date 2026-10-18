@@ -15,7 +15,7 @@ import type { GraphPayload } from '@/lib/graph';
 import { createEngine, type Engine, type Hover, type HoverAnchor } from './engine';
 import { buildModel, campaignLabel, type Model, type ONode } from './layout';
 import { OrreryChrome } from './OrreryChrome';
-import { kindSingular, kindTextColor, resolveFonts, resolvePalette, type Palette } from './palette';
+import { kindSingular, kindTextColor, relColor, relLabel, resolveFonts, resolvePalette, type Palette } from './palette';
 import s from './orrery.module.css';
 
 interface Props {
@@ -202,8 +202,16 @@ function renderTip(h: Hover, palette: Palette, model: Model, campNames: Record<s
       </>
     );
   }
+  if (h.type === 'rel') {
+    const { r } = h;
+    return (
+      <div className={s.relTip}>
+        {r.s.title} · <em style={{ color: relColor(palette, r.type) }}>{relLabel(r.type, true)}</em> · {r.t.title}
+      </div>
+    );
+  }
   const n = h.n;
-  const kind = n.isIndex ? (n.role === 'camp' ? 'Campaign index' : 'Index note') : kindSingular(n.kind);
+  const kind =n.isIndex ? (n.role === 'camp' ? 'Campaign index' : 'Index note') : kindSingular(n.kind);
   const camp = campaignLabel(n.campaign, campNames);
   return (
     <>

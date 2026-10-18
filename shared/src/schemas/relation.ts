@@ -21,24 +21,43 @@ export const RELATION_TYPES = [
 export const RelationType = z.enum(RELATION_TYPES);
 export type RelationType = z.infer<typeof RelationType>;
 
+/** The families of Relationship types, in display order. The graph colours
+ *  a Relationship by its group and lists the types under these headings. */
+export const RELATION_GROUPS = [
+  { id: 'friendly', label: 'Friendly' },
+  { id: 'hostile', label: 'Hostile' },
+  { id: 'organisation', label: 'Organisation' },
+  { id: 'place', label: 'Place & ownership' },
+  { id: 'family', label: 'Family' },
+  { id: 'neutral', label: 'Neutral' },
+] as const;
+
+export type RelationGroup = (typeof RELATION_GROUPS)[number]['id'];
+
 type RelationInfo = {
   inverse: string;
   symmetric: boolean;
   label: string;
   inverseLabel: string;
+  group: RelationGroup;
 };
 
 export const RELATIONS = {
-  ally_of: { inverse: 'ally_of', symmetric: true, label: 'ally of', inverseLabel: 'ally of' },
-  enemy_of: { inverse: 'enemy_of', symmetric: true, label: 'enemy of', inverseLabel: 'enemy of' },
-  member_of: { inverse: 'has_member', symmetric: false, label: 'member of', inverseLabel: 'has member' },
-  leads: { inverse: 'led_by', symmetric: false, label: 'leads', inverseLabel: 'led by' },
-  works_for: { inverse: 'employs', symmetric: false, label: 'works for', inverseLabel: 'employs' },
-  owns: { inverse: 'owned_by', symmetric: false, label: 'owns', inverseLabel: 'owned by' },
-  located_in: { inverse: 'contains', symmetric: false, label: 'located in', inverseLabel: 'contains' },
-  parent_of: { inverse: 'child_of', symmetric: false, label: 'parent of', inverseLabel: 'child of' },
-  related_to: { inverse: 'related_to', symmetric: true, label: 'related to', inverseLabel: 'related to' },
+  ally_of: { inverse: 'ally_of', symmetric: true, label: 'ally of', inverseLabel: 'ally of', group: 'friendly' },
+  enemy_of: { inverse: 'enemy_of', symmetric: true, label: 'enemy of', inverseLabel: 'enemy of', group: 'hostile' },
+  member_of: { inverse: 'has_member', symmetric: false, label: 'member of', inverseLabel: 'has member', group: 'organisation' },
+  leads: { inverse: 'led_by', symmetric: false, label: 'leads', inverseLabel: 'led by', group: 'organisation' },
+  works_for: { inverse: 'employs', symmetric: false, label: 'works for', inverseLabel: 'employs', group: 'organisation' },
+  owns: { inverse: 'owned_by', symmetric: false, label: 'owns', inverseLabel: 'owned by', group: 'place' },
+  located_in: { inverse: 'contains', symmetric: false, label: 'located in', inverseLabel: 'contains', group: 'place' },
+  parent_of: { inverse: 'child_of', symmetric: false, label: 'parent of', inverseLabel: 'child of', group: 'family' },
+  related_to: { inverse: 'related_to', symmetric: true, label: 'related to', inverseLabel: 'related to', group: 'neutral' },
 } as const satisfies Record<RelationType, RelationInfo>;
+
+/** The stored types of one group, in `RELATION_TYPES` order. */
+export function relationTypesIn(group: RelationGroup): RelationType[] {
+  return RELATION_TYPES.filter((t) => RELATIONS[t].group === group);
+}
 
 /** A Relationship as read from either end: a stored type or its inverse. */
 export type RelationName = RelationType | (typeof RELATIONS)[RelationType]['inverse'];
