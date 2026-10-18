@@ -19,8 +19,9 @@ export type WorldRow = {
   isActive: boolean;
   /** Cache-buster for /api/worlds/[id]/icon?v=N. 0 means no icon. */
   iconVersion: number;
-  /** Newest note save or asset upload (epoch ms) the caller may see in
-   *  this world, or null when there is none. */
+  /** Newest note save or asset upload (epoch ms) by someone other than
+   *  the caller that the caller may see in this world, or null when there
+   *  is none. The caller's own writes never count as new activity. */
   latestActivityAt: number | null;
   /** The most recently saved open Session the caller may see. */
   openSession: { path: string } | null;
@@ -115,20 +116,25 @@ type ListDbRow = {
 /** Every world the user belongs to, in their rail order: placed worlds
  *  by `sort_order`, then unplaced ones by name. The activity columns
  *  are gated by the user's role in each world, so a hidden note or
- *  asset never moves `latestActivityAt` or surfaces as `openSession`. */
+ *  asset never moves `latestActivityAt` or surfaces as `openSession`.
+ *  A collab save stamps `updated_by` with the author of the last update
+ *  in its debounce window, so a co-edited note is credited to whoever
+ *  typed last. */
 export function listWorldsForSession(
   userId: string,
   sessionId: string,
 ): WorldRow[] {
   const rows = getDb()
-    .query<ListDbRow, [string, string]>(
+    .query<ListDbRow, [string, string, string, string]>(
       `SELECT g.id, g.name, gm.role, g.icon_updated_at,
               (SELECT s.current_group_id FROM sessions s WHERE s.id = ?) AS current_group_id,
               (SELECT n.updated_at FROM notes n
-                WHERE n.group_id = g.id AND (${visibleToMemberSql('n', 'gm')})
+                WHERE n.group_id = g.id AND n.updated_by IS NOT ?
+                  AND (${visibleToMemberSql('n', 'gm')})
                 ORDER BY n.updated_at DESC LIMIT 1) AS latest_note_at,
               (SELECT MAX(a.uploaded_at) FROM assets a
-                WHERE a.group_id = g.id AND (${assetVisibleToMemberSql('a', 'gm')})) AS latest_asset_at,
+                WHERE a.group_id = g.id AND a.uploaded_by IS NOT ?
+                  AND (${assetVisibleToMemberSql('a', 'gm')})) AS latest_asset_at,
               (SELECT sn.note_path FROM session_notes sn
                  JOIN notes n ON n.group_id = sn.group_id AND n.path = sn.note_path
                 WHERE sn.group_id = g.id AND sn.status = 'open'
@@ -139,7 +145,7 @@ export function listWorldsForSession(
         WHERE gm.user_id = ?
         ORDER BY gm.sort_order IS NULL, gm.sort_order, g.name COLLATE NOCASE`,
     )
-    .all(sessionId, userId);
+    .all(sessionId, userId, userId, userId);
   return rows.map((r) => ({
     id: r.id,
     name: r.name,

@@ -55,13 +55,13 @@ function seedNote(
   groupId: string,
   path: string,
   updatedAt: number,
-  flags: { dmOnly?: boolean; gmOnly?: boolean } = {},
+  flags: { dmOnly?: boolean; gmOnly?: boolean; by?: string } = {},
 ): void {
   getDb()
     .query(
       `INSERT INTO notes (id, group_id, path, content_json, content_text,
-                          updated_at, created_at, dm_only, gm_only)
-       VALUES (?, ?, ?, '{}', '', ?, ?, ?, ?)`,
+                          updated_at, created_at, dm_only, gm_only, updated_by)
+       VALUES (?, ?, ?, '{}', '', ?, ?, ?, ?, ?)`,
     )
     .run(
       randomUUID(),
@@ -71,16 +71,17 @@ function seedNote(
       updatedAt,
       flags.dmOnly ? 1 : 0,
       flags.gmOnly ? 1 : 0,
+      flags.by ?? null,
     );
 }
 
-function seedAsset(groupId: string, uploadedAt: number, gmOnly: boolean): void {
+function seedAsset(groupId: string, uploadedAt: number, gmOnly: boolean, by: string | null = null): void {
   getDb()
     .query(
-      `INSERT INTO assets (id, group_id, hash, mime, size, original_name, uploaded_at, gm_only)
-       VALUES (?, ?, ?, 'image/png', 1, 'a.png', ?, ?)`,
+      `INSERT INTO assets (id, group_id, hash, mime, size, original_name, uploaded_at, gm_only, uploaded_by)
+       VALUES (?, ?, ?, 'image/png', 1, 'a.png', ?, ?, ?)`,
     )
-    .run(randomUUID(), groupId, randomUUID(), uploadedAt, gmOnly ? 1 : 0);
+    .run(randomUUID(), groupId, randomUUID(), uploadedAt, gmOnly ? 1 : 0, by);
 }
 
 function seedSession(groupId: string, path: string, status: 'open' | 'closed'): void {
@@ -195,6 +196,31 @@ describe('world latestActivityAt', () => {
 
     expect(worldFor(users.editor, groupId).latestActivityAt).toBe(1_000);
     expect(worldFor(users.admin, groupId).latestActivityAt).toBe(5_000);
+  });
+
+  it("should ignore the caller's own newer note edit", () => {
+    const { groupId, users } = worldWithRoles();
+    seedNote(groupId, 'Lore/Open.md', 1_000, { by: users.admin });
+    seedNote(groupId, 'Lore/Mine.md', 6_000, { by: users.viewer });
+
+    expect(worldFor(users.viewer, groupId).latestActivityAt).toBe(1_000);
+  });
+
+  it("should count another member's newer note edit", () => {
+    const { groupId, users } = worldWithRoles();
+    seedNote(groupId, 'Lore/Mine.md', 1_000, { by: users.viewer });
+    seedNote(groupId, 'Lore/Theirs.md', 6_000, { by: users.editor });
+
+    expect(worldFor(users.viewer, groupId).latestActivityAt).toBe(6_000);
+  });
+
+  it("should ignore the caller's own newer asset upload", () => {
+    const { groupId, users } = worldWithRoles();
+    seedAsset(groupId, 1_000, false, users.admin);
+    seedAsset(groupId, 7_000, false, users.viewer);
+
+    expect(worldFor(users.viewer, groupId).latestActivityAt).toBe(1_000);
+    expect(worldFor(users.editor, groupId).latestActivityAt).toBe(7_000);
   });
 
   it('should be null for a world with nothing the caller can see', () => {
