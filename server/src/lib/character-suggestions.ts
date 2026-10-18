@@ -6,24 +6,27 @@
 // items in the inventory; it never touches stats. See
 // docs/adr/0001-wrap-up-on-close.md.
 //
-// Only the Player a Suggestion was addressed to can see or resolve it.
-// Anyone else, and anything hidden from them, reads as not found.
+// Only the Player a Suggestion was addressed to can see or resolve it,
+// from any World they belong to. Anyone else, a World they have left,
+// and anything hidden from their role there, reads as not found.
 
 import { randomUUID } from 'node:crypto';
 import { getDb } from '@/lib/db';
-import { loadNote, visibilityFor, type NoteRow } from '@/lib/notes';
+import { loadNote, visibleToMemberSql, type NoteRow } from '@/lib/notes';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { validateSheet } from '@/lib/validateSheet';
 import { syncNoteToMaster } from '@/lib/userCharacterSync';
 import { addHistoryEntry, applyNoteEdit } from '@/lib/note-edits';
 import { signalSheetChanged } from '@/collab/server';
-import type { Role, Suggestion } from '@/lib/wrap-up';
+import type { Suggestion } from '@/lib/wrap-up';
 
 export type SuggestedItem = { name: string; quantity: number };
 
 /** A pending Suggestion as its Player sees it. */
 export type PendingSuggestion = {
   id: string;
+  worldId: string;
+  worldName: string;
   sessionPath: string;
   sessionTitle: string;
   characterPath: string;
@@ -89,6 +92,8 @@ export function storeSuggestions(opts: {
 
 type Row = {
   id: string;
+  group_id: string;
+  group_name: string;
   session_path: string;
   session_title: string;
   character_path: string;
@@ -99,36 +104,39 @@ type Row = {
   created_at: number;
 };
 
-/** `userId`'s Suggestions, newest first, that they still own (the
- *  Character is still theirs) and may still see (neither the Character
- *  nor the Session is hidden from `role`). `id` narrows to one. */
+/** `userId`'s Suggestions, newest first, in every World they are still a
+ *  member of, that they still own (the Character is still theirs) and may
+ *  still see under their role in that World (neither the Character nor
+ *  the Session is hidden from it). `id` narrows to one. The World and the
+ *  role come from the Suggestion and its membership row, never from the
+ *  caller, so reading or resolving one needs no current World. */
 function mine(opts: {
-  groupId: string;
-  role: Role;
   userId: string;
   id?: string;
   status?: Row['status'];
   limit: number;
 }): Row[] {
-  const vis = visibilityFor(opts.role);
-  const hidden = (alias: string): string =>
-    `${vis.hideDmOnly ? ` AND ${alias}.dm_only = 0` : ''}${vis.hideGmOnly ? ` AND ${alias}.gm_only = 0` : ''}`;
-  const args: Array<string | number> = [opts.groupId, opts.userId];
+  const args: Array<string | number> = [opts.userId];
   if (opts.id) args.push(opts.id);
   if (opts.status) args.push(opts.status);
   args.push(opts.limit);
   return getDb()
     .query<Row, Array<string | number>>(
-      `SELECT s.id, s.session_path, sn.title AS session_title,
+      `SELECT s.id, s.group_id, g.name AS group_name,
+              s.session_path, sn.title AS session_title,
               s.character_path, cn.title AS character_title,
               s.story, s.items_json, s.status, s.created_at
          FROM character_suggestions s
+         JOIN group_members gm ON gm.group_id = s.group_id AND gm.user_id = s.owner_user_id
+         JOIN groups g ON g.id = s.group_id
          JOIN characters c
            ON c.group_id = s.group_id AND c.note_path = s.character_path
           AND c.player_user_id = s.owner_user_id
-         JOIN notes cn ON cn.group_id = s.group_id AND cn.path = s.character_path${hidden('cn')}
-         JOIN notes sn ON sn.group_id = s.group_id AND sn.path = s.session_path${hidden('sn')}
-        WHERE s.group_id = ? AND s.owner_user_id = ?
+         JOIN notes cn ON cn.group_id = s.group_id AND cn.path = s.character_path
+                      AND (${visibleToMemberSql('cn', 'gm')})
+         JOIN notes sn ON sn.group_id = s.group_id AND sn.path = s.session_path
+                      AND (${visibleToMemberSql('sn', 'gm')})
+        WHERE s.owner_user_id = ?
           ${opts.id ? 'AND s.id = ?' : ''}
           ${opts.status ? 'AND s.status = ?' : ''}
         ORDER BY s.created_at DESC, s.id
@@ -137,14 +145,13 @@ function mine(opts: {
     .all(...args);
 }
 
-/** The pending Suggestions for `userId` to accept or dismiss. */
-export function listMySuggestions(opts: {
-  groupId: string;
-  role: Role;
-  userId: string;
-}): PendingSuggestion[] {
+/** The pending Suggestions for `userId` to accept or dismiss, across
+ *  every World they belong to. */
+export function listMySuggestions(opts: { userId: string }): PendingSuggestion[] {
   return mine({ ...opts, status: 'pending', limit: MAX_PENDING_LISTED }).map((r) => ({
     id: r.id,
+    worldId: r.group_id,
+    worldName: r.group_name,
     sessionPath: r.session_path,
     sessionTitle: r.session_title,
     characterPath: r.character_path,
@@ -173,16 +180,16 @@ export type ResolveResult =
 /** Accepts one of `userId`'s Suggestions: a History entry for the story
  *  and the items added to the inventory. Accepting twice changes nothing
  *  the second time. Nothing is written unless the Sheet with the items
- *  in it validates, so a refused accept leaves the Character untouched. */
+ *  in it validates, so a refused accept leaves the Character untouched.
+ *  Works from any World: the write lands in the Suggestion's own. */
 export async function acceptSuggestion(opts: {
-  groupId: string;
-  role: Role;
   userId: string;
   id: string;
 }): Promise<ResolveResult> {
-  const { groupId, userId } = opts;
+  const { userId } = opts;
   const row = mine({ ...opts, limit: 1 })[0];
   if (!row) return { status: 'not_found' };
+  const groupId = row.group_id;
   if (row.status === 'accepted') return { status: 'ok', changed: false };
   if (row.status === 'dismissed') return { status: 'conflict', resolved: 'dismissed' };
 
@@ -243,17 +250,12 @@ export async function acceptSuggestion(opts: {
 }
 
 /** Dismisses one of `userId`'s Suggestions. The Character is left as it is. */
-export function dismissSuggestion(opts: {
-  groupId: string;
-  role: Role;
-  userId: string;
-  id: string;
-}): DismissResult {
+export function dismissSuggestion(opts: { userId: string; id: string }): DismissResult {
   const row = mine({ ...opts, limit: 1 })[0];
   if (!row) return { status: 'not_found' };
   if (row.status === 'dismissed') return { status: 'ok', changed: false };
   if (row.status === 'accepted') return { status: 'conflict', resolved: 'accepted' };
-  return { status: 'ok', changed: resolve(opts.groupId, row.id, 'pending', 'dismissed') };
+  return { status: 'ok', changed: resolve(row.group_id, row.id, 'pending', 'dismissed') };
 }
 
 /** Moves a Suggestion from `from` to `to`; false when it was no longer `from`. */

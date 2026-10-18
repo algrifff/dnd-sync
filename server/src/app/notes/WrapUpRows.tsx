@@ -18,6 +18,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { Mention, WrapUpProposal } from '@/lib/wrap-up';
+import type { SimilarNote } from '@/lib/similar-names';
 import { WrapUpTick } from './WrapUpTick';
 import {
   KIND_LABEL,
@@ -27,6 +28,7 @@ import {
   setAccepted,
   setAsNew,
   setRelationAccepted,
+  setUseExisting,
   type RelationReview,
   type RelationRow,
   type ReviewRow,
@@ -43,6 +45,10 @@ const KIND_LOOK: Record<Mention['kind'], { Icon: LucideIcon; tile: string }> = {
 };
 
 const WRAP = '[overflow-wrap:anywhere]';
+
+/** "person" -> "Person"; kinds outside the mention list read as written. */
+const SIMILAR_KIND = (kind: string): string =>
+  KIND_LABEL[kind as Mention['kind']] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
 const STRUCK = 'line-through decoration-[var(--ink-muted)] decoration-1';
 
 function rowStyle(i: number, dim?: number): React.CSSProperties {
@@ -52,6 +58,7 @@ function rowStyle(i: number, dim?: number): React.CSSProperties {
 export function ReviewList({
   proposal,
   titles,
+  similar,
   review,
   relationsOff,
   disabled,
@@ -60,6 +67,8 @@ export function ReviewList({
 }: {
   proposal: WrapUpProposal;
   titles: Record<string, string>;
+  /** Per new-Note mention id: visible Notes with a close name. */
+  similar: Record<string, SimilarNote[]>;
   review: ReviewState;
   relationsOff: RelationReview;
   disabled: boolean;
@@ -75,9 +84,11 @@ export function ReviewList({
       row={row}
       index={i}
       titles={titles}
+      similar={similar[row.mention.id] ?? []}
       disabled={disabled}
       onToggle={(accepted) => onChange(setAccepted(review, row.mention.id, accepted))}
       onSwitch={(asNew) => onChange(setAsNew(review, row.mention.id, asNew))}
+      onUseExisting={(path) => onChange(setUseExisting(review, row.mention.id, path))}
     />
   );
 
@@ -237,16 +248,21 @@ function MentionRow({
   row,
   index,
   titles,
+  similar,
   disabled,
   onToggle,
   onSwitch,
+  onUseExisting,
 }: {
   row: ReviewRow;
   index: number;
   titles: Record<string, string>;
+  similar: SimilarNote[];
   disabled: boolean;
   onToggle: (accepted: boolean) => void;
   onSwitch: (asNew: boolean) => void;
+  /** A similar Note's path to use it, null to go back to a new Note. */
+  onUseExisting: (path: string | null) => void;
 }): React.JSX.Element {
   const { mention, destination } = row;
   const kind = KIND_LABEL[mention.kind];
@@ -254,12 +270,15 @@ function MentionRow({
   const matchedTitle =
     mention.match.type === 'existing' ? (titles[mention.match.path] ?? mention.match.path) : null;
   const uncertain = mention.match.type === 'existing' && !mention.match.certain;
+  const chosen = destination.type === 'existing' && destination.chosen;
+  const chosenPath = destination.type === 'existing' && destination.chosen ? destination.path : null;
+  const chosenTitle = chosenPath ? (titles[chosenPath] ?? chosenPath) : null;
+  // Only a mention the Wrap-up would create a Note for is offered a similar one.
+  const offerSimilar = mention.match.type === 'new' && similar.length > 0;
   const heading =
     destination.type === 'new'
       ? destination.title
-      : uncertain
-        ? mention.name
-        : (matchedTitle ?? mention.name);
+      : chosenTitle ?? (uncertain ? mention.name : (matchedTitle ?? mention.name));
   const switched = destination.type === 'new' && destination.switched;
 
   return (
@@ -290,6 +309,42 @@ function MentionRow({
           <span className={`block text-xs text-[var(--ink-muted)] ${WRAP}`}>{mention.historyEntry}</span>
         </span>
       </label>
+      {offerSimilar && !chosen && (
+        <ul className="space-y-1 pb-2.5 pl-[calc(22px+0.75rem+32px+0.75rem)]">
+          {similar.map((s) => (
+            <li key={s.path} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--ink-soft)]">
+              <span className={WRAP}>
+                Similar: <strong className="font-semibold text-[var(--ink)]">{s.title}</strong>
+                <span className="text-[var(--ink-muted)]"> ({SIMILAR_KIND(s.kind)})</span>
+              </span>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onUseExisting(s.path)}
+                className="wu-chip cursor-pointer disabled:opacity-40"
+              >
+                <Link2 size={11} aria-hidden />
+                Use {s.title} instead
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {offerSimilar && chosenTitle && (
+        <div className="pb-2.5 pl-[calc(22px+0.75rem+32px+0.75rem)]">
+          <div className="wu-seg" role="group" aria-label={`Where ${mention.name} goes`}>
+            <button type="button" disabled={disabled} aria-pressed onClick={() => chosenPath && onUseExisting(chosenPath)}>
+              <Link2 size={12} aria-hidden className="shrink-0" />
+              <span>{chosenTitle}</span>
+            </button>
+            <button type="button" disabled={disabled} aria-pressed={false} onClick={() => onUseExisting(null)}>
+              <Plus size={12} aria-hidden className="shrink-0" />
+              <span>{kind}</span>
+              <span className="sr-only"> new</span>
+            </button>
+          </div>
+        </div>
+      )}
       {uncertain && matchedTitle && (
         <div className="pb-2.5 pl-[calc(22px+0.75rem+32px+0.75rem)]">
           <div className="wu-seg" role="group" aria-label={`Where ${mention.name} goes`}>

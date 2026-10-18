@@ -57,7 +57,7 @@ globally (`npm i -g bun@1.4.3`) — don't rely on `npx bun`, which resolves the 
 - The Dockerfile is a single stage on `oven/bun:1.4.3` (keep it in step with `mise.toml`); it installs `poppler-utils` for PDF import, runs `next build`, and starts `bun run server.ts`
 - Anything that must run under Node (there is nothing today) cannot import `lib/db.ts`
 
-## Data model (51 migrations, versions 1–53 — append only, never edit existing)
+## Data model (52 migrations, versions 1–54 — append only, never edit existing)
 
 Numbering isn't contiguous — a couple of version numbers (21, 22) were
 never shipped, so "latest version" and "migration count" are two
@@ -70,7 +70,7 @@ Key tables:
 | `notes` | All content — path, ProseMirror JSON, Yjs state, frontmatter, `dm_only` + `gm_only` visibility flags |
 | `users` | Web app accounts — email, password_hash (Argon2), avatar |
 | `groups` | Worlds/campaigns — the multi-tenancy container |
-| `group_members` | User ↔ group with role: `admin`, `editor`, `viewer` |
+| `group_members` | User ↔ group with role: `admin`, `editor`, `viewer`, plus the user's own worlds-rail `sort_order` (v54, NULL sorts last by name; written by `PUT /api/worlds/order`) |
 | `sessions` | HTTP-only session cookies + CSRF tokens |
 | `characters` | Derived index from note frontmatter — re-derived on every save |
 | `session_notes` | Session status (open → closed) and the pending Wrap-up proposal (`wrap_up_json`) |
@@ -141,7 +141,7 @@ additionally loses every mutating tool, leaving just `campaign_list` /
 - `inventory_add` — add items to character sheet (GM only)
 - `entity_move`, `entity_change_kind`, `note_write_section`, `session_finalize` (GM only)
 
-**Wrap-up** — the app does not generate it. A Player's own Claude reads `GET /api/sessions/wrap-up/context` (log + visible candidate Notes, flagged `recorded` when their History already links the Session) and submits `POST /api/sessions/wrap-up` (strict Zod `WrapUpSubmission`; a mention of a Note the caller cannot see is a 404). The closer reviews the pending proposal in the End of Session dialog; `POST /api/sessions/wrap-up/apply` adds History entries, creates new Notes, links the log, records the ticked Relationships and closes the Session. A proposal may carry `relations` (`{ from, relation, to, note? }`, each end a `mention` of the same submission by name or an `existing` Note path, `relation` from the shared `RELATION_TYPES`); an unresolvable one is `400 invalid_relation`, an existing end the caller cannot see is a 404, and apply (`acceptedRelations`) records one only when both ends landed, otherwise it comes back in `relationsSkipped`. Logic lives in `server/src/lib/wrap-up.ts`.
+**Wrap-up** — the app does not generate it. A Player's own Claude reads `GET /api/sessions/wrap-up/context` (log + visible candidate Notes, flagged `recorded` when their History already links the Session) and submits `POST /api/sessions/wrap-up` (strict Zod `WrapUpSubmission`; a mention of a Note the caller cannot see is a 404). The closer reviews the pending proposal in the End of Session dialog; `POST /api/sessions/wrap-up/apply` adds History entries, creates new Notes, links the log, records the ticked Relationships and closes the Session. A proposal may carry `relations` (`{ from, relation, to, note? }`, each end a `mention` of the same submission by name or an `existing` Note path, `relation` from the shared `RELATION_TYPES`); an unresolvable one is `400 invalid_relation`, an existing end the caller cannot see is a 404, and apply (`acceptedRelations`) records one only when both ends landed, otherwise it comes back in `relationsSkipped`. `GET /api/sessions/wrap-up` also returns `similar`: for each mention that would create a new Note, up to 3 visible Notes with a same or close name (`lib/similar-names.ts`), computed on read. Apply accepts a `useExisting` decision (mention id to Note path) that lands the mention's History on that Note instead of creating a duplicate. Logic lives in `server/src/lib/wrap-up.ts`.
 
 **Import pipeline** — AI-assisted batch import of Markdown vaults ("Smart Import")
 1. Upload ZIP → `import-parse.ts` (structural parse), job status `uploaded`
@@ -219,12 +219,15 @@ whole flow over HTTP) and the MCP Inspector:
 | `server/src/lib/superadmin.ts` | `ADMIN_TOKEN` check for the `/admin/*` `__sa` cookie |
 | `server/src/lib/session.ts` | Session CRUD, CSRF, expiry cleanup |
 | `server/src/lib/notes.ts` | Note CRUD, backlink derivation, FTS sync |
+| `server/src/lib/groups.ts` | Worlds: `listWorldsForSession` (rail order plus role-gated `latestActivityAt` / `openSession`) and `setWorldOrder`, behind `GET /api/worlds` and `PUT /api/worlds/order`. `latestActivityAt` skips the caller's own writes by `notes.updated_by`, so every write that bumps `notes.updated_at` must also stamp `updated_by` with the acting user |
+| `server/src/app/world-rail.ts` | The worlds rail's client model: unread badges against the per-browser seen map, reorder, 1–9 shortcuts and remembered last pages, pure apart from its localStorage wrappers |
 | `server/src/lib/relations.ts` | Relationships: `addRelation` (plus its manual link), `addManualLink` / `removeLink` for plain links, `removeRelation`, visibility-gated `listRelations`, and the repoint/delete helpers every move and delete path calls |
 | `server/src/lib/note-permissions.ts` | `canEditDoc`, the one edit-rights rule shared by the collab server, the Connections panel and `/api/notes/relations` |
 | `server/src/app/api/notes/relations/route.ts` | `POST`/`DELETE` a Relationship or (`relation: 'link'`) a plain link between two Notes; needs `canEditDoc` on both, hidden Notes 404 first, audits `relation.add` / `relation.remove` |
 | `server/src/lib/unlinked-mentions.ts` | Unlinked mentions: Notes that name this Note's title or an alias as a whole word without linking to it. FTS finds candidates (`worldBodyPhraseMatch`), then a regex-free scan of the original text confirms the word and builds the snippet; read-only |
 | `server/src/lib/ai/tools.ts` | AI tool definitions, unreferenced until the MCP connector adopts them |
 | `server/src/lib/wrap-up.ts` | Wrap-up: proposal shape, submit validation, candidate context, idempotent apply |
+| `server/src/lib/similar-names.ts` | Name similarity: `nameTokens`, `findSimilarNotes` (visibility-gated; same name, close spelling, or one near-identical word; containment deliberately excluded) behind the new-Note warning and the Wrap-up `similar` field |
 | `server/src/lib/note-edits.ts` | Lossless PM-JSON edits: `addHistoryEntry`, `linkMention`, `applyNoteEdit` |
 | `server/src/lib/import-orchestrate.ts` | "Smart Import" — the multi-phase pipeline the vault UI actually drives (assets → campaign → entities → quality) |
 | `server/src/lib/assets.ts` | Content-addressed asset storage — hash/mime dedup, `deleteAsset()` reference-checked delete |
@@ -235,6 +238,7 @@ whole flow over HTTP) and the MCP Inspector:
 | `server/src/lib/mcp/server.ts` | Per-request stateless Streamable HTTP MCP server over that registry |
 | `server/src/app/api/mcp/route.ts` | Bearer gate + 401 challenge in front of the MCP server |
 | `server/scripts/mcp-smoke.ts` | Live end-to-end check of the connector over HTTP |
+| `server/src/app/settings/profile/connect-claude.ts` | In-app "Connect Claude" guide data (Profile settings): per-client steps and commands, and `safeMcpUrl`, which refuses to print a link that is not a canonical http(s) `/api/mcp` URL so a forged host cannot reach a pasted shell command |
 | `server/scripts/suggest-relations.ts` | Read-only: prints candidate `member_of` / `located_in` Relationships from Person and Creature `faction` / `location` frontmatter (logic in `lib/relation-suggestions.ts`) |
 | `server/src/collab/server.ts` | Hocuspocus server for web editing |
 | `server/server.ts` | Entry point — Next.js + WebSocket on the same port |

@@ -68,6 +68,10 @@ _Avoid_: Stat block, frontmatter
 How one Note stands to another, such as ally of or located in, drawn from a fixed list and recorded with the Session that established it.
 _Avoid_: Edge, link (a link only says two Notes are connected)
 
+**Unlinked mention**:
+A place where one Note names another by title or alias without linking to it. Shown on the named Note so someone can link the two.
+_Avoid_: Unresolved link, orphan mention
+
 ## Visibility
 
 **Secret**:

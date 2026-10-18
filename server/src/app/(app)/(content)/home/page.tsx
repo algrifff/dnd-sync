@@ -1,4 +1,5 @@
-// Home landing. Shows a lightweight welcome + recent notes + top-level
+// World overview (the sidebar's "Overview" link; the user's personal
+// Home is /me). Shows the world's name, recent notes and top-level
 // folders. The legacy admin-token dashboard is still reachable at
 // /admin/legacy (wired in Phase 8 cleanup).
 //
@@ -15,6 +16,7 @@ import { getDb } from '@/lib/db';
 import { countVisibleNotes, recentlyUpdated, visibilityFor } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
 import { GM_MODE_COOKIE, treeModeFor } from '@/lib/gm-mode';
+import { getWorldHeader } from '@/lib/groups';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,7 +63,7 @@ export default async function HomePage(): Promise<ReactElement> {
               className="text-4xl font-bold tracking-tight text-[var(--ink)]"
               style={{ fontFamily: '"Fraunces", Georgia, serif' }}
             >
-              Welcome, {session.displayName}.
+              {getWorldHeader(session.currentGroupId).name || 'Overview'}
             </h1>
             <p className="mt-2 text-sm text-[var(--ink-soft)]">
               {counts.notes} note{counts.notes === 1 ? '' : 's'} · {counts.assets} asset

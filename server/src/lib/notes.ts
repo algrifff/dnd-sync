@@ -141,9 +141,18 @@ export function hiddenNotesSql(alias: string, vis: Visibility): string {
 /** SQL predicate: note `<n>` is visible to the member row `<m>` under
  *  that member's own role. Built from `visibilityFor` so the mapping
  *  stays in one place; a role outside MEMBER_ROLES matches nothing. */
-function visibleToMemberSql(n: string, m: string): string {
+export function visibleToMemberSql(n: string, m: string): string {
   return MEMBER_ROLES.map(
     (role) => `(${m}.role = '${role}'${hiddenNotesSql(n, visibilityFor(role))})`,
+  ).join(' OR ');
+}
+
+/** SQL predicate: asset `<a>` is visible to the member row `<m>`.
+ *  Assets carry only `gm_only`, so `hideDmOnly` does not apply. */
+export function assetVisibleToMemberSql(a: string, m: string): string {
+  return MEMBER_ROLES.map(
+    (role) =>
+      `(${m}.role = '${role}'${visibilityFor(role).hideGmOnly ? ` AND ${a}.gm_only = 0` : ''})`,
   ).join(' OR ');
 }
 

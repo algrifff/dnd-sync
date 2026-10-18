@@ -111,12 +111,9 @@ async function wrapUp(suggestions: Suggestion[]): Promise<Awaited<ReturnType<typ
   });
 }
 
-const mineFor = (userId: string, role: 'admin' | 'editor' | 'viewer' = 'viewer') =>
-  listMySuggestions({ groupId, role, userId });
-const accept = (userId: string, id: string, role: 'admin' | 'editor' | 'viewer' = 'viewer') =>
-  acceptSuggestion({ groupId, role, userId, id });
-const dismiss = (userId: string, id: string, role: 'admin' | 'editor' | 'viewer' = 'viewer') =>
-  dismissSuggestion({ groupId, role, userId, id });
+const mineFor = (userId: string) => listMySuggestions({ userId });
+const accept = (userId: string, id: string) => acceptSuggestion({ userId, id });
+const dismiss = (userId: string, id: string) => dismissSuggestion({ userId, id });
 
 beforeAll(async () => {
   setupTestDb();
@@ -167,7 +164,7 @@ describe('storing Suggestions when a Wrap-up is applied', () => {
     });
 
     expect(result.suggestions.skipped).toEqual([{ id: 's1', reason: 'not_visible' }]);
-    expect(mineFor(karaPlayer, 'admin')).toEqual([]);
+    expect(mineFor(karaPlayer)).toEqual([]);
   });
 
   it('adds nothing when the same Wrap-up is applied again', async () => {
@@ -237,7 +234,7 @@ describe('who can see a Suggestion', () => {
     await wrapUp([suggestion('s1', KARA)]);
 
     expect(mineFor(otherPlayer)).toEqual([]);
-    expect(mineFor(ownerId, 'admin')).toEqual([]);
+    expect(mineFor(ownerId)).toEqual([]);
   });
 
   it('reads as not found to anyone else, for accept and dismiss', async () => {
@@ -245,7 +242,7 @@ describe('who can see a Suggestion', () => {
     const id = mineFor(karaPlayer)[0]!.id;
 
     expect(await accept(otherPlayer, id)).toEqual({ status: 'not_found' });
-    expect(await accept(ownerId, id, 'admin')).toEqual({ status: 'not_found' });
+    expect(await accept(ownerId, id)).toEqual({ status: 'not_found' });
     expect(dismiss(otherPlayer, id)).toEqual({ status: 'not_found' });
     expect(mineFor(karaPlayer)).toHaveLength(1);
   });

@@ -19,10 +19,19 @@
 // the "gone" state.
 
 import type { ReactElement } from 'react';
+import { cookies } from 'next/headers';
 import Link from 'next/link';
+import { readSession } from '@/lib/session';
 import { TabCleaner } from './TabCleaner';
 
-export default function NoteNotFound(): ReactElement {
+export default async function NoteNotFound(): Promise<ReactElement> {
+  const jar = await cookies();
+  const session = readSession(
+    jar
+      .getAll()
+      .map((c) => `${c.name}=${c.value}`)
+      .join('; '),
+  );
   return (
     <main className="flex min-h-[60vh] flex-1 items-center justify-center px-6 py-10">
       <div className="max-w-md rounded-[12px] border border-[var(--rule)] bg-[var(--vellum)] p-6 text-center shadow-[0_8px_24px_rgb(var(--ink-rgb)/0.12)]">
@@ -44,7 +53,7 @@ export default function NoteNotFound(): ReactElement {
             Go to dashboard
           </Link>
         </div>
-        <TabCleaner />
+        {session && <TabCleaner groupId={session.currentGroupId} />}
       </div>
     </main>
   );
