@@ -1,9 +1,10 @@
 'use client';
 
 // Persistent tab strip of open notes. Stored in localStorage per world
-// so tabs survive reloads and each world keeps its own; the tab matching the current URL is "active". Opening
-// a note (any /notes/<path>) adds it to the list; X removes. Removing the
-// active tab routes to the next tab, or `/` if empty.
+// so tabs survive reloads and each world keeps its own; the tab matching
+// the current URL is "active". Opening a note (any /notes/<path>) adds
+// it to the list; X removes. Removing the active tab routes to the next
+// tab, or `/` if empty.
 //
 // Non-note routes (home, /tags, /admin/...) just render the tab strip as
 // a passive preview — the "active" dot moves off, but the tabs stay.
@@ -13,10 +14,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { X, FileText } from 'lucide-react';
 import { TREE_CHANGE_EVENT, TREE_CHANGE_REMOTE_EVENT } from '@/lib/tree-sync';
 import { setPersistentPaths } from './notes/provider-cache';
-import { adoptsLegacyTabs, LEGACY_TABS_KEY, tabsStorageKey } from './note-tabs-storage';
+import { readTabs, type StoredTab as Tab, writeTabs } from './note-tabs-storage';
 import { useWorldSwitch } from './(app)/WorldSwitch';
-
-type Tab = { path: string; title: string };
 
 export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
   const router = useRouter();
@@ -35,27 +34,7 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
 
   useEffect(() => {
     setMounted(true);
-    try {
-      let raw = localStorage.getItem(tabsStorageKey(groupId));
-      if (raw === null) {
-        const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? '');
-        if (adoptsLegacyTabs(keys)) raw = localStorage.getItem(LEGACY_TABS_KEY);
-        localStorage.removeItem(LEGACY_TABS_KEY);
-      }
-      const parsed = raw ? (JSON.parse(raw) as unknown) : null;
-      if (Array.isArray(parsed)) {
-        const clean = parsed.filter(
-          (t): t is Tab =>
-            !!t &&
-            typeof t === 'object' &&
-            typeof (t as Tab).path === 'string' &&
-            typeof (t as Tab).title === 'string',
-        );
-        setTabs(clean);
-      }
-    } catch {
-      /* ignore */
-    }
+    setTabs(readTabs(groupId));
   }, [groupId]);
 
   // Add / refresh the current note in the tab list.
@@ -80,11 +59,7 @@ export function NoteTabs({ groupId }: { groupId: string }): React.JSX.Element {
   // Persist.
   useEffect(() => {
     if (!mounted) return;
-    try {
-      localStorage.setItem(tabsStorageKey(groupId), JSON.stringify(tabs));
-    } catch {
-      /* ignore */
-    }
+    writeTabs(groupId, tabs);
   }, [tabs, mounted, groupId]);
 
   // Prefetch every non-active open tab. Next.js caches the RSC payload

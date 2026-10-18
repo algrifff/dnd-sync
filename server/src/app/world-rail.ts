@@ -65,20 +65,22 @@ export function railWorlds(
   });
 }
 
-/** Brings the seen map up to date after a fetch. The active world (the
- *  one the server confirms, never an optimistic switch target) takes its
- *  current `latestActivityAt`. A world with no entry yet takes it too, so
- *  a first visit (or a newly joined world) never lights up every badge.
+/** Brings the seen map up to date after a fetch. Each watched world takes
+ *  its current `latestActivityAt`: the active world (the one the server
+ *  confirms, never an optimistic switch target) and, on the first fetch
+ *  after a switch, the world just left, whose writes since the last poll
+ *  the user watched live. A world with no entry yet takes it too, so a
+ *  first visit (or a newly joined world) never lights up every badge.
  *  Returns `seen` itself when nothing changes. */
 export function reconcileSeen(
   seen: SeenMap,
   rows: readonly WorldRow[],
-  activeId: string | null,
+  watched: readonly string[],
 ): SeenMap {
   let next: Record<string, number> | null = null;
   for (const row of rows) {
     const prev = seen[row.id];
-    if (prev !== undefined && row.id !== activeId) continue;
+    if (prev !== undefined && !watched.includes(row.id)) continue;
     const at = row.latestActivityAt ?? 0;
     if (at === prev) continue;
     next ??= { ...seen };

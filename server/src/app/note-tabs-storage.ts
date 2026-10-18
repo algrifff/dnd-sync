@@ -1,5 +1,7 @@
 // Where each world's open note tabs live in localStorage.
 
+export type StoredTab = { path: string; title: string };
+
 const TABS_PREFIX = 'compendium.tabs.v2:';
 
 // One list shared by every world, from before tabs were per world.
@@ -19,4 +21,46 @@ export function adoptsLegacyTabs(storageKeys: Iterable<string>): boolean {
     if (key.startsWith(TABS_PREFIX)) return false;
   }
   return true;
+}
+
+/** The well-formed tabs in a stored list; anything else reads as none. */
+export function parseTabs(raw: string | null): StoredTab[] {
+  let parsed: unknown;
+  try {
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(
+    (t): t is StoredTab =>
+      !!t &&
+      typeof t === 'object' &&
+      typeof (t as StoredTab).path === 'string' &&
+      typeof (t as StoredTab).title === 'string',
+  );
+}
+
+/** A world's open tabs. The first world opened after the upgrade takes
+ *  over the legacy shared list, which is then dropped. */
+export function readTabs(groupId: string): StoredTab[] {
+  try {
+    let raw = localStorage.getItem(tabsStorageKey(groupId));
+    if (raw === null) {
+      const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? '');
+      if (adoptsLegacyTabs(keys)) raw = localStorage.getItem(LEGACY_TABS_KEY);
+      localStorage.removeItem(LEGACY_TABS_KEY);
+    }
+    return parseTabs(raw);
+  } catch {
+    return [];
+  }
+}
+
+export function writeTabs(groupId: string, tabs: readonly StoredTab[]): void {
+  try {
+    localStorage.setItem(tabsStorageKey(groupId), JSON.stringify(tabs));
+  } catch {
+    /* quota or private mode: tabs just won't survive a reload */
+  }
 }

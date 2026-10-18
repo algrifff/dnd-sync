@@ -119,11 +119,13 @@ export function WorldsSidebar({
     }
   }, []);
 
-  // Mount, and again whenever the session's world changes, so role
-  // flags, iconVersion bumps and newly joined worlds stay current.
+  // Mount, and again whenever the user enters or leaves a world (a switch,
+  // or a visit to /me), so role flags, iconVersion bumps and newly joined
+  // worlds stay current and the world just left is recorded promptly.
+  const confirmedWorldId = onMe ? null : worldId;
   useEffect(() => {
     void fetchWorlds();
-  }, [fetchWorlds, worldId]);
+  }, [fetchWorlds, confirmedWorldId]);
 
   // The settings page dispatches this after a rename or icon change.
   useEffect(() => {
@@ -153,11 +155,23 @@ export function WorldsSidebar({
   // optimistic switch target is left alone, so a failed switch keeps
   // its badge. The user's own writes never reach latestActivityAt, so
   // saves that land after they leave do not come back as a badge.
-  const confirmedWorldId = onMe ? null : worldId;
+  // The world just left is recorded once more, by the first fetch after
+  // leaving: co-players' writes since the last poll were watched live.
+  const lastConfirmed = useRef<string | null>(confirmedWorldId);
+  const left = useRef<{ id: string; rowsAtLeave: WorldRow[] | null } | null>(null);
   useEffect(() => {
+    if (lastConfirmed.current !== confirmedWorldId) {
+      if (lastConfirmed.current) left.current = { id: lastConfirmed.current, rowsAtLeave: rows };
+      lastConfirmed.current = confirmedWorldId;
+    }
     let next = readSeen();
     if (ownsRail && rows) {
-      next = reconcileSeen(next, rows, confirmedWorldId);
+      const watched = confirmedWorldId ? [confirmedWorldId] : [];
+      if (left.current && left.current.rowsAtLeave !== rows) {
+        watched.push(left.current.id);
+        left.current = null;
+      }
+      next = reconcileSeen(next, rows, watched);
       writeSeen(next);
     }
     setSeen(next);

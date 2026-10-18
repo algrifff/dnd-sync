@@ -8,9 +8,7 @@
 
 import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { tabsStorageKey } from '../../../../note-tabs-storage';
-
-type StoredTab = { path: string; title: string };
+import { readTabs, writeTabs } from '../../../../note-tabs-storage';
 
 export function TabCleaner({ groupId }: { groupId: string }): null {
   const router = useRouter();
@@ -20,22 +18,9 @@ export function TabCleaner({ groupId }: { groupId: string }): null {
     if (!pathname.startsWith('/notes/')) return;
     const notePath = decode(pathname.slice('/notes/'.length));
 
-    try {
-      const raw = localStorage.getItem(tabsStorageKey(groupId));
-      const parsed = raw ? (JSON.parse(raw) as unknown) : null;
-      if (Array.isArray(parsed)) {
-        const next = parsed.filter(
-          (t): t is StoredTab =>
-            !!t &&
-            typeof t === 'object' &&
-            typeof (t as StoredTab).path === 'string' &&
-            (t as StoredTab).path !== notePath,
-        );
-        localStorage.setItem(tabsStorageKey(groupId), JSON.stringify(next));
-      }
-    } catch {
-      /* quota / private-mode / malformed — leave it */
-    }
+    const tabs = readTabs(groupId);
+    const next = tabs.filter((t) => t.path !== notePath);
+    if (next.length !== tabs.length) writeTabs(groupId, next);
 
     // replace, not push — this URL is dead, Back shouldn't return to it.
     const t = setTimeout(() => router.replace('/home'), 1500);

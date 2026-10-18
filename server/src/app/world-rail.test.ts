@@ -78,41 +78,52 @@ describe('railWorlds', () => {
 describe('reconcileSeen', () => {
   test('a world seen for the first time takes its current activity, so it does not badge', () => {
     const rows = [row('a', { latestActivityAt: 50 }), row('b')];
-    const next = reconcileSeen({}, rows, null);
+    const next = reconcileSeen({}, rows, []);
     expect(next).toEqual({ a: 50, b: 0 });
     expect(railWorlds(rows, next, null, null).map((w) => w.unread)).toEqual([false, false]);
   });
 
   test('an existing entry for an inactive world is kept, so its badge survives', () => {
-    const next = reconcileSeen({ a: 10 }, [row('a', { latestActivityAt: 50 })], null);
+    const next = reconcileSeen({ a: 10 }, [row('a', { latestActivityAt: 50 })], []);
     expect(next).toEqual({ a: 10 });
   });
 
   test('the active world takes its current activity', () => {
-    const next = reconcileSeen({ a: 10 }, [row('a', { latestActivityAt: 50 })], 'a');
+    const next = reconcileSeen({ a: 10 }, [row('a', { latestActivityAt: 50 })], ['a']);
     expect(next).toEqual({ a: 50 });
   });
 
   test('returns the same object when nothing changed', () => {
     const seen = { a: 10 };
-    expect(reconcileSeen(seen, [row('a', { latestActivityAt: 10 })], 'a')).toBe(seen);
+    expect(reconcileSeen(seen, [row('a', { latestActivityAt: 10 })], ['a'])).toBe(seen);
   });
 
   test('a world left with no new activity stays clean, and badges once someone else writes', () => {
-    let seen = reconcileSeen({}, [row('a', { latestActivityAt: 100 }), row('b')], 'a');
+    let seen = reconcileSeen({}, [row('a', { latestActivityAt: 100 }), row('b')], ['a']);
     // The user switches to b. Their own late saves in a never move a's
     // latestActivityAt, so a stays at 100.
-    seen = reconcileSeen(seen, [row('a', { latestActivityAt: 100 }), row('b')], 'b');
+    seen = reconcileSeen(seen, [row('a', { latestActivityAt: 100 }), row('b')], ['b']);
     expect(railWorlds([row('a', { latestActivityAt: 100 })], seen, 'b', null)[0]!.unread).toBe(false);
 
     const later = [row('a', { latestActivityAt: 101 }), row('b')];
-    seen = reconcileSeen(seen, later, 'b');
+    seen = reconcileSeen(seen, later, ['b']);
     expect(railWorlds(later, seen, 'b', null)[0]!.unread).toBe(true);
+  });
+
+  test('a world just left takes the activity the user watched there, so it does not badge', () => {
+    // In a, a co-player writes at 150 after the last poll; the user then
+    // switches to b and the first fetch after the switch sees a at 150.
+    const rows = [row('a', { latestActivityAt: 150 }), row('b')];
+    const seen = reconcileSeen({ a: 100, b: 0 }, rows, ['b', 'a']);
+    expect(railWorlds(rows, seen, 'b', null)[0]!.unread).toBe(false);
+
+    const later = [row('a', { latestActivityAt: 160 }), row('b')];
+    expect(railWorlds(later, reconcileSeen(seen, later, ['b']), 'b', null)[0]!.unread).toBe(true);
   });
 
   test('an optimistic switch target that never became active keeps its badge', () => {
     const rows = [row('a'), row('b', { latestActivityAt: 200 })];
-    const seen = reconcileSeen({ a: 0, b: 100 }, rows, 'a');
+    const seen = reconcileSeen({ a: 0, b: 100 }, rows, ['a']);
     expect(railWorlds(rows, seen, 'a', null)[1]!.unread).toBe(true);
   });
 });
