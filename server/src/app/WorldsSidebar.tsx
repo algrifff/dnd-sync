@@ -527,6 +527,10 @@ function WorldIcon({
           <Flame size={10} strokeWidth={2.75} />
         </span>
       )}
+      {/* The pencil overlaps the tile's corner, so it takes taps only while
+          shown by hover or keyboard focus. Not focus-within: a tap focuses
+          the tile between mousedown and mouseup, the pencil would take the
+          mouseup, and the click would land on neither button. */}
       {canEdit && (
         <button
           type="button"
@@ -536,7 +540,7 @@ function WorldIcon({
           }}
           title={`Edit ${world.name}`}
           aria-label={`Edit ${world.name}`}
-          className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full opacity-0 transition-opacity duration-150 motion-reduce:transition-none group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+          className="pointer-events-none absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full opacity-0 transition-opacity duration-150 motion-reduce:transition-none group-hover:pointer-events-auto group-hover:opacity-100 group-has-[:focus-visible]:pointer-events-auto group-has-[:focus-visible]:opacity-100"
         >
           <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[var(--shadow)] bg-[var(--rail-ink)] text-[var(--shadow)]">
             <Pencil size={9} aria-hidden />

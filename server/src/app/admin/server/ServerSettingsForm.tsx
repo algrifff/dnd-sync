@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Upload,
 } from 'lucide-react';
+import { worldInitials } from '../../world-chip';
 
 // Client-side resize config, mirrored from ProfileForm so uploads
 // here and avatar uploads produce images of comparable weight.
@@ -574,7 +575,7 @@ function WorldIconSection({
               className="h-full w-full object-cover"
             />
           ) : (
-            <span>{initialsOf(worldName)}</span>
+            <span>{worldInitials(worldName)}</span>
           )}
         </div>
 
@@ -616,13 +617,6 @@ function WorldIconSection({
       />
     </section>
   );
-}
-
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }
 
 async function resizeImage(file: File, maxDim: number): Promise<Blob> {
