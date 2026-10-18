@@ -14,6 +14,7 @@ import {
 import { getTemplate, type NoteTemplate, type TemplateKind } from '@/lib/templates';
 import { getWorldHeader } from '@/lib/groups';
 import { listRelations } from '@/lib/relations';
+import { canEditDoc } from '@/lib/note-permissions';
 import { findUnlinkedMentions } from '@/lib/unlinked-mentions';
 import { lockedFolderTitleFor } from '@/lib/folder-rename';
 import { NoteMenu } from '../../../../notes/NoteMenu';
@@ -21,6 +22,7 @@ import { NoteWorkspace } from '../../../../notes/NoteWorkspace';
 import { ExcalidrawCanvas } from '../../../../excalidraw/ExcalidrawCanvas';
 import { TagEditor } from '../../../../notes/TagEditor';
 import { NoteSidebar, extractOutline } from '../../../../notes/NoteSidebar';
+import type { MentionRow, RelationRow } from '../../../../notes/connections';
 import { EndSessionButton } from '../../../../notes/EndSessionButton';
 import { getSessionStatus } from '@/lib/sessions';
 import { CollapsibleRightPanel } from '../../../../CollapsibleRightPanel';
@@ -60,7 +62,8 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   // slow query before a fast one can start. Tree + kindMap are owned
   // by the parent (content)/layout so this page only fetches the
   // note-specific payloads.
-  const [worldHeader, relations, mentions, backlinks, outgoingLinks, tags, creator] =
+  const canEditThis = canEditDoc(path, session);
+  const [worldHeader, relationViews, mentionViews, backlinks, outgoingLinks, tags, creator] =
     await Promise.all([
       Promise.resolve(getWorldHeader(session.currentGroupId)),
       Promise.resolve(
@@ -78,6 +81,22 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
     ]);
 
   const accentColor = worldHeader.headerColor;
+  // A Relationship can be removed by someone who can edit both its Notes.
+  const relations: RelationRow[] = relationViews.map((r) => ({
+    ...r,
+    canRemove: canEditThis && canEditDoc(r.path, session),
+  }));
+
+  // A link can be removed by someone who can edit both its Notes.
+  const removableLinkPaths = [...new Set([...backlinks.map((b) => b.from_path), ...outgoingLinks.map((l) => l.to_path)])].filter(
+    (p) => canEditThis && canEditDoc(p, session),
+  );
+
+  // A mention can be linked by someone who can edit both Notes.
+  const mentions: MentionRow[] = mentionViews.map((m) => ({
+    ...m,
+    canLink: canEditThis && canEditDoc(m.path, session),
+  }));
 
   // Parse frontmatter ONCE — character resolution, session detection,
   // and campaign-slug extraction all used to re-parse the same JSON.
@@ -259,7 +278,8 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
             path={path}
             relations={relations}
             mentions={mentions}
-            canLinkMentions={session.role !== 'viewer'}
+            canEdit={canEditThis}
+            removableLinkPaths={removableLinkPaths}
             backlinks={backlinks}
             outgoingLinks={outgoingLinks}
             tags={tags}

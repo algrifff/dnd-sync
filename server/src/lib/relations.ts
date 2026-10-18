@@ -13,7 +13,9 @@ import {
   type RelationName,
   type RelationType,
 } from '@compendium/shared';
+import { collectLinksAndTags } from '@/collab/derive';
 import { getDb } from '@/lib/db';
+import type { PmNode } from '@/lib/md-to-pm';
 import { visibilityFor } from '@/lib/notes';
 import type { Role } from '@/lib/wrap-up';
 
@@ -41,15 +43,87 @@ export function addRelation(opts: {
         )
         .run(opts.groupId, pair.from, pair.relation, pair.to, opts.sessionPath, opts.userId, Date.now())
         .changes > 0;
-    // Marked manual even when the body already links the pair, so the
-    // link outlives an edit that removes the wikilink.
-    db.query(
-      `INSERT INTO note_links (group_id, from_path, to_path, is_manual)
-       VALUES (?, ?, ?, 1)
-       ON CONFLICT (group_id, from_path, to_path) DO UPDATE SET is_manual = 1`,
-    ).run(opts.groupId, pair.from, pair.to);
+    addManualLink({ groupId: opts.groupId, from: pair.from, to: pair.to });
   })();
   return { status: added ? 'added' : 'unchanged' };
+}
+
+/** Adds the plain `from -> to` link as a manual one. A body-derived row for
+ *  the pair is flipped to manual, so the link outlives an edit that removes
+ *  the wikilink. `added` is true when the row was new or was flipped. */
+export function addManualLink(opts: { groupId: string; from: string; to: string }): { added: boolean } {
+  const changes = getDb()
+    .query(
+      `INSERT INTO note_links (group_id, from_path, to_path, is_manual)
+       VALUES (?, ?, ?, 1)
+       ON CONFLICT (group_id, from_path, to_path) DO UPDATE SET is_manual = 1
+         WHERE note_links.is_manual = 0`,
+    )
+    .run(opts.groupId, opts.from, opts.to).changes;
+  return { added: changes > 0 };
+}
+
+/** Removes the manual `from -> to` link. When `from`'s body still
+ *  wikilinks `to`, the edge is body-derived too: it is only un-flagged
+ *  (`is_manual = 0`) and stays, reported as `removed: false`, so backlinks
+ *  and the graph keep it until the text is edited. A body-only row
+ *  (`is_manual = 0`) is left alone. */
+export function removeLink(opts: { groupId: string; from: string; to: string }): { removed: boolean } {
+  const db = getDb();
+  let removed = false;
+  db.transaction(() => {
+    const row = db
+      .query<{ is_manual: number }, [string, string, string]>(
+        'SELECT is_manual FROM note_links WHERE group_id = ? AND from_path = ? AND to_path = ?',
+      )
+      .get(opts.groupId, opts.from, opts.to);
+    if (!row || row.is_manual !== 1) return;
+    if (bodyLinks(opts.groupId, opts.from).has(opts.to)) {
+      db.query(
+        'UPDATE note_links SET is_manual = 0 WHERE group_id = ? AND from_path = ? AND to_path = ?',
+      ).run(opts.groupId, opts.from, opts.to);
+      return;
+    }
+    db.query('DELETE FROM note_links WHERE group_id = ? AND from_path = ? AND to_path = ?').run(
+      opts.groupId,
+      opts.from,
+      opts.to,
+    );
+    removed = true;
+  })();
+  return { removed };
+}
+
+/** Targets `path`'s stored body links to, by the same extraction the
+ *  derive step uses. */
+function bodyLinks(groupId: string, path: string): Set<string> {
+  const row = getDb()
+    .query<{ content_json: string }, [string, string]>(
+      'SELECT content_json FROM notes WHERE group_id = ? AND path = ?',
+    )
+    .get(groupId, path);
+  if (!row) return new Set();
+  try {
+    return new Set(collectLinksAndTags(JSON.parse(row.content_json) as PmNode).wikilinks);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Removes the one stored row for `from relation to`, canonicalised like
+ *  `addRelation`. The plain link it came with stays. */
+export function removeRelation(opts: {
+  groupId: string;
+  from: string;
+  relation: RelationType;
+  to: string;
+}): { status: 'removed' | 'missing' } {
+  const pair = canonicalPair(opts.from, opts.relation, opts.to);
+  const removed =
+    getDb()
+      .query('DELETE FROM note_relations WHERE group_id = ? AND from_path = ? AND relation = ? AND to_path = ?')
+      .run(opts.groupId, pair.from, pair.relation, pair.to).changes > 0;
+  return { status: removed ? 'removed' : 'missing' };
 }
 
 /** A Relationship as read from one of its Notes. */

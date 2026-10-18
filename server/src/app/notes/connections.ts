@@ -1,15 +1,24 @@
 // Pure helpers behind ConnectionsPanel: no React, no DB, so they can be
 // tested directly (docs/adr/0003-connections-panel-and-manual-relationships.md).
 
+import { RELATION_TYPES, RELATIONS } from '@compendium/shared';
 import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
 import type { RelationView } from '@/lib/relations';
+import type { UnlinkedMention } from '@/lib/unlinked-mentions';
 
 /** The pieces of a Relationship the panel shows. Derived from
  *  `RelationView`, so the two cannot drift. */
 export type RelationRow = Pick<
   RelationView,
   'relation' | 'label' | 'path' | 'title' | 'sessionPath' | 'fromSession' | 'sessionTitle' | 'createdBy'
->;
+> & {
+  /** The caller can edit both Notes, so may remove it (computed on the server). */
+  canRemove: boolean;
+};
+
+/** An unlinked mention plus whether the caller can edit both Notes, so may
+ *  link it (computed on the server). */
+export type MentionRow = UnlinkedMention & { canLink: boolean };
 
 export type RelationGroup = { label: string; rows: RelationRow[] };
 
@@ -21,8 +30,12 @@ export type LinkRow = {
   path: string;
   title: string;
   direction: LinkDirection;
-  /** The `note_links` edges the × removes, as `{ fromPath, toPath }`. */
-  edges: Array<{ fromPath: string; toPath: string }>;
+  /** The `note_links` edges of the row. `isManual` is false for one derived
+   *  from a `[[wikilink]]` in a body, which the × cannot remove. */
+  edges: Array<{ fromPath: string; toPath: string; isManual: boolean }>;
+  /** True when the caller can edit both Notes AND at least one edge is manual
+   *  (computed on the server): a body-derived link would only be re-added. */
+  canRemove: boolean;
 };
 
 export const ARROWS: Record<LinkDirection, string> = { out: '→', in: '←', both: '↔' };
@@ -52,23 +65,30 @@ export function mergeLinks(opts: {
   backlinks: readonly BacklinkRow[];
   outgoing: readonly OutgoingLinkRow[];
   exclude?: ReadonlySet<string>;
+  /** Paths of Notes the caller may remove a link to; others get no ×. */
+  removable?: ReadonlySet<string>;
 }): LinkRow[] {
-  const { currentPath, exclude } = opts;
+  const { currentPath, exclude, removable } = opts;
   const rows = new Map<string, LinkRow>();
-  const upsert = (path: string, title: string, dir: 'out' | 'in'): void => {
+  const upsert = (path: string, title: string, dir: 'out' | 'in', isManual: boolean): void => {
     if (path === currentPath || exclude?.has(path)) return;
     const edge =
-      dir === 'out' ? { fromPath: currentPath, toPath: path } : { fromPath: path, toPath: currentPath };
+      dir === 'out'
+        ? { fromPath: currentPath, toPath: path, isManual }
+        : { fromPath: path, toPath: currentPath, isManual };
     const existing = rows.get(path);
     if (!existing) {
-      rows.set(path, { path, title, direction: dir, edges: [edge] });
+      rows.set(path, { path, title, direction: dir, edges: [edge], canRemove: false });
       return;
     }
     if (existing.direction !== dir) existing.direction = 'both';
     existing.edges.push(edge);
   };
-  for (const l of opts.outgoing) upsert(l.to_path, l.title, 'out');
-  for (const b of opts.backlinks) upsert(b.from_path, b.title, 'in');
+  for (const l of opts.outgoing) upsert(l.to_path, l.title, 'out', l.is_manual === 1);
+  for (const b of opts.backlinks) upsert(b.from_path, b.title, 'in', b.is_manual === 1);
+  for (const row of rows.values()) {
+    row.canRemove = (removable?.has(row.path) ?? false) && row.edges.some((e) => e.isManual);
+  }
   return [...rows.values()].sort((a, b) => a.title.localeCompare(b.title) || a.path.localeCompare(b.path));
 }
 
@@ -85,6 +105,20 @@ export function relationProvenance(
   }
   if (r.fromSession) return { kind: 'hidden-session' };
   return r.createdBy ? { kind: 'author', name: r.createdBy } : null;
+}
+
+export type ConnectionOption = { value: string; label: string };
+
+/** What "Add connection" offers, from this Note's side: a plain link, then
+ *  every type and every inverse (a symmetric type once). */
+export function connectionOptions(): ConnectionOption[] {
+  const options: ConnectionOption[] = [{ value: 'link', label: 'just linked' }];
+  for (const type of RELATION_TYPES) {
+    const info = RELATIONS[type];
+    options.push({ value: type, label: info.label });
+    if (!info.symmetric) options.push({ value: info.inverse, label: info.inverseLabel });
+  }
+  return options;
 }
 
 export function baseName(p: string): string {

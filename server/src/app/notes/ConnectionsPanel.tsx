@@ -14,9 +14,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import type { BacklinkRow, OutgoingLinkRow } from '@/lib/notes';
-import type { UnlinkedMention } from '@/lib/unlinked-mentions';
-import { AddBacklink } from './AddBacklink';
-import { AddOutgoingLink } from './AddOutgoingLink';
+import { AddConnection } from './AddConnection';
 import {
   ARROWS,
   baseName,
@@ -25,6 +23,7 @@ import {
   mergeLinks,
   relationProvenance,
   type LinkRow,
+  type MentionRow,
   type RelationRow,
 } from './connections';
 
@@ -39,23 +38,58 @@ const ARROW_TITLES = {
 export function ConnectionsPanel({
   relations,
   mentions,
-  canLinkMentions,
   backlinks,
   outgoingLinks,
   currentPath,
   csrfToken,
+  canEdit,
+  removableLinkPaths,
 }: {
   relations: RelationRow[];
-  mentions: UnlinkedMention[];
-  /** Viewers cannot add links, so they see mentions without the button. */
-  canLinkMentions: boolean;
+  mentions: MentionRow[];
   backlinks: BacklinkRow[];
   outgoingLinks: OutgoingLinkRow[];
   currentPath: string;
   csrfToken: string;
+  /** The caller can edit this Note, so may add connections to it. */
+  canEdit: boolean;
+  /** Other Notes whose link the caller may remove (can edit both). */
+  removableLinkPaths: string[];
 }): React.JSX.Element {
   const router = useRouter();
-  const groups = useMemo(() => groupRelations(relations), [relations]);
+  const [rows, setRows] = useState<RelationRow[]>(relations);
+  useEffect(() => {
+    setRows(relations);
+  }, [relations]);
+  const groups = useMemo(() => groupRelations(rows), [rows]);
+
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const removeRelation = useCallback(
+    (row: RelationRow): void => {
+      setRemoveError(null);
+      setRows((prev) => prev.filter((r) => !(r.path === row.path && r.relation === row.relation)));
+      const restore = (): void => {
+        setRows((prev) =>
+          prev.some((r) => r.path === row.path && r.relation === row.relation) ? prev : [...prev, row],
+        );
+        setRemoveError(`Could not remove the connection with ${row.title || baseName(row.path)}.`);
+      };
+      void fetch('/api/notes/relations', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ path: currentPath, relation: row.relation, otherPath: row.path }),
+      })
+        .then((res) => {
+          if (!res.ok) restore();
+        })
+        .catch(restore)
+        .finally(() => {
+          router.refresh();
+        });
+    },
+    [csrfToken, currentPath, router],
+  );
+  const removable = useMemo(() => new Set(removableLinkPaths), [removableLinkPaths]);
   const serverLinks = useMemo(
     () =>
       mergeLinks({
@@ -63,8 +97,9 @@ export function ConnectionsPanel({
         backlinks,
         outgoing: outgoingLinks,
         exclude: new Set(relations.map((r) => r.path)),
+        removable,
       }),
-    [currentPath, backlinks, outgoingLinks, relations],
+    [currentPath, backlinks, outgoingLinks, relations, removable],
   );
   const [links, setLinks] = useState<LinkRow[]>(serverLinks);
 
@@ -75,40 +110,56 @@ export function ConnectionsPanel({
 
   const removeLink = useCallback(
     (row: LinkRow): void => {
-      setLinks((prev) => prev.filter((l) => l.path !== row.path));
+      setRemoveError(null);
+      const manual = row.edges.filter((e) => e.isManual);
+      const kept = row.edges.filter((e) => !e.isManual);
+      setLinks((prev) =>
+        kept.length === 0
+          ? prev.filter((l) => l.path !== row.path)
+          : prev.map((l) => (l.path === row.path ? { ...l, edges: kept, canRemove: false } : l)),
+      );
+      const restore = (): void => {
+        setLinks((prev) => (prev.some((l) => l.path === row.path) ? prev : [...prev, row]));
+        setRemoveError(`Could not remove the link with ${row.title || baseName(row.path)}.`);
+      };
       void Promise.all(
-        row.edges.map((edge) =>
-          fetch('/api/notes/backlink', {
+        manual.map((edge) =>
+          fetch('/api/notes/relations', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-            body: JSON.stringify(edge),
+            body: JSON.stringify({ path: edge.fromPath, relation: 'link', otherPath: edge.toPath }),
           }),
         ),
-      ).finally(() => {
-        router.refresh();
-      });
+      )
+        .then((responses) => {
+          if (responses.some((res) => !res.ok)) restore();
+        })
+        .catch(restore)
+        .finally(() => {
+          router.refresh();
+        });
     },
     [csrfToken, router],
   );
 
-  const [unlinked, setUnlinked] = useState<UnlinkedMention[]>(mentions);
+  const [unlinked, setUnlinked] = useState<MentionRow[]>(mentions);
   useEffect(() => {
     setUnlinked(mentions);
   }, [mentions]);
 
   const [linkError, setLinkError] = useState<string | null>(null);
   const linkMention = useCallback(
-    (m: UnlinkedMention): void => {
+    (m: MentionRow): void => {
       setLinkError(null);
       setUnlinked((prev) => prev.filter((x) => x.path !== m.path));
       const restore = (): void => {
         setUnlinked((prev) => (prev.some((x) => x.path === m.path) ? prev : [m, ...prev]));
         setLinkError(`Could not link ${m.title || baseName(m.path)}.`);
       };
-      void fetch('/api/notes/backlink', {
+      void fetch('/api/notes/relations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-        body: JSON.stringify({ fromPath: m.path, toPath: currentPath }),
+        body: JSON.stringify({ path: m.path, relation: 'link', otherPath: currentPath }),
       })
         .then((res) => {
           if (!res.ok) restore();
@@ -129,13 +180,16 @@ export function ConnectionsPanel({
         <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
           Connections
         </h3>
-        <span className="flex items-center gap-1">
-          <AddOutgoingLink currentPath={currentPath} csrfToken={csrfToken} />
-          <AddBacklink currentPath={currentPath} csrfToken={csrfToken} />
-        </span>
+        {canEdit && <AddConnection currentPath={currentPath} csrfToken={csrfToken} />}
       </div>
 
       {empty && <p className="text-xs text-[var(--ink-soft)]/80">No connections yet.</p>}
+
+      {removeError && (
+        <p role="alert" className="mb-1 text-[11px] text-[var(--wine)]">
+          {removeError}
+        </p>
+      )}
 
       {groups.length > 0 && (
         <div className="mb-3">
@@ -146,7 +200,7 @@ export function ConnectionsPanel({
                 <p className="text-xs font-medium text-[var(--ink-soft)]">{g.label}</p>
                 <ul className="mt-0.5 space-y-1">
                   {g.rows.map((r) => (
-                    <RelationItem key={r.relation + r.path} row={r} />
+                    <RelationItem key={r.relation + r.path} row={r} onRemove={removeRelation} />
                   ))}
                 </ul>
               </div>
@@ -160,7 +214,11 @@ export function ConnectionsPanel({
           <SubHeading>Links</SubHeading>
           <ul className="space-y-0.5">
             {links.map((l) => (
-              <li key={l.path} className="group flex items-center gap-1.5 text-xs">
+              <li
+                key={l.path}
+                className="group flex items-center gap-1.5 text-xs"
+                title={l.edges.some((e) => e.isManual) ? undefined : `Linked in the text of ${baseName(l.path)}`}
+              >
                 <span
                   className="w-3 shrink-0 text-center text-[var(--ink-soft)]"
                   title={ARROW_TITLES[l.direction]}
@@ -174,15 +232,21 @@ export function ConnectionsPanel({
                 >
                   {l.title || baseName(l.path)}
                 </Link>
-                <button
-                  type="button"
-                  onClick={() => removeLink(l)}
-                  title={`Remove link with ${baseName(l.path)}`}
-                  aria-label={`Remove link with ${baseName(l.path)}`}
-                  className="ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--ink-soft)] opacity-0 transition hover:bg-[var(--wine)]/15 hover:text-[var(--wine)] focus-visible:opacity-100 group-hover:opacity-100"
-                >
-                  <X size={10} aria-hidden />
-                </button>
+                {l.canRemove ? (
+                  <button
+                    type="button"
+                    onClick={() => removeLink(l)}
+                    title={`Remove link with ${baseName(l.path)}`}
+                    aria-label={`Remove link with ${baseName(l.path)}`}
+                    className="ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--ink-soft)] opacity-0 transition hover:bg-[var(--wine)]/15 hover:text-[var(--wine)] focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    <X size={10} aria-hidden />
+                  </button>
+                ) : (
+                  !l.edges.some((e) => e.isManual) && (
+                    <span className="sr-only">Linked in the text of {l.title || baseName(l.path)}</span>
+                  )
+                )}
               </li>
             ))}
           </ul>
@@ -212,7 +276,7 @@ export function ConnectionsPanel({
                     {m.snippet}
                   </p>
                 </div>
-                {canLinkMentions && (
+                {m.canLink && (
                   <button
                     type="button"
                     onClick={() => linkMention(m)}
@@ -239,13 +303,36 @@ function SubHeading({ children }: { children: React.ReactNode }): React.JSX.Elem
   );
 }
 
-function RelationItem({ row }: { row: RelationRow }): React.JSX.Element {
+function RelationItem({
+  row,
+  onRemove,
+}: {
+  row: RelationRow;
+  onRemove: (row: RelationRow) => void;
+}): React.JSX.Element {
   const provenance = relationProvenance(row);
   return (
-    <li className="text-xs">
-      <Link href={'/notes/' + encodePath(row.path)} title={row.path} className={LINK_CLASS}>
-        {row.title || baseName(row.path)}
-      </Link>
+    <li className="group text-xs">
+      <div className="flex items-center gap-1.5">
+        <Link
+          href={'/notes/' + encodePath(row.path)}
+          title={row.path}
+          className={'min-w-0 truncate ' + LINK_CLASS}
+        >
+          {row.title || baseName(row.path)}
+        </Link>
+        {row.canRemove && (
+          <button
+            type="button"
+            onClick={() => onRemove(row)}
+            title={`Remove "${row.label}" with ${baseName(row.path)}`}
+            aria-label={`Remove "${row.label}" with ${baseName(row.path)}`}
+            className="ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--ink-soft)] opacity-0 transition hover:bg-[var(--wine)]/15 hover:text-[var(--wine)] focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            <X size={10} aria-hidden />
+          </button>
+        )}
+      </div>
       {provenance && (
         <p className="text-[11px] text-[var(--ink-muted)]">
           {provenance.kind === 'session' ? (
