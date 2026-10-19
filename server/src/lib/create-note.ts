@@ -8,10 +8,13 @@
 // `template: 'character'`, `player` on frontmatter, and a Sheet holding
 // BOTH the nested fields the SheetHeader and Zod shape read
 // (`ability_scores`, `classes`) and the legacy flat keys (`str`, `class`,
-// `level`, `hp_max` ...) the old side panel still reads. No `role`:
-// `characters.ts#detectRole` treats a role-less Character as a PC, and the
-// index only needs `fm.player` to link the owner. NPC / ally / villain
-// canonicalise to `person` (shared kind table), which has its own header.
+// `level`, `hp_max` ...) the old side panel still reads.
+//
+// A legacy alias (`pc` / `npc` / `ally` / `villain`) also keeps `role:
+// <alias>`: the note page and the sheet route read `role` to decide that a
+// Character's `player` owns it, and a Person keeps which stance it was
+// made as. NPC / ally / villain canonicalise to `person` (shared kind
+// table), which has its own header and no `characters` row.
 
 import { randomUUID } from 'node:crypto';
 import { prosemirrorJSONToYDoc } from 'y-prosemirror';
@@ -24,6 +27,7 @@ import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { deriveFolderIndex, parentFolderUnderCampaign } from '@/lib/campaign-index';
 import { writeNote } from '@/lib/import-apply';
 import { hiddenNotesSql, type Visibility } from '@/lib/notes';
+import { parseSheet } from '@/lib/validateSheet';
 
 /** Kinds that carry a template-seeded Sheet. */
 const SHEETED: readonly NoteKind[] = ['character', 'person', 'creature', 'item', 'location', 'session'];
@@ -31,10 +35,16 @@ const SHEETED: readonly NoteKind[] = ['character', 'person', 'creature', 'item',
 /** Plain `page`, `excalidraw`, or any canonical Kind / legacy alias. */
 export type NewNoteKind = KindInput | 'page' | 'excalidraw';
 
+/** Legacy aliases that carried a `role` before the shared kind table. */
+const ROLE_ALIASES: readonly string[] = ['pc', 'npc', 'ally', 'villain'];
+
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
 
+/** How far `next-free` looks for a free ` (n)` / `-n` path. */
+export const NEXT_FREE_LIMIT = 1000;
+
 /** Frontmatter for a brand-new Note of `kind`. Plain pages get `{}`. */
-export function seedFrontmatter(opts: {
+function seedFrontmatter(opts: {
   kind: NewNoteKind;
   title: string;
   /** Owner's username; becomes `player` on a Character. */
@@ -63,13 +73,14 @@ export function seedFrontmatter(opts: {
     }
   }
   // Legacy aliases carried a stance that the Person template models.
+  const alias = String(opts.kind).toLowerCase();
   if (canonical === 'person' && !(opts.sheet && 'disposition' in opts.sheet)) {
-    const alias = String(opts.kind).toLowerCase();
     if (alias === 'ally') sheet.disposition = 'friendly';
     if (alias === 'villain') sheet.disposition = 'hostile';
   }
 
   const fm: Record<string, unknown> = { kind: canonical, template: canonical, sheet };
+  if (ROLE_ALIASES.includes(alias)) fm.role = alias;
   if (canonical === 'character') {
     nestCharacterSheet(sheet);
     if (opts.username) fm.player = opts.username;
@@ -78,7 +89,8 @@ export function seedFrontmatter(opts: {
 }
 
 /** Template defaults seed the legacy flat keys; the SheetHeader and Zod
- *  shape read nested objects. Add the nested form and keep the flat keys. */
+ *  shape read nested objects. Add the nested form and keep the flat keys
+ *  (except a numeric `speed`, which becomes `{ walk }`). */
 function nestCharacterSheet(sheet: Record<string, unknown>): void {
   const ab = sheet.ability_scores;
   const hasBlock =
@@ -113,6 +125,35 @@ function nestCharacterSheet(sheet: Record<string, unknown>): void {
       sheet.classes = [{ ref: { name: className ?? 'Adventurer' }, level: level ?? 1 }];
     }
   }
+
+  const hp = sheet.hit_points;
+  const hasHpBlock =
+    !!hp && typeof hp === 'object' && typeof (hp as Record<string, unknown>).max === 'number';
+  if (!hasHpBlock) {
+    const max = typeof sheet.hp_max === 'number' ? sheet.hp_max : null;
+    const cur = typeof sheet.hp_current === 'number' ? sheet.hp_current : null;
+    if (max !== null || cur !== null) {
+      sheet.hit_points = {
+        max: max ?? cur ?? 0,
+        current: cur ?? max ?? 0,
+        temporary:
+          typeof sheet.hp_temporary === 'number' && Number.isFinite(sheet.hp_temporary)
+            ? sheet.hp_temporary
+            : 0,
+      };
+    }
+  }
+
+  const ac = sheet.armor_class;
+  const hasAcBlock =
+    !!ac && typeof ac === 'object' && typeof (ac as Record<string, unknown>).value === 'number';
+  if (!hasAcBlock && typeof sheet.ac === 'number' && Number.isFinite(sheet.ac)) {
+    sheet.armor_class = { value: sheet.ac };
+  }
+
+  if (typeof sheet.speed === 'number' && Number.isFinite(sheet.speed)) {
+    sheet.speed = { walk: sheet.speed };
+  }
 }
 
 /** Default suffix: `a/b.md` -> `a/b (2).md`. */
@@ -131,7 +172,7 @@ export function nextFreePath(
   const q = getDb().query<{ n: number }, [string, string]>(
     'SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path = ?',
   );
-  for (let n = firstN; n < firstN + 1000; n++) {
+  for (let n = firstN; n < firstN + NEXT_FREE_LIMIT; n++) {
     const candidate = `${stem}${suffix(n)}.md`;
     if ((q.get(groupId, candidate)?.n ?? 0) === 0) return candidate;
   }
@@ -149,9 +190,11 @@ export type CreateNoteOpts = {
   sheet?: Record<string, unknown> | undefined;
   /** Extra top-level frontmatter (e.g. `campaigns`). */
   frontmatter?: Record<string, unknown> | undefined;
-  /** Replace seeding with a frontmatter the caller built via
-   *  `seedFrontmatter` and then adjusted (e.g. merged a parsed body). */
-  seeded?: Record<string, unknown> | undefined;
+  /** Validate the seeded Sheet against its Kind's Zod shape and store the
+   *  parsed result; a bad Sheet throws `SheetValidationError`. */
+  validateSheet?: boolean | undefined;
+  /** Wait for the parent folder index refresh (default: fire and forget). */
+  awaitFolderIndex?: boolean | undefined;
   /** Markdown body. Omitted: an empty paragraph. */
   markdown?: string | undefined;
   dmOnly?: boolean | undefined;
@@ -186,12 +229,13 @@ export async function createNote(groupId: string, opts: CreateNoteOpts): Promise
   // Insert first and translate the conflict: a SELECT-then-INSERT leaves
   // a window where two concurrent creates both pass the check.
   for (let n = 2; ; n++) {
-    frontmatter = opts.seeded
-      ? { ...opts.seeded }
-      : {
-          ...seedFrontmatter({ kind: opts.kind, title, username: opts.username, sheet: opts.sheet }),
-          ...opts.frontmatter,
-        };
+    frontmatter = {
+      ...seedFrontmatter({ kind: opts.kind, title, username: opts.username, sheet: opts.sheet }),
+      ...opts.frontmatter,
+    };
+    if (opts.validateSheet && frontmatter.sheet && typeof frontmatter.kind === 'string') {
+      frontmatter.sheet = parseSheet(frontmatter.kind, frontmatter.sheet);
+    }
     // Every derive recomputes the dm_only column from this flag.
     if (opts.dmOnly) frontmatter.dm_only = true;
     try {
@@ -211,7 +255,7 @@ export async function createNote(groupId: string, opts: CreateNoteOpts): Promise
       break;
     } catch (err) {
       if (!isUniqueConstraintError(err)) throw err;
-      if (opts.onTaken !== 'next-free' || n > 50) return { status: 'exists', path };
+      if (opts.onTaken !== 'next-free' || n > NEXT_FREE_LIMIT) return { status: 'exists', path };
       if (opts.visibleTo) {
         const visible = db
           .query<{ n: number }, [string, string]>(
@@ -232,9 +276,10 @@ export async function createNote(groupId: string, opts: CreateNoteOpts): Promise
   }
   const parent = parentFolderUnderCampaign(path);
   if (parent) {
-    await deriveFolderIndex(groupId, parent, { userId: opts.userId }).catch((err) => {
+    const refresh = deriveFolderIndex(groupId, parent, { userId: opts.userId }).catch((err) => {
       console.error('[create-note] folder index refresh failed:', err);
     });
+    if (opts.awaitFolderIndex) await refresh;
   }
   return { status: 'created', path, title, frontmatter };
 }

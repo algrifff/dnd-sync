@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { getDb } from './db';
 import { setupTestDb, teardownTestDb } from './test-utils';
-import { createNote, nextFreePath, seedFrontmatter } from './create-note';
+import { createNote, nextFreePath, type CreateNoteOpts } from './create-note';
 import { visibilityFor } from './notes';
+import { SheetValidationError } from './validateSheet';
 import { createUser, DEFAULT_GROUP_ID } from './users';
 import { ensureDefaultTemplates } from './templates';
 
@@ -31,46 +32,110 @@ function fmAt(path: string): Record<string, unknown> {
   return JSON.parse(row!.frontmatter_json);
 }
 
-describe('seedFrontmatter', () => {
-  it('seeds a Character with nested and legacy flat keys, a player and no role', () => {
-    const fm = seedFrontmatter({ kind: 'pc', title: 'Aria', username: 'rowan' });
-    expect(fm.kind).toBe('character');
-    expect(fm.template).toBe('character');
-    expect(fm.player).toBe('rowan');
-    expect(fm.role).toBeUndefined();
-    const sheet = fm.sheet as Record<string, unknown>;
-    expect(sheet.name).toBe('Aria');
-    expect(sheet.ability_scores).toMatchObject({ str: expect.any(Number), cha: expect.any(Number) });
-    expect(typeof sheet.str).toBe('number');
-    expect(Array.isArray(sheet.classes)).toBe(true);
+let seedN = 0;
+/** Seeded frontmatter of a fresh Note, as stored. */
+async function seed(
+  kind: CreateNoteOpts['kind'],
+  title: string,
+  extra: { username?: string; sheet?: Record<string, unknown> } = {},
+): Promise<Record<string, unknown>> {
+  const path = `World Lore/Seed/n${++seedN}.md`;
+  const made = await createNote(DEFAULT_GROUP_ID, { userId, path, kind, title, ...extra });
+  expect(made.status).toBe('created');
+  return fmAt(path);
+}
+
+describe('seeded frontmatter', () => {
+  it('should seed a pc as a Character with a player and role pc', async () => {
+    const fm = await seed('pc', 'Aria', { username: 'rowan' });
+    expect({ kind: fm.kind, template: fm.template, player: fm.player, role: fm.role }).toEqual({
+      kind: 'character',
+      template: 'character',
+      player: 'rowan',
+      role: 'pc',
+    });
   });
 
-  it('collapses legacy aliases through the shared kind table', () => {
-    expect(seedFrontmatter({ kind: 'npc', title: 'Bram' }).kind).toBe('person');
-    expect(seedFrontmatter({ kind: 'monster', title: 'Ooze' }).kind).toBe('creature');
-    const villain = seedFrontmatter({ kind: 'villain', title: 'Vex' });
-    expect((villain.sheet as Record<string, unknown>).disposition).toBe('hostile');
-    expect(villain.player).toBeUndefined();
+  it('should give a canonical character no role', async () => {
+    expect((await seed('character', 'Brin', { username: 'rowan' })).role).toBeUndefined();
   });
 
-  it('seeds Item and Location sheets with their name', () => {
+  it('should write a new Character sheet in both nested and legacy flat shapes', async () => {
+    const fm = await seed('character', 'Aria', {
+      username: 'rowan',
+      sheet: { hp_max: 24, hp_current: 20, ac: 15, speed: 35, class: 'Rogue', level: 3, str: 14 },
+    });
+    expect(fm.sheet).toMatchObject({
+      name: 'Aria',
+      hit_points: { max: 24, current: 20, temporary: 0 },
+      armor_class: { value: 15 },
+      speed: { walk: 35 },
+      ability_scores: { str: 14, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+      classes: [{ ref: { name: 'Rogue' }, level: 3 }],
+      hp_max: 24,
+      hp_current: 20,
+      ac: 15,
+      str: 14,
+      class: 'Rogue',
+      level: 3,
+    });
+  });
+
+  it('should nest template-default AC and speed on a bare Character', async () => {
+    const fm = await seed('pc', 'Cato', { username: 'rowan' });
+    expect(fm.sheet).toMatchObject({
+      armor_class: { value: 10 },
+      speed: { walk: 30 },
+      ac: 10,
+      ability_scores: { str: 10, cha: 10 },
+      str: 10,
+    });
+  });
+
+  it('should collapse legacy aliases through the shared kind table and keep their role', async () => {
+    const npc = await seed('npc', 'Bram');
+    const villain = await seed('villain', 'Vex');
+    const ooze = await seed('monster', 'Ooze');
+    expect({
+      npc: [npc.kind, npc.role],
+      villain: [villain.kind, villain.role, (villain.sheet as Record<string, unknown>).disposition, villain.player],
+      ooze: [ooze.kind, ooze.role],
+    }).toEqual({
+      npc: ['person', 'npc'],
+      villain: ['person', 'villain', 'hostile', undefined],
+      ooze: ['creature', undefined],
+    });
+  });
+
+  it('should seed Item and Location sheets with their name', async () => {
     for (const kind of ['item', 'location'] as const) {
-      const fm = seedFrontmatter({ kind, title: 'Thing' });
-      expect(fm.kind).toBe(kind);
-      expect((fm.sheet as Record<string, unknown>).name).toBe('Thing');
+      const fm = await seed(kind, 'Thing');
+      expect([fm.kind, (fm.sheet as Record<string, unknown>).name]).toEqual([kind, 'Thing']);
     }
   });
 
-  it('keeps caller sheet fields over template defaults, and no name on a session', () => {
-    const fm = seedFrontmatter({ kind: 'session', title: 'T', sheet: { date: '2026-01-02' } });
-    const sheet = fm.sheet as Record<string, unknown>;
-    expect(sheet.date).toBe('2026-01-02');
-    expect('name' in sheet).toBe(false);
+  it('should keep caller sheet fields over template defaults, and no name on a session', async () => {
+    const sheet = (await seed('session', 'T', { sheet: { date: '2026-01-02' } })).sheet as Record<string, unknown>;
+    expect([sheet.date, 'name' in sheet]).toEqual(['2026-01-02', false]);
   });
 
-  it('gives quests a bare kind and plain pages nothing', () => {
-    expect(seedFrontmatter({ kind: 'quest', title: 'Q' })).toEqual({ kind: 'quest' });
-    expect(seedFrontmatter({ kind: 'page', title: 'P' })).toEqual({});
+  it('should give quests a bare kind and plain pages nothing', async () => {
+    expect([await seed('quest', 'Q'), await seed('page', 'P')]).toEqual([{ kind: 'quest' }, {}]);
+  });
+
+  it('should refuse an invalid Sheet when asked to validate, writing nothing', async () => {
+    const path = 'World Lore/Seed/bad.md';
+    const made = createNote(DEFAULT_GROUP_ID, {
+      userId,
+      path,
+      kind: 'character',
+      title: 'Bad',
+      sheet: { hit_points: { max: 'lots' } },
+      validateSheet: true,
+    });
+    await expect(made).rejects.toBeInstanceOf(SheetValidationError);
+    const row = getDb().query('SELECT 1 FROM notes WHERE group_id = ? AND path = ?').get(DEFAULT_GROUP_ID, path) ?? null;
+    expect(row).toBeNull();
   });
 });
 

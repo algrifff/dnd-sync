@@ -895,6 +895,7 @@ async function resolveTarget(opts: {
     gmOnly: session.gm_only === 1,
     onTaken: 'next-free',
     suffix: (n) => `-${n}`,
+    awaitFolderIndex: true,
   });
   if (made.status === 'exists') throw new Error(`No free path near ${wanted}`);
   return { status: 'ok', path: made.path, created: true };

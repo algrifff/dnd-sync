@@ -58,9 +58,8 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (
     session.role === 'viewer' &&
     requestedKind !== 'page' &&
-    requestedKind !== 'excalidraw' &&
-    canonicalKind(requestedKind) !== 'quest' &&
-    canonicalKind(requestedKind) !== 'character'
+    (requestedKind === 'excalidraw' ||
+      (canonicalKind(requestedKind) !== 'quest' && canonicalKind(requestedKind) !== 'character'))
   ) {
     return json({ error: 'forbidden', reason: 'players can create pages, quests or PCs only' }, 403);
   }

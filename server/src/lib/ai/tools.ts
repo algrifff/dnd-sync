@@ -18,10 +18,10 @@ import { getCampaignBySlug, listCampaigns } from '@/lib/characters';
 import { canonicalFolder } from '@/lib/ai/paths';
 import { slugify } from '@/lib/slugify';
 import { canonicalKind, KIND_INPUTS, NOTE_KINDS } from '@compendium/shared';
-import { createNote, seedFrontmatter } from '@/lib/create-note';
+import { createNote } from '@/lib/create-note';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { deriveFolderIndexesFor } from '@/lib/campaign-index';
-import { validateSheet } from '@/lib/validateSheet';
+import { SheetValidationError, validateSheet } from '@/lib/validateSheet';
 import {
   closeDocumentConnections,
   closeDocumentForWrite,
@@ -523,48 +523,27 @@ function entityCreate(ctx: ToolContext) {
         return { ok: false as const, error: `Already exists at ${path}` };
       }
 
-      // Build the seed frontmatter from the AI's structured input.
-      const frontmatter = seedFrontmatter({ kind: canonical, title: name, sheet: sheet ?? {}, username: ctx.userId });
-
       // For characters with a body, run the structured-sheet extractor
       // over the prose so HP/AC/abilities/class/race in markdown tables
-      // flow into `frontmatter.sheet` automatically. Caller-supplied
-      // sheet fields win on conflict (the AI made a deliberate choice).
+      // flow into the Sheet automatically. Parsed-from-body beats template
+      // defaults; caller-supplied sheet fields win on conflict (the AI made
+      // a deliberate choice).
+      let seedSheet: Record<string, unknown> = sheet ?? {};
+      const extraFm: Record<string, unknown> = {};
       let bodyToWrite = '';
       if (typeof body === 'string' && body.trim().length > 0) {
         if (canonical === 'character' || kind === 'character' || kind === 'pc') {
-          const parsed = parseCharacter(body, {
-            defaultPlayer:
-              typeof frontmatter.player === 'string' ? frontmatter.player : ctx.userId,
-          });
+          const parsed = parseCharacter(body, { defaultPlayer: ctx.userId });
           const parsedSheet =
             (parsed.frontmatter.sheet as Record<string, unknown> | undefined) ?? {};
-          const aiSheet =
-            (frontmatter.sheet as Record<string, unknown> | undefined) ?? {};
-          // Parsed-from-body fills blanks; AI explicitly-set fields win.
-          frontmatter.sheet = { ...parsedSheet, ...aiSheet };
+          seedSheet = { ...parsedSheet, name, ...seedSheet };
           // Surface portrait at the top level so transfer-character / derive
           // pick it up (they read fm.portrait, not fm.sheet.portrait).
-          if (parsed.frontmatter.portrait && frontmatter.portrait == null) {
-            frontmatter.portrait = parsed.frontmatter.portrait;
-          }
+          if (parsed.frontmatter.portrait) extraFm.portrait = parsed.frontmatter.portrait;
           bodyToWrite = parsed.body;
         } else {
           bodyToWrite = body;
         }
-      }
-
-      const fmKind = typeof frontmatter.kind === 'string' ? frontmatter.kind : undefined;
-      const vr = validateSheet(fmKind, frontmatter.sheet);
-      if (!vr.ok) {
-        return {
-          ok: false as const,
-          error: `invalid_sheet for kind ${fmKind}`,
-          issues: vr.issues,
-        };
-      }
-      if (frontmatter.sheet && typeof frontmatter.sheet === 'object') {
-        frontmatter.sheet = vr.data as Record<string, unknown>;
       }
 
       // createNote persists via writeNote so md-to-pm, FTS triggers,
@@ -573,17 +552,27 @@ function entityCreate(ctx: ToolContext) {
       try {
         const made = await createNote(ctx.groupId, {
           userId: ctx.userId,
+          username: ctx.userId,
           path,
           kind: canonical,
           title: name,
-          seeded: frontmatter,
+          sheet: seedSheet,
+          frontmatter: extraFm,
           markdown: bodyToWrite,
           dmOnly,
+          validateSheet: true,
         });
         if (made.status === 'exists') {
           return { ok: false as const, error: `Already exists at ${path}` };
         }
       } catch (err) {
+        if (err instanceof SheetValidationError) {
+          return {
+            ok: false as const,
+            error: `invalid_sheet for kind ${err.kind}`,
+            issues: err.issues,
+          };
+        }
         return {
           ok: false as const,
           error: 'write_failed',
