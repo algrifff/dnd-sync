@@ -1,22 +1,29 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
+import { deriveAllIndexes } from './derive-indexes';
 import { setupTestDb, teardownTestDb } from './test-utils';
 import { buildTree, type TreeDir } from './tree';
 import { DEFAULT_GROUP_ID } from './users';
 
 let clock = 1;
 
-function seedNote(path: string, title: string): void {
+function seedNote(path: string, title: string, frontmatter: Record<string, unknown> = {}): void {
   const now = clock++;
+  const fm = JSON.stringify(frontmatter);
   getDb()
     .query(
       `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
                           content_md, yjs_state, frontmatter_json, byte_size,
                           updated_at, updated_by, created_at, created_by)
-       VALUES (?, ?, ?, ?, '{"type":"doc","content":[]}', '', '', NULL, '{}', 0, ?, NULL, ?, NULL)`,
+       VALUES (?, ?, ?, ?, '{"type":"doc","content":[]}', '', '', NULL, ?, 0, ?, NULL, ?, NULL)`,
     )
-    .run(randomUUID(), DEFAULT_GROUP_ID, path, title, now, now);
+    .run(randomUUID(), DEFAULT_GROUP_ID, path, title, fm, now, now);
+  deriveAllIndexes({ groupId: DEFAULT_GROUP_ID, notePath: path, frontmatterJson: fm });
+}
+
+function seedSession(path: string, title: string, sheet: Record<string, unknown>): void {
+  seedNote(path, title, { kind: 'session', campaigns: ['ashfall'], sheet });
 }
 
 function retitle(path: string, title: string): void {
@@ -41,6 +48,7 @@ beforeAll(() => setupTestDb());
 afterAll(() => teardownTestDb());
 beforeEach(() => {
   getDb().query('DELETE FROM notes WHERE group_id = ?').run(DEFAULT_GROUP_ID);
+  getDb().query('DELETE FROM session_notes WHERE group_id = ?').run(DEFAULT_GROUP_ID);
 });
 
 describe('buildTree ordering', () => {
@@ -61,16 +69,12 @@ describe('buildTree ordering', () => {
     expect(labelsIn('Lore')).toEqual(['Aboleth', 'Dragon']);
   });
 
-  it('should order numbered sessions numerically', () => {
-    seedNote('Log/2026-01-01.md', 'Session 10_Alex_2026-03-01');
-    seedNote('Log/2026-01-02.md', 'Session 9_Alex_2026-02-20');
-    seedNote('Log/2026-01-03.md', 'Session 1_Sam_2026-01-01');
+  it('should compare numbers in titles numerically', () => {
+    seedNote('Lore/a.md', 'Chapter 10');
+    seedNote('Lore/b.md', 'Chapter 9');
+    seedNote('Lore/c.md', 'Chapter 1');
 
-    expect(labelsIn('Log')).toEqual([
-      'Session 1_Sam_2026-01-01',
-      'Session 9_Alex_2026-02-20',
-      'Session 10_Alex_2026-03-01',
-    ]);
+    expect(labelsIn('Lore')).toEqual(['Chapter 1', 'Chapter 9', 'Chapter 10']);
   });
 
   it('should keep folders ahead of files', () => {
@@ -78,5 +82,31 @@ describe('buildTree ordering', () => {
     seedNote('Lore/Zoo/Keeper.md', 'Keeper');
 
     expect(labelsIn('Lore')).toEqual(['Zoo/', 'Aardvark']);
+  });
+
+});
+
+describe('buildTree session ordering', () => {
+  it('should keep sessions in date order whatever their titles', () => {
+    seedSession('Log/2026-03-01.md', 'Alex — 2026-03-01', { date: '2026-03-01' });
+    seedSession('Log/2026-01-01.md', 'Sam — 2026-01-01', { date: '2026-01-01' });
+    seedSession('Log/2026-02-01-the-mill.md', 'The Mill', { date: '2026-02-01' });
+
+    expect(labelsIn('Log')).toEqual(['Sam — 2026-01-01', 'The Mill', 'Alex — 2026-03-01']);
+  });
+
+  it('should order same-day sessions by session number', () => {
+    seedSession('Log/b.md', 'Session 10_Alex_2026-03-01', { date: '2026-03-01', session_number: 10 });
+    seedSession('Log/a.md', 'Session 9_Alex_2026-03-01', { date: '2026-03-01', session_number: 9 });
+
+    expect(labelsIn('Log')).toEqual(['Session 9_Alex_2026-03-01', 'Session 10_Alex_2026-03-01']);
+  });
+
+  it('should place sessions before other notes and undated sessions last among them', () => {
+    seedNote('Log/recap.md', 'Aaa recap');
+    seedSession('Log/undated.md', 'Undated', {});
+    seedSession('Log/2026-01-01.md', 'Zed', { date: '2026-01-01' });
+
+    expect(labelsIn('Log')).toEqual(['Zed', 'Undated', 'Aaa recap']);
   });
 });

@@ -97,7 +97,8 @@ export function TitleEditor({
       onChange={onChange}
       onBlur={treeRefresh.committed}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') e.currentTarget.blur();
+        // Enter also confirms an IME candidate; only a plain Enter commits.
+        if (e.key === 'Enter' && !e.nativeEvent.isComposing) e.currentTarget.blur();
       }}
       disabled={!ydoc}
       placeholder={placeholder}

@@ -185,6 +185,17 @@ export function buildTree(
     campaignOrder.set(c.slug, c.sort_order);
   }
 
+  // Sessions keep chronological order whatever they're titled. Sheet
+  // edits bump notes.updated_at, so the snapshot key covers this too.
+  const sessions = new Map<string, SessionOrder>();
+  for (const s of getDb()
+    .query<{ note_path: string; session_date: string | null; session_number: number | null }, [string]>(
+      `SELECT note_path, session_date, session_number FROM session_notes WHERE group_id = ?`,
+    )
+    .all(groupId)) {
+    sessions.set(s.note_path, { date: s.session_date, number: s.session_number });
+  }
+
   const root: TreeDir = { kind: 'dir', name: '', path: '', system: false, children: [] };
   let maxUpdated = 0;
 
@@ -196,7 +207,7 @@ export function buildTree(
     ensureFolder(root, path);
   }
 
-  sortTree(root, campaignOrder);
+  sortTree(root, campaignOrder, sessions);
   const tree: Tree = { root, updatedAt: maxUpdated };
   // Bound the cache so an admin in many worlds doesn't grow it
   // forever. FIFO eviction by Map insertion order.
@@ -258,7 +269,13 @@ function insert(dir: TreeDir, segments: string[], fullPath: string, title: strin
   insert(child, segments.slice(1), fullPath, title);
 }
 
-function sortTree(dir: TreeDir, campaignOrder: Map<string, number>): void {
+type SessionOrder = { date: string | null; number: number | null };
+
+function sortTree(
+  dir: TreeDir,
+  campaignOrder: Map<string, number>,
+  sessions: Map<string, SessionOrder>,
+): void {
   const isCampaignsRoot = dir.path === 'Campaigns';
   dir.children.sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1;
@@ -276,15 +293,36 @@ function sortTree(dir: TreeDir, campaignOrder: Map<string, number>): void {
         return 1;
       }
     }
+    if (a.kind === 'file' && b.kind === 'file') {
+      const bySession = compareSessions(sessions.get(a.path), sessions.get(b.path));
+      if (bySession !== 0) return bySession;
+    }
     // Files sort by the label the sidebar shows, so a title edit in the
     // note reorders it without renaming the path. `numeric` keeps
-    // "Session 9" ahead of "Session 10".
-    return sortLabel(a).localeCompare(sortLabel(b), undefined, {
-      numeric: true,
-      sensitivity: 'base',
-    });
+    // "Session 9" ahead of "Session 10". The raw name breaks ties so
+    // "Lore" and "lore" keep a stable order.
+    return (
+      sortLabel(a).localeCompare(sortLabel(b), undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      }) || a.name.localeCompare(b.name)
+    );
   });
-  for (const c of dir.children) if (c.kind === 'dir') sortTree(c, campaignOrder);
+  for (const c of dir.children) if (c.kind === 'dir') sortTree(c, campaignOrder, sessions);
+}
+
+/** Sessions come before other notes, oldest first by date then number;
+ *  a missing date or number sorts last. 0 hands over to the title. */
+function compareSessions(a: SessionOrder | undefined, b: SessionOrder | undefined): number {
+  if (!a || !b) return a ? -1 : b ? 1 : 0;
+  return compareNullsLast(a.date, b.date) || compareNullsLast(a.number, b.number);
+}
+
+function compareNullsLast<T extends string | number>(a: T | null, b: T | null): number {
+  if (a === b) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a < b ? -1 : 1;
 }
 
 function sortLabel(node: TreeDir | TreeFile): string {
