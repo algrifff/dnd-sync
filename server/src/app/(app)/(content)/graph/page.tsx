@@ -35,7 +35,7 @@ export default async function GraphPage({
 
   const campNames = listVisibleCampaignNames(session.currentGroupId, {
     mode: treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role),
-    hideDmOnly: visibilityFor(session.role).hideDmOnly,
+    vis: visibilityFor(session.role),
   });
 
   return (

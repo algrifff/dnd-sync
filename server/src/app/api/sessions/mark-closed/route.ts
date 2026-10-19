@@ -9,7 +9,7 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
-import { loadNote, visibilityFor } from '@/lib/notes';
+import { loadVisibleNote, visibilityFor } from '@/lib/notes';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 import { apiErrorResponse } from '@/lib/analytics/api-error';
@@ -38,12 +38,8 @@ export async function POST(req: NextRequest): Promise<Response> {
     // this path and be kind=session before we upsert a session_notes
     // row for it. Without this, any caller can create session_notes
     // rows keyed on a nonexistent path.
-    const note = loadNote(session.currentGroupId, body.sessionPath);
+    const note = loadVisibleNote(session.currentGroupId, body.sessionPath, visibilityFor(session.role));
     if (!note) return json({ error: 'not_found' }, 404);
-    const vis = visibilityFor(session.role);
-    if ((note.gm_only === 1 && vis.hideGmOnly) || (note.dm_only === 1 && vis.hideDmOnly)) {
-      return json({ error: 'not_found' }, 404);
-    }
     let fm: Record<string, unknown>;
     try {
       fm = JSON.parse(note.frontmatter_json) as Record<string, unknown>;

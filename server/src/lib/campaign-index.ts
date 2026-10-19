@@ -26,6 +26,11 @@ import { closeDocumentConnections } from '@/collab/server';
 import { ensureIndexNote } from './index-notes';
 import { rebuildYjsState } from './yjs-rebuild';
 import { slugify } from './slugify';
+import { hiddenNotesSql, visibilityFor } from './notes';
+
+/** An index body is one shared document every member reads, so it only
+ *  names notes the least-privileged member (a viewer) may see. */
+const SEEN_BY_EVERYONE = hiddenNotesSql('n', visibilityFor('viewer'));
 
 /** Callout title marker — used both as the user-visible heading and as
  *  the detection sentinel when we look for the managed block. */
@@ -394,9 +399,8 @@ function folderHasContent(groupId: string, folderPath: string): boolean {
   const db = getDb();
   const noteRow = db
     .query<{ x: number }, [string, string]>(
-      `SELECT 1 AS x FROM notes
-        WHERE group_id = ? AND path LIKE ? || '/%'
-          AND dm_only = 0 AND gm_only = 0
+      `SELECT 1 AS x FROM notes n
+        WHERE n.group_id = ? AND n.path LIKE ? || '/%'${SEEN_BY_EVERYONE}
         LIMIT 1`,
     )
     .get(groupId, folderPath);
@@ -489,13 +493,12 @@ function listDirectChildren(
   // note hidden from viewers (dm_only or gm_only) is never listed.
   const directNotes = db
     .query<{ path: string; title: string }, [string, string, string, string]>(
-      `SELECT path, title FROM notes
-        WHERE group_id = ?
-          AND path LIKE ? || '/%'
-          AND path NOT LIKE ? || '/%/%'
-          AND path != ?
-          AND dm_only = 0 AND gm_only = 0
-        ORDER BY title COLLATE NOCASE`,
+      `SELECT n.path, n.title FROM notes n
+        WHERE n.group_id = ?
+          AND n.path LIKE ? || '/%'
+          AND n.path NOT LIKE ? || '/%/%'
+          AND n.path != ?${SEEN_BY_EVERYONE}
+        ORDER BY n.title COLLATE NOCASE`,
     )
     .all(groupId, folderPath, folderPath, indexPath);
 
@@ -515,9 +518,8 @@ function listDirectChildren(
 
   const deeperNotes = db
     .query<{ path: string }, [string, string]>(
-      `SELECT DISTINCT path FROM notes
-        WHERE group_id = ? AND path LIKE ? || '/%/%'
-          AND dm_only = 0 AND gm_only = 0`,
+      `SELECT DISTINCT n.path FROM notes n
+        WHERE n.group_id = ? AND n.path LIKE ? || '/%/%'${SEEN_BY_EVERYONE}`,
     )
     .all(groupId, folderPath);
   for (const r of deeperNotes) {

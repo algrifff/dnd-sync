@@ -1,6 +1,7 @@
 // Search helpers. `searchWorld` backs the header quick-find (/api/ui/search).
 
 import { getDb } from './db';
+import { hiddenAssetsSql, hiddenNotesSql, visibilityFor } from './notes';
 import { SNIPPET_MARK_CLOSE, SNIPPET_MARK_OPEN } from './search-snippet';
 
 /**
@@ -100,18 +101,19 @@ export function searchWorld(opts: {
   if (!q) return [];
 
   const db = getDb();
+  // `gmMode` picks the namespace; `vis` is the gate on top of it.
   const gmOnly = opts.gmMode ? 1 : 0;
-  const showDmOnly = opts.role !== 'viewer' ? 1 : 0;
+  const vis = visibilityFor(opts.role);
 
   // Title matching scans this world's titles in JS: cheaper than FTS for
   // short prefixes, and it matches mid-word ("grove" finds "Ashgrove").
   const titleHits = rankByName(
     db
-      .query<{ path: string; title: string }, [string, number, number]>(
+      .query<{ path: string; title: string }, [string, number]>(
         `SELECT path, title FROM notes
-          WHERE group_id = ? AND gm_only = ? AND (dm_only = 0 OR ? = 1)`,
+          WHERE group_id = ? AND gm_only = ?${hiddenNotesSql('notes', vis)}`,
       )
-      .all(opts.groupId, gmOnly, showDmOnly)
+      .all(opts.groupId, gmOnly)
       .map((r) => ({ path: r.path, title: displayTitle(r.title, r.path) })),
     (r) => r.title,
     q,
@@ -133,7 +135,7 @@ export function searchWorld(opts: {
   const titlePaths = new Set(titleHits.map((r) => r.path));
   const contentRows = match
     ? db
-        .query<{ path: string; title: string; note_kind: unknown; snippet: string }, [string, string, number, number]>(
+        .query<{ path: string; title: string; note_kind: unknown; snippet: string }, [string, string, number]>(
           `SELECT n.path, n.title, ${noteKind('n.frontmatter_json')} AS note_kind,
                   snippet(notes_fts, 3, '${SNIPPET_MARK_OPEN}', '${SNIPPET_MARK_CLOSE}', '…', 12) AS snippet
              FROM notes_fts
@@ -141,12 +143,11 @@ export function searchWorld(opts: {
                ON n.group_id = notes_fts.group_id AND n.path = notes_fts.path
             WHERE notes_fts MATCH ?
               AND notes_fts.group_id = ?
-              AND (n.dm_only = 0 OR ? = 1)
-              AND n.gm_only = ?
+              AND n.gm_only = ?${hiddenNotesSql('n', vis)}
             ORDER BY notes_fts.rank
             LIMIT ${CONTENT_LIMIT + TITLE_LIMIT}`,
         )
-        .all(match, opts.groupId, showDmOnly, gmOnly)
+        .all(match, opts.groupId, gmOnly)
         .filter((r) => !titlePaths.has(r.path))
         .slice(0, CONTENT_LIMIT)
     : [];
@@ -154,7 +155,7 @@ export function searchWorld(opts: {
   const assetHits = rankByName(
     db
       .query<{ id: string; original_name: string; mime: string }, [string, number]>(
-        `SELECT id, original_name, mime FROM assets WHERE group_id = ? AND gm_only = ?`,
+        `SELECT id, original_name, mime FROM assets WHERE group_id = ? AND gm_only = ?${hiddenAssetsSql('assets', vis)}`,
       )
       .all(opts.groupId, gmOnly),
     (r) => r.original_name,

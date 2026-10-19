@@ -15,7 +15,7 @@ import {
 } from '@compendium/shared';
 import { getDb } from '@/lib/db';
 import type { PmNode } from '@/lib/md-to-pm';
-import { visibilityFor } from '@/lib/notes';
+import { hiddenNotesSql, visibilityFor } from '@/lib/notes';
 import { collectLinksAndTags } from '@/lib/pm-links';
 import type { Role } from '@/lib/wrap-up';
 
@@ -161,9 +161,7 @@ type Row = {
  *  may see: both Notes visible to them. Nothing when `path` itself is
  *  hidden or missing. */
 export function listRelations(opts: { groupId: string; role: Role; path: string }): RelationView[] {
-  const vis = visibilityFor(opts.role);
-  const hidden = (alias: string): string =>
-    `${vis.hideDmOnly ? ` AND ${alias}.dm_only = 0` : ''}${vis.hideGmOnly ? ` AND ${alias}.gm_only = 0` : ''}`;
+  const hidden = (alias: string): string => hiddenNotesSql(alias, visibilityFor(opts.role));
   const side = (outgoing: 0 | 1): string => {
     const [me, other] = outgoing ? ['from_path', 'to_path'] : ['to_path', 'from_path'];
     return `SELECT ${outgoing} AS outgoing, r.relation AS relation, o.path AS path, o.title AS title,

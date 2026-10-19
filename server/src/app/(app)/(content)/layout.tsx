@@ -57,10 +57,10 @@ export default async function ContentLayout({
   const vis = visibilityFor(session.role);
   const playerTree = buildTree(session.currentGroupId, {
     mode: 'player',
-    hideDmOnly: vis.hideDmOnly,
+    vis,
   });
   const gmTree = gmMode
-    ? buildTree(session.currentGroupId, { mode: 'gm', hideDmOnly: vis.hideDmOnly })
+    ? buildTree(session.currentGroupId, { mode: 'gm', vis })
     : null;
   const kindMap = Object.fromEntries(listNoteKinds(session.currentGroupId, vis));
   const features = getWorldFeatures(session.currentGroupId);

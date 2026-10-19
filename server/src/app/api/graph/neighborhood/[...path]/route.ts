@@ -30,7 +30,7 @@ export async function GET(req: NextRequest, ctx: Ctx): Promise<Response> {
   const mode = treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role);
   const payload = buildNeighborhood(session.currentGroupId, path, depth, {
     mode,
-    hideDmOnly: visibilityFor(session.role).hideDmOnly,
+    vis: visibilityFor(session.role),
   });
   if (!payload) return json({ error: 'not_found' }, 404);
 

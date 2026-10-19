@@ -6,8 +6,8 @@ import {
   decodePath,
   loadBacklinks,
   loadOutgoingLinks,
-  loadNote,
   loadTags,
+  loadVisibleNote,
   loadUser,
   visibilityFor,
 } from '@/lib/notes';
@@ -45,15 +45,10 @@ export default async function NotePage({ params }: Ctx): Promise<ReactElement> {
   const session = readSession(cookieHeader);
   if (!session) notFound();
 
-  const note = loadNote(session.currentGroupId, path);
-  if (!note) notFound();
-  // GM-only notes are admin-exclusive and DM-only notes are hidden
-  // from viewers — same response as a missing note so we don't leak
-  // the existence of a hidden path. Mirrors the collab gates, which
-  // already refuse the WebSocket for both of these combinations.
+  // A hidden note answers exactly like a missing one.
   const vis = visibilityFor(session.role);
-  if (note.gm_only === 1 && vis.hideGmOnly) notFound();
-  if (note.dm_only === 1 && vis.hideDmOnly) notFound();
+  const note = loadVisibleNote(session.currentGroupId, path, vis);
+  if (!note) notFound();
 
   const rightPanelOpen = jar.get('compendium_rightpanel_open')?.value !== 'false';
 

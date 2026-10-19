@@ -2,6 +2,7 @@
 // /api/tree endpoint + the server-side FileTree render on note pages.
 
 import { getDb } from './db';
+import { hiddenNotesSql, type Visibility } from './notes';
 
 /** Default campaign-shaped folder skeleton seeded on first boot. Each
  *  entry is a folder path relative to the vault root; subfolders
@@ -96,11 +97,7 @@ const TREE_CACHE_MAX = 20;
 
 export type TreeMode = 'player' | 'gm';
 
-function snapshotKey(
-  groupId: string,
-  hideDmOnly: boolean,
-  mode: TreeMode,
-): string {
+function snapshotKey(groupId: string, variant: string): string {
   // Single round-trip: max(updated_at) + count over notes + count
   // over folder_markers + sum of campaign sort_order. Captures every
   // input that buildTree's SELECTs read. ~1ms even on large worlds.
@@ -122,25 +119,18 @@ function snapshotKey(
   const n = row?.n ?? 0;
   const m = row?.m ?? 0;
   const s = row?.s ?? 0;
-  return `${u}:${n}:${m}:${s}:${hideDmOnly ? 1 : 0}:${mode}`;
-}
-
-function cacheKey(
-  groupId: string,
-  hideDmOnly: boolean,
-  mode: TreeMode,
-): string {
-  return `${groupId}:${hideDmOnly ? 1 : 0}:${mode}`;
+  return `${u}:${n}:${m}:${s}:${variant}`;
 }
 
 export function buildTree(
   groupId: string,
-  opts: { hideDmOnly: boolean; mode?: TreeMode },
+  opts: { vis: Visibility; mode?: TreeMode },
 ): Tree {
-  const hideDmOnly = opts.hideDmOnly;
   const mode: TreeMode = opts.mode ?? 'player';
-  const key = cacheKey(groupId, hideDmOnly, mode);
-  const snap = snapshotKey(groupId, hideDmOnly, mode);
+  // One cached tree per (visibility, namespace) pair.
+  const variant = `${opts.vis.hideDmOnly ? 1 : 0}${opts.vis.hideGmOnly ? 1 : 0}:${mode}`;
+  const key = `${groupId}:${variant}`;
+  const snap = snapshotKey(groupId, variant);
   const cached = treeCache.get(key);
   if (cached && cached.snapshotKey === snap) {
     // Re-insert to keep the LRU-ish ordering — Map.set on an
@@ -149,20 +139,19 @@ export function buildTree(
     treeCache.set(key, cached);
     return cached.tree;
   }
-  // GM mode: only gm_only=1 rows. Player mode: only gm_only=0 rows
-  // (and additionally hide dm_only when requested).
-  const gmClause = mode === 'gm' ? 'gm_only = 1' : 'gm_only = 0';
-  const where = hideDmOnly
-    ? `WHERE group_id = ? AND dm_only = 0 AND ${gmClause}`
-    : `WHERE group_id = ? AND ${gmClause}`;
+  // `mode` picks the namespace (GM mode: only gm_only=1 rows, player
+  // mode: only gm_only=0 rows); `opts.vis` is the gate on top of it.
+  const gmFlag = mode === 'gm' ? 1 : 0;
   const rows = getDb()
     .query<
       { path: string; title: string; updated_at: number },
-      [string]
+      [string, number]
     >(
-      `SELECT path, title, updated_at FROM notes ${where} ORDER BY path`,
+      `SELECT path, title, updated_at FROM notes
+        WHERE group_id = ? AND gm_only = ?${hiddenNotesSql('notes', opts.vis)}
+        ORDER BY path`,
     )
-    .all(groupId);
+    .all(groupId, gmFlag);
 
   // Explicit empty-folder markers; rendered alongside folders derived
   // from file paths so user-created organisation survives even when a
