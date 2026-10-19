@@ -96,6 +96,33 @@ describe('Players run Sessions', () => {
     expect(getSessionStatus(DEFAULT_GROUP_ID, path)).toBe('closed');
   });
 
+  it('names an untitled Session "Session <N>_<creator>_<date>" and counts up per campaign', async () => {
+    getDb()
+      .query('INSERT INTO campaigns (group_id, slug, name, folder_path, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(DEFAULT_GROUP_ID, 'brindle', 'Brindle', 'Campaigns/Brindle', Date.now());
+
+    const titles: string[] = [];
+    for (const date of ['2026-10-01', '2026-10-08']) {
+      const res = await createSessionNote(
+        post('http://localhost/api/sessions/create', player, { campaignSlug: 'brindle', date }),
+      );
+      expect(res.status).toBe(201);
+      const { path } = (await res.json()) as { path: string };
+      titles.push(
+        getDb()
+          .query<{ title: string }, [string, string]>(
+            'SELECT title FROM notes WHERE group_id = ? AND path = ?',
+          )
+          .get(DEFAULT_GROUP_ID, path)!.title,
+      );
+    }
+
+    expect(titles).toEqual([
+      'Session 1_player-one_2026-10-01',
+      'Session 2_player-one_2026-10-08',
+    ]);
+  });
+
   it("a Player still cannot edit another member's non-session Note", () => {
     seedNote('Campaigns/Ashfall/People/Innkeeper.md', gm.userId, { kind: 'person' });
 

@@ -75,8 +75,10 @@ export async function POST(req: NextRequest): Promise<Response> {
       }
     }
   }
+  const sessionNumber =
+    body.sessionNumber ?? nextSessionNumber(session.currentGroupId, body.campaignSlug);
   sheet.date = body.date;
-  if (body.sessionNumber != null) sheet.session_number = body.sessionNumber;
+  sheet.session_number = sessionNumber;
   if (body.title) sheet.title = body.title;
 
   const frontmatter: Record<string, unknown> = {
@@ -86,7 +88,9 @@ export async function POST(req: NextRequest): Promise<Response> {
     sheet,
   };
 
-  const titleText = body.title ?? generateSessionTitle(session.displayName || session.username, body.date);
+  const titleText =
+    body.title ??
+    generateSessionTitle(sessionNumber, session.displayName || session.username, body.date);
   const emptyDoc = { type: 'doc', content: [{ type: 'paragraph' }] };
   const schema = getPmSchema();
   const ydoc = prosemirrorJSONToYDoc(schema, emptyDoc, 'default');
@@ -149,6 +153,19 @@ export async function POST(req: NextRequest): Promise<Response> {
   });
 
   return json({ ok: true, path }, 201);
+}
+
+/** One past the campaign's highest Session #. Older Sessions may carry
+ *  no number, so the count is a floor: a campaign with five unnumbered
+ *  Sessions starts at 6, not 1. */
+function nextSessionNumber(groupId: string, campaignSlug: string): number {
+  const row = getDb()
+    .query<{ n: number }, [string, string]>(
+      `SELECT MAX(COALESCE(MAX(session_number), 0), COUNT(*)) AS n
+         FROM session_notes WHERE group_id = ? AND campaign_slug = ?`,
+    )
+    .get(groupId, campaignSlug);
+  return (row?.n ?? 0) + 1;
 }
 
 function json(body: unknown, status: number): Response {

@@ -276,7 +276,17 @@ function sortTree(dir: TreeDir, campaignOrder: Map<string, number>): void {
         return 1;
       }
     }
-    return a.name.localeCompare(b.name);
+    // Files sort by the label the sidebar shows, so a title edit in the
+    // note reorders it without renaming the path. `numeric` keeps
+    // "Session 9" ahead of "Session 10".
+    return sortLabel(a).localeCompare(sortLabel(b), undefined, {
+      numeric: true,
+      sensitivity: 'base',
+    });
   });
   for (const c of dir.children) if (c.kind === 'dir') sortTree(c, campaignOrder);
+}
+
+function sortLabel(node: TreeDir | TreeFile): string {
+  return node.kind === 'file' ? node.title || node.name : node.name;
 }

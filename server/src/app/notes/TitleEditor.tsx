@@ -16,6 +16,7 @@ import { broadcastTreeChange } from '@/lib/tree-sync';
 // Hocuspocus debounces its store at ~2 s; we wait 2.5 s so the DB
 // write has landed before the sidebar refresh fires.
 const TREE_REFRESH_DELAY_MS = 2500;
+const COMMIT_REFRESH_DELAY_MS = 500;
 
 export function TitleEditor({
   ydoc,
@@ -82,8 +83,21 @@ export function TitleEditor({
     });
     if (treeRefreshTimer.current !== null) clearTimeout(treeRefreshTimer.current);
     treeRefreshTimer.current = setTimeout(() => {
+      treeRefreshTimer.current = null;
       broadcastTreeChange();
     }, TREE_REFRESH_DELAY_MS);
+  };
+
+  // Leaving the field (blur or Enter) means the rename is done: pull the
+  // pending sidebar refresh forward. The store fires 200 ms after the
+  // last keystroke, so a short delay still lands after the DB write.
+  const commit = (): void => {
+    if (treeRefreshTimer.current === null) return;
+    clearTimeout(treeRefreshTimer.current);
+    treeRefreshTimer.current = setTimeout(() => {
+      treeRefreshTimer.current = null;
+      broadcastTreeChange();
+    }, COMMIT_REFRESH_DELAY_MS);
   };
 
   if (lockedTitle) {
@@ -105,6 +119,10 @@ export function TitleEditor({
       type="text"
       value={value}
       onChange={onChange}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur();
+      }}
       disabled={!ydoc}
       placeholder={placeholder}
       aria-label="Note title"
