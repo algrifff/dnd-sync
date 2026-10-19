@@ -1,5 +1,10 @@
-// The one way to create a Note: canonical Kind, Sheet seeded from the
-// template, the first free path, the insert, and the derived indexes.
+// Create one Note from the app: canonical Kind, Sheet seeded from the
+// template, the insert, and the derived indexes. Used by
+// `POST /api/notes/create`, `POST /api/sessions/create`, Wrap-up apply
+// (`lib/wrap-up.ts`) and the `entity_create` AI tool. Other paths still
+// write Notes themselves: Smart Import and the manual import apply,
+// folder indexes (`index-notes.ts`), ingest, and the duplicate, promote
+// and campaign-join routes.
 //
 // Callers differ only in what they know up front (a path, a body, who
 // owns it); they all get the same Sheet shape for the same Kind.
@@ -26,8 +31,6 @@ import { getTemplate, type TemplateKind } from '@/lib/templates';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { deriveFolderIndex, parentFolderUnderCampaign } from '@/lib/campaign-index';
 import { writeNote } from '@/lib/import-apply';
-import { hiddenNotesSql, type Visibility } from '@/lib/notes';
-import { parseSheet } from '@/lib/validateSheet';
 
 /** Kinds that carry a template-seeded Sheet. */
 const SHEETED: readonly NoteKind[] = ['character', 'person', 'creature', 'item', 'location', 'session'];
@@ -44,11 +47,11 @@ const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
 export const NEXT_FREE_LIMIT = 1000;
 
 /** Frontmatter for a brand-new Note of `kind`. Plain pages get `{}`. */
-function seedFrontmatter(opts: {
+export function seedFrontmatter(opts: {
   kind: NewNoteKind;
   title: string;
-  /** Owner's username; becomes `player` on a Character. */
-  username?: string | undefined;
+  /** Written as `player` on a Character; ignored for other Kinds. */
+  player?: string | undefined;
   /** Caller-chosen Sheet fields; they win over template defaults. */
   sheet?: Record<string, unknown> | undefined;
 }): Record<string, unknown> {
@@ -83,7 +86,7 @@ function seedFrontmatter(opts: {
   if (ROLE_ALIASES.includes(alias)) fm.role = alias;
   if (canonical === 'character') {
     nestCharacterSheet(sheet);
-    if (opts.username) fm.player = opts.username;
+    if (opts.player) fm.player = opts.player;
   }
   return fm;
 }
@@ -185,29 +188,21 @@ export type CreateNoteOpts = {
   path: string;
   kind: NewNoteKind;
   title: string;
-  username?: string | undefined;
+  /** Written as `player` on a Character. */
+  player?: string | undefined;
   /** Sheet fields that win over template defaults. */
   sheet?: Record<string, unknown> | undefined;
-  /** Extra top-level frontmatter (e.g. `campaigns`). */
+  /** Extra top-level frontmatter (e.g. `campaigns`); wins over the seed. */
   frontmatter?: Record<string, unknown> | undefined;
-  /** Validate the seeded Sheet against its Kind's Zod shape and store the
-   *  parsed result; a bad Sheet throws `SheetValidationError`. */
-  validateSheet?: boolean | undefined;
-  /** Wait for the parent folder index refresh (default: fire and forget). */
-  awaitFolderIndex?: boolean | undefined;
   /** Markdown body. Omitted: an empty paragraph. */
   markdown?: string | undefined;
   dmOnly?: boolean | undefined;
   gmOnly?: boolean | undefined;
-  /** A taken path: fail (default) or take the next free one. */
-  onTaken?: 'fail' | 'next-free' | undefined;
-  /** With `next-free`: a holder visible under this still fails, so the
-   *  answer never reveals a hidden Note. */
-  visibleTo?: Visibility | undefined;
-  /** Suffix for `next-free` (default ` (n)`). */
-  suffix?: ((n: number) => string) | undefined;
-  /** With `next-free`: the title takes the suffix too. */
-  suffixTitle?: boolean | undefined;
+  /** Called when `taken` is already held, with n = 2, 3, ...: the next
+   *  path and title to try, or null to answer `exists`. Omitted: `exists`
+   *  at once. Retrying the insert, rather than looking for a free path
+   *  first, keeps two concurrent creates from both passing the check. */
+  onTaken?: ((taken: string, n: number) => { path: string; title: string } | null) | undefined;
 };
 
 export type CreateNoteResult =
@@ -218,11 +213,6 @@ export type CreateNoteResult =
  *  A taken path is a result, not a throw; unexpected database errors throw. */
 export async function createNote(groupId: string, opts: CreateNoteOpts): Promise<CreateNoteResult> {
   const db = getDb();
-  const stem = opts.path.replace(/\.md$/i, '');
-  const leaf = stem.split('/').pop() ?? stem;
-  const dir = stem.slice(0, stem.length - leaf.length);
-  const suffix = opts.suffix ?? PAREN_SUFFIX;
-
   let path = opts.path;
   let title = opts.title;
   let frontmatter: Record<string, unknown> = {};
@@ -230,12 +220,9 @@ export async function createNote(groupId: string, opts: CreateNoteOpts): Promise
   // a window where two concurrent creates both pass the check.
   for (let n = 2; ; n++) {
     frontmatter = {
-      ...seedFrontmatter({ kind: opts.kind, title, username: opts.username, sheet: opts.sheet }),
+      ...seedFrontmatter({ kind: opts.kind, title, player: opts.player, sheet: opts.sheet }),
       ...opts.frontmatter,
     };
-    if (opts.validateSheet && frontmatter.sheet && typeof frontmatter.kind === 'string') {
-      frontmatter.sheet = parseSheet(frontmatter.kind, frontmatter.sheet);
-    }
     // Every derive recomputes the dm_only column from this flag.
     if (opts.dmOnly) frontmatter.dm_only = true;
     try {
@@ -255,17 +242,9 @@ export async function createNote(groupId: string, opts: CreateNoteOpts): Promise
       break;
     } catch (err) {
       if (!isUniqueConstraintError(err)) throw err;
-      if (opts.onTaken !== 'next-free' || n > NEXT_FREE_LIMIT) return { status: 'exists', path };
-      if (opts.visibleTo) {
-        const visible = db
-          .query<{ n: number }, [string, string]>(
-            `SELECT COUNT(*) AS n FROM notes n WHERE n.group_id = ? AND n.path = ?${hiddenNotesSql('n', opts.visibleTo)}`,
-          )
-          .get(groupId, path);
-        if ((visible?.n ?? 0) > 0) return { status: 'exists', path };
-      }
-      path = `${dir}${leaf}${suffix(n)}.md`;
-      if (opts.suffixTitle) title = `${opts.title}${suffix(n)}`;
+      const next = n > NEXT_FREE_LIMIT ? null : (opts.onTaken?.(path, n) ?? null);
+      if (!next) return { status: 'exists', path };
+      ({ path, title } = next);
     }
   }
 
@@ -276,10 +255,9 @@ export async function createNote(groupId: string, opts: CreateNoteOpts): Promise
   }
   const parent = parentFolderUnderCampaign(path);
   if (parent) {
-    const refresh = deriveFolderIndex(groupId, parent, { userId: opts.userId }).catch((err) => {
+    await deriveFolderIndex(groupId, parent, { userId: opts.userId }).catch((err) => {
       console.error('[create-note] folder index refresh failed:', err);
     });
-    if (opts.awaitFolderIndex) await refresh;
   }
   return { status: 'created', path, title, frontmatter };
 }

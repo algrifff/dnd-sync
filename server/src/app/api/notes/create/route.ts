@@ -9,7 +9,8 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { logAudit } from '@/lib/audit';
 import { createNote } from '@/lib/create-note';
-import { isAllowedPath, visibilityFor } from '@/lib/notes';
+import { getDb } from '@/lib/db';
+import { hiddenNotesSql, isAllowedPath, visibilityFor } from '@/lib/notes';
 import { GM_MODE_COOKIE, isGmModeOn } from '@/lib/gm-mode';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
@@ -87,16 +88,28 @@ export async function POST(req: NextRequest): Promise<Response> {
   // (that would confirm the hidden note exists) and must not touch it,
   // so that case takes the next free " (2)", " (3)" ... name instead,
   // like a duplicate does. A path held by a visible note is still 409.
-  const created = await createNote(session.currentGroupId, {
+  const groupId = session.currentGroupId;
+  const vis = visibilityFor(session.role);
+  const created = await createNote(groupId, {
     userId: session.userId,
-    username: session.username,
+    player: session.username,
     path: basePath,
-    kind: requestedKind,
+    // A Character made here belongs to its creator, as a `pc` always did:
+    // `role: pc` is what links `player` to the account and lets the player
+    // edit the whole Sheet, wherever the Note lives.
+    kind: requestedKind === 'character' ? 'pc' : requestedKind,
     title: baseName,
     gmOnly,
-    onTaken: 'next-free',
-    visibleTo: visibilityFor(session.role),
-    suffixTitle: true,
+    onTaken: (taken, n) => {
+      const visible = getDb()
+        .query<{ n: number }, [string, string]>(
+          `SELECT COUNT(*) AS n FROM notes n WHERE n.group_id = ? AND n.path = ?${hiddenNotesSql('n', vis)}`,
+        )
+        .get(groupId, taken);
+      if ((visible?.n ?? 0) > 0) return null;
+      const title = `${baseName} (${n})`;
+      return { path: (folder ? folder + '/' : '') + title + '.md', title };
+    },
   });
   if (created.status === 'exists') return json({ error: 'exists', path: created.path }, 409);
   const path = created.path;

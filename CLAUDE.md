@@ -225,7 +225,7 @@ whole flow over HTTP) and the MCP Inspector:
 | `server/src/lib/superadmin.ts` | `ADMIN_TOKEN` check for the `/admin/*` `__sa` cookie |
 | `server/src/lib/session.ts` | Session CRUD, CSRF, expiry cleanup |
 | `server/src/lib/notes.ts` | Note CRUD, backlink derivation, FTS sync |
-| `server/src/lib/create-note.ts` | The one way to create a Note: seeded frontmatter (Character Sheet nested + legacy flat), next-free path, derived + folder index refresh |
+| `server/src/lib/create-note.ts` | `createNote` for `notes/create`, `sessions/create`, Wrap-up apply and the `entity_create` AI tool: seeded frontmatter (Character Sheet nested + legacy flat), insert with caller-chosen retry on a taken path, derived + folder index refresh. Import, ingest, folder indexes, duplicate, promote and campaign join still insert Notes themselves |
 | `server/src/lib/groups.ts` | Worlds: `listWorldsForSession` (rail order plus role-gated `latestActivityAt` / `openSession`) and `setWorldOrder`, behind `GET /api/worlds` and `PUT /api/worlds/order`. `latestActivityAt` skips the caller's own writes by `notes.updated_by`, so every write that bumps `notes.updated_at` must also stamp `updated_by` with the acting user |
 | `server/src/app/world-rail.ts` | The worlds rail's client model: unread badges against the per-browser seen map, reorder, 1–9 shortcuts and remembered last pages, pure apart from its localStorage wrappers |
 | `server/src/lib/relations.ts` | Relationships: `addRelation` (plus its manual link), `addManualLink` / `removeLink` for plain links, `removeRelation`, visibility-gated `listRelations`, and the repoint/delete helpers every move and delete path calls |

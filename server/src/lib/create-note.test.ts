@@ -2,8 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { getDb } from './db';
 import { setupTestDb, teardownTestDb } from './test-utils';
 import { createNote, nextFreePath, type CreateNoteOpts } from './create-note';
-import { visibilityFor } from './notes';
-import { SheetValidationError } from './validateSheet';
 import { createUser, DEFAULT_GROUP_ID } from './users';
 import { ensureDefaultTemplates } from './templates';
 
@@ -37,7 +35,7 @@ let seedN = 0;
 async function seed(
   kind: CreateNoteOpts['kind'],
   title: string,
-  extra: { username?: string; sheet?: Record<string, unknown> } = {},
+  extra: { player?: string; sheet?: Record<string, unknown> } = {},
 ): Promise<Record<string, unknown>> {
   const path = `World Lore/Seed/n${++seedN}.md`;
   const made = await createNote(DEFAULT_GROUP_ID, { userId, path, kind, title, ...extra });
@@ -47,7 +45,7 @@ async function seed(
 
 describe('seeded frontmatter', () => {
   it('should seed a pc as a Character with a player and role pc', async () => {
-    const fm = await seed('pc', 'Aria', { username: 'rowan' });
+    const fm = await seed('pc', 'Aria', { player: 'rowan' });
     expect({ kind: fm.kind, template: fm.template, player: fm.player, role: fm.role }).toEqual({
       kind: 'character',
       template: 'character',
@@ -57,12 +55,12 @@ describe('seeded frontmatter', () => {
   });
 
   it('should give a canonical character no role', async () => {
-    expect((await seed('character', 'Brin', { username: 'rowan' })).role).toBeUndefined();
+    expect((await seed('character', 'Brin', { player: 'rowan' })).role).toBeUndefined();
   });
 
   it('should write a new Character sheet in both nested and legacy flat shapes', async () => {
     const fm = await seed('character', 'Aria', {
-      username: 'rowan',
+      player: 'rowan',
       sheet: { hp_max: 24, hp_current: 20, ac: 15, speed: 35, class: 'Rogue', level: 3, str: 14 },
     });
     expect(fm.sheet).toMatchObject({
@@ -82,7 +80,7 @@ describe('seeded frontmatter', () => {
   });
 
   it('should nest template-default AC and speed on a bare Character', async () => {
-    const fm = await seed('pc', 'Cato', { username: 'rowan' });
+    const fm = await seed('pc', 'Cato', { player: 'rowan' });
     expect(fm.sheet).toMatchObject({
       armor_class: { value: 10 },
       speed: { walk: 30 },
@@ -123,20 +121,6 @@ describe('seeded frontmatter', () => {
     expect([await seed('quest', 'Q'), await seed('page', 'P')]).toEqual([{ kind: 'quest' }, {}]);
   });
 
-  it('should refuse an invalid Sheet when asked to validate, writing nothing', async () => {
-    const path = 'World Lore/Seed/bad.md';
-    const made = createNote(DEFAULT_GROUP_ID, {
-      userId,
-      path,
-      kind: 'character',
-      title: 'Bad',
-      sheet: { hit_points: { max: 'lots' } },
-      validateSheet: true,
-    });
-    await expect(made).rejects.toBeInstanceOf(SheetValidationError);
-    const row = getDb().query('SELECT 1 FROM notes WHERE group_id = ? AND path = ?').get(DEFAULT_GROUP_ID, path) ?? null;
-    expect(row).toBeNull();
-  });
 });
 
 describe('nextFreePath', () => {
@@ -154,7 +138,7 @@ describe('createNote', () => {
   it('inserts, derives the characters index, and returns the path', async () => {
     const made = await createNote(DEFAULT_GROUP_ID, {
       userId,
-      username: 'rowan',
+      player: 'rowan',
       path: 'Campaigns/mill/Characters/Aria.md',
       kind: 'pc',
       title: 'Aria',
@@ -169,31 +153,31 @@ describe('createNote', () => {
     expect(idx?.player_user_id).toBe(userId);
   });
 
-  it('answers exists by default and takes the next free name on request', async () => {
+  it('answers exists by default and retries where onTaken points', async () => {
     const path = 'Campaigns/mill/Lore/dup.md';
     await createNote(DEFAULT_GROUP_ID, { userId, path, kind: 'page', title: 'dup' });
     expect(await createNote(DEFAULT_GROUP_ID, { userId, path, kind: 'page', title: 'dup' })).toEqual({
       status: 'exists',
       path,
     });
+    const taken: Array<[string, number]> = [];
     const next = await createNote(DEFAULT_GROUP_ID, {
-      userId, path, kind: 'page', title: 'dup', onTaken: 'next-free', suffixTitle: true,
+      userId, path, kind: 'page', title: 'dup',
+      onTaken: (at, n) => {
+        taken.push([at, n]);
+        return { path: `Campaigns/mill/Lore/dup (${n}).md`, title: `dup (${n})` };
+      },
     });
-    expect(next).toMatchObject({ status: 'created', path: 'Campaigns/mill/Lore/dup (2).md', title: 'dup (2)' });
+    expect({ next, taken }).toMatchObject({
+      next: { status: 'created', path: 'Campaigns/mill/Lore/dup (2).md', title: 'dup (2)' },
+      taken: [[path, 2]],
+    });
   });
 
-  it('still answers exists for a visible holder and renames past a hidden one', async () => {
-    const path = 'Campaigns/mill/Lore/secret.md';
-    await createNote(DEFAULT_GROUP_ID, { userId, path, kind: 'page', title: 's', gmOnly: true });
-    const asViewer = await createNote(DEFAULT_GROUP_ID, {
-      userId, path, kind: 'page', title: 's', onTaken: 'next-free', visibleTo: visibilityFor('viewer'),
-    });
-    expect(asViewer).toMatchObject({ status: 'created', path: 'Campaigns/mill/Lore/secret (2).md' });
-    const asAdmin = await createNote(DEFAULT_GROUP_ID, {
-      userId, path: 'Campaigns/mill/Lore/dup.md', kind: 'page', title: 'dup',
-      onTaken: 'next-free', visibleTo: visibilityFor('admin'),
-    });
-    expect(asAdmin.status).toBe('exists');
+  it('answers exists when onTaken gives up', async () => {
+    const path = 'Campaigns/mill/Lore/dup.md';
+    const made = await createNote(DEFAULT_GROUP_ID, { userId, path, kind: 'page', title: 'dup', onTaken: () => null });
+    expect(made).toEqual({ status: 'exists', path });
   });
 
   it('writes a markdown body and the dm_only flag', async () => {

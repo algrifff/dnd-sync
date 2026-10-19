@@ -1,4 +1,4 @@
-// POST /api/notes/create with the legacy character aliases: what lands
+// POST /api/notes/create with Character kinds and the legacy aliases: what lands
 // in frontmatter and in the `characters` index, and which a player may make.
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -9,6 +9,7 @@ import { createUser, DEFAULT_GROUP_ID } from '@/lib/users';
 import { buildSessionCookies, createSession, type Session } from '@/lib/session';
 import { ensureDefaultTemplates } from '@/lib/templates';
 import { POST as createNote } from './route';
+import { PATCH as patchSheet } from '../sheet/route';
 
 type Role = 'admin' | 'viewer';
 const sessions = {} as Record<Role, Session>;
@@ -73,7 +74,7 @@ beforeAll(async () => {
 });
 afterAll(() => teardownTestDb());
 
-describe('POST /api/notes/create with a legacy character alias', () => {
+describe('POST /api/notes/create with a Character kind', () => {
   it('should create a pc as a Character the player owns, indexed as a pc', async () => {
     const res = await create('viewer', 'pc', 'Aria');
 
@@ -86,6 +87,30 @@ describe('POST /api/notes/create with a legacy character alias', () => {
         player: 'create-viewer',
         character: { kind: 'pc', player_user_id: userIds.viewer },
       },
+    });
+  });
+
+  it('should give a player their own Character when they create kind character outside a pcs folder', async () => {
+    const res = await create('viewer', 'character', 'Brin');
+    const path = 'World Lore/People/Brin.md';
+    const shape = shapeOf(path);
+
+    // Ownership through `player` alone, not through being the creator:
+    // a GM-only field (`ac`) still sticks once `created_by` is cleared.
+    getDb().query('UPDATE notes SET created_by = NULL WHERE group_id = ? AND path = ?').run(DEFAULT_GROUP_ID, path);
+    const patched = await patchSheet(request('viewer', { path, sheet: { ac: 17 } }));
+    const ownsSheet = ((await patched.json()) as { sheet?: { ac?: number } }).sheet?.ac === 17;
+
+    expect({ status: res.status, shape, ownsSheet }).toEqual({
+      status: 201,
+      shape: {
+        kind: 'character',
+        role: 'pc',
+        template: 'character',
+        player: 'create-viewer',
+        character: { kind: 'pc', player_user_id: userIds.viewer },
+      },
+      ownsSheet: true,
     });
   });
 

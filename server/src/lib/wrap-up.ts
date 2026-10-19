@@ -893,9 +893,7 @@ async function resolveTarget(opts: {
     markdown: summary,
     dmOnly: session.dm_only === 1,
     gmOnly: session.gm_only === 1,
-    onTaken: 'next-free',
-    suffix: (n) => `-${n}`,
-    awaitFolderIndex: true,
+    onTaken: (_taken, n) => ({ path: wanted.replace(/\.md$/, `-${n}.md`), title }),
   });
   if (made.status === 'exists') throw new Error(`No free path near ${wanted}`);
   return { status: 'ok', path: made.path, created: true };

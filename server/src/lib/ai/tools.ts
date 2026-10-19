@@ -18,10 +18,10 @@ import { getCampaignBySlug, listCampaigns } from '@/lib/characters';
 import { canonicalFolder } from '@/lib/paths';
 import { slugify } from '@/lib/slugify';
 import { canonicalKind, KIND_INPUTS, NOTE_KINDS } from '@compendium/shared';
-import { createNote } from '@/lib/create-note';
+import { createNote, seedFrontmatter } from '@/lib/create-note';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { deriveFolderIndexesFor } from '@/lib/campaign-index';
-import { SheetValidationError, validateSheet } from '@/lib/validateSheet';
+import { validateSheet } from '@/lib/validateSheet';
 import {
   closeDocumentConnections,
   closeDocumentForWrite,
@@ -546,33 +546,42 @@ function entityCreate(ctx: ToolContext) {
         }
       }
 
+      // A Character's `player` is the caller's user id here, as it has
+      // always been for tool-created Characters.
+      const player = ctx.userId;
+      // Validate the seeded Sheet before anything is written; the parsed
+      // result is the Sheet createNote stores.
+      const seeded = seedFrontmatter({ kind: canonical, title: name, player, sheet: seedSheet });
+      if (seeded.sheet && typeof seeded.kind === 'string') {
+        const vr = validateSheet(seeded.kind, seeded.sheet);
+        if (!vr.ok) {
+          return {
+            ok: false as const,
+            error: `invalid_sheet for kind ${seeded.kind}`,
+            issues: vr.issues,
+          };
+        }
+        extraFm.sheet = vr.data;
+      }
+
       // createNote persists via writeNote so md-to-pm, FTS triggers,
       // note_links, tags, derived indexes, and Yjs state stay in
       // lock-step with every other write path.
       try {
         const made = await createNote(ctx.groupId, {
           userId: ctx.userId,
-          username: ctx.userId,
+          player,
           path,
           kind: canonical,
           title: name,
-          sheet: seedSheet,
           frontmatter: extraFm,
           markdown: bodyToWrite,
           dmOnly,
-          validateSheet: true,
         });
         if (made.status === 'exists') {
           return { ok: false as const, error: `Already exists at ${path}` };
         }
       } catch (err) {
-        if (err instanceof SheetValidationError) {
-          return {
-            ok: false as const,
-            error: `invalid_sheet for kind ${err.kind}`,
-            issues: err.issues,
-          };
-        }
         return {
           ok: false as const,
           error: 'write_failed',
