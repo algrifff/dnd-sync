@@ -44,7 +44,7 @@ import { slugify } from './slugify';
 import {
   canonicalFolder,
   type EntityKind,
-} from './ai/paths';
+} from './paths';
 
 export type PlanInputFile = {
   /** Arbitrary key — filesystem path or zip-relative path. The

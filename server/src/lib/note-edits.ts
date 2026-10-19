@@ -18,6 +18,7 @@ import {
   closeDocumentForWrite,
   closeDocumentConnections,
   releaseServerWrite,
+  type ServerWriteToken,
 } from '@/collab/server';
 
 export type PmDoc = { type: 'doc'; content?: PmNode[] };
@@ -31,6 +32,23 @@ export type ApplyResult =
   | { status: 'unchanged' }
   | { status: 'rejected'; reason: string }
   | { status: 'not_found' };
+
+/** What `applyNoteEdit` needs from the collab server: drain open
+ *  editors and take a write token, evict anyone who reattached once the
+ *  write is done (discarding their stale doc), and give the token back
+ *  on every path. */
+export type LiveDocuments = {
+  closeForWrite(groupId: string, path: string): Promise<ServerWriteToken>;
+  evictAfterWrite(groupId: string, path: string, token: ServerWriteToken): Promise<void>;
+  release(token: ServerWriteToken): void;
+};
+
+/** The production adapter: the Hocuspocus server in `collab/server`. */
+export const hocuspocusDocuments: LiveDocuments = {
+  closeForWrite: (groupId, path) => closeDocumentForWrite(groupId, path),
+  evictAfterWrite: (groupId, path, token) => closeDocumentConnections(groupId, path, token),
+  release: (token) => releaseServerWrite(token),
+};
 
 const HISTORY_HEADING = 'History';
 
@@ -113,15 +131,18 @@ export function linkMention(
  *  write yjs_state and every derived column the way a live save does,
  *  then evict anyone who reattached during the drain. An `unchanged`
  *  or `rejected` edit writes nothing and evicts nobody. Callers gate
- *  visibility before calling, since the drain disconnects editors. */
+ *  visibility before calling, since the drain disconnects editors.
+ *  `live` defaults to the Hocuspocus server. */
 export async function applyNoteEdit(opts: {
   groupId: string;
   path: string;
   userId: string | null;
   edit: (doc: PmDoc, note: NoteRow) => EditOutcome;
+  live?: LiveDocuments;
 }): Promise<ApplyResult> {
   const { groupId, path, userId } = opts;
-  const token = await closeDocumentForWrite(groupId, path);
+  const live = opts.live ?? hocuspocusDocuments;
+  const token = await live.closeForWrite(groupId, path);
   try {
     const note = loadNote(groupId, path);
     if (!note) return { status: 'not_found' };
@@ -140,10 +161,10 @@ export async function applyNoteEdit(opts: {
     writeNoteState({ groupId, path, userId, state, doc: ydoc });
     deriveIndexesFor(groupId, path);
 
-    await closeDocumentConnections(groupId, path, token);
+    await live.evictAfterWrite(groupId, path, token);
     return { status: 'applied' };
   } finally {
-    releaseServerWrite(token);
+    live.release(token);
   }
 }
 
