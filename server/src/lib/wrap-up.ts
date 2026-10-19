@@ -26,7 +26,7 @@ import { addRelation } from '@/lib/relations';
 import { loadNameIndex, matchName, type NameIndex, type SimilarNote } from '@/lib/similar-names';
 import { loadNote, visibilityFor, type NoteRow } from '@/lib/notes';
 import { getCampaignBySlug } from '@/lib/characters';
-import { canonicalPath } from '@/lib/ai/paths';
+import { canonicalPath } from '@/lib/paths';
 import { slugify } from '@/lib/slugify';
 import { createNote } from '@/lib/create-note';
 import {

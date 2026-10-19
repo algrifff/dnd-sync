@@ -15,7 +15,7 @@ import { loadNote, isAllowedPath } from '@/lib/notes';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 import { getCampaignBySlug, listCampaigns } from '@/lib/characters';
-import { canonicalFolder } from '@/lib/ai/paths';
+import { canonicalFolder } from '@/lib/paths';
 import { slugify } from '@/lib/slugify';
 import { canonicalKind, KIND_INPUTS, NOTE_KINDS } from '@compendium/shared';
 import { createNote } from '@/lib/create-note';

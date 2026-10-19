@@ -20,6 +20,8 @@ import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { createNote } from '@/lib/create-note';
 import { generateSessionTitle } from '@/lib/session-title';
+import { nextSessionNumber } from '@/lib/sessions';
+import { visibilityFor } from '@/lib/notes';
 import { slugify } from '@/lib/slugify';
 
 export const dynamic = 'force-dynamic';
@@ -59,12 +61,24 @@ export async function POST(req: NextRequest): Promise<Response> {
   const fileStem = slugTitle ? `${body.date}-${slugTitle}` : body.date;
   const path = `${campaign.folder_path}/Adventure Log/${fileStem}.md`;
 
+  // createNote runs synchronously through deriveAllIndexes, so on the
+  // single server process no other create can read session_notes between
+  // this number and the row that records it.
+  const sessionNumber =
+    body.sessionNumber ??
+    nextSessionNumber({
+      groupId: session.currentGroupId,
+      campaignSlug: body.campaignSlug,
+      folderPath: campaign.folder_path,
+      vis: visibilityFor(session.role),
+    });
   // The caller's picks win over the template defaults.
-  const sheet: Record<string, unknown> = { date: body.date };
-  if (body.sessionNumber != null) sheet.session_number = body.sessionNumber;
+  const sheet: Record<string, unknown> = { date: body.date, session_number: sessionNumber };
   if (body.title) sheet.title = body.title;
 
-  const titleText = body.title ?? generateSessionTitle(session.displayName || session.username, body.date);
+  const titleText =
+    body.title ??
+    generateSessionTitle(sessionNumber, session.displayName || session.username, body.date);
 
   // A lost creation race (a rapid double-click on "New session") is the
   // same 409 as a taken path.
