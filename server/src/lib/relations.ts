@@ -17,7 +17,7 @@ import { getDb } from '@/lib/db';
 import type { PmNode } from '@/lib/md-to-pm';
 import { visibilityFor } from '@/lib/notes';
 import { collectLinksAndTags } from '@/lib/pm-links';
-import type { Role } from '@/lib/wrap-up';
+import type { UserRole } from '@/lib/session';
 
 /** Records `from relation to`. Adding it again, from either end of a
  *  symmetric type, changes nothing and reports `unchanged`. */
@@ -160,7 +160,7 @@ type Row = {
 /** Every Relationship `path` takes part in, from either end, that `role`
  *  may see: both Notes visible to them. Nothing when `path` itself is
  *  hidden or missing. */
-export function listRelations(opts: { groupId: string; role: Role; path: string }): RelationView[] {
+export function listRelations(opts: { groupId: string; role: UserRole; path: string }): RelationView[] {
   const vis = visibilityFor(opts.role);
   const hidden = (alias: string): string =>
     `${vis.hideDmOnly ? ` AND ${alias}.dm_only = 0` : ''}${vis.hideGmOnly ? ` AND ${alias}.gm_only = 0` : ''}`;

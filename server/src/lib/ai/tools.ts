@@ -37,6 +37,7 @@ import { writeNote } from '@/lib/import-apply';
 import { applyNoteEdit, type PmDoc } from '@/lib/note-edits';
 import { repointSuggestionPaths } from '@/lib/suggestion-paths';
 import { repointRelations } from '@/lib/relations';
+import { endSession } from '@/lib/wrap-up';
 import type { PmNode } from '@/lib/md-to-pm';
 
 // ── Context ────────────────────────────────────────────────────────────
@@ -1203,21 +1204,18 @@ function sessionFinalize(ctx: ToolContext) {
     execute: async ({ sessionPath }: z.infer<typeof SessionFinalizeSchema>) => {
       if (ctx.role !== 'dm') return { ok: false as const, error: 'GM only' };
 
-      const note = loadNote(ctx.groupId, sessionPath);
-      if (!note || isGmOnlyHiddenFrom(ctx, note)) {
-        return { ok: false as const, error: `Not found: ${sessionPath}` };
+      // The one close path: visibility on the real session role, and it
+      // drops a pending Wrap-up proposal like every other close.
+      const result = endSession({
+        groupId: ctx.groupId,
+        userId: ctx.userId,
+        role: ctx.sessionRole,
+        sessionPath,
+      });
+      if (result.status === 'not_found') return { ok: false as const, error: `Not found: ${sessionPath}` };
+      if (result.status === 'not_a_session') {
+        return { ok: false as const, error: `Not a Session note: ${sessionPath}` };
       }
-
-      const now = Date.now();
-      getDb()
-        .query(
-          `INSERT INTO session_notes (group_id, note_path, updated_at, status, closed_at, closed_by)
-           VALUES (?, ?, ?, 'closed', ?, ?)
-           ON CONFLICT (group_id, note_path)
-           DO UPDATE SET status='closed', closed_at=excluded.closed_at, closed_by=excluded.closed_by`,
-        )
-        .run(ctx.groupId, sessionPath, now, now, ctx.userId);
-
       return { ok: true as const, sessionPath };
     },
   });

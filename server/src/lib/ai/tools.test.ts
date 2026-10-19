@@ -1175,6 +1175,7 @@ describe('session_finalize — gm_only enforcement', () => {
       title: 'GM prep',
       pmDoc: { type: 'doc', content: [paragraph('Secret session.')] },
       contentMd: 'Secret session.',
+      frontmatterJson: JSON.stringify({ kind: 'session' }),
       gmOnly: true,
     });
   });
@@ -1200,6 +1201,36 @@ describe('session_finalize — gm_only enforcement', () => {
 
     expect(result).toEqual({ ok: true, sessionPath: path });
     expect(sessionStatus(path)).toBe('closed');
+  });
+
+  it('should drop a pending Wrap-up proposal when it closes the Session, like every other close', async () => {
+    getDb()
+      .query(
+        `INSERT INTO session_notes (group_id, note_path, updated_at, wrap_up_json) VALUES (?, ?, ?, ?)
+         ON CONFLICT (group_id, note_path) DO UPDATE SET wrap_up_json = excluded.wrap_up_json`,
+      )
+      .run(groupId, path, Date.now(), JSON.stringify({ sessionPath: path, generatedAt: 1, mentions: [] }));
+    const tools = createTools(ctxFor('dm', 'admin'));
+
+    await tools.session_finalize.execute!({ sessionPath: path }, { toolCallId: 'sf4', messages: [] });
+
+    const row = getDb()
+      .query<{ wrap_up_json: string | null }, [string, string]>(
+        'SELECT wrap_up_json FROM session_notes WHERE group_id=? AND note_path=?',
+      )
+      .get(groupId, path);
+    expect(row?.wrap_up_json).toBeNull();
+  });
+
+  it('should refuse a note that is not a Session and leave no session row', async () => {
+    const plain = 'Adventure Log/not-a-session.md';
+    seedNote({ path: plain, title: 'Plain', pmDoc: { type: 'doc', content: [paragraph('Hi.')] }, contentMd: 'Hi.' });
+    const tools = createTools(ctxFor('dm', 'admin'));
+
+    const result = await tools.session_finalize.execute!({ sessionPath: plain }, { toolCallId: 'sf5', messages: [] });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(sessionStatus(plain)).toBeNull();
   });
 });
 

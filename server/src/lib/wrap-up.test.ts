@@ -6,25 +6,27 @@ import { getDb } from '@/lib/db';
 import { getPmSchema } from '@/lib/pm-schema';
 import { setupTestDb, teardownTestDb } from '@/lib/test-utils';
 import { createUser, DEFAULT_GROUP_ID as groupId } from '@/lib/users';
-import { getSessionStatus } from '@/lib/sessions';
+import { getSessionStatus, writePendingWrapUpJson } from '@/lib/sessions';
 import { validateSheet } from '@/lib/validateSheet';
 import type { PmNode } from '@/lib/md-to-pm';
 import type { PmDoc } from '@/lib/note-edits';
 import { listRelations } from '@/lib/relations';
 import {
   applyWrapUp,
-  similarNotesFor,
+  endSession,
   listPendingWrapUps,
   loadPendingWrapUp,
-  loadVisibleSession,
+  readWrapUpContext,
+  readWrapUpReview,
   submitWrapUp,
   WrapUpSubmission,
-  wrapUpContext,
   type Relation,
-  type SubmittedMention,
-  type SubmittedRelation,
   type WrapUpProposal,
 } from './wrap-up';
+import { applyStaged } from './wrap-up.testing';
+
+type SubmittedMention = WrapUpSubmission['mentions'][number];
+type SubmittedRelation = WrapUpSubmission['relations'][number];
 
 const SESSION = 'Campaigns/Ashfall/Adventure Log/2026-10-11-the-mill.md';
 const SECRET_SESSION = 'Campaigns/Ashfall/Adventure Log/2026-10-12-the-vault.md';
@@ -144,14 +146,10 @@ function proposalFrom(sessionPath: string, mentions: SubmittedMention[]): WrapUp
   return { sessionPath, generatedAt: 1, mentions: mentions.map((m, i) => ({ ...m, id: `m${i + 1}` })), relations: [], suggestions: [] };
 }
 
-function sessionNote(path: string) {
-  const found = loadVisibleSession(groupId, 'admin', path);
-  if (found.status !== 'ok') throw new Error(`no session ${path}`);
-  return found.note;
-}
-
 function contextFor(role: 'admin' | 'editor' | 'viewer', limit = 200, cursor = 0) {
-  return wrapUpContext({ groupId, role, session: sessionNote(SESSION), limit, cursor });
+  const found = readWrapUpContext({ groupId, role, sessionPath: SESSION, limit, cursor });
+  if (found.status !== 'ok') throw new Error(`no session ${SESSION}`);
+  return found.context;
 }
 
 beforeAll(async () => {
@@ -340,7 +338,7 @@ describe('submitWrapUp', () => {
       submission: { sessionPath: SESSION, mentions: [existing('Kara', KARA, 'person', 'Fought.')] },
     });
 
-    expect(result).toEqual({ status: 'invalid_target', mention: 'Kara' });
+    expect(result).toMatchObject({ status: 'invalid_target', mention: 'Kara' });
   });
 
   it('stores nothing when any mention is refused', () => {
@@ -399,7 +397,7 @@ describe('loadPendingWrapUp', () => {
     expect(player.mentions.map((m) => m.id)).toEqual([owner.mentions[0]!.id, owner.mentions[2]!.id]);
     expect(player.mentions.every((m) => !/^m\d+$/.test(m.id))).toBe(true);
 
-    const result = await applyWrapUp({
+    const result = await applyStaged({
       groupId, userId, role: 'viewer', sessionPath: SESSION, proposal: player,
       decisions: { accepted: [player.mentions[1]!.id], asNew: [] },
     });
@@ -428,7 +426,7 @@ describe('listPendingWrapUps', () => {
     submitWrapUp({ groupId, role: 'admin', submission: { sessionPath: SESSION, mentions: [] } });
     const proposal = loadPendingWrapUp(groupId, 'admin', SESSION)!;
 
-    await applyWrapUp({ groupId, userId, role: 'admin', sessionPath: SESSION, proposal, decisions: { accepted: [], asNew: [] } });
+    await applyStaged({ groupId, userId, role: 'admin', sessionPath: SESSION, proposal, decisions: { accepted: [], asNew: [] } });
 
     expect(listPendingWrapUps(groupId, 'admin').map((p) => p.sessionPath)).not.toContain(SESSION);
   });
@@ -447,7 +445,7 @@ describe('applyWrapUp', () => {
   it('appends History, creates new Notes in their kind folder, links the log, closes the Session and clears the proposal', async () => {
     submitWrapUp({ groupId, role: 'viewer', submission: { sessionPath: SESSION, mentions: [fresh('Marker', 'lore', '', 'Kept.')] } });
 
-    const result = await applyWrapUp({
+    const result = await applyStaged({
       groupId, userId, role: 'viewer', sessionPath: SESSION, proposal,
       decisions: { accepted: ['m1', 'm2', 'm3'], asNew: ['m2'] },
     });
@@ -480,7 +478,7 @@ describe('applyWrapUp', () => {
   it('changes nothing when the same proposal is applied again', async () => {
     const before = allNotes();
 
-    const result = await applyWrapUp({
+    const result = await applyStaged({
       groupId, userId, role: 'viewer', sessionPath: SESSION, proposal,
       decisions: { accepted: ['m1', 'm2', 'm3'], asNew: ['m2'] },
     });
@@ -497,7 +495,7 @@ describe('applyWrapUp', () => {
       existing('Bram', BRAM, 'person', 'Gave the party the Rusted Key.'),
       existing('the pond', MENTIONED_ONLY, 'location', 'Where the wight rose.'),
     ]);
-    const result = await applyWrapUp({
+    const result = await applyStaged({
       groupId, userId, role: 'viewer', sessionPath: SESSION, proposal: secondRun,
       decisions: { accepted: ['m1', 'm2'], asNew: [] },
     });
@@ -508,7 +506,7 @@ describe('applyWrapUp', () => {
   });
 
   it('lands a new mention on a same-titled Note of that kind instead of creating one', async () => {
-    const result = await applyWrapUp({
+    const result = await applyStaged({
       groupId, userId, role: 'viewer', sessionPath: SESSION,
       proposal: proposalFrom(SESSION, [fresh('the mill', 'location', 'A mill.', 'Visited.', 'The Mill')]),
       decisions: { accepted: ['m1'], asNew: [] },
@@ -518,8 +516,8 @@ describe('applyWrapUp', () => {
     expect(historyEntries(contentOf(MILL))).toEqual(['The Mill: Where the party met Bram.']);
   });
 
-  it('skips a mention of a Note the closer cannot see, and one it does not know', async () => {
-    const result = await applyWrapUp({
+  it('skips a mention of a Note the closer cannot see exactly as one it does not know', async () => {
+    const result = await applyStaged({
       groupId, userId, role: 'viewer', sessionPath: SESSION,
       proposal: proposalFrom(SESSION, [existing('the spy', SECRET, 'person', 'Seen.')]),
       decisions: { accepted: ['m1', 'nope'], asNew: [] },
@@ -527,7 +525,7 @@ describe('applyWrapUp', () => {
 
     expect(result.applied).toEqual([]);
     expect(result.skipped).toEqual([
-      { id: 'm1', reason: 'not_visible' },
+      { id: 'm1', reason: 'unknown_mention' },
       { id: 'nope', reason: 'unknown_mention' },
     ]);
     expect(historyEntries(contentOf(SECRET))).toEqual([]);
@@ -536,7 +534,7 @@ describe('applyWrapUp', () => {
   it('applies only the ticked mentions', async () => {
     const untouched = 'Campaigns/Ashfall/Quests/find-the-lost-smith.md';
 
-    await applyWrapUp({
+    await applyStaged({
       groupId, userId, role: 'viewer', sessionPath: SESSION,
       proposal: proposalFrom(SESSION, [fresh('Find the Lost Smith', 'quest', '', 'Taken on.')]),
       decisions: { accepted: [], asNew: [] },
@@ -548,7 +546,7 @@ describe('applyWrapUp', () => {
   it('keeps a Note born from a Secret Session as hidden as that Session', async () => {
     const zed = 'Campaigns/Ashfall/People/zed.md';
 
-    await applyWrapUp({
+    await applyStaged({
       groupId, userId, role: 'editor', sessionPath: SECRET_SESSION,
       proposal: proposalFrom(SECRET_SESSION, [fresh('Zed', 'person', 'A thief.', 'Opened the vault.')]),
       decisions: { accepted: ['m1'], asNew: [] },
@@ -562,7 +560,7 @@ describe('applyWrapUp', () => {
 
 describe('applyWrapUp edge cases', () => {
   const apply = (role: 'admin' | 'editor' | 'viewer', mentions: SubmittedMention[], asNew: string[] = []) =>
-    applyWrapUp({
+    applyStaged({
       groupId, userId, role, sessionPath: SESSION, proposal: proposalFrom(SESSION, mentions),
       decisions: { accepted: mentions.map((_, i) => `m${i + 1}`), asNew },
     });
@@ -595,13 +593,17 @@ describe('applyWrapUp edge cases', () => {
     expect(result.applied).toEqual([{ id: 'm1', path: SECRET, created: false }]);
   });
 
-  it('skips an uncertain match switched to new when its name has no letters or digits to build a path from, without writing <Folder>/.md', async () => {
+  it('never applies a stored mention whose name has no letters or digits to build a path from, so writes no <Folder>/.md', async () => {
     const before = allNotes().length;
+    const stored = proposalFrom(SESSION, [existing('???', BRAM, 'person', 'Seen.', false)]);
+    writePendingWrapUpJson(groupId, SESSION, JSON.stringify(stored));
 
-    const result = await apply('viewer', [existing('???', BRAM, 'person', 'Seen.', false)], ['m1']);
+    const result = await applyWrapUp({
+      groupId, userId, role: 'viewer', sessionPath: SESSION, generatedAt: stored.generatedAt,
+      decisions: { accepted: ['m1'], asNew: ['m1'] },
+    });
 
-    expect(result.applied).toEqual([]);
-    expect(result.skipped).toEqual([{ id: 'm1', reason: 'invalid_title' }]);
+    expect(result).toEqual({ status: 'no_pending_proposal' });
     expect(allNotes()).toHaveLength(before);
     expect(allNotes().some((n) => n.path.endsWith('/.md'))).toBe(false);
   });
@@ -689,7 +691,7 @@ describe('Relationships in a Wrap-up', () => {
         existing('the miller', BRAM, 'person', 'Was there.'),
       ];
 
-      expect(submit('viewer', mentions, [relate(at(KARA), 'ally_of', at(GUILD)), ...relations])).toEqual({
+      expect(submit('viewer', mentions, [relate(at(KARA), 'ally_of', at(GUILD)), ...relations])).toMatchObject({
         status: 'invalid_relation', index: 1, problem,
       });
     });
@@ -750,7 +752,7 @@ describe('Relationships in a Wrap-up', () => {
       decisions: { accepted: string[]; acceptedRelations?: string[]; asNew?: string[] },
       role: 'admin' | 'viewer' = 'viewer',
     ) =>
-      applyWrapUp({ groupId, userId, role, sessionPath: REL_SESSION, proposal, decisions: { asNew: [], ...decisions } });
+      applyStaged({ groupId, userId, role, sessionPath: REL_SESSION, proposal, decisions: { asNew: [], ...decisions } });
 
     const proposal = (): WrapUpProposal => ({
       ...proposalFrom(REL_SESSION, [fresh('Volo', 'person', 'A chronicler.', 'Offered a job.'), existing('Bram', BRAM, 'person', 'Was there.')]),
@@ -821,18 +823,19 @@ describe('Relationships in a Wrap-up', () => {
       expect(relationsOf(BRAM).map((r) => r.path)).not.toContain(gone);
     });
 
-    it('skips a relation to an existing Note the closer cannot see, but not for the Owner', async () => {
+    it('skips a relation to an existing Note the closer cannot see as one it does not know, but not for the Owner', async () => {
       const hidden = { ...proposal(), relations: [rel('r6', p(KARA), 'enemy_of', p(INFORMANT))] };
 
       const asPlayer = await run(hidden, { accepted: [], acceptedRelations: ['r6'] });
       const asOwner = await run(hidden, { accepted: [], acceptedRelations: ['r6'] }, 'admin');
 
-      expect(asPlayer.relationsSkipped).toEqual([{ id: 'r6', reason: 'not_visible' }]);
+      expect(asPlayer.relationsSkipped).toEqual([{ id: 'r6', reason: 'unknown_relation' }]);
       expect(asOwner.relationsAdded).toEqual([{ id: 'r6', status: 'added' }]);
     });
 
     it('skips an id the proposal does not hold, and a relation whose two mentions landed on one Note', async () => {
       const bell = 'Campaigns/Ashfall/Loot/old-bell.md';
+      seed({ path: 'Campaigns/Ashfall/Loot/the-other-bell.md', title: 'The Other Bell', frontmatter: { kind: 'item' } });
       const twins = {
         ...proposalFrom(REL_SESSION, [
           fresh('Old Bell', 'item', '', 'Rang.'),
@@ -880,8 +883,16 @@ describe('Similarly named Notes in a Wrap-up', () => {
     relations: [{ id: 'r1', from: { type: 'mention', mentionId: 'm1' }, relation: 'member_of', to: { type: 'existing', path: FERRY_GUILD } }],
   });
 
+  /** What the review offers `role` for `staged` once it is pending. */
+  const similarFor = (role: 'admin' | 'editor' | 'viewer', staged: WrapUpProposal) => {
+    writePendingWrapUpJson(groupId, SIM_SESSION, JSON.stringify(staged));
+    const review = readWrapUpReview({ groupId, role, sessionPath: SIM_SESSION });
+    if (review.status !== 'ok') throw new Error(review.status);
+    return review.similar;
+  };
+
   const run = (decisions: { accepted: string[]; acceptedRelations?: string[]; useExisting?: Record<string, string> }, role: 'admin' | 'viewer' = 'viewer') =>
-    applyWrapUp({ groupId, userId, role, sessionPath: SIM_SESSION, proposal: proposal(), decisions: { asNew: [], ...decisions } });
+    applyStaged({ groupId, userId, role, sessionPath: SIM_SESSION, proposal: proposal(), decisions: { asNew: [], ...decisions } });
 
   beforeAll(() => {
     seed({
@@ -901,25 +912,25 @@ describe('Similarly named Notes in a Wrap-up', () => {
 
   describe('offering', () => {
     it('lists a close-named Note for each mention that would be new', () => {
-      const similar = similarNotesFor(groupId, 'viewer', proposal());
+      const similar = similarFor('viewer', proposal());
 
       expect(Object.keys(similar)).toEqual(['m1']);
       expect(similar.m1!.map((s) => [s.path, s.title, s.reason])).toEqual([[KIXISH, 'Kixish', 'close_spelling']]);
     });
 
     it('leaves out a Note the reader cannot see, and shows it to a GM', () => {
-      expect(similarNotesFor(groupId, 'viewer', proposal()).m2).toBeUndefined();
-      expect(similarNotesFor(groupId, 'editor', proposal()).m2!.map((s) => s.path)).toEqual([BASSOS]);
+      expect(similarFor('viewer', proposal()).m2).toBeUndefined();
+      expect(similarFor('editor', proposal()).m2!.map((s) => s.path)).toEqual([BASSOS]);
     });
 
     it('leaves out a Note a mention cannot land on, such as a Character', () => {
-      expect(similarNotesFor(groupId, 'admin', proposal()).m3).toBeUndefined();
+      expect(similarFor('admin', proposal()).m3).toBeUndefined();
     });
 
     it('offers nothing for a mention already matched to an existing Note', () => {
       const matched = proposalFrom(SIM_SESSION, [existing('Kixxish', KIXISH, 'person', 'Poled.')]);
 
-      expect(similarNotesFor(groupId, 'viewer', matched)).toEqual({});
+      expect(similarFor('viewer', matched)).toEqual({});
     });
   });
 
@@ -930,8 +941,8 @@ describe('Similarly named Notes in a Wrap-up', () => {
       ['an unkinded Note under World Lore/', 'Vandrel', BARE_LORE],
     ])('%s is offered if and only if apply accepts it', async (_label, title, path) => {
       const one = proposalFrom(SIM_SESSION, [fresh(title, 'lore', 'A thing.', 'Mentioned.')]);
-      const offered = (similarNotesFor(groupId, 'admin', one).m1 ?? []).some((s) => s.path === path);
-      const result = await applyWrapUp({
+      const offered = (similarFor('admin', one).m1 ?? []).some((s) => s.path === path);
+      const result = await applyStaged({
         groupId, userId, role: 'admin', sessionPath: SIM_SESSION, proposal: one,
         decisions: { accepted: ['m1'], asNew: [], useExisting: { m1: path } },
       });
@@ -998,7 +1009,7 @@ describe('Similarly named Notes in a Wrap-up', () => {
         relations: [{ id: 'r1', from: { type: 'mention', mentionId: 'm2' }, relation: 'works_for', to: { type: 'existing', path: FERRY_GUILD } }],
       };
 
-      const result = await applyWrapUp({
+      const result = await applyStaged({
         groupId, userId, role: 'viewer', sessionPath: SIM_SESSION, proposal: both,
         decisions: { accepted: ['m1', 'm2'], asNew: [], acceptedRelations: ['r1'], useExisting: { m1: KIXISH } },
       });
@@ -1009,5 +1020,104 @@ describe('Similarly named Notes in a Wrap-up', () => {
       expect(noteExists(KIXXISH)).toBe(false);
     });
 
+  });
+});
+
+describe('the Session gate, staleness and closing', () => {
+  const RACE = 'Campaigns/Ashfall/Adventure Log/2026-10-16-the-race.md';
+  const LANTERN_NOTE = 'Campaigns/Ashfall/Loot/race-lantern.md';
+  const submission = (title: string) => ({
+    sessionPath: RACE,
+    mentions: [fresh(title, 'item', 'A lamp.', 'Was lit.')],
+  });
+  const stored = (): WrapUpProposal => {
+    const result = submitWrapUp({ groupId, role: 'viewer', submission: submission('Race Lantern') });
+    if (result.status !== 'ok') throw new Error(result.status);
+    return result.proposal;
+  };
+  const pendingJson = (): string | null =>
+    getDb()
+      .query<{ wrap_up_json: string | null }, [string, string]>(
+        'SELECT wrap_up_json FROM session_notes WHERE group_id = ? AND note_path = ?',
+      )
+      .get(groupId, RACE)?.wrap_up_json ?? null;
+
+  const HIDDEN_RACE = 'Campaigns/Ashfall/Adventure Log/2026-10-17-the-rematch.md';
+
+  beforeAll(() => {
+    seed({ path: RACE, title: 'The Race', frontmatter: { kind: 'session', campaigns: ['ashfall'] } });
+    seed({
+      path: HIDDEN_RACE,
+      title: 'The Rematch',
+      frontmatter: { kind: 'session', campaigns: ['ashfall'], dm_only: true },
+      dmOnly: true,
+    });
+  });
+
+  it('refuses a stale apply with proposal_changed and writes nothing, then applies the fresh one', async () => {
+    const reviewed = stored();
+    await new Promise((r) => setTimeout(r, 2));
+    const resubmitted = stored();
+    const before = allNotes();
+
+    const stale = await applyWrapUp({
+      groupId, userId, role: 'viewer', sessionPath: RACE, generatedAt: reviewed.generatedAt,
+      decisions: { accepted: reviewed.mentions.map((x) => x.id), asNew: [] },
+    });
+
+    expect(stale).toEqual({ status: 'proposal_changed' });
+    expect(allNotes()).toEqual(before);
+    expect(getSessionStatus(groupId, RACE)).toBe('open');
+
+    const fresh = await applyWrapUp({
+      groupId, userId, role: 'viewer', sessionPath: RACE, generatedAt: resubmitted.generatedAt,
+      decisions: { accepted: resubmitted.mentions.map((x) => x.id), asNew: [] },
+    });
+    expect(fresh).toMatchObject({ status: 'applied', applied: [{ path: LANTERN_NOTE, created: true }] });
+    expect(getSessionStatus(groupId, RACE)).toBe('closed');
+  });
+
+  it('answers a repeated apply with no_pending_proposal', async () => {
+    const result = await applyWrapUp({
+      groupId, userId, role: 'viewer', sessionPath: RACE, generatedAt: 1, decisions: { accepted: [], asNew: [] },
+    });
+
+    expect(result).toEqual({ status: 'no_pending_proposal' });
+  });
+
+  it('reads a Secret Session as missing and a plain Note as not a Session, on every entry point', async () => {
+    const decisions = { accepted: [], asNew: [] };
+    const asPlayer = { groupId, userId, role: 'viewer' as const };
+
+    for (const [path, status] of [[HIDDEN_RACE, 'not_found'], [BRAM, 'not_a_session']] as const) {
+      expect(readWrapUpContext({ ...asPlayer, sessionPath: path, limit: 10, cursor: 0 })).toEqual({ status });
+      expect(readWrapUpReview({ ...asPlayer, sessionPath: path })).toEqual({ status });
+      expect(submitWrapUp({ ...asPlayer, submission: { sessionPath: path, mentions: [] } })).toEqual({ status });
+      expect(await applyWrapUp({ ...asPlayer, sessionPath: path, generatedAt: 1, decisions })).toEqual({ status });
+      expect(endSession({ ...asPlayer, sessionPath: path })).toEqual({ status });
+    }
+    expect(getSessionStatus(groupId, HIDDEN_RACE)).toBe('open');
+  });
+
+  it('closes a Session without a Wrap-up and drops a proposal submitted meanwhile', () => {
+    stored();
+
+    const result = endSession({ groupId, userId, role: 'viewer', sessionPath: RACE });
+
+    expect(result).toEqual({ status: 'closed' });
+    expect(pendingJson()).toBeNull();
+    expect(listPendingWrapUps(groupId, 'admin').map((p) => p.sessionPath)).not.toContain(RACE);
+  });
+
+  it('refuses two Suggestions for one Character and stores nothing', () => {
+    const before = pendingJson();
+    const twice = { characterPath: KARA, story: 'Rang the bell.', items: [] };
+
+    const result = submitWrapUp({
+      groupId, role: 'viewer', submission: { sessionPath: RACE, mentions: [], suggestions: [twice, twice] },
+    });
+
+    expect(result).toEqual({ status: 'invalid_body', reason: 'suggestions: one Suggestion per Character' });
+    expect(pendingJson()).toBe(before);
   });
 });

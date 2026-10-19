@@ -13,6 +13,7 @@ import { GET as getPending, POST as submit } from './route';
 import { GET as getContext } from './context/route';
 import { POST as apply } from './apply/route';
 import { GET as listPending } from './pending/route';
+import { POST as markClosed } from '../mark-closed/route';
 
 const SESSION = 'Campaigns/Ashfall/Adventure Log/2026-10-11-the-mill.md';
 const SECRET_SESSION = 'Campaigns/Ashfall/Adventure Log/2026-10-12-the-vault.md';
@@ -327,26 +328,17 @@ describe('POST /api/sessions/wrap-up/apply', () => {
     expect(noStamp.status).toBe(400);
   });
 
-  it('answers 409 proposal_changed and writes nothing when the proposal was resubmitted after the closer fetched it', async () => {
+  // The race itself (what is and is not written) is covered in
+  // lib/wrap-up.test.ts; this only checks the mapping onto HTTP.
+  it('answers 409 proposal_changed when the generatedAt is not the pending proposal', async () => {
     const reviewed = await submitOk(player, proposal(EMPTY_SESSION));
-    await new Promise((r) => setTimeout(r, 2));
-    const resubmitted = await submitOk(otherPlayer, proposal(EMPTY_SESSION));
-    const before = snapshot();
 
     const stale = await apply(post(url('/apply'), player, {
-      sessionPath: EMPTY_SESSION, generatedAt: reviewed.generatedAt, accepted: reviewed.mentions.map((m) => m.id),
+      sessionPath: EMPTY_SESSION, generatedAt: reviewed.generatedAt - 1, accepted: [],
     }));
 
-    expect(resubmitted.generatedAt).not.toBe(reviewed.generatedAt);
     expect(stale.status).toBe(409);
     expect(await stale.json()).toEqual({ error: 'proposal_changed' });
-    expect(snapshot()).toEqual(before);
-    expect(getSessionStatus(groupId, EMPTY_SESSION)).toBe('open');
-
-    const fresh = await apply(post(url('/apply'), player, {
-      sessionPath: EMPTY_SESSION, generatedAt: resubmitted.generatedAt, accepted: [],
-    }));
-    expect(fresh.status).toBe(200);
   });
 });
 
@@ -506,5 +498,37 @@ describe('GET /api/sessions/wrap-up/pending', () => {
     expect(playerPaths).not.toContain(SECRET_SESSION);
     expect(forPlayer.pending.find((p) => p.sessionPath === SESSION)!.title).toBe('The Mill');
     expect(forCoGm.pending.map((p) => p.sessionPath)).toEqual(expect.arrayContaining([SESSION, SECRET_SESSION]));
+  });
+});
+
+describe('POST /api/sessions/mark-closed', () => {
+  const LATE = 'Campaigns/Ashfall/Adventure Log/2026-10-14-late.md';
+  const closeUrl = 'http://localhost/api/sessions/mark-closed';
+
+  beforeAll(() => {
+    seed(LATE, 'Late', { kind: 'session', campaigns: ['ashfall'] }, 'We met Bram again.');
+  });
+
+  it('closes the Session and drops a proposal submitted after the dialog loaded, as apply does', async () => {
+    await submitOk(otherPlayer, proposal(LATE));
+
+    const res = await markClosed(post(closeUrl, player, { sessionPath: LATE }));
+
+    expect(res.status).toBe(200);
+    expect(getSessionStatus(groupId, LATE)).toBe('closed');
+    const pending = (await (await listPending(get('http://localhost/api/sessions/wrap-up/pending', owner))).json()) as {
+      pending: Array<{ sessionPath: string }>;
+    };
+    expect(pending.pending.map((p) => p.sessionPath)).not.toContain(LATE);
+  });
+
+  it('answers 404 to a Player closing a Secret Session, and 400 for a Note that is not a Session', async () => {
+    const secret = await markClosed(post(closeUrl, player, { sessionPath: SECRET_SESSION }));
+    const notSession = await markClosed(post(closeUrl, player, { sessionPath: BRAM }));
+
+    expect(secret.status).toBe(404);
+    expect(getSessionStatus(groupId, SECRET_SESSION)).toBe('open');
+    expect(notSession.status).toBe(400);
+    expect(await notSession.json()).toMatchObject({ error: 'not_a_session' });
   });
 });

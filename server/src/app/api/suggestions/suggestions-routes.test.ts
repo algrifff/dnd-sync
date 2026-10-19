@@ -9,7 +9,7 @@ import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { setupTestDb, teardownTestDb } from '@/lib/test-utils';
 import { createUser, DEFAULT_GROUP_ID as groupId } from '@/lib/users';
 import { buildSessionCookies, createSession, type Session } from '@/lib/session';
-import { applyWrapUp } from '@/lib/wrap-up';
+import { applyStaged } from '@/lib/wrap-up.testing';
 import { GET as list } from './route';
 import { POST as accept } from './[id]/accept/route';
 import { POST as dismiss } from './[id]/dismiss/route';
@@ -73,7 +73,7 @@ beforeAll(async () => {
     .run(groupId, 'ashfall', 'Ashfall', 'Campaigns/Ashfall', Date.now());
   seed(SESSION, 'The Mill', { kind: 'session', campaigns: ['ashfall'] });
   seed(KARA, 'Kara', { kind: 'character', player: 'kara-player', sheet: { name: 'Kara' } });
-  await applyWrapUp({
+  await applyStaged({
     groupId, userId: owner.userId, role: 'admin', sessionPath: SESSION,
     proposal: {
       sessionPath: SESSION, generatedAt: 1, mentions: [], relations: [],

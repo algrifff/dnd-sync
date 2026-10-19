@@ -51,7 +51,9 @@ export function writePendingWrapUpJson(
 }
 
 /** Marks the Session Closed and drops any pending proposal. Closing an
- *  already Closed Session only refreshes closed_at / closed_by. */
+ *  already Closed Session only refreshes closed_at / closed_by. The row
+ *  write only: callers go through lib/wrap-up.ts (`endSession`,
+ *  `applyWrapUp`), which checks the Session is visible first. */
 export function closeSession(groupId: string, notePath: string, closedBy: string): void {
   const now = Date.now();
   getDb()

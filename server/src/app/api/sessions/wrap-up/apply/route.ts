@@ -28,7 +28,7 @@ import { verifyCsrf } from '@/lib/csrf';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 import { apiErrorResponse } from '@/lib/analytics/api-error';
-import { applyWrapUp, loadPendingWrapUp, loadVisibleSession } from '@/lib/wrap-up';
+import { applyWrapUp } from '@/lib/wrap-up';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,20 +59,12 @@ export async function POST(req: NextRequest): Promise<Response> {
     }
 
     const { currentGroupId: groupId, role, userId } = session;
-    const lookup = loadVisibleSession(groupId, role, body.sessionPath);
-    if (lookup.status === 'not_found') return json({ error: 'not_found' }, 404);
-    if (lookup.status === 'not_a_session') return json({ error: 'not_a_session' }, 400);
-
-    const proposal = loadPendingWrapUp(groupId, role, body.sessionPath);
-    if (!proposal) return json({ error: 'no_pending_proposal' }, 409);
-    if (proposal.generatedAt !== body.generatedAt) return json({ error: 'proposal_changed' }, 409);
-
-    const result = await applyWrapUp({
+    const outcome = await applyWrapUp({
       groupId,
       userId,
       role,
       sessionPath: body.sessionPath,
-      proposal,
+      generatedAt: body.generatedAt,
       decisions: {
         accepted: body.accepted,
         asNew: body.asNew,
@@ -80,6 +72,16 @@ export async function POST(req: NextRequest): Promise<Response> {
         useExisting: body.useExisting,
       },
     });
+    switch (outcome.status) {
+      case 'not_found':
+        return json({ error: 'not_found' }, 404);
+      case 'not_a_session':
+        return json({ error: 'not_a_session' }, 400);
+      case 'no_pending_proposal':
+      case 'proposal_changed':
+        return json({ error: outcome.status }, 409);
+    }
+    const { status: _applied, ...result } = outcome;
 
     void captureServer({
       userId,
