@@ -3,8 +3,9 @@
 // against every one of them. When you add a table keyed by a Note path,
 // the schema guard at the bottom fails until it has a row in PATH_STATE.
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { randomUUID } from 'node:crypto';
+import * as campaignIndex from './campaign-index';
 import { getDb } from './db';
 import { setupTestDb, teardownTestDb } from './test-utils';
 import { copyNote, deleteNotes, renameNotes } from './note-paths';
@@ -282,6 +283,71 @@ describe('renameNotes', () => {
     expect(count('note_links WHERE group_id = ?', G)).toBe(2);
   });
 
+  it('should keep a manual flag when a link merges into a dangling one', async () => {
+    seedNote(SRC);
+    seedNote('Lore/Linker.md');
+    insert('note_links', { group_id: G, from_path: 'Lore/Linker.md', to_path: SRC, is_manual: 1 });
+    insert('note_links', { group_id: G, from_path: 'Lore/Linker.md', to_path: DST, is_manual: 0 });
+
+    await renameNotes({ groupId: G, userId: USER, moves: [{ from: SRC, to: DST }] });
+
+    expect(getDb().query('SELECT to_path, is_manual FROM note_links WHERE group_id = ?').all(G)).toEqual([
+      { to_path: DST, is_manual: 1 },
+    ]);
+  });
+
+  it("should keep the moving Character's pending Suggestion over a stale one at the destination", async () => {
+    const A = 'Party/A.md';
+    const B = 'Party/B.md';
+    seedNote(A);
+    seedNote('Lore/Session.md');
+    const suggestion = { group_id: G, session_path: 'Lore/Session.md', owner_user_id: USER, created_at: 0 };
+    insert('character_suggestions', { ...suggestion, id: 'stale', character_path: B, status: 'dismissed' });
+    insert('character_suggestions', { ...suggestion, id: 'live', character_path: A, status: 'pending' });
+
+    const result = await renameNotes({ groupId: G, userId: USER, moves: [{ from: A, to: B }] });
+
+    expect(result).toEqual({ ok: true });
+    expect(
+      getDb().query('SELECT id, character_path, status FROM character_suggestions WHERE group_id = ?').all(G),
+    ).toEqual([{ id: 'live', character_path: B, status: 'pending' }]);
+  });
+
+  it("should keep the moving Session's Wrap-up over a stale row at the destination", async () => {
+    seedNote(SRC);
+    getDb().exec('PRAGMA foreign_keys = OFF');
+    try {
+      insert('session_notes', { group_id: G, note_path: DST, updated_at: 0, wrap_up_json: '{"stale":true}' });
+    } finally {
+      getDb().exec('PRAGMA foreign_keys = ON');
+    }
+    insert('session_notes', { group_id: G, note_path: SRC, updated_at: 0, wrap_up_json: '{"live":true}' });
+
+    await renameNotes({ groupId: G, userId: USER, moves: [{ from: SRC, to: DST }] });
+
+    expect(getDb().query('SELECT note_path, wrap_up_json FROM session_notes WHERE group_id = ?').all(G)).toEqual([
+      { note_path: DST, wrap_up_json: '{"live":true}' },
+    ]);
+  });
+
+  it('should not hand orphan tags or Relationships at the destination to the moved Note', async () => {
+    seedNote(SRC);
+    seedNote('Lore/Other.md');
+    insert('tags', { group_id: G, path: SRC, tag: 'merchant' });
+    insert('tags', { group_id: G, path: DST, tag: 'stale' });
+    const relation = { group_id: G, created_at: 0, to_path: 'Lore/Other.md' };
+    insert('note_relations', { ...relation, from_path: SRC, relation: 'member_of', session_path: 'Lore/S1.md' });
+    insert('note_relations', { ...relation, from_path: DST, relation: 'member_of', session_path: 'Lore/Stale.md' });
+    insert('note_relations', { ...relation, from_path: DST, relation: 'enemy_of' });
+
+    await renameNotes({ groupId: G, userId: USER, moves: [{ from: SRC, to: DST }] });
+
+    expect(getDb().query('SELECT tag FROM tags WHERE group_id = ?').all(G)).toEqual([{ tag: 'merchant' }]);
+    expect(getDb().query('SELECT from_path, relation, session_path FROM note_relations WHERE group_id = ?').all(G)).toEqual([
+      { from_path: DST, relation: 'member_of', session_path: 'Lore/S1.md' },
+    ]);
+  });
+
   it('should write nothing and report not_found when a source is gone', async () => {
     seedNote(SRC);
 
@@ -437,6 +503,45 @@ describe('deleteNotes', () => {
     seedNote(SRC);
 
     expect(col('character_suggestions', 'character_path')(SRC)).toBe(0);
+  });
+
+  it("should drop a pending Suggestion for a deleted Character and keep the Session's others", async () => {
+    seedNote(SRC);
+    const suggestion = { group_id: G, session_path: 'Lore/Session.md', owner_user_id: USER, status: 'pending', created_at: 0 };
+    insert('character_suggestions', { ...suggestion, id: 's1', character_path: SRC });
+    insert('character_suggestions', { ...suggestion, id: 's2', character_path: 'Party/Other.md' });
+
+    await deleteNotes({ groupId: G, userId: USER, paths: [SRC] });
+
+    expect(getDb().query('SELECT id FROM character_suggestions WHERE group_id = ?').all(G)).toEqual([{ id: 's2' }]);
+  });
+
+  it("should clear a member's active Character when it is deleted", async () => {
+    seedNote(SRC);
+    insert('group_members', { group_id: G, user_id: USER, role: 'viewer' });
+    getDb().query('UPDATE users SET active_character_path = ? WHERE id = ?').run(SRC, USER);
+
+    await deleteNotes({ groupId: G, userId: USER, paths: [SRC] });
+
+    expect(
+      getDb().query('SELECT active_character_path AS p FROM users WHERE id = ?').get(USER),
+    ).toEqual({ p: null });
+  });
+
+  it('should still delete and resolve when the folder index refresh fails', async () => {
+    seedNote(SRC);
+    const refresh = spyOn(campaignIndex, 'deriveFolderIndexesFor').mockRejectedValue(new Error('index broke'));
+    const logged = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await deleteNotes({ groupId: G, userId: USER, paths: [SRC] });
+
+      expect(refresh).toHaveBeenCalled();
+      expect(col('notes', 'path')(SRC)).toBe(0);
+      expect(logged).toHaveBeenCalled();
+    } finally {
+      refresh.mockRestore();
+      logged.mockRestore();
+    }
   });
 
   it('should drop the folder markers under a deleted folder', async () => {

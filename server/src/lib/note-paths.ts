@@ -38,23 +38,34 @@ export type PathMove = { from: string; to: string };
  *  Nothing was written. */
 export type PathError = { ok: false; error: 'not_found' | 'exists'; path: string };
 
-/** Every column that holds a Note path, as (table, column). Each one is
- *  carried on rename. When you add a table keyed by a Note path, add it
- *  here and to note-paths.test.ts, whose suite checks every row. */
+/** Every column that holds a Note path, as (table, column, kind). Each
+ *  one is carried on rename. When you add a table keyed by a Note path,
+ *  add it here and to note-paths.test.ts, whose suite checks every row.
+ *
+ *  A rename's destination holds no Note, so what a row already there
+ *  means depends on the kind:
+ *    own  the row belongs to the Note at that path. One already at the
+ *         destination is an orphan a past delete left behind: it is
+ *         cleared and the moving row takes its place, never the other
+ *         way round (a Suggestion or a pending Wrap-up is user work).
+ *    ref  another Note's row naming this path, which may be a path no
+ *         Note holds yet (a dangling [[wikilink]]). A moving row that
+ *         would collide is the same reference, so the two merge. */
 const PATH_COLUMNS = [
-  ['note_links', 'from_path'],
-  ['note_links', 'to_path'],
-  ['tags', 'path'],
-  ['aliases', 'path'],
-  ['characters', 'note_path'],
-  ['character_campaigns', 'note_path'],
-  ['session_notes', 'note_path'],
-  ['items', 'note_path'],
-  ['locations', 'note_path'],
-  ['locations', 'parent_path'],
-  ['creatures', 'note_path'],
-  ['character_suggestions', 'character_path'],
-  ['character_suggestions', 'session_path'],
+  ['note_links', 'from_path', 'own'],
+  ['note_links', 'to_path', 'ref'],
+  ['tags', 'path', 'own'],
+  ['aliases', 'path', 'own'],
+  ['characters', 'note_path', 'own'],
+  ['character_campaigns', 'note_path', 'own'],
+  ['session_notes', 'note_path', 'own'],
+  ['items', 'note_path', 'own'],
+  ['locations', 'note_path', 'own'],
+  ['locations', 'parent_path', 'ref'],
+  ['creatures', 'note_path', 'own'],
+  // A Suggestion belongs to both its Character and its Session.
+  ['character_suggestions', 'character_path', 'own'],
+  ['character_suggestions', 'session_path', 'own'],
 ] as const;
 
 // ── Rename ─────────────────────────────────────────────────────────────
@@ -124,14 +135,13 @@ export async function renameNotes(opts: {
   }
   if (failed) return failed;
 
-  try {
+  await afterCommit('wikilink rewrite', async () => {
     const touched = rewriteWikilinksForLinkers(groupId, linkers, renames, userId);
     for (const linker of touched) await closeDocumentConnections(groupId, linker);
-  } catch (err) {
-    console.error('[note-paths] wikilink rewrite failed:', err);
-  }
-
-  await deriveFolderIndexesFor(groupId, renames.flatMap((r) => [r.from, r.to]), { userId });
+  });
+  await afterCommit('folder index refresh', () =>
+    deriveFolderIndexesFor(groupId, renames.flatMap((r) => [r.from, r.to]), { userId }),
+  );
   return { ok: true };
 }
 
@@ -151,16 +161,27 @@ function checkMoves(groupId: string, moves: readonly PathMove[]): PathError | nu
   return null;
 }
 
-/** Repoints every row naming `from` to `to`. OR IGNORE leaves behind a
- *  row that would collide with one already at `to` (a stale link edge
- *  derive re-added, say), and the DELETE drops it, so the two merge. */
+/** Repoints every row naming `from` to `to`; see PATH_COLUMNS for what
+ *  happens to a row already at `to`. */
 function carryPath(groupId: string, from: string, to: string): void {
   const db = getDb();
-  for (const [table, column] of PATH_COLUMNS) {
+  for (const [table, column, kind] of PATH_COLUMNS) {
+    if (kind === 'own') {
+      db.query(`DELETE FROM ${table} WHERE group_id = ? AND ${column} = ?`).run(groupId, to);
+      db.query(`UPDATE ${table} SET ${column} = ? WHERE group_id = ? AND ${column} = ?`)
+        .run(to, groupId, from);
+      continue;
+    }
+    if (table === 'note_links') keepLinkFlags(groupId, from, to);
+    // OR IGNORE leaves behind a row that would collide with one already
+    // at `to`, and the DELETE drops it, so the two merge.
     db.query(`UPDATE OR IGNORE ${table} SET ${column} = ? WHERE group_id = ? AND ${column} = ?`)
       .run(to, groupId, from);
     db.query(`DELETE FROM ${table} WHERE group_id = ? AND ${column} = ?`).run(groupId, from);
   }
+  // A Relationship is authored, and both its ends were Notes when it was
+  // recorded, so one at `to` is an orphan: clear it, like an own row.
+  deleteRelationsOf(groupId, to);
   repointRelations(groupId, from, to);
   // users is not per World, so only this World's members follow.
   db.query(
@@ -168,6 +189,21 @@ function carryPath(groupId: string, from: string, to: string): void {
       WHERE active_character_path = ?
         AND id IN (SELECT user_id FROM group_members WHERE group_id = ?)`,
   ).run(to, from, groupId);
+}
+
+/** Before a link into `from` merges into the same link already into
+ *  `to`, the surviving row takes the moving one's flags too: a manual
+ *  link that lost its flag would vanish on the linker's next save. */
+function keepLinkFlags(groupId: string, from: string, to: string): void {
+  getDb()
+    .query(
+      `UPDATE note_links AS d
+          SET is_manual = MAX(d.is_manual, s.is_manual), is_index = MAX(d.is_index, s.is_index)
+         FROM note_links AS s
+        WHERE d.group_id = ? AND d.to_path = ?
+          AND s.group_id = d.group_id AND s.from_path = d.from_path AND s.to_path = ?`,
+    )
+    .run(groupId, to, from);
 }
 
 function nestedFolderRenames(groupId: string, folder: PathMove): Rename[] {
@@ -350,7 +386,7 @@ export async function copyNote(opts: {
     throw err;
   }
   if (failed) return failed;
-  await deriveFolderIndexesFor(groupId, [to], { userId });
+  await afterCommit('folder index refresh', () => deriveFolderIndexesFor(groupId, [to], { userId }));
   return { ok: true };
 }
 
@@ -401,14 +437,29 @@ export async function deleteNotes(opts: {
     opts.inTransaction?.();
   })();
 
-  for (const path of paths) await closeDocumentConnections(groupId, path);
-  await deriveFolderIndexesFor(groupId, folder ? [folder, ...paths] : [...paths], {
-    userId,
-    createMissing: false,
+  await afterCommit('editor eviction', async () => {
+    for (const path of paths) await closeDocumentConnections(groupId, path);
   });
+  await afterCommit('folder index refresh', () =>
+    deriveFolderIndexesFor(groupId, folder ? [folder, ...paths] : [...paths], {
+      userId,
+      createMissing: false,
+    }),
+  );
 }
 
 // ── Shared ─────────────────────────────────────────────────────────────
+
+/** Runs work that follows a committed write. The write has landed, so a
+ *  failure here is logged, never thrown at a caller that would report
+ *  the whole operation as failed. */
+async function afterCommit(what: string, work: () => Promise<void>): Promise<void> {
+  try {
+    await work();
+  } catch (err) {
+    console.error(`[note-paths] ${what} failed:`, err);
+  }
+}
 
 function noteExists(groupId: string, path: string): boolean {
   return (
