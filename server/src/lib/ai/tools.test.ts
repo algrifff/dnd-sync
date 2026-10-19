@@ -323,7 +323,7 @@ describe('entity_edit_sheet — does not touch yjs_state', () => {
 // 'dm' — that fold is deliberate and load-bearing for every OTHER
 // permission check in this file, so it must stay. But `gm_only` is a
 // stricter, separate gate: only session role 'admin' may see gm_only
-// content (mirrors collab/server.ts#isNoteGmOnly and
+// content (mirrors collab/server.ts#hiddenReason and
 // lib/notes.ts#visibilityFor). Before this fix, note_read (and every
 // other path-based tool) only ever looked at the collapsed `role`, so
 // an editor — indistinguishable from an admin once collapsed — could
