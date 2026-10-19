@@ -4,8 +4,7 @@
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getDb } from '@/lib/db';
-import { deleteRelationsOf } from '@/lib/relations';
+import { deleteNotes } from '@/lib/note-paths';
 import {
   decodePath,
   findNearestIndexPath,
@@ -15,8 +14,6 @@ import {
   visibilityFor,
 } from '@/lib/notes';
 import { logAudit } from '@/lib/audit';
-import { closeDocumentConnections } from '@/collab/server';
-import { deriveFolderIndex, parentFolderUnderCampaign } from '@/lib/campaign-index';
 
 export const dynamic = 'force-dynamic';
 
@@ -85,33 +82,8 @@ export async function DELETE(req: NextRequest, ctx: RouteCtx): Promise<Response>
     return json({ error: 'not_found' }, 404);
   }
 
-  const db = getDb();
-  db.transaction(() => {
-    db.query('DELETE FROM note_links WHERE group_id = ? AND (from_path = ? OR to_path = ?)')
-      .run(session.currentGroupId, path, path);
-    deleteRelationsOf(session.currentGroupId, path);
-    db.query('DELETE FROM tags WHERE group_id = ? AND path = ?').run(session.currentGroupId, path);
-    db.query('DELETE FROM aliases WHERE group_id = ? AND path = ?').run(session.currentGroupId, path);
-    db.query('DELETE FROM notes WHERE group_id = ? AND path = ?').run(session.currentGroupId, path);
-  })();
-
-  // Kick any live editors so they disconnect instead of trying to
-  // persist updates against a row that no longer exists.
-  await closeDocumentConnections(session.currentGroupId, path);
-
-  // Refresh the parent folder's auto-managed index so the deleted
-  // note drops out of its table.
-  const parent = parentFolderUnderCampaign(path);
-  if (parent) {
-    try {
-      await deriveFolderIndex(session.currentGroupId, parent, {
-        userId: session.userId,
-        createMissing: false,
-      });
-    } catch (err) {
-      console.error('[notes/delete] folder index refresh failed:', err);
-    }
-  }
+  // Evicts live editors and refreshes the parent folder's index too.
+  await deleteNotes({ groupId: session.currentGroupId, userId: session.userId, paths: [path] });
 
   logAudit({
     action: 'note.destroy',
@@ -125,8 +97,6 @@ export async function DELETE(req: NextRequest, ctx: RouteCtx): Promise<Response>
   // folder's index) instead of guessing at a path or always bouncing
   // to the dashboard. null when no ancestor has one (e.g. under
   // Assets/Excalidraw) — the client falls back to the dashboard.
-  // Reuses the `parent` computed above (parentFolderUnderCampaign
-  // returns null outside Campaigns/<slug>/, so re-derive generically).
   const parentFolder = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
   const redirectTo = parentFolder
     ? findNearestIndexPath(session.currentGroupId, parentFolder)

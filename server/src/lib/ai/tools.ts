@@ -35,8 +35,7 @@ import {
 import { parseCharacter } from '@/lib/character-parser';
 import { writeNote } from '@/lib/import-apply';
 import { applyNoteEdit, type PmDoc } from '@/lib/note-edits';
-import { repointSuggestionPaths } from '@/lib/suggestion-paths';
-import { repointRelations } from '@/lib/relations';
+import { renameNotes } from '@/lib/note-paths';
 import type { PmNode } from '@/lib/md-to-pm';
 
 // ── Context ────────────────────────────────────────────────────────────
@@ -754,7 +753,6 @@ function entityMove(ctx: ToolContext) {
       if (ctx.role !== 'dm') return { ok: false as const, error: 'GM only' };
 
       if (from === to) return { ok: true as const, path: from };
-      const db = getDb();
       const fromNote = loadNote(ctx.groupId, from);
       if (!fromNote) return { ok: false as const, error: `Not found: ${from}` };
       if (isGmOnlyHiddenFrom(ctx, fromNote)) {
@@ -763,70 +761,40 @@ function entityMove(ctx: ToolContext) {
       const taken = destinationTakenError(ctx, to);
       if (taken) return { ok: false as const, error: taken };
 
-      const failed = await renameNoteRow(ctx, from, to, () => {
-        db.query(`UPDATE notes SET path=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
-          .run(to, Date.now(), ctx.userId, ctx.groupId, from);
-      });
+      const failed = await moveDrained(ctx, from, to);
       if (failed) return { ok: false as const, error: failed };
-
-      void deriveFolderIndexesFor(ctx.groupId, [from, to], {
-        userId: ctx.userId,
-      }).catch((err) => {
-        console.error('[ai/tools] folder index refresh failed:', err);
-      });
-
       return { ok: true as const, path: to };
     },
   });
 }
 
-/** Moves the note at `from` to `to`: `updateNote` rewrites the notes row,
- *  and every table keyed by the note's path follows it. Live editors are
- *  drained first so their pending keystrokes land before the path
- *  changes, then whatever reattached is discarded: a document still open
- *  under the old name would store() into a row that no longer exists.
- *  Returns an error string when the source vanished or the destination
- *  was taken while the editors drained (the callers' checks run before
- *  that await), otherwise null. */
-async function renameNoteRow(
+/** Moves the note at `from` to `to` through lib/note-paths, with
+ *  `inTransaction` written alongside. Live editors are drained first so
+ *  their pending keystrokes land before the path changes, then whatever
+ *  reattached is discarded: a document still open under the old name
+ *  would store() into a row that no longer exists. Returns an error
+ *  string when the source vanished or the destination was taken while
+ *  the editors drained (the callers' checks run before that await),
+ *  otherwise null. */
+async function moveDrained(
   ctx: ToolContext,
   from: string,
   to: string,
-  updateNote: () => void,
+  inTransaction?: () => void,
 ): Promise<string | null> {
-  const db = getDb();
   const token = await closeDocumentForWrite(ctx.groupId, from);
   try {
-    let failed: string | null = null;
-    db.transaction(() => {
-      if (!loadNote(ctx.groupId, from)) {
-        failed = `Not found: ${from}`;
-        return;
-      }
-      failed = destinationTakenError(ctx, to);
-      if (failed) return;
-      // Derived-index tables hold FKs on notes(group_id, path) with no
-      // ON UPDATE CASCADE; check them at COMMIT, after the rewrites below.
-      db.exec('PRAGMA defer_foreign_keys = 1');
-      updateNote();
-      for (const tbl of ['note_links', 'tags', 'aliases', 'characters', 'character_campaigns', 'session_notes']) {
-        const col = tbl === 'note_links' ? 'from_path'
-          : tbl === 'characters' || tbl === 'character_campaigns' || tbl === 'session_notes' ? 'note_path'
-          : 'path';
-        db.query(`UPDATE ${tbl} SET ${col}=? WHERE group_id=? AND ${col}=?`).run(to, ctx.groupId, from);
-      }
-      db.query(`UPDATE note_links SET to_path=? WHERE group_id=? AND to_path=?`).run(to, ctx.groupId, from);
-      repointSuggestionPaths(ctx.groupId, from, to);
-      repointRelations(ctx.groupId, from, to);
-      // Structured-note index tables (same FK as above), plus the two soft
-      // references notes/move also rewrites.
-      for (const tbl of ['items', 'locations', 'creatures']) {
-        db.query(`UPDATE ${tbl} SET note_path=? WHERE group_id=? AND note_path=?`).run(to, ctx.groupId, from);
-      }
-      db.query(`UPDATE locations SET parent_path=? WHERE group_id=? AND parent_path=?`).run(to, ctx.groupId, from);
-      db.query(`UPDATE users SET active_character_path=? WHERE active_character_path=?`).run(to, from);
-    })();
-    if (failed) return failed;
+    const result = await renameNotes({
+      groupId: ctx.groupId,
+      userId: ctx.userId,
+      moves: [{ from, to }],
+      ...(inTransaction ? { inTransaction } : {}),
+    });
+    if (!result.ok) {
+      return result.error === 'not_found'
+        ? `Not found: ${from}`
+        : (destinationTakenError(ctx, to) ?? `Path exists: ${to}`);
+    }
     await closeDocumentConnections(ctx.groupId, from, token);
     return null;
   } finally {
@@ -900,9 +868,9 @@ function entityChangeKind(ctx: ToolContext) {
       if (newPath !== path) {
         const taken = destinationTakenError(ctx, newPath);
         if (taken) return { ok: false as const, error: taken };
-        const failed = await renameNoteRow(ctx, path, newPath, () => {
-          db.query(`UPDATE notes SET path=?, frontmatter_json=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
-            .run(newPath, JSON.stringify(nextFm), Date.now(), ctx.userId, ctx.groupId, path);
+        const failed = await moveDrained(ctx, path, newPath, () => {
+          db.query(`UPDATE notes SET frontmatter_json=? WHERE group_id=? AND path=?`)
+            .run(JSON.stringify(nextFm), ctx.groupId, newPath);
         });
         if (failed) return { ok: false as const, error: failed };
       } else {
@@ -921,11 +889,14 @@ function entityChangeKind(ctx: ToolContext) {
         console.error('[ai/tools] derive failed after entity_change_kind:', err);
       }
 
-      void deriveFolderIndexesFor(ctx.groupId, [path, newPath], {
-        userId: ctx.userId,
-      }).catch((err) => {
-        console.error('[ai/tools] folder index refresh failed:', err);
-      });
+      // A move refreshed both folders' indexes already.
+      if (newPath === path) {
+        void deriveFolderIndexesFor(ctx.groupId, [path], {
+          userId: ctx.userId,
+        }).catch((err) => {
+          console.error('[ai/tools] folder index refresh failed:', err);
+        });
+      }
 
       return { ok: true as const, path: newPath, kind: canonical };
     },

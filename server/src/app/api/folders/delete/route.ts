@@ -8,10 +8,8 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
-import { deleteRelationsOf } from '@/lib/relations';
+import { deleteNotes } from '@/lib/note-paths';
 import { logAudit } from '@/lib/audit';
-import { closeDocumentConnections } from '@/collab/server';
-import { deriveFolderIndexesFor } from '@/lib/campaign-index';
 import { findNearestIndexPath, hiddenNotesSql, visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
@@ -52,35 +50,14 @@ export async function POST(req: NextRequest): Promise<Response> {
     )
     .all(groupId, path, path);
 
-  db.transaction(() => {
-    for (const n of notes) {
-      db.query(
-        'DELETE FROM note_links WHERE group_id = ? AND (from_path = ? OR to_path = ?)',
-      ).run(groupId, n.path, n.path);
-      deleteRelationsOf(groupId, n.path);
-      db.query('DELETE FROM tags WHERE group_id = ? AND path = ?').run(groupId, n.path);
-      db.query('DELETE FROM aliases WHERE group_id = ? AND path = ?').run(groupId, n.path);
-      db.query('DELETE FROM notes WHERE group_id = ? AND path = ?').run(groupId, n.path);
-    }
-    db.query(
-      `DELETE FROM folder_markers
-        WHERE group_id = ? AND (path = ? OR path LIKE ? || '/%')`,
-    ).run(groupId, path, path);
-  })();
-
-  for (const n of notes) {
-    await closeDocumentConnections(groupId, n.path);
-  }
-
-  // Refresh auto-managed indexes. Include the deleted folder's own
-  // path so its parent's index drops it from the Folders table; the
-  // notes' parents are picked up too in case any sub-children were
-  // their own folder representatives.
-  await deriveFolderIndexesFor(
+  // Also drops the folder's markers, evicts the notes' editors and
+  // refreshes the indexes of the folder's parent and every subfolder.
+  await deleteNotes({
     groupId,
-    [path, ...notes.map((n) => n.path)],
-    { userId: session.userId, createMissing: false },
-  );
+    userId: session.userId,
+    paths: notes.map((n) => n.path),
+    folder: path,
+  });
 
   logAudit({
     action: 'folder.destroy',

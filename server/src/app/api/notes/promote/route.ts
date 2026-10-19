@@ -9,16 +9,18 @@
 // admins still editing the doc don't lose their session — players
 // will pick up the live state when they open it. Document this in
 // the route comment because move-promote leaks edit history.
+//
+// lib/note-paths does the copy and the rename, carrying every row
+// keyed by the note's path.
 
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getDb, isUniqueConstraintError } from '@/lib/db';
-import { repointRelations } from '@/lib/relations';
+import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { isAllowedPath } from '@/lib/notes';
+import { copyNote, renameNotes } from '@/lib/note-paths';
 import {
   closeDocumentConnections,
   closeDocumentForWrite,
@@ -32,18 +34,6 @@ const Body = z.object({
   toPath: z.string().min(1).max(512).optional(),
   mode: z.enum(['copy', 'move']),
 });
-
-type Row = {
-  id: string;
-  title: string;
-  content_json: string;
-  content_text: string;
-  content_md: string;
-  yjs_state: Uint8Array | null;
-  frontmatter_json: string;
-  byte_size: number;
-  gm_only: number;
-};
 
 export async function POST(req: NextRequest): Promise<Response> {
   const session = requireSession(req);
@@ -68,22 +58,13 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   const db = getDb();
+  const groupId = session.currentGroupId;
 
   // Cheap existence/permission/collision checks BEFORE the drain, so a
   // request that's going to 404/409 doesn't needlessly kick editors.
-  // Deliberately does NOT select content_json/content_md/yjs_state —
-  // those are re-read fresh after the drain below (see D3: the old
-  // code captured a full `src` snapshot here and then drained 20
-  // lines later, so `src` was guaranteed to be exactly as stale as
-  // whatever the drain's flush had just written — the copy silently
-  // lost the source note's last edits).
-  const check = db
-    .query<{ gm_only: number }, [string, string]>(
-      'SELECT gm_only FROM notes WHERE group_id = ? AND path = ?',
-    )
-    .get(session.currentGroupId, body.fromPath);
-  if (!check) return json({ error: 'not_found' }, 404);
-  if (check.gm_only !== 1) {
+  const check = gmOnlyOf(groupId, body.fromPath);
+  if (check === undefined) return json({ error: 'not_found' }, 404);
+  if (check !== 1) {
     return json({ error: 'not_gm_only', reason: 'source note is already in the player namespace' }, 409);
   }
 
@@ -91,71 +72,42 @@ export async function POST(req: NextRequest): Promise<Response> {
     .query<{ n: number }, [string, string]>(
       'SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path = ?',
     )
-    .get(session.currentGroupId, toPath);
+    .get(groupId, toPath);
   if ((collide?.n ?? 0) > 0 && toPath !== body.fromPath) {
     return json({ error: 'exists', path: toPath }, 409);
   }
 
-  const now = Date.now();
-
   // Both branches read/rewrite the source row's yjs_state, so drain
   // any live editor on it first: copy would otherwise snapshot a
   // stale blob, and move would race the flush (see below).
-  const token = await closeDocumentForWrite(session.currentGroupId, body.fromPath);
+  const token = await closeDocumentForWrite(groupId, body.fromPath);
   try {
-    // Re-select the full row AFTER the drain, so `src` reflects whatever
-    // the drain's own flush just persisted rather than a pre-drain
-    // snapshot. Re-check existence/gm_only too — the drain can take up
-    // to 500ms, during which the row could theoretically have changed
-    // (e.g. a concurrent promote/delete).
-    const src = db
-      .query<Row, [string, string]>(
-        `SELECT id, title, content_json, content_text, content_md, yjs_state,
-                frontmatter_json, byte_size, gm_only
-           FROM notes WHERE group_id = ? AND path = ?`,
-      )
-      .get(session.currentGroupId, body.fromPath);
-    if (!src) return json({ error: 'not_found' }, 404);
-    if (src.gm_only !== 1) {
+    // Re-check AFTER the drain: it can take up to 500ms, during which
+    // the row could have changed (e.g. a concurrent promote/delete).
+    // The copy itself reads the row inside its own transaction, so it
+    // takes whatever the drain's flush just persisted.
+    const gmOnly = gmOnlyOf(groupId, body.fromPath);
+    if (gmOnly === undefined) return json({ error: 'not_found' }, 404);
+    if (gmOnly !== 1) {
       return json({ error: 'not_gm_only', reason: 'source note is already in the player namespace' }, 409);
     }
 
     if (body.mode === 'copy') {
-      const newId = randomUUID();
-      try {
-        db.query(
-          `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
-                              content_md, yjs_state, frontmatter_json, byte_size,
-                              updated_at, updated_by, created_at, created_by, gm_only)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-        ).run(
-          newId,
-          session.currentGroupId,
-          toPath,
-          src.title,
-          src.content_json,
-          src.content_text,
-          src.content_md,
-          src.yjs_state,
-          src.frontmatter_json,
-          src.byte_size,
-          now,
-          session.userId,
-          now,
-          session.userId,
-        );
-      } catch (err) {
-        // The collide check above is a fast path; the drain gives a
-        // concurrent create time to win. UNIQUE(group_id, path) decides.
-        if (isUniqueConstraintError(err)) {
-          return json({ error: 'exists', path: toPath }, 409);
-        }
-        throw err;
-      }
+      // The collide check above is a fast path; the drain gives a
+      // concurrent create time to win. UNIQUE(group_id, path) decides.
+      const copied = await copyNote({
+        groupId,
+        userId: session.userId,
+        from: body.fromPath,
+        to: toPath,
+        dmOnly: false,
+        gmOnly: false,
+      });
+      if (!copied.ok) return failure(copied);
       logAudit({
         action: 'note.create',
         actorId: session.userId,
-        groupId: session.currentGroupId,
+        groupId,
         target: toPath,
         details: { promotedFrom: body.fromPath, mode: 'copy' },
       });
@@ -168,45 +120,19 @@ export async function POST(req: NextRequest): Promise<Response> {
       return json({ ok: true, path: toPath, mode: 'copy' }, 201);
     }
 
-    // move: flip gm_only and (optionally) rename in one transaction.
-    try {
-      db.transaction(() => {
-        if (toPath === body.fromPath) {
-          db.query(
-            'UPDATE notes SET gm_only = 0, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
-          ).run(now, session.userId, session.currentGroupId, body.fromPath);
-        } else {
-          db.query(
-            'UPDATE notes SET gm_only = 0, path = ?, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
-          ).run(toPath, now, session.userId, session.currentGroupId, body.fromPath);
-          // Rewire backlinks pointing at the old path so the graph stays
-          // consistent. Outgoing links (from_path) follow the rename too.
-          // OR IGNORE + DELETE merges edges that would collide on the
-          // (group_id, from_path, to_path) key with stale ones at toPath.
-          for (const col of ['to_path', 'from_path'] as const) {
-            db.query(
-              `UPDATE OR IGNORE note_links SET ${col} = ? WHERE group_id = ? AND ${col} = ?`,
-            ).run(toPath, session.currentGroupId, body.fromPath);
-            db.query(`DELETE FROM note_links WHERE group_id = ? AND ${col} = ?`).run(
-              session.currentGroupId,
-              body.fromPath,
-            );
-          }
-          db.query('UPDATE tags SET path = ? WHERE group_id = ? AND path = ?')
-            .run(toPath, session.currentGroupId, body.fromPath);
-          repointRelations(session.currentGroupId, body.fromPath, toPath);
-        }
-      })();
-    } catch (err) {
-      // Same race as the copy branch; the transaction has rolled back,
-      // so the source is untouched. Falls through to the finally. Only a
-      // note really sitting at toPath is a name conflict; any other
-      // constraint failure must surface.
-      if (isUniqueConstraintError(err) && noteExists(session.currentGroupId, toPath)) {
-        return json({ error: 'exists', path: toPath }, 409);
-      }
-      throw err;
-    }
+    // move: flip gm_only and (optionally) rename in one transaction. On
+    // a lost race the transaction rolls back and the source is untouched.
+    const moved = await renameNotes({
+      groupId,
+      userId: session.userId,
+      moves: [{ from: body.fromPath, to: toPath }],
+      inTransaction: () => {
+        db.query(
+          'UPDATE notes SET gm_only = 0, updated_at = ?, updated_by = ? WHERE group_id = ? AND path = ?',
+        ).run(Date.now(), session.userId, groupId, toPath);
+      },
+    });
+    if (!moved.ok) return failure(moved);
 
     // Evict again AFTER the write so anyone who reattached during the
     // transaction re-authenticates against the new gm_only value (and,
@@ -214,17 +140,17 @@ export async function POST(req: NextRequest): Promise<Response> {
     // their store() would silently match zero rows). The token makes
     // this a discard: whatever reattached is holding pre-write state
     // for a row whose path and/or gm_only just changed underneath it.
-    await closeDocumentConnections(session.currentGroupId, body.fromPath, token);
+    await closeDocumentConnections(groupId, body.fromPath, token);
     if (toPath !== body.fromPath) {
       // No token for toPath — none was issued for it, and nothing wrote
       // over an in-memory doc there. Plain flush-on-evict is correct.
-      await closeDocumentConnections(session.currentGroupId, toPath);
+      await closeDocumentConnections(groupId, toPath);
     }
 
     logAudit({
       action: 'note.move',
       actorId: session.userId,
-      groupId: session.currentGroupId,
+      groupId,
       target: toPath,
       details: { promotedFrom: body.fromPath, mode: 'move' },
     });
@@ -236,14 +162,18 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 }
 
-function noteExists(groupId: string, path: string): boolean {
-  return (
-    getDb()
-      .query<{ n: number }, [string, string]>(
-        'SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path = ?',
-      )
-      .get(groupId, path)?.n === 1
-  );
+function gmOnlyOf(groupId: string, path: string): number | undefined {
+  return getDb()
+    .query<{ gm_only: number }, [string, string]>(
+      'SELECT gm_only FROM notes WHERE group_id = ? AND path = ?',
+    )
+    .get(groupId, path)?.gm_only;
+}
+
+function failure(err: { error: 'not_found' | 'exists'; path: string }): Response {
+  return err.error === 'exists'
+    ? json({ error: 'exists', path: err.path }, 409)
+    : json({ error: 'not_found' }, 404);
 }
 
 function json(body: unknown, status = 200): Response {

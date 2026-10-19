@@ -1,33 +1,25 @@
 // POST /api/notes/duplicate — clone an existing note to a new path.
 // Body: { path }. Auto-picks "<name> (copy).md", incrementing the
-// suffix on conflict. Copies yjs_state bytewise so the new doc opens
-// with the same Y.Doc state; note_links (from side) and tags are
-// copied so the new page retains its outgoing references. Aliases
-// are NOT copied — the user can add new aliases if they want.
+// suffix on conflict. lib/note-paths#copyNote copies the body and
+// yjs_state bytewise, the outgoing links and tags, and derives the new
+// note's indexes. Aliases and Relationships stay with the original.
 
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getDb, isUniqueConstraintError } from '@/lib/db';
+import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { visibilityFor } from '@/lib/notes';
+import { copyNote } from '@/lib/note-paths';
 
 export const dynamic = 'force-dynamic';
 
 const Body = z.object({ path: z.string().min(1).max(512) });
 
 type NoteRow = {
-  id: string;
   path: string;
   title: string;
-  content_json: string;
-  content_text: string;
-  content_md: string;
-  yjs_state: Uint8Array | null;
-  frontmatter_json: string;
-  byte_size: number;
   dm_only: number;
   gm_only: number;
 };
@@ -50,9 +42,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const src = getDb()
     .query<NoteRow, [string, string]>(
-      `SELECT id, path, title, content_json, content_text, content_md,
-              yjs_state, frontmatter_json, byte_size, dm_only, gm_only
-         FROM notes WHERE group_id = ? AND path = ?`,
+      `SELECT path, title, dm_only, gm_only FROM notes WHERE group_id = ? AND path = ?`,
     )
     .get(session.currentGroupId, body.path);
   if (!src) return json({ error: 'not_found' }, 404);
@@ -65,83 +55,27 @@ export async function POST(req: NextRequest): Promise<Response> {
     return json({ error: 'not_found' }, 404);
   }
 
-  const id = randomUUID();
-  const now = Date.now();
-  const db = getDb();
-
   // nextAvailablePath() scans via SELECT for a free "<name> (copy N)"
-  // path, but that scan and the INSERT below aren't atomic — a second
+  // path, but that scan and the copy below aren't atomic — a second
   // concurrent duplicate of the same source note can land on the same
-  // candidate in between. Rather than trust the scan, attempt the
-  // INSERT and, on a lost race (UNIQUE constraint violation), rescan
-  // and retry with the next candidate. Bounded so a pathological storm
-  // of concurrent requests still terminates in a clean 409 rather than
-  // retrying forever.
+  // candidate in between. Rather than trust the scan, attempt the copy
+  // and, on a lost race, rescan and retry with the next candidate.
+  // Bounded so a pathological storm of concurrent requests still
+  // terminates in a clean 409 rather than retrying forever.
   const MAX_ATTEMPTS = 5;
   let newPath = nextAvailablePath(session.currentGroupId, body.path);
-  let newTitle = deriveTitle(src.title, newPath);
   for (let attempt = 1; ; attempt++) {
-    try {
-      db.transaction(() => {
-        db.query(
-          `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
-                              content_md, yjs_state, frontmatter_json, byte_size,
-                              updated_at, updated_by, created_at, created_by,
-                              dm_only, gm_only)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(
-          id,
-          session.currentGroupId,
-          newPath,
-          newTitle,
-          src.content_json,
-          src.content_text,
-          src.content_md,
-          src.yjs_state,
-          src.frontmatter_json,
-          src.byte_size,
-          now,
-          session.userId,
-          now,
-          session.userId,
-          src.dm_only,
-          src.gm_only,
-        );
-        // Copy outgoing links + tags only. Inbound links (note_links
-        // where to_path = src.path) shouldn't auto-point at the
-        // duplicate. Relationships are not copied: each is a fact about
-        // the original, recorded by a Session.
-        for (const { to_path } of db
-          .query<{ to_path: string }, [string, string]>(
-            'SELECT to_path FROM note_links WHERE group_id = ? AND from_path = ?',
-          )
-          .all(session.currentGroupId, src.path)) {
-          if (to_path === newPath) continue; // no self-loops
-          db.query(
-            'INSERT OR IGNORE INTO note_links (group_id, from_path, to_path) VALUES (?, ?, ?)',
-          ).run(session.currentGroupId, newPath, to_path);
-        }
-        for (const { tag } of db
-          .query<{ tag: string }, [string, string]>(
-            'SELECT tag FROM tags WHERE group_id = ? AND path = ?',
-          )
-          .all(session.currentGroupId, src.path)) {
-          db.query('INSERT OR IGNORE INTO tags (group_id, path, tag) VALUES (?, ?, ?)').run(
-            session.currentGroupId,
-            newPath,
-            tag,
-          );
-        }
-      })();
-      break;
-    } catch (err) {
-      if (!isUniqueConstraintError(err)) throw err;
-      if (attempt >= MAX_ATTEMPTS) {
-        return json({ error: 'exists', path: newPath }, 409);
-      }
-      newPath = nextAvailablePath(session.currentGroupId, body.path);
-      newTitle = deriveTitle(src.title, newPath);
-    }
+    const copied = await copyNote({
+      groupId: session.currentGroupId,
+      userId: session.userId,
+      from: src.path,
+      to: newPath,
+      title: deriveTitle(src.title, newPath),
+    });
+    if (copied.ok) break;
+    if (copied.error === 'not_found') return json({ error: 'not_found' }, 404);
+    if (attempt >= MAX_ATTEMPTS) return json({ error: 'exists', path: newPath }, 409);
+    newPath = nextAvailablePath(session.currentGroupId, body.path);
   }
 
   logAudit({
