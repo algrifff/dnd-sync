@@ -9,10 +9,8 @@ import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
-import { deleteRelationsOf } from '@/lib/relations';
+import { deleteNotes } from '@/lib/note-paths';
 import { logAudit } from '@/lib/audit';
-import { closeDocumentConnections } from '@/collab/server';
-import { deriveFolderIndexesFor } from '@/lib/campaign-index';
 import { slugify } from '@/lib/slugify';
 
 export const dynamic = 'force-dynamic';
@@ -101,59 +99,41 @@ export async function POST(req: NextRequest): Promise<Response> {
     )
     .all(groupId, folderPath, folderPath);
 
-  db.transaction(() => {
-    db.exec('PRAGMA defer_foreign_keys = 1');
-    for (const n of notes) {
-      db.query(
-        'DELETE FROM note_links WHERE group_id = ? AND (from_path = ? OR to_path = ?)',
-      ).run(groupId, n.path, n.path);
-      deleteRelationsOf(groupId, n.path);
-      db.query('DELETE FROM tags WHERE group_id = ? AND path = ?').run(groupId, n.path);
-      db.query('DELETE FROM aliases WHERE group_id = ? AND path = ?').run(groupId, n.path);
-      // characters / session_notes / items / locations / creatures all
-      // have ON DELETE CASCADE off notes(group_id, path).
-      db.query('DELETE FROM notes WHERE group_id = ? AND path = ?').run(groupId, n.path);
-    }
-    db.query(
-      `DELETE FROM folder_markers
-        WHERE group_id = ? AND (path = ? OR path LIKE ? || '/%')`,
-    ).run(groupId, folderPath, folderPath);
-
-    // Belt-and-braces cleanup of slug-keyed indexes (most rows would
-    // already be gone via the notes cascade, but a stale row with no
-    // backing note would survive otherwise). Always key off the
-    // canonical slug — character_campaigns/session_notes/etc. were
-    // written by the derive pipeline which always slugifies.
-    db.query(
-      `DELETE FROM character_campaigns WHERE group_id = ? AND campaign_slug = ?`,
-    ).run(groupId, campaign.slug);
-    db.query(
-      `DELETE FROM session_notes WHERE group_id = ? AND campaign_slug = ?`,
-    ).run(groupId, campaign.slug);
-
-    if (hasCampaignRow) {
-      db.query(`DELETE FROM campaigns WHERE group_id = ? AND slug = ?`).run(
-        groupId,
-        campaign.slug,
-      );
-    }
-
-    // Unpin the active campaign if the user just deleted it.
-    db.query(
-      `UPDATE groups SET active_campaign_slug = NULL
-        WHERE id = ? AND active_campaign_slug = ?`,
-    ).run(groupId, campaign.slug);
-  })();
-
-  for (const n of notes) {
-    await closeDocumentConnections(groupId, n.path);
-  }
-
-  await deriveFolderIndexesFor(
+  // deleteNotes also evicts the notes' editors and refreshes indexes;
+  // the campaign's own rows go in the same transaction.
+  const campaignSlug = campaign.slug;
+  await deleteNotes({
     groupId,
-    [folderPath, ...notes.map((n) => n.path)],
-    { userId: session.userId, createMissing: false },
-  );
+    userId: session.userId,
+    paths: notes.map((n) => n.path),
+    folder: folderPath,
+    inTransaction: () => {
+      // Belt-and-braces cleanup of slug-keyed indexes (most rows would
+      // already be gone via the notes cascade, but a stale row with no
+      // backing note would survive otherwise). Always key off the
+      // canonical slug — character_campaigns/session_notes/etc. were
+      // written by the derive pipeline which always slugifies.
+      db.query(
+        `DELETE FROM character_campaigns WHERE group_id = ? AND campaign_slug = ?`,
+      ).run(groupId, campaignSlug);
+      db.query(
+        `DELETE FROM session_notes WHERE group_id = ? AND campaign_slug = ?`,
+      ).run(groupId, campaignSlug);
+
+      if (hasCampaignRow) {
+        db.query(`DELETE FROM campaigns WHERE group_id = ? AND slug = ?`).run(
+          groupId,
+          campaignSlug,
+        );
+      }
+
+      // Unpin the active campaign if the user just deleted it.
+      db.query(
+        `UPDATE groups SET active_campaign_slug = NULL
+          WHERE id = ? AND active_campaign_slug = ?`,
+      ).run(groupId, campaignSlug);
+    },
+  });
 
   logAudit({
     action: 'campaign.destroy',

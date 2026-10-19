@@ -118,6 +118,27 @@ describe('POST /api/notes/promote', () => {
     expect(gmOnlyAt('World Lore/MoveDst.md')).toBe(0); // the concurrent winner, untouched
   });
 
+  it('moves and renames a Character note, carrying its derived row instead of failing the FK check', async () => {
+    seedGmNote('World Lore/Hero.md');
+    getDb()
+      .query(
+        `INSERT INTO characters (group_id, note_path, kind, display_name, updated_at)
+         VALUES (?, 'World Lore/Hero.md', 'character', 'Hero', 0)`,
+      )
+      .run(DEFAULT_GROUP_ID);
+
+    const res = await POST(
+      promoteRequest({ fromPath: 'World Lore/Hero.md', toPath: 'World Lore/Hero Public.md', mode: 'move' }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(gmOnlyAt('World Lore/Hero Public.md')).toBe(0);
+    const row = getDb()
+      .query<{ note_path: string }, [string]>('SELECT note_path FROM characters WHERE group_id = ?')
+      .get(DEFAULT_GROUP_ID);
+    expect(row?.note_path).toBe('World Lore/Hero Public.md');
+  });
+
   it('merges note_links instead of failing when a stale edge to the destination already exists', async () => {
     seedGmNote('World Lore/DupSrc.md');
     seedPlayerNote('World Lore/DupLinker.md');
