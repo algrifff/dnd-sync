@@ -457,7 +457,7 @@ async function afterCommit(what: string, work: () => Promise<void>): Promise<voi
   try {
     await work();
   } catch (err) {
-    console.error(`[note-paths] ${what} failed:`, err);
+    console.error('[note-paths] %s failed:', what, err);
   }
 }
 
