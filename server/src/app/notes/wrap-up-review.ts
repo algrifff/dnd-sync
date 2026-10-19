@@ -56,15 +56,6 @@ export type WrapUpOutcome = {
   relationsSkipped: number;
 };
 
-export const KIND_LABEL: Record<Mention['kind'], string> = {
-  person: 'Person',
-  creature: 'Creature',
-  location: 'Location',
-  item: 'Item',
-  quest: 'Quest',
-  lore: 'Lore',
-};
-
 /** Every mention ticked, every match as proposed. */
 export function initialReview(proposal: WrapUpProposal): ReviewState {
   return new Map(

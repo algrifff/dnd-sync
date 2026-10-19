@@ -6,7 +6,7 @@
 // The tools are a registry (name → definition) so the MCP server and
 // the tests drive the same table, and adding a tool is one entry.
 
-import { inverseOf, RelationType } from '@compendium/shared';
+import { inverseOf, mentionKindList, RelationType } from '@compendium/shared';
 import { z } from 'zod';
 import { getDb } from '../db';
 import { listCampaigns } from '../characters';
@@ -26,17 +26,12 @@ import { SNIPPET_MARK_CLOSE, SNIPPET_MARK_OPEN } from '../search-snippet';
 import type { UserRole } from '../session';
 import {
   DEFAULT_CANDIDATE_LIMIT,
-  describeRelationProblem,
-  loadVisibleSession,
   MAX_CANDIDATE_LIMIT,
   MAX_MENTIONS,
   MAX_RELATIONS,
-  MAX_SUGGESTIONS,
+  readWrapUpContext,
   submitWrapUp,
-  SubmittedMention,
-  SubmittedRelation,
-  SubmittedSuggestion,
-  wrapUpContext,
+  WrapUpSubmission,
 } from '../wrap-up';
 
 /** `scopes` are the OAuth scopes of the grant; absent means read-only. */
@@ -348,26 +343,29 @@ const noteNeighborsTool = define({
 // in the app. Nothing here edits a Note.
 
 const MAX_LOG_CHARS = 16_000;
+const MENTION_KINDS_PROSE = mentionKindList();
 
-function resolveSession(ctx: McpContext, rawPath: string): { path: string } | ToolResult {
-  const note = loadVisible(ctx, rawPath);
-  if (!note) return notFound(rawPath);
-  const lookup = loadVisibleSession(ctx.groupId, ctx.role, note.path);
-  if (lookup.status === 'not_a_session') return { text: `${note.path} is not a Session note.`, isError: true };
-  if (lookup.status !== 'ok') return notFound(rawPath);
-  return { path: note.path };
+/** The path of the note `rawPath` names, as the other tools read it
+ *  (leading slash and `.md` optional). lib/wrap-up.ts gates the Session
+ *  itself; this only finds the path. */
+function sessionPathOf(ctx: McpContext, rawPath: string): string | null {
+  return loadVisible(ctx, rawPath)?.path ?? null;
+}
+
+function notASession(path: string): ToolResult {
+  return { text: `${path} is not a Session note.`, isError: true };
 }
 
 const wrapUpContextTool = define({
   name: 'wrap_up_context',
   title: 'Read a Session for its Wrap-up',
   description:
-    'Step 1 of a Session Wrap-up. Returns the Session log and a page of the existing People, Creatures, ' +
-    'Locations, Items, Quests and Lore notes a mention could belong to, each marked [recorded] when its ' +
+    'Step 1 of a Session Wrap-up. Returns the Session log and a page of the existing notes a mention could ' +
+    `belong to (${MENTION_KINDS_PROSE}), each marked [recorded] when its ` +
     'History already links this Session. Page through candidates with cursor. ' +
     'Check these candidates first. If a subject is not listed, run search_notes for it, including near spellings ' +
     '(for example "Kixish" and "Kixxish"). If a note exists, reuse it as an existing endpoint, not a new mention. ' +
-    'An existing mention must be a Person, Creature, Location, Item, Quest or Lore note. A Character goes in ' +
+    `An existing mention must be a ${MENTION_KINDS_PROSE} note. A Character goes in ` +
     'suggestions or as an existing end of a relation, never as a mention. Session and plain notes are never mentions. ' +
     'Then call submit_wrap_up.',
   input: {
@@ -376,17 +374,18 @@ const wrapUpContextTool = define({
     cursor: z.number().int().min(0).optional().describe('next_cursor from the previous page.'),
   },
   run(ctx, args) {
-    const resolved = resolveSession(ctx, args.session_path);
-    if ('text' in resolved) return resolved;
-    const lookup = loadVisibleSession(ctx.groupId, ctx.role, resolved.path);
-    if (lookup.status !== 'ok') return notFound(args.session_path);
-    const wrap = wrapUpContext({
+    const sessionPath = sessionPathOf(ctx, args.session_path);
+    if (!sessionPath) return notFound(args.session_path);
+    const result = readWrapUpContext({
       groupId: ctx.groupId,
       role: ctx.role,
-      session: lookup.note,
+      sessionPath,
       limit: args.limit ?? DEFAULT_CANDIDATE_LIMIT,
       cursor: args.cursor ?? 0,
     });
+    if (result.status === 'not_found') return notFound(args.session_path);
+    if (result.status === 'not_a_session') return notASession(sessionPath);
+    const wrap = result.context;
     const log = wrap.log.length > MAX_LOG_CHARS ? `${wrap.log.slice(0, MAX_LOG_CHARS)}\n[log truncated]` : wrap.log;
     const lines = wrap.candidates.map((c) => `- ${c.path} — ${c.title} [${c.kind}]${c.recorded ? ' [recorded]' : ''}`);
     const more = wrap.nextCursor !== null ? `\n\nnext_cursor: ${wrap.nextCursor}` : '';
@@ -404,13 +403,13 @@ const submitWrapUpTool = define({
   description:
     'Step 2 of a Session Wrap-up. Proposes what the Session log adds to the world. Nothing is written to any ' +
     'note: the proposal waits on the Session for a Player to review, untick and apply it, and it replaces any ' +
-    'earlier pending proposal. Each mention is a person, creature, location, item, quest or lore subject named in ' +
+    `earlier pending proposal. Each mention is a ${MENTION_KINDS_PROSE.toLowerCase()} subject named in ` +
     'the log, with a one-line past-tense historyEntry for this Session. ' +
     'Before you add a mention, check the wrap_up_context candidates and run search_notes, including near spellings ' +
     '(for example "Kixish" and "Kixxish"). If a note already exists, use match.type "existing" with its path. ' +
     'Prefer existing over new mentions. Use "new" only when no existing note fits. ' +
     'match.type "existing" names a path from wrap_up_context or search_notes (certain=false when unsure). ' +
-    'An existing mention must be a Person, Creature, Location, Item, Quest or Lore note. A Character goes in ' +
+    `An existing mention must be a ${MENTION_KINDS_PROSE} note. A Character goes in ` +
     'suggestions or as an existing end of a relation, never as a mention. Session and plain notes are never mentions. ' +
     `"new" proposes a note with a title and summary. At most ${MAX_MENTIONS} mentions. ` +
     'Optionally add suggestions: for a Character note (find its path with search_notes), a story line and/or items gained, ' +
@@ -424,45 +423,43 @@ const submitWrapUpTool = define({
     'A Player reviews each relation and it is recorded only if both notes are kept.',
   scope: 'wrapup:submit',
   readOnly: false,
+  // The fields are the HTTP route's own schema (WrapUpSubmission), so
+  // both surfaces refuse the same things, and submitWrapUp parses again.
   input: {
     session_path: z.string().min(1).max(512).describe('Path of the Session note.'),
-    mentions: z.array(SubmittedMention).max(MAX_MENTIONS).describe('The proposed mentions.'),
-    suggestions: z.array(SubmittedSuggestion).max(MAX_SUGGESTIONS).optional().describe('Optional per-Character suggestions, one per Character.'),
-    relations: z.array(SubmittedRelation).max(MAX_RELATIONS).optional().describe('Optional typed relationships between notes, only those the log states.'),
+    mentions: WrapUpSubmission.shape.mentions.describe('The proposed mentions.'),
+    suggestions: WrapUpSubmission.shape.suggestions.describe('Optional per-Character suggestions, one per Character.'),
+    relations: WrapUpSubmission.shape.relations.describe('Optional typed relationships between notes, only those the log states.'),
   },
   run(ctx, args) {
-    const resolved = resolveSession(ctx, args.session_path);
-    if ('text' in resolved) return resolved;
+    const sessionPath = sessionPathOf(ctx, args.session_path);
+    if (!sessionPath) return notFound(args.session_path);
     const result = submitWrapUp({
       groupId: ctx.groupId,
       role: ctx.role,
       submission: {
-        sessionPath: resolved.path,
+        sessionPath,
         mentions: args.mentions,
-        ...(args.suggestions ? { suggestions: args.suggestions } : {}),
-        ...(args.relations ? { relations: args.relations } : {}),
+        suggestions: args.suggestions,
+        relations: args.relations,
       },
     });
     switch (result.status) {
       case 'not_found':
         return notFound(args.session_path);
       case 'not_a_session':
-        return { text: `${resolved.path} is not a Session note.`, isError: true };
+        return notASession(sessionPath);
+      case 'invalid_body':
       case 'invalid_target':
-        return {
-          text: `"${result.mention}" matches a note that cannot take a History entry. Match a Person, Creature, Location, Item, Quest or Lore note, or propose a new one.`,
-          isError: true,
-        };
       case 'invalid_suggestion_target':
-        return { text: `${result.characterPath} is not a Character note, so it cannot take a suggestion.`, isError: true };
       case 'invalid_relation':
-        return { text: describeRelationProblem(result.index, result.problem), isError: true };
+        return { text: result.reason, isError: true };
       case 'ok': {
         const created = result.proposal.mentions.filter((m) => m.match.type === 'new').length;
         const relations = result.proposal.relations.length;
         return {
           text:
-            `Submitted ${result.proposal.mentions.length} mention(s) for ${resolved.path} (${created} new note(s))` +
+            `Submitted ${result.proposal.mentions.length} mention(s) for ${sessionPath} (${created} new note(s))` +
             `${relations ? ` and ${relations} relation(s)` : ''}. ` +
             'Nothing has been written. A Player reviews the Wrap-up when they end the Session in Compendium.',
         };

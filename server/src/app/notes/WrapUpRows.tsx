@@ -18,10 +18,10 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { Mention, WrapUpProposal } from '@/lib/wrap-up';
+import { MENTION_KIND_LABELS } from '@compendium/shared';
 import type { SimilarNote } from '@/lib/similar-names';
 import { WrapUpTick } from './WrapUpTick';
 import {
-  KIND_LABEL,
   groupRows,
   itemsLabel,
   relationRows,
@@ -48,7 +48,7 @@ const WRAP = '[overflow-wrap:anywhere]';
 
 /** "person" -> "Person"; kinds outside the mention list read as written. */
 const SIMILAR_KIND = (kind: string): string =>
-  KIND_LABEL[kind as Mention['kind']] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
+  MENTION_KIND_LABELS[kind as Mention['kind']] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
 const STRUCK = 'line-through decoration-[var(--ink-muted)] decoration-1';
 
 function rowStyle(i: number, dim?: number): React.CSSProperties {
@@ -265,7 +265,7 @@ function MentionRow({
   onUseExisting: (path: string | null) => void;
 }): React.JSX.Element {
   const { mention, destination } = row;
-  const kind = KIND_LABEL[mention.kind];
+  const kind = MENTION_KIND_LABELS[mention.kind];
   const { Icon, tile } = KIND_LOOK[mention.kind];
   const matchedTitle =
     mention.match.type === 'existing' ? (titles[mention.match.path] ?? mention.match.path) : null;

@@ -311,6 +311,17 @@ describe('submit_wrap_up suggestions', () => {
     expect(loadPendingWrapUp(DEFAULT_GROUP_ID, 'viewer', SESSION)?.suggestions).toHaveLength(1);
   });
 
+  it('refuses two suggestions for one Character, as the HTTP route does, and stores nothing new', () => {
+    const before = loadPendingWrapUp(DEFAULT_GROUP_ID, 'viewer', SESSION);
+    const twice = { characterPath: CHARACTER, story: 'Picked the lock.', items: [] };
+
+    const r = runTool('submit_wrap_up', submitter, { session_path: SESSION, mentions: [], suggestions: [twice, twice] });
+
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('one Suggestion per Character');
+    expect(loadPendingWrapUp(DEFAULT_GROUP_ID, 'viewer', SESSION)).toEqual(before);
+  });
+
   it('refuses a suggestion aimed at a note that is not a Character', () => {
     const r = runTool('submit_wrap_up', submitter, {
       session_path: SESSION,

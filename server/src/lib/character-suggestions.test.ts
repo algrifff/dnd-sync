@@ -21,14 +21,9 @@ import {
   dismissSuggestion,
   listMySuggestions,
 } from './character-suggestions';
-import {
-  applyWrapUp,
-  loadPendingWrapUp,
-  submitWrapUp,
-  SubmittedSuggestion,
-  WrapUpProposal,
-  type Suggestion,
-} from './wrap-up';
+import { writePendingWrapUpJson } from './sessions';
+import { loadPendingWrapUp, submitWrapUp, type Suggestion, type WrapUpProposal } from './wrap-up';
+import { applyStaged } from './wrap-up.testing';
 
 const SESSION = 'Campaigns/Ashfall/Adventure Log/2026-10-11-the-mill.md';
 const SECRET_SESSION = 'Campaigns/Ashfall/Adventure Log/2026-10-12-the-vault.md';
@@ -104,8 +99,8 @@ function proposalOf(suggestions: Suggestion[]): WrapUpProposal {
   return { sessionPath: SESSION, generatedAt: 1, mentions: [], relations: [], suggestions };
 }
 
-async function wrapUp(suggestions: Suggestion[]): Promise<Awaited<ReturnType<typeof applyWrapUp>>> {
-  return applyWrapUp({
+async function wrapUp(suggestions: Suggestion[]): Promise<Awaited<ReturnType<typeof applyStaged>>> {
+  return applyStaged({
     groupId, userId: ownerId, role: 'admin', sessionPath: SESSION,
     proposal: proposalOf(suggestions), decisions: { accepted: [], asNew: [] },
   });
@@ -157,13 +152,13 @@ describe('storing Suggestions when a Wrap-up is applied', () => {
     expect(result.suggestions).toEqual({ stored: 0, skipped: [{ id: 's1', reason: 'no_player' }] });
   });
 
-  it('skips a Character the closer cannot see', async () => {
-    const result = await applyWrapUp({
+  it('holds nothing for a Character the closer cannot see: the proposal they apply never had it', async () => {
+    const result = await applyStaged({
       groupId, userId: otherPlayer, role: 'viewer', sessionPath: SESSION,
       proposal: proposalOf([suggestion('s1', SECRET_HERO)]), decisions: { accepted: [], asNew: [] },
     });
 
-    expect(result.suggestions.skipped).toEqual([{ id: 's1', reason: 'not_visible' }]);
+    expect(result.suggestions).toEqual({ stored: 0, skipped: [] });
     expect(mineFor(karaPlayer)).toEqual([]);
   });
 
@@ -201,7 +196,7 @@ describe('submitting Suggestions', () => {
   });
 
   it('rejects a Suggestion for a Note that is not a Character', () => {
-    expect(submit([{ characterPath: BRAM, story: 'Hi.', items: [] }])).toEqual({
+    expect(submit([{ characterPath: BRAM, story: 'Hi.', items: [] }])).toMatchObject({
       status: 'invalid_suggestion_target',
       characterPath: BRAM,
     });
@@ -219,13 +214,13 @@ describe('submitting Suggestions', () => {
   });
 
   it('refuses a Suggestion with neither a story nor an item', () => {
-    expect(SubmittedSuggestion.safeParse({ characterPath: KARA, story: null, items: [] }).success).toBe(false);
+    expect(submit([{ characterPath: KARA, story: null, items: [] }])).toMatchObject({ status: 'invalid_body' });
   });
 
   it('reads a proposal stored before Suggestions existed as having none', () => {
-    const old = { sessionPath: SESSION, generatedAt: 1, mentions: [] };
+    writePendingWrapUpJson(groupId, SESSION, JSON.stringify({ sessionPath: SESSION, generatedAt: 1, mentions: [] }));
 
-    expect(WrapUpProposal.parse(old).suggestions).toEqual([]);
+    expect(loadPendingWrapUp(groupId, 'viewer', SESSION)!.suggestions).toEqual([]);
   });
 });
 
@@ -259,7 +254,7 @@ describe('who can see a Suggestion', () => {
   });
 
   it('hides a Suggestion whose Session is hidden from the Player', async () => {
-    await applyWrapUp({
+    await applyStaged({
       groupId, userId: ownerId, role: 'admin', sessionPath: SECRET_SESSION,
       proposal: { ...proposalOf([suggestion('s1', KARA)]), sessionPath: SECRET_SESSION },
       decisions: { accepted: [], asNew: [] },

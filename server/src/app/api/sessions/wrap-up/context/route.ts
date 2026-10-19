@@ -13,8 +13,7 @@ import { apiErrorResponse } from '@/lib/analytics/api-error';
 import {
   DEFAULT_CANDIDATE_LIMIT,
   MAX_CANDIDATE_LIMIT,
-  loadVisibleSession,
-  wrapUpContext,
+  readWrapUpContext,
 } from '@/lib/wrap-up';
 
 export const dynamic = 'force-dynamic';
@@ -38,20 +37,15 @@ export async function GET(req: NextRequest): Promise<Response> {
     });
     if (!query.success) return json({ error: 'invalid_query' }, 400);
 
-    const lookup = loadVisibleSession(session.currentGroupId, session.role, query.data.sessionPath);
-    if (lookup.status === 'not_found') return json({ error: 'not_found' }, 404);
-    if (lookup.status === 'not_a_session') return json({ error: 'not_a_session' }, 400);
-
-    return json(
-      wrapUpContext({
-        groupId: session.currentGroupId,
-        role: session.role,
-        session: lookup.note,
-        limit: query.data.limit,
-        cursor: query.data.cursor,
-      }),
-      200,
-    );
+    const result = readWrapUpContext({ groupId: session.currentGroupId, role: session.role, ...query.data });
+    switch (result.status) {
+      case 'not_found':
+        return json({ error: 'not_found' }, 404);
+      case 'not_a_session':
+        return json({ error: 'not_a_session' }, 400);
+      case 'ok':
+        return json(result.context, 200);
+    }
   } catch (err) {
     return apiErrorResponse('api/sessions/wrap-up/context', err);
   }

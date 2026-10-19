@@ -51,6 +51,34 @@ export function parseKind(raw: unknown): NoteKind | null {
   return null;
 }
 
+/** Kinds a Wrap-up mention can land on: the Notes a Session adds
+ *  History to. Characters get Suggestions instead. */
+export const MENTION_KINDS = [
+  'person',
+  'creature',
+  'location',
+  'item',
+  'quest',
+  'lore',
+] as const satisfies readonly NoteKind[];
+export type MentionKind = (typeof MENTION_KINDS)[number];
+
+export const MENTION_KIND_LABELS = {
+  person: 'Person',
+  creature: 'Creature',
+  location: 'Location',
+  item: 'Item',
+  quest: 'Quest',
+  lore: 'Lore',
+} as const satisfies Record<MentionKind, string>;
+
+/** "Person, Creature, Location, Item, Quest or Lore", for prose that
+ *  tells a person or a model which Notes a mention may name. */
+export function mentionKindList(): string {
+  const labels = MENTION_KINDS.map((k) => MENTION_KIND_LABELS[k]);
+  return `${labels.slice(0, -1).join(', ')} or ${labels[labels.length - 1]}`;
+}
+
 /** Kinds that carry a structured sheet validated by Zod. */
 export const SHEETED_KINDS = [
   'character',

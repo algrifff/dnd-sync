@@ -1,15 +1,18 @@
-// POST /api/sessions/mark-closed — mark a session note as closed.
-// Lightweight — no AI, no entity work. Just flips the status flag for the
-// End of Session button.
+// POST /api/sessions/mark-closed — close a Session without a Wrap-up
+// ("Close without a Wrap-up" in the End of Session dialog). Drops any
+// pending proposal, exactly as applying one does; to apply a proposal
+// use /api/sessions/wrap-up/apply instead.
 //
 // Body: { sessionPath: string }
+//
+// 404 for a Session the caller cannot see or that does not exist, 400
+// not_a_session for any other Note. lib/wrap-up.ts#endSession owns both.
 
 import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getDb } from '@/lib/db';
-import { loadVisibleNote, visibilityFor } from '@/lib/notes';
+import { endSession } from '@/lib/wrap-up';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 import { apiErrorResponse } from '@/lib/analytics/api-error';
@@ -34,31 +37,16 @@ export async function POST(req: NextRequest): Promise<Response> {
       return json({ error: 'invalid_body' }, 400);
     }
 
-    // A note must actually exist at
-    // this path and be kind=session before we upsert a session_notes
-    // row for it. Without this, any caller can create session_notes
-    // rows keyed on a nonexistent path.
-    const note = loadVisibleNote(session.currentGroupId, body.sessionPath, visibilityFor(session.role));
-    if (!note) return json({ error: 'not_found' }, 404);
-    let fm: Record<string, unknown>;
-    try {
-      fm = JSON.parse(note.frontmatter_json) as Record<string, unknown>;
-    } catch {
-      return json({ error: 'invalid_note', reason: 'cannot parse frontmatter' }, 400);
-    }
-    if (fm.kind !== 'session') {
+    const result = endSession({
+      groupId: session.currentGroupId,
+      userId: session.userId,
+      role: session.role,
+      sessionPath: body.sessionPath,
+    });
+    if (result.status === 'not_found') return json({ error: 'not_found' }, 404);
+    if (result.status === 'not_a_session') {
       return json({ error: 'not_a_session', reason: 'note is not a session kind' }, 400);
     }
-
-    const now = Date.now();
-    getDb()
-      .query(
-        `INSERT INTO session_notes (group_id, note_path, updated_at, status, closed_at, closed_by)
-         VALUES (?, ?, ?, 'closed', ?, ?)
-         ON CONFLICT (group_id, note_path)
-         DO UPDATE SET status='closed', closed_at=excluded.closed_at, closed_by=excluded.closed_by`,
-      )
-      .run(session.currentGroupId, body.sessionPath, now, now, session.userId);
 
     void captureServer({
       userId: session.userId,

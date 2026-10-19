@@ -1,10 +1,23 @@
 // Wrap-up: folding a Session log into the World as a reviewed proposal.
 //
+// The module's interface is the whole flow, each call taking the
+// caller's World and role and answering with a result union that the
+// HTTP routes, the MCP tools and `session_finalize` map onto their own
+// output:
+//
+//   readWrapUpContext  the log plus a page of candidate Notes
+//   submitWrapUp       parse and store a proposal (the one schema)
+//   readWrapUpReview   the pending proposal as the reader may see it
+//   applyWrapUp        apply the reviewed proposal, refusing a stale one
+//   endSession         close a Session without a Wrap-up
+//
+// Each one checks that the Session is there, is a Session and is
+// visible to the caller, so no caller re-implements that gate.
+//
 // The app never writes the proposal itself. A Player's own Claude reads
-// the Session log and the candidate Notes (`wrapUpContext`), then
-// submits a proposal of Mentions (`submitWrapUp`). The app stores it as
-// the Session's pending proposal; the closer reviews it and applies it
-// (`applyWrapUp`). Applying adds a dated History entry to each
+// the Session log and the candidate Notes, then submits a proposal of
+// Mentions. The app stores it as the Session's pending proposal; the
+// closer reviews it and applies it. Applying adds a dated History entry to each
 // mentioned Note (creating new Notes where needed), links the log to
 // each Note, records the ticked Relationships (lib/relations.ts, after
 // the mentions so created Notes have paths), holds the Suggestions for
@@ -20,7 +33,13 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { parseKind, RelationType } from '@compendium/shared';
+import {
+  MENTION_KINDS,
+  mentionKindList,
+  parseKind,
+  RelationType,
+  type MentionKind,
+} from '@compendium/shared';
 import { getDb } from '@/lib/db';
 import { addRelation } from '@/lib/relations';
 import { loadNameIndex, matchName, type NameIndex, type SimilarNote } from '@/lib/similar-names';
@@ -36,6 +55,7 @@ import { getCampaignBySlug } from '@/lib/characters';
 import { canonicalPath } from '@/lib/paths';
 import { slugify } from '@/lib/slugify';
 import { createNote } from '@/lib/create-note';
+import type { UserRole } from '@/lib/session';
 import {
   closeSession,
   getSessionStatus,
@@ -57,10 +77,17 @@ import {
   type PmDoc,
 } from '@/lib/note-edits';
 
-// ── Data shape ─────────────────────────────────────────────────────────
+// ── Who is asking ──────────────────────────────────────────────────────
 
-export const MENTION_KINDS = ['person', 'creature', 'location', 'item', 'quest', 'lore'] as const;
-export type MentionKind = (typeof MENTION_KINDS)[number];
+/** A caller reading or proposing: their World and their role in it. */
+type WrapUpReader = { groupId: string; role: UserRole };
+/** A caller who writes (applies or closes), recorded as the closer. */
+export type WrapUpActor = WrapUpReader & { userId: string };
+
+type NotFound = { status: 'not_found' };
+type NotASession = { status: 'not_a_session' };
+
+// ── Data shape ─────────────────────────────────────────────────────────
 
 export const MAX_MENTIONS = 60;
 
@@ -99,7 +126,7 @@ const MentionMatch = z.discriminatedUnion('type', [
 ]);
 
 /** One thing the Session log mentions, as a client proposes it. */
-export const SubmittedMention = z
+const SubmittedMention = z
   .object({
     /** As written in the log, e.g. "the innkeeper". */
     name: oneLine(200).refine(hasLetterOrDigit, 'name needs letters or digits'),
@@ -109,9 +136,9 @@ export const SubmittedMention = z
     historyEntry: oneLine(600),
   })
   .strict();
-export type SubmittedMention = z.infer<typeof SubmittedMention>;
+type SubmittedMention = z.infer<typeof SubmittedMention>;
 
-export const MAX_SUGGESTIONS = 30;
+const MAX_SUGGESTIONS = 30;
 
 const SuggestedItem = z
   .object({
@@ -133,11 +160,11 @@ const SuggestionShape = z
 
 /** What a Character's Player is offered after a Wrap-up, as a client
  *  proposes it. It has to carry something to accept. */
-export const SubmittedSuggestion = SuggestionShape.refine(
+const SubmittedSuggestion = SuggestionShape.refine(
   (s) => s.story !== null || s.items.length > 0,
   'a Suggestion needs a story or at least one item',
 );
-export type SubmittedSuggestion = z.infer<typeof SubmittedSuggestion>;
+type SubmittedSuggestion = z.infer<typeof SubmittedSuggestion>;
 
 export const MAX_RELATIONS = 60;
 
@@ -151,7 +178,7 @@ const SubmittedEndpoint = z.discriminatedUnion('type', [
 
 /** How two Notes stand to each other, as a client proposes it. The type
  *  comes from the shared list (docs/adr/0002-typed-relationships.md). */
-export const SubmittedRelation = z
+const SubmittedRelation = z
   .object({
     from: SubmittedEndpoint,
     relation: RelationType,
@@ -160,7 +187,7 @@ export const SubmittedRelation = z
     note: oneLine(300).optional(),
   })
   .strict();
-export type SubmittedRelation = z.infer<typeof SubmittedRelation>;
+type SubmittedRelation = z.infer<typeof SubmittedRelation>;
 
 export const WrapUpSubmission = z
   .object({
@@ -183,11 +210,11 @@ export type WrapUpSubmission = z.infer<typeof WrapUpSubmission>;
  *  opaque and stable for the life of the proposal. It is deliberately
  *  not a counter: a reader who cannot see some Mentions would otherwise
  *  see gaps in the numbering. */
-export const Mention = SubmittedMention.extend({ id: z.string().min(1) });
+const Mention = SubmittedMention.extend({ id: z.string().min(1) });
 export type Mention = z.infer<typeof Mention>;
 
 /** A submitted Suggestion once stored, with an app-assigned id. */
-export const Suggestion = SuggestionShape.extend({ id: z.string().min(1) });
+const Suggestion = SuggestionShape.extend({ id: z.string().min(1) });
 export type Suggestion = z.infer<typeof Suggestion>;
 
 /** A stored end: a mention names the Mention by its id, resolved at
@@ -199,14 +226,14 @@ const StoredEndpoint = z.discriminatedUnion('type', [
 export type StoredEndpoint = z.infer<typeof StoredEndpoint>;
 
 /** A submitted Relationship once stored, with an app-assigned id. */
-export const Relation = SubmittedRelation.omit({ from: true, to: true }).extend({
+const Relation = SubmittedRelation.omit({ from: true, to: true }).extend({
   id: z.string().min(1),
   from: StoredEndpoint,
   to: StoredEndpoint,
 });
 export type Relation = z.infer<typeof Relation>;
 
-export const WrapUpProposal = z.object({
+const WrapUpProposal = z.object({
   sessionPath: z.string().min(1),
   generatedAt: z.number(),
   mentions: z.array(Mention),
@@ -217,11 +244,24 @@ export const WrapUpProposal = z.object({
 });
 export type WrapUpProposal = z.infer<typeof WrapUpProposal>;
 
-export type Role = 'admin' | 'editor' | 'viewer';
+// ── The Session gate ───────────────────────────────────────────────────
+
+type SessionLookup = { status: 'ok'; note: NoteRow } | NotFound | NotASession;
+
+/** The Session note at `path` as `role` may see it. Hidden reads as
+ *  missing, so a Player learns nothing from the status code. Every
+ *  entry point below goes through this once. */
+function loadVisibleSession(groupId: string, role: UserRole, path: string): SessionLookup {
+  const note = loadNote(groupId, path);
+  if (!note || isHiddenFrom(note, visibilityFor(role))) return { status: 'not_found' };
+  return frontmatterKind(note.frontmatter_json) === 'session'
+    ? { status: 'ok', note }
+    : { status: 'not_a_session' };
+}
 
 // ── Reading the Session and its candidate Notes ────────────────────────
 
-export type Candidate = {
+type Candidate = {
   path: string;
   title: string;
   kind: MentionKind;
@@ -229,7 +269,7 @@ export type Candidate = {
   recorded: boolean;
 };
 
-export type WrapUpContext = {
+type WrapUpContext = {
   session: { path: string; title: string; status: SessionStatus };
   log: string;
   candidates: Candidate[];
@@ -240,50 +280,37 @@ export type WrapUpContext = {
 export const DEFAULT_CANDIDATE_LIMIT = 50;
 export const MAX_CANDIDATE_LIMIT = 200;
 
-type SessionLookup =
-  | { status: 'ok'; note: NoteRow }
-  | { status: 'not_found' }
-  | { status: 'not_a_session' };
-
-/** The Session note at `path` as `role` may see it. Hidden reads as
- *  missing, so a Player learns nothing from the status code. */
-export function loadVisibleSession(groupId: string, role: Role, path: string): SessionLookup {
-  const note = loadNote(groupId, path);
-  if (!note || isHiddenFrom(note, visibilityFor(role))) return { status: 'not_found' };
-  return frontmatterKind(note.frontmatter_json) === 'session'
-    ? { status: 'ok', note }
-    : { status: 'not_a_session' };
-}
-
 /** What a client needs to propose well: the log, plus a page of the
  *  Notes `role` may see that a Mention could land on, each marked with
  *  whether it already records this Session. */
-export function wrapUpContext(opts: {
-  groupId: string;
-  role: Role;
-  session: NoteRow;
-  limit: number;
-  cursor: number;
-}): WrapUpContext {
-  const { groupId, session } = opts;
+export function readWrapUpContext(
+  opts: WrapUpReader & { sessionPath: string; limit: number; cursor: number },
+): { status: 'ok'; context: WrapUpContext } | NotFound | NotASession {
+  const { groupId } = opts;
+  const lookup = loadVisibleSession(groupId, opts.role, opts.sessionPath);
+  if (lookup.status !== 'ok') return lookup;
+  const session = lookup.note;
   const all = visibleCandidates(groupId, opts.role);
   const recorded = recordedPaths(groupId, session.path);
   const page = all.slice(opts.cursor, opts.cursor + opts.limit);
   const end = opts.cursor + page.length;
   return {
-    session: {
-      path: session.path,
-      title: session.title,
-      status: getSessionStatus(groupId, session.path),
+    status: 'ok',
+    context: {
+      session: {
+        path: session.path,
+        title: session.title,
+        status: getSessionStatus(groupId, session.path),
+      },
+      log: session.content_text,
+      candidates: page.map((c) => ({ ...c, recorded: recorded.has(c.path) })),
+      nextCursor: end < all.length ? end : null,
     },
-    log: session.content_text,
-    candidates: page.map((c) => ({ ...c, recorded: recorded.has(c.path) })),
-    nextCursor: end < all.length ? end : null,
   };
 }
 
 /** Notes of a mention kind that `role` may see, by title. */
-function visibleCandidates(groupId: string, role: Role): Array<Omit<Candidate, 'recorded'>> {
+function visibleCandidates(groupId: string, role: UserRole): Array<Omit<Candidate, 'recorded'>> {
   const rows = getDb()
     .query<{ path: string; title: string; frontmatter_json: string }, [string]>(
       `SELECT path, title, frontmatter_json FROM notes n
@@ -332,21 +359,25 @@ function mentionKindOf(path: string, frontmatterJson: string): MentionKind | nul
 
 // ── Submitting a proposal ──────────────────────────────────────────────
 
-export type SubmitResult =
+/** Every refusal carries `reason`, a sentence the HTTP route and the MCP
+ *  tool both pass on unchanged. */
+type SubmitResult =
   | { status: 'ok'; proposal: WrapUpProposal }
-  | { status: 'not_found' }
-  | { status: 'not_a_session' }
+  | NotFound
+  | NotASession
+  /** The body does not fit `WrapUpSubmission`. */
+  | { status: 'invalid_body'; reason: string }
   /** A mention matches a visible Note that cannot receive History
    *  (a Character, a Session, a plain Note). */
-  | { status: 'invalid_target'; mention: string }
+  | { status: 'invalid_target'; mention: string; reason: string }
   /** A Suggestion names a visible Note that is not a Character. */
-  | { status: 'invalid_suggestion_target'; characterPath: string }
+  | { status: 'invalid_suggestion_target'; characterPath: string; reason: string }
   /** The Relationship at `index` cannot be resolved: a mention end that
    *  names nothing or two Mentions, or the same Note at both ends. (An
    *  existing end the caller cannot see is `not_found`.) */
-  | { status: 'invalid_relation'; index: number; problem: RelationProblem };
+  | { status: 'invalid_relation'; index: number; problem: RelationProblem; reason: string };
 
-export type RelationProblem = 'unknown_mention' | 'ambiguous_mention' | 'same_note';
+type RelationProblem = 'unknown_mention' | 'ambiguous_mention' | 'same_note';
 
 const RELATION_PROBLEMS: Record<RelationProblem, string> = {
   unknown_mention: 'an end names a mention that is not in this submission',
@@ -354,25 +385,16 @@ const RELATION_PROBLEMS: Record<RelationProblem, string> = {
   same_note: 'both ends are the same Note',
 };
 
-/** What to tell a client whose Relationship was refused, by position. */
-export function describeRelationProblem(index: number, problem: RelationProblem): string {
-  return `relations.${index}: ${RELATION_PROBLEMS[problem]}`;
-}
-
-/** Stores `mentions` as the Session's pending proposal, replacing any
- *  earlier one. An `existing` match must name a Note `role` may see;
- *  one that is missing or hidden reads as `not_found`, and so does an
- *  `existing` end of a Relationship. */
-export function submitWrapUp(opts: {
-  groupId: string;
-  role: Role;
-  submission: Omit<WrapUpSubmission, 'suggestions' | 'relations'> & {
-    suggestions?: SubmittedSuggestion[];
-    relations?: SubmittedRelation[];
-  };
-}): SubmitResult {
-  const { groupId, role, submission } = opts;
-  const suggestions = submission.suggestions ?? [];
+/** Parses `input` with `WrapUpSubmission`, the one schema both the HTTP
+ *  route and the MCP tool submit through, then stores it as the
+ *  Session's pending proposal, replacing any earlier one. An `existing`
+ *  match must name a Note `role` may see; one that is missing or hidden
+ *  reads as `not_found`, and so does an `existing` end of a Relationship. */
+export function submitWrapUp(opts: WrapUpReader & { submission: unknown }): SubmitResult {
+  const { groupId, role } = opts;
+  const parsed = WrapUpSubmission.safeParse(opts.submission);
+  if (!parsed.success) return { status: 'invalid_body', reason: describeIssue(parsed.error) };
+  const submission = parsed.data;
   const lookup = loadVisibleSession(groupId, role, submission.sessionPath);
   if (lookup.status !== 'ok') return lookup;
 
@@ -382,20 +404,29 @@ export function submitWrapUp(opts: {
     const target = loadNote(groupId, mention.match.path);
     if (!target || isHiddenFrom(target, vis)) return { status: 'not_found' };
     if (!mentionKindOf(target.path, target.frontmatter_json)) {
-      return { status: 'invalid_target', mention: mention.name };
+      return {
+        status: 'invalid_target',
+        mention: mention.name,
+        reason: `"${mention.name}" matches a Note that cannot take a History entry. Match a ${mentionKindList()} Note, or propose a new one.`,
+      };
     }
   }
 
-  for (const suggestion of suggestions) {
+  for (const suggestion of submission.suggestions) {
     const target = loadNote(groupId, suggestion.characterPath);
     if (!target || isHiddenFrom(target, vis)) return { status: 'not_found' };
     if (parseKind(frontmatterKind(target.frontmatter_json)) !== 'character') {
-      return { status: 'invalid_suggestion_target', characterPath: suggestion.characterPath };
+      return {
+        status: 'invalid_suggestion_target',
+        characterPath: suggestion.characterPath,
+        reason: `"${suggestion.characterPath}" is not a Character Note, so it cannot take a Suggestion.`,
+      };
     }
   }
 
+  const suggestions = submission.suggestions;
   const mentions = submission.mentions.map((m) => ({ ...m, id: newMentionId() }));
-  const relations = resolveRelations(groupId, vis, mentions, submission.relations ?? []);
+  const relations = resolveRelations(groupId, vis, mentions, submission.relations);
   if (!Array.isArray(relations)) return relations;
 
   const proposal: WrapUpProposal = {
@@ -442,15 +473,21 @@ function resolveRelations(
     };
   };
 
+  const refuse = (index: number, problem: RelationProblem) => ({
+    status: 'invalid_relation' as const,
+    index,
+    problem,
+    reason: `relations.${index}: ${RELATION_PROBLEMS[problem]}`,
+  });
   const out: Relation[] = [];
   for (const [index, r] of submitted.entries()) {
     const from = resolveEnd(r.from);
     if (from.status === 'not_found') return from;
-    if (from.status === 'invalid') return { status: 'invalid_relation', index, problem: from.problem };
+    if (from.status === 'invalid') return refuse(index, from.problem);
     const to = resolveEnd(r.to);
     if (to.status === 'not_found') return to;
-    if (to.status === 'invalid') return { status: 'invalid_relation', index, problem: to.problem };
-    if (from.identity === to.identity) return { status: 'invalid_relation', index, problem: 'same_note' };
+    if (to.status === 'invalid') return refuse(index, to.problem);
+    if (from.identity === to.identity) return refuse(index, 'same_note');
     out.push({
       id: newRelationId(),
       from: from.end,
@@ -480,7 +517,7 @@ function newSuggestionId(): string {
  *  hidden Note to a Player who resumes it. */
 export function loadPendingWrapUp(
   groupId: string,
-  role: Role,
+  role: UserRole,
   sessionPath: string,
 ): WrapUpProposal | null {
   const json = readPendingWrapUpJson(groupId, sessionPath);
@@ -520,7 +557,7 @@ export type PendingWrapUp = {
 /** Every Session in the World with a proposal waiting for review that
  *  `role` may see, newest first, counted as `loadPendingWrapUp` would
  *  show it. Backs the header's "Wrap-up ready" notice. */
-export function listPendingWrapUps(groupId: string, role: Role): PendingWrapUp[] {
+export function listPendingWrapUps(groupId: string, role: UserRole): PendingWrapUp[] {
   // One join gates every Session at once; only visible ones pay for
   // loadPendingWrapUp's per-mention checks.
   const rows = getDb()
@@ -556,7 +593,7 @@ export function listPendingWrapUps(groupId: string, role: Role): PendingWrapUp[]
  *  Relationship ends and Suggestion Characters), for the review dialog's
  *  "Matched to <Title>?", its Relationships and its Suggestions list. Call it on a proposal from
  *  `loadPendingWrapUp`, which already dropped what the reader cannot see. */
-export function existingTitles(groupId: string, proposal: WrapUpProposal): Record<string, string> {
+function existingTitles(groupId: string, proposal: WrapUpProposal): Record<string, string> {
   const paths = [
     ...proposal.mentions.flatMap((m) => (m.match.type === 'existing' ? [m.match.path] : [])),
     ...proposal.relations.flatMap((r) =>
@@ -577,9 +614,9 @@ export function existingTitles(groupId: string, proposal: WrapUpProposal): Recor
  *  kinds a mention can land on). Keyed by mention id; mentions with none
  *  are absent. Computed on read, never stored: the World moves on while
  *  a proposal waits. Call it on a proposal from `loadPendingWrapUp`. */
-export function similarNotesFor(
+function similarNotesFor(
   groupId: string,
-  role: Role,
+  role: UserRole,
   proposal: WrapUpProposal,
 ): Record<string, SimilarNote[]> {
   const out: Record<string, SimilarNote[]> = {};
@@ -593,9 +630,35 @@ export function similarNotesFor(
   return out;
 }
 
+/** What the review dialog shows for a Session: the pending proposal as
+ *  the reader may see it (null when none is waiting), the titles of the
+ *  Notes it points at, and per new-Note mention the similarly named
+ *  Notes it could use instead. */
+export function readWrapUpReview(opts: WrapUpReader & { sessionPath: string }):
+  | {
+      status: 'ok';
+      proposal: WrapUpProposal | null;
+      existingTitles: Record<string, string>;
+      similar: Record<string, SimilarNote[]>;
+    }
+  | NotFound
+  | NotASession {
+  const { groupId, role, sessionPath } = opts;
+  const lookup = loadVisibleSession(groupId, role, sessionPath);
+  if (lookup.status !== 'ok') return lookup;
+  const proposal = loadPendingWrapUp(groupId, role, sessionPath);
+  if (!proposal) return { status: 'ok', proposal, existingTitles: {}, similar: {} };
+  return {
+    status: 'ok',
+    proposal,
+    existingTitles: existingTitles(groupId, proposal),
+    similar: similarNotesFor(groupId, role, proposal),
+  };
+}
+
 // ── Apply ──────────────────────────────────────────────────────────────
 
-export type WrapUpDecisions = {
+type WrapUpDecisions = {
   /** Mention ids the closer ticked. */
   accepted: string[];
   /** Accepted mention ids whose uncertain match the closer switched to a new Note. */
@@ -617,7 +680,7 @@ export type WrapUpDecisions = {
  *  History (a Character, a Session, a plain Note). `edit_failed`: the
  *  Note could not take the History entry (it vanished or refused the
  *  edit). `invalid_title`: nothing to name a new Note by. */
-export type SkipReason =
+type SkipReason =
   | 'unknown_mention'
   | 'not_visible'
   | 'invalid_target'
@@ -625,18 +688,18 @@ export type SkipReason =
   | 'edit_failed'
   | 'invalid_title';
 
-export type AppliedMention = { id: string; path: string; created: boolean };
+type AppliedMention = { id: string; path: string; created: boolean };
 
 /** `mention_not_applied`: a mention end was unticked or could not land.
  *  `not_visible`: an existing end is hidden from the closer or gone.
  *  `same_note`: both ends landed on one Note. */
-export type RelationSkipReason =
+type RelationSkipReason =
   | 'unknown_relation'
   | 'mention_not_applied'
   | 'not_visible'
   | 'same_note';
 
-export type ApplyResult = {
+type ApplyResult = {
   applied: AppliedMention[];
   /** Accepted mentions that could not be applied, and why. */
   skipped: Array<{ id: string; reason: SkipReason }>;
@@ -648,25 +711,62 @@ export type ApplyResult = {
   suggestions: StoredSuggestions;
 };
 
-/** Applies the closer's decisions on `proposal`, links the log, records
- *  the ticked Relationships, holds the proposal's Suggestions for their
- *  Players, closes the Session and clears its pending proposal. Running it again with the same proposal
- *  writes nothing new. */
-export async function applyWrapUp(opts: {
-  groupId: string;
-  userId: string;
-  role: Role;
-  sessionPath: string;
-  proposal: WrapUpProposal;
-  decisions: WrapUpDecisions;
-}): Promise<ApplyResult> {
-  const { groupId, userId, role, sessionPath, proposal } = opts;
-  const session = loadNote(groupId, sessionPath);
-  if (!session) throw new Error(`Session not found: ${sessionPath}`);
+type ApplyOutcome =
+  | ({ status: 'applied' } & ApplyResult)
+  | NotFound
+  | NotASession
+  /** Nothing to apply, which is also what a repeated apply gets: the
+   *  first one cleared the proposal. */
+  | { status: 'no_pending_proposal' }
+  /** `generatedAt` is not the pending proposal's: someone resubmitted
+   *  while the closer was reviewing, so their ticks belong to a proposal
+   *  that no longer exists (ADR 0001). Nothing is written. */
+  | { status: 'proposal_changed' };
+
+/** Applies the closer's decisions on the Session's pending proposal as
+ *  `role` sees it, provided it is still the one they reviewed (its
+ *  `generatedAt`). Adds the History entries, links the log, records the
+ *  ticked Relationships, holds the Suggestions for their Players, then
+ *  closes the Session and clears the proposal. */
+export async function applyWrapUp(
+  opts: WrapUpActor & { sessionPath: string; generatedAt: number; decisions: WrapUpDecisions },
+): Promise<ApplyOutcome> {
+  const lookup = loadVisibleSession(opts.groupId, opts.role, opts.sessionPath);
+  if (lookup.status !== 'ok') return lookup;
+  const proposal = loadPendingWrapUp(opts.groupId, opts.role, opts.sessionPath);
+  if (!proposal) return { status: 'no_pending_proposal' };
+  if (proposal.generatedAt !== opts.generatedAt) return { status: 'proposal_changed' };
+  const result = await applyProposal(opts, lookup.note, proposal, opts.decisions);
+  return { status: 'applied', ...result };
+}
+
+/** Closes the Session without a Wrap-up, dropping any pending proposal
+ *  (one submitted after the closer chose not to review is not kept on a
+ *  Closed Session). Closing a Closed Session only refreshes who closed it. */
+export function endSession(
+  opts: WrapUpActor & { sessionPath: string },
+): { status: 'closed' } | NotFound | NotASession {
+  const lookup = loadVisibleSession(opts.groupId, opts.role, opts.sessionPath);
+  if (lookup.status !== 'ok') return lookup;
+  closeSession(opts.groupId, lookup.note.path, opts.userId);
+  return { status: 'closed' };
+}
+
+/** Applies `decisions` on `proposal`, which the caller has already
+ *  checked is the pending one for `session`. Running it again with the
+ *  same proposal writes nothing new. */
+async function applyProposal(
+  actor: WrapUpActor,
+  session: NoteRow,
+  proposal: WrapUpProposal,
+  decisions: WrapUpDecisions,
+): Promise<ApplyResult> {
+  const { groupId, userId, role } = actor;
+  const sessionPath = session.path;
   const vis = visibilityFor(role);
   const byId = new Map(proposal.mentions.map((m) => [m.id, m]));
-  const asNew = new Set(opts.decisions.asNew);
-  const useExisting = opts.decisions.useExisting ?? {};
+  const asNew = new Set(decisions.asNew);
+  const useExisting = decisions.useExisting ?? {};
   const campaign = campaignFor(groupId, session);
 
   const applied: AppliedMention[] = [];
@@ -674,7 +774,7 @@ export async function applyWrapUp(opts: {
   // Every mention that landed on a Note, including duplicates folded into
   // an earlier one, so Relationships on either resolve.
   const landed = new Map<string, string>();
-  for (const id of new Set(opts.decisions.accepted)) {
+  for (const id of new Set(decisions.accepted)) {
     const mention = byId.get(id);
     if (!mention) {
       skipped.push({ id, reason: 'unknown_mention' });
@@ -728,7 +828,7 @@ export async function applyWrapUp(opts: {
     userId,
     sessionPath,
     proposal,
-    accepted: opts.decisions.acceptedRelations ?? [],
+    accepted: decisions.acceptedRelations ?? [],
     landed,
     isVisible,
   });
@@ -931,6 +1031,13 @@ function findVisibleByTitle(
 }
 
 // ── Shared ─────────────────────────────────────────────────────────────
+
+/** First Zod issue as `path: message`, so a client can fix its payload
+ *  without the stack or the schema internals. */
+function describeIssue(err: z.ZodError): string {
+  const issue = err.issues[0];
+  return issue ? `${issue.path.join('.') || 'body'}: ${issue.message}` : 'body is not valid';
+}
 
 function frontmatterKind(frontmatterJson: string): unknown {
   try {
