@@ -25,6 +25,8 @@ import { logAudit } from '@/lib/audit';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { getTemplate } from '@/lib/templates';
 import { generateSessionTitle } from '@/lib/session-title';
+import { nextSessionNumber } from '@/lib/sessions';
+import { visibilityFor } from '@/lib/notes';
 import { slugify } from '@/lib/slugify';
 
 export const dynamic = 'force-dynamic';
@@ -80,7 +82,12 @@ export async function POST(req: NextRequest): Promise<Response> {
   // number and the row that records it.
   const sessionNumber =
     body.sessionNumber ??
-    nextSessionNumber(session.currentGroupId, body.campaignSlug, campaign.folder_path);
+    nextSessionNumber({
+      groupId: session.currentGroupId,
+      campaignSlug: body.campaignSlug,
+      folderPath: campaign.folder_path,
+      vis: visibilityFor(session.role),
+    });
   sheet.date = body.date;
   sheet.session_number = sessionNumber;
   if (body.title) sheet.title = body.title;
@@ -157,26 +164,6 @@ export async function POST(req: NextRequest): Promise<Response> {
   });
 
   return json({ ok: true, path }, 201);
-}
-
-/** One past the campaign's highest Session #. Older Sessions may carry
- *  no number, so the count is a floor: a campaign with five unnumbered
- *  Sessions starts at 6, not 1. Once a number is assigned it is the max,
- *  so deleting a Session never hands that number out again.
- *
- *  A Session belongs to the campaign by slug or by living under its
- *  folder: imported notes often name the campaign in `campaigns:` by
- *  display name, which slugifies to something other than the slug. */
-function nextSessionNumber(groupId: string, campaignSlug: string, folderPath: string): number {
-  const underFolder = `${folderPath.replace(/[\\%_]/g, (c) => `\\${c}`)}/%`;
-  const row = getDb()
-    .query<{ n: number }, [string, string, string]>(
-      `SELECT MAX(COALESCE(MAX(session_number), 0), COUNT(*)) AS n
-         FROM session_notes
-        WHERE group_id = ? AND (campaign_slug = ? OR note_path LIKE ? ESCAPE '\\')`,
-    )
-    .get(groupId, campaignSlug, underFolder);
-  return (row?.n ?? 0) + 1;
 }
 
 function json(body: unknown, status: number): Response {

@@ -102,6 +102,35 @@ describe('buildTree session ordering', () => {
     expect(labelsIn('Log')).toEqual(['Session 9_Alex_2026-03-01', 'Session 10_Alex_2026-03-01']);
   });
 
+  it('should place a new numbered session after undated imported ones', () => {
+    seedSession('Log/session-2.md', 'Session 2', {});
+    seedSession('Log/session-1.md', 'Session 1', {});
+    seedSession('Log/2026-10-19.md', 'Session 3_Alice_2026-10-19', { date: '2026-10-19', session_number: 3 });
+
+    expect(labelsIn('Log')).toEqual(['Session 1', 'Session 2', 'Session 3_Alice_2026-10-19']);
+  });
+
+  it('should order mixed dated and numbered sessions the same whatever the input order', () => {
+    // Numbered by "date if both, else number" pairwise, these three form
+    // a cycle and the result depends on the input order.
+    const rows: Array<[string, Record<string, unknown>]> = [
+      ['A', { date: '2026-01-01', session_number: 9 }],
+      ['B', { session_number: 5 }],
+      ['C', { date: '2026-02-01', session_number: 1 }],
+    ];
+    // Rows are read in path order, so the numeric prefix sets the order
+    // the comparator sees them in.
+    rows.forEach(([t, sheet], i) => seedSession(`Log/${i}-${t}.md`, t, sheet));
+    const first = labelsIn('Log');
+    getDb().query('DELETE FROM notes WHERE group_id = ?').run(DEFAULT_GROUP_ID);
+    getDb().query('DELETE FROM session_notes WHERE group_id = ?').run(DEFAULT_GROUP_ID);
+
+    [...rows].reverse().forEach(([t, sheet], i) => seedSession(`Log/${i}-${t}.md`, t, sheet));
+
+    expect(first).toEqual(['C', 'B', 'A']);
+    expect(labelsIn('Log')).toEqual(first);
+  });
+
   it('should place sessions before other notes and undated sessions last among them', () => {
     seedNote('Log/recap.md', 'Aaa recap');
     seedSession('Log/undated.md', 'Undated', {});

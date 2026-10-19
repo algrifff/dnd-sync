@@ -311,11 +311,18 @@ function sortTree(
   for (const c of dir.children) if (c.kind === 'dir') sortTree(c, campaignOrder, sessions);
 }
 
-/** Sessions come before other notes, oldest first by date then number;
- *  a missing date or number sorts last. 0 hands over to the title. */
+/** Sessions come before other notes. Unnumbered ones (older or imported)
+ *  come first, by date; numbered ones follow, by number then date. New
+ *  Sessions are numbered past every existing one, so they land last.
+ *  Missing dates sort last within their group. 0 hands over to the
+ *  title. Grouping on "has a number" keeps this a total order; mixing
+ *  "date if both have one, else number" pairwise is not transitive. */
 function compareSessions(a: SessionOrder | undefined, b: SessionOrder | undefined): number {
   if (!a || !b) return a ? -1 : b ? 1 : 0;
-  return compareNullsLast(a.date, b.date) || compareNullsLast(a.number, b.number);
+  if ((a.number === null) !== (b.number === null)) return a.number === null ? -1 : 1;
+  return a.number === null
+    ? compareNullsLast(a.date, b.date)
+    : compareNullsLast(a.number, b.number) || compareNullsLast(a.date, b.date);
 }
 
 function compareNullsLast<T extends string | number>(a: T | null, b: T | null): number {
