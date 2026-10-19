@@ -8,7 +8,6 @@ import { deleteNotes } from '@/lib/note-paths';
 import {
   decodePath,
   findNearestIndexPath,
-  loadNote,
   loadTags,
   loadVisibleNote,
   visibilityFor,
@@ -27,16 +26,9 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
   const path = decodePath(segments);
   if (!path) return json({ error: 'invalid_path' }, 400);
 
-  const note = loadNote(session.currentGroupId, path);
+  // A note the caller can't see answers exactly like a missing one.
+  const note = loadVisibleNote(session.currentGroupId, path, visibilityFor(session.role));
   if (!note) return json({ error: 'not_found' }, 404);
-  // GM-only notes: admins only. DM-only notes: hidden from viewers.
-  // 404 instead of 403 in both cases so the existence of a hidden path
-  // isn't disclosed. Same predicates as the collab gates in
-  // `collab/server.ts` — loadNote does NOT filter for us.
-  const vis = visibilityFor(session.role);
-  if ((note.gm_only === 1 && vis.hideGmOnly) || (note.dm_only === 1 && vis.hideDmOnly)) {
-    return json({ error: 'not_found' }, 404);
-  }
 
   const tags = loadTags(session.currentGroupId, path);
 

@@ -39,7 +39,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   const mode = treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role);
   const payload = buildGraph(session.currentGroupId, scope, {
     mode,
-    hideDmOnly: visibilityFor(session.role).hideDmOnly,
+    vis: visibilityFor(session.role),
   });
 
   // Phase-scoped ETag so the nodes-only and edges-only responses

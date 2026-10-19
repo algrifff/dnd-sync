@@ -13,9 +13,9 @@ export async function GET(req: NextRequest): Promise<Response> {
   if (session instanceof Response) return session;
 
   const mode = treeModeFor(req.cookies.get(GM_MODE_COOKIE)?.value, session.role);
-  const { hideDmOnly } = visibilityFor(session.role);
-  const tree = buildTree(session.currentGroupId, { mode, hideDmOnly });
-  const etag = `"tree-${mode}${hideDmOnly ? '-nodm' : ''}-${tree.updatedAt}"`;
+  const vis = visibilityFor(session.role);
+  const tree = buildTree(session.currentGroupId, { mode, vis });
+  const etag = `"tree-${mode}${vis.hideDmOnly ? '-nodm' : ''}-${tree.updatedAt}"`;
 
   if (req.headers.get('if-none-match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag } });

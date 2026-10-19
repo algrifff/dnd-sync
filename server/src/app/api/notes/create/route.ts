@@ -2,19 +2,14 @@
 // Body: { folder: string, name: string }  (name does NOT need .md;
 // the server appends it). Returns 201 { path }.
 
-import { randomUUID } from 'node:crypto';
-import { prosemirrorJSONToYDoc } from 'y-prosemirror';
-import * as Y from 'yjs';
 import { z } from 'zod';
 import type { NextRequest } from 'next/server';
+import { canonicalKind, KIND_INPUTS } from '@compendium/shared';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getDb, isUniqueConstraintError } from '@/lib/db';
-import { getPmSchema } from '@/lib/pm-schema';
 import { logAudit } from '@/lib/audit';
-import { deriveAllIndexes } from '@/lib/derive-indexes';
-import { deriveFolderIndex, parentFolderUnderCampaign } from '@/lib/campaign-index';
-import { getTemplate, type TemplateKind } from '@/lib/templates';
+import { createNote } from '@/lib/create-note';
+import { getDb } from '@/lib/db';
 import { hiddenNotesSql, isAllowedPath, visibilityFor } from '@/lib/notes';
 import { GM_MODE_COOKIE, isGmModeOn } from '@/lib/gm-mode';
 import { captureServer } from '@/lib/analytics/capture';
@@ -29,12 +24,11 @@ const Body = z.object({
     .min(1)
     .max(200)
     .regex(/^[^/\\\0]+$/, 'name must not contain slashes or null bytes'),
-  /** Optional entry kind — when set, we pre-seed frontmatter from
-   *  the matching template so the sheet UI has defaults to render.
-   *  "page" (or omitted) creates a plain note with no kind. */
-  kind: z
-    .enum(['page', 'pc', 'npc', 'ally', 'villain', 'item', 'location', 'session', 'monster', 'quest', 'excalidraw'])
-    .optional(),
+  /** Optional entry kind (canonical or legacy alias) — when set, we
+   *  pre-seed frontmatter from the matching template so the sheet UI
+   *  has defaults to render. "page" (or omitted) creates a plain note
+   *  with no kind. */
+  kind: z.enum([...KIND_INPUTS, 'page', 'excalidraw']).optional(),
 });
 
 export async function POST(req: NextRequest): Promise<Response> {
@@ -60,12 +54,13 @@ export async function POST(req: NextRequest): Promise<Response> {
   const gmOnly = isGmModeOn(req.cookies.get(GM_MODE_COOKIE)?.value, session.role);
 
   // Viewers can create plain pages and quests (their own creator-owned
-  // notes) and their own PCs; everything else is an admin/editor action.
+  // notes) and their own Characters; everything else is an admin/editor
+  // action.
   if (
     session.role === 'viewer' &&
     requestedKind !== 'page' &&
-    requestedKind !== 'quest' &&
-    requestedKind !== 'pc'
+    (requestedKind === 'excalidraw' ||
+      (canonicalKind(requestedKind) !== 'quest' && canonicalKind(requestedKind) !== 'character'))
   ) {
     return json({ error: 'forbidden', reason: 'players can create pages, quests or PCs only' }, 403);
   }
@@ -89,97 +84,35 @@ export async function POST(req: NextRequest): Promise<Response> {
     return json({ error: code, reason: allowed.reason }, status);
   }
 
-  const db = getDb();
-
-  // Title lives on a dedicated Y.Text so the TitleEditor can subscribe
-  // to it independently. Body starts as an empty paragraph.
-  const emptyDoc = {
-    type: 'doc',
-    content: [{ type: 'paragraph' }],
-  };
-  const schema = getPmSchema();
-  const vis = visibilityFor(session.role);
-  const id = randomUUID();
-  const now = Date.now();
-
-  // No pre-check + separate INSERT — that leaves a race window where
-  // two concurrent requests for the same path both pass a SELECT and
-  // the loser's INSERT then throws a raw UNIQUE-constraint error. Try
-  // the INSERT directly and translate the conflict.
-  //
   // A path held by a note the caller can't see must not answer 409
   // (that would confirm the hidden note exists) and must not touch it,
   // so that case takes the next free " (2)", " (3)" ... name instead,
   // like a duplicate does. A path held by a visible note is still 409.
-  let cleanName = baseName;
-  let path = basePath;
-  let frontmatter: Record<string, unknown> = {};
-  for (let n = 2; ; n++) {
-    // Seed frontmatter from the template whenever a kind is specified.
-    // Plain pages still get '{}' so the JSON is valid downstream.
-    frontmatter = buildFrontmatter(requestedKind, cleanName, session.username);
-    const ydoc = prosemirrorJSONToYDoc(schema, emptyDoc, 'default');
-    ydoc.getText('title').insert(0, cleanName);
-    const state = Y.encodeStateAsUpdate(ydoc);
-    try {
-      db.query(
-        `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
-                            content_md, yjs_state, frontmatter_json, byte_size,
-                            updated_at, updated_by, created_at, created_by, gm_only)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        id,
-        session.currentGroupId,
-        path,
-        cleanName,
-        JSON.stringify(emptyDoc),
-        '',
-        '',
-        state,
-        JSON.stringify(frontmatter),
-        0,
-        now,
-        session.userId,
-        now,
-        session.userId,
-        gmOnly ? 1 : 0,
-      );
-      break;
-    } catch (err) {
-      if (!isUniqueConstraintError(err)) throw err;
-      const visible = db
+  const groupId = session.currentGroupId;
+  const vis = visibilityFor(session.role);
+  const created = await createNote(groupId, {
+    userId: session.userId,
+    player: session.username,
+    path: basePath,
+    // A Character made here belongs to its creator, as a `pc` always did:
+    // `role: pc` is what links `player` to the account and lets the player
+    // edit the whole Sheet, wherever the Note lives.
+    kind: requestedKind === 'character' ? 'pc' : requestedKind,
+    title: baseName,
+    gmOnly,
+    onTaken: (taken, n) => {
+      const visible = getDb()
         .query<{ n: number }, [string, string]>(
           `SELECT COUNT(*) AS n FROM notes n WHERE n.group_id = ? AND n.path = ?${hiddenNotesSql('n', vis)}`,
         )
-        .get(session.currentGroupId, path);
-      if ((visible?.n ?? 0) > 0 || n > 50) return json({ error: 'exists', path }, 409);
-      cleanName = `${baseName} (${n})`;
-      path = (folder ? folder + '/' : '') + cleanName + '.md';
-    }
-  }
-
-  // Run the derive pipeline so the characters / campaigns index
-  // rows catch up without waiting for the first collab save.
-  try {
-    deriveAllIndexes({
-      groupId: session.currentGroupId,
-      notePath: path,
-      frontmatterJson: JSON.stringify(frontmatter),
-    });
-  } catch (err) {
-    console.error('[notes/create] derive failed:', err);
-  }
-
-  // Refresh the parent folder's auto-managed index so the new note
-  // appears in its Notes table.
-  const parent = parentFolderUnderCampaign(path);
-  if (parent) {
-    void deriveFolderIndex(session.currentGroupId, parent, {
-      userId: session.userId,
-    }).catch((err) => {
-      console.error('[notes/create] folder index refresh failed:', err);
-    });
-  }
+        .get(groupId, taken);
+      if ((visible?.n ?? 0) > 0) return null;
+      const title = `${baseName} (${n})`;
+      return { path: (folder ? folder + '/' : '') + title + '.md', title };
+    },
+  });
+  if (created.status === 'exists') return json({ error: 'exists', path: created.path }, 409);
+  const path = created.path;
 
   logAudit({
     action: 'note.create',
@@ -202,42 +135,6 @@ export async function POST(req: NextRequest): Promise<Response> {
   });
 
   return json({ ok: true, path }, 201);
-}
-
-function buildFrontmatter(
-  kind: NonNullable<z.infer<typeof Body>['kind']>,
-  name: string,
-  username: string,
-): Record<string, unknown> {
-  if (kind === 'page') return {};
-  if (kind === 'quest') return { kind: 'quest' };
-  if (kind === 'excalidraw') {
-    return { kind: 'excalidraw', sheet: { name } };
-  }
-
-  const template = getTemplate(kind as TemplateKind);
-  const sheet: Record<string, unknown> = { name };
-  if (template) {
-    for (const section of template.schema.sections) {
-      for (const field of section.fields) {
-        if (field.id === 'name') continue;
-        if (field.default !== undefined) sheet[field.id] = field.default;
-      }
-    }
-  }
-
-  if (kind === 'pc' || kind === 'npc' || kind === 'ally' || kind === 'villain') {
-    const fm: Record<string, unknown> = {
-      kind: 'character',
-      role: kind,
-      template: kind,
-      sheet,
-    };
-    if (kind === 'pc') fm.player = username;
-    return fm;
-  }
-  // item / location share the same 'kind:<literal>' + sheet shape.
-  return { kind, template: kind, sheet };
 }
 
 function json(body: unknown, status: number): Response {

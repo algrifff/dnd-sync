@@ -162,4 +162,21 @@ describe('searchWorld', () => {
     expect(labels(search('lich'))).toEqual(['title:Lich Rumours']);
     expect(labels(search('lich', 'admin', true))).toEqual(['title:Lich Plan', 'asset:lich-secret.png']);
   });
+
+  it('shows each role only what it may see, in both namespaces', () => {
+    seedNote(WORLD, 'plain.md', 'Wyrm Plain', 'wyrmling');
+    seedNote(WORLD, 'secret.md', 'Wyrm Secret', 'wyrmling', { dmOnly: true });
+    seedNote(WORLD, 'private.md', 'Wyrm Private', 'wyrmling', { gmOnly: true });
+    seedNote(WORLD, 'both.md', 'Wyrm Both', 'wyrmling', { dmOnly: true, gmOnly: true });
+    seedAsset(WORLD, 'wyrm-shared.png');
+    seedAsset(WORLD, 'wyrm-gm.png', true);
+
+    const sorted = (role: 'admin' | 'editor' | 'viewer', gmMode = false) =>
+      labels(search('wyrm', role, gmMode)).sort();
+    expect(sorted('viewer')).toEqual(['asset:wyrm-shared.png', 'title:Wyrm Plain']);
+    expect(sorted('editor')).toEqual(['asset:wyrm-shared.png', 'title:Wyrm Plain', 'title:Wyrm Secret']);
+    expect(sorted('admin')).toEqual(['asset:wyrm-shared.png', 'title:Wyrm Plain', 'title:Wyrm Secret']);
+    // Only an admin reaches GM mode (`isGmModeOn`).
+    expect(sorted('admin', true)).toEqual(['asset:wyrm-gm.png', 'title:Wyrm Both', 'title:Wyrm Private']);
+  });
 });

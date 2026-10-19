@@ -10,7 +10,8 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
-import { visibilityFor } from '@/lib/notes';
+import { isHiddenFrom, visibilityFor } from '@/lib/notes';
+import { nextFreePath } from '@/lib/create-note';
 import { copyNote } from '@/lib/note-paths';
 
 export const dynamic = 'force-dynamic';
@@ -45,17 +46,12 @@ export async function POST(req: NextRequest): Promise<Response> {
       `SELECT path, title, dm_only, gm_only FROM notes WHERE group_id = ? AND path = ?`,
     )
     .get(session.currentGroupId, body.path);
-  if (!src) return json({ error: 'not_found' }, 404);
-
-  // Hidden notes must not be duplicatable into visibility the caller
-  // couldn't otherwise see — 404 (not 403) so a hidden path's existence
-  // isn't disclosed, matching `api/notes/[...path]/route.ts`.
-  const vis = visibilityFor(session.role);
-  if ((src.gm_only === 1 && vis.hideGmOnly) || (src.dm_only === 1 && vis.hideDmOnly)) {
+  // A note the caller can't see answers exactly like a missing one.
+  if (!src || isHiddenFrom(src, visibilityFor(session.role))) {
     return json({ error: 'not_found' }, 404);
   }
 
-  // nextAvailablePath() scans via SELECT for a free "<name> (copy N)"
+  // nextFreePath() scans via SELECT for a free "<name> (copy N)"
   // path, but that scan and the copy below aren't atomic — a second
   // concurrent duplicate of the same source note can land on the same
   // candidate in between. Rather than trust the scan, attempt the copy
@@ -63,7 +59,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   // Bounded so a pathological storm of concurrent requests still
   // terminates in a clean 409 rather than retrying forever.
   const MAX_ATTEMPTS = 5;
-  let newPath = nextAvailablePath(session.currentGroupId, body.path);
+  let newPath = nextFreePath(session.currentGroupId, body.path, copySuffix, 1);
   for (let attempt = 1; ; attempt++) {
     const copied = await copyNote({
       groupId: session.currentGroupId,
@@ -75,7 +71,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     if (copied.ok) break;
     if (copied.error === 'not_found') return json({ error: 'not_found' }, 404);
     if (attempt >= MAX_ATTEMPTS) return json({ error: 'exists', path: newPath }, 409);
-    newPath = nextAvailablePath(session.currentGroupId, body.path);
+    newPath = nextFreePath(session.currentGroupId, body.path, copySuffix, 1);
   }
 
   logAudit({
@@ -89,21 +85,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   return json({ ok: true, path: newPath }, 201);
 }
 
-function nextAvailablePath(groupId: string, origPath: string): string {
-  const idx = origPath.lastIndexOf('/');
-  const dir = idx >= 0 ? origPath.slice(0, idx + 1) : '';
-  const leaf = origPath.slice(idx + 1).replace(/\.md$/i, '');
-  for (let i = 1; i < 1000; i++) {
-    const candidate = `${dir}${leaf} (copy${i > 1 ? ' ' + i : ''}).md`;
-    const row = getDb()
-      .query<{ n: number }, [string, string]>(
-        'SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path = ?',
-      )
-      .get(groupId, candidate);
-    if ((row?.n ?? 0) === 0) return candidate;
-  }
-  throw new Error('too many duplicates of ' + origPath);
-}
+const copySuffix = (n: number): string => (n === 1 ? ' (copy)' : ` (copy ${n})`);
 
 function deriveTitle(origTitle: string, newPath: string): string {
   const leaf = (newPath.split('/').pop() ?? newPath).replace(/\.md$/i, '');

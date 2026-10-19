@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, renameSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { getDb } from './db';
-import { hiddenNotesSql, type Visibility } from './notes';
+import { hiddenAssetsSql, visibleNoteSql, type Visibility } from './notes';
 
 export type AssetRow = {
   id: string;
@@ -306,14 +306,14 @@ type AssetListDbRow = {
 /** All assets in a group, for the /assets gallery. */
 export function listGroupAssets(
   groupId: string,
-  opts: { mode?: AssetMode } = {},
+  opts: { mode?: AssetMode; vis: Visibility },
 ): AssetListEntry[] {
   const gmFlag = opts.mode === 'gm' ? 1 : 0;
   return getDb()
     .query<AssetListDbRow, [string, number]>(
       `SELECT id, mime, size, original_name, original_path, uploaded_at
          FROM assets
-        WHERE group_id = ? AND gm_only = ?
+        WHERE group_id = ? AND gm_only = ?${hiddenAssetsSql('assets', opts.vis)}
         ORDER BY original_path COLLATE NOCASE`,
     )
     .all(groupId, gmFlag)
@@ -332,7 +332,7 @@ export type AssetListEntryWithTags = AssetListEntry & { tags: string[] };
 /** All assets in a group with their tags, for the /assets gallery. */
 export function listGroupAssetsWithTags(
   groupId: string,
-  opts: { mode?: AssetMode } = {},
+  opts: { mode?: AssetMode; vis: Visibility },
 ): AssetListEntryWithTags[] {
   const assets = listGroupAssets(groupId, opts);
 
@@ -420,7 +420,7 @@ export function assetReferenceCount(
     const row = getDb()
       .query<{ total: number; visible: number | null }, [string, string]>(
         `SELECT COUNT(*) AS total,
-                SUM(CASE WHEN 1 = 1${hiddenNotesSql('n', vis)} THEN 1 ELSE 0 END) AS visible
+                SUM(CASE WHEN ${visibleNoteSql('n', vis)} THEN 1 ELSE 0 END) AS visible
            FROM notes n WHERE n.group_id = ? AND n.${column} LIKE ?`,
       )
       .get(groupId, `%${needle}%`);

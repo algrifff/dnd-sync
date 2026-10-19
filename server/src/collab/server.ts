@@ -13,6 +13,7 @@ import { Logger } from '@hocuspocus/extension-logger';
 import { getDb } from '@/lib/db';
 import { readSessionFromIncoming } from '@/lib/session';
 import { canEditDoc, isNonNoteDoc } from '@/lib/note-permissions';
+import { isHiddenFrom, visibilityFor, type Visibility } from '@/lib/notes';
 import { writeNoteState, deriveIndexesFor } from './derive';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
@@ -132,22 +133,22 @@ function parseMetaDocName(
   return { kind: 'groups', groupId: m[1]! };
 }
 
-function isNoteDmOnly(groupId: string, path: string): boolean {
+/** Why `vis` hides the note at `path`, or null when it exists and is
+ *  visible or does not exist yet (a new doc is created on connect). The
+ *  Secret flag is reported first, so a viewer refused a note carrying
+ *  both flags logs `dm_only_blocked`. Exported for tests. */
+export function hiddenReason(
+  groupId: string,
+  path: string,
+  vis: Visibility,
+): 'gm_only_blocked' | 'dm_only_blocked' | null {
   const row = getDb()
-    .query<{ dm_only: number }, [string, string]>(
-      'SELECT dm_only FROM notes WHERE group_id = ? AND path = ?',
+    .query<{ dm_only: number; gm_only: number }, [string, string]>(
+      'SELECT dm_only, gm_only FROM notes WHERE group_id = ? AND path = ?',
     )
     .get(groupId, path);
-  return !!row && row.dm_only === 1;
-}
-
-function isNoteGmOnly(groupId: string, path: string): boolean {
-  const row = getDb()
-    .query<{ gm_only: number }, [string, string]>(
-      'SELECT gm_only FROM notes WHERE group_id = ? AND path = ?',
-    )
-    .get(groupId, path);
-  return !!row && row.gm_only === 1;
+  if (!row || !isHiddenFrom(row, vis)) return null;
+  return row.dm_only === 1 && vis.hideDmOnly ? 'dm_only_blocked' : 'gm_only_blocked';
 }
 
 /** The DB-writing half of the Hocuspocus `store()` hook for a real
@@ -323,36 +324,18 @@ export const collabServer: Hocuspocus =
     // record from here on.
     const path = parsed.path;
 
-    // DM-only gate: block viewers from any note marked dm_only
-    // entirely (they get no connection, so no live updates and no
-    // awareness). Admins + editors see everything.
-    if (
-      session.role === 'viewer' &&
-      !isNonNoteDoc(path) &&
-      isNoteDmOnly(session.currentGroupId, path)
-    ) {
+    // Visibility gate: a note the caller can't see (a Secret Note for a
+    // viewer, a Private Note for anyone but admin) gets no connection,
+    // so no body, no live updates and no awareness.
+    const hidden = isNonNoteDoc(path)
+      ? null
+      : hiddenReason(session.currentGroupId, path, visibilityFor(session.role));
+    if (hidden) {
       void captureServer({
         userId: session.userId,
         groupId: session.currentGroupId,
         event: EVENTS.COLLAB_AUTH_REJECTED,
-        properties: { reason: 'dm_only_blocked', documentName: path },
-      });
-      throw new Error('Unauthorized');
-    }
-
-    // GM-only gate: GM-namespace notes are visible only to admins.
-    // Editors and viewers are rejected at the protocol layer so no
-    // live state ever ships to a player session.
-    if (
-      session.role !== 'admin' &&
-      !isNonNoteDoc(path) &&
-      isNoteGmOnly(session.currentGroupId, path)
-    ) {
-      void captureServer({
-        userId: session.userId,
-        groupId: session.currentGroupId,
-        event: EVENTS.COLLAB_AUTH_REJECTED,
-        properties: { reason: 'gm_only_blocked', documentName: path },
+        properties: { reason: hidden, documentName: path },
       });
       throw new Error('Unauthorized');
     }

@@ -6,6 +6,7 @@ import {
   countVisibleNotes,
   decodePath,
   findNearestIndexPath,
+  hiddenNotesSql,
   listAllTags,
   listNotesByTag,
   listRecentForUser,
@@ -15,6 +16,7 @@ import {
   loadTags,
   recentlyUpdated,
   visibilityFor,
+  visibleNoteSql,
 } from './notes';
 import { listNoteKinds } from './characters';
 import { buildTree, type TreeDir, type TreeFile } from './tree';
@@ -532,6 +534,17 @@ describe('list surfaces — visibility filtering', () => {
         expect(listAllTags(world, vis)).toEqual(expected);
       });
 
+      it('visibleNoteSql and hiddenNotesSql select the same notes the role may see', () => {
+        const paths = (where: string): string[] =>
+          getDb()
+            .query<{ path: string }, [string]>(`SELECT n.path FROM notes n WHERE ${where} ORDER BY n.path`)
+            .all(world)
+            .map((r) => r.path);
+        const expected = [...visible[role]].sort();
+        expect(paths(`n.group_id = ? AND ${visibleNoteSql('n', vis)}`)).toEqual(expected);
+        expect(paths(`n.group_id = ?${hiddenNotesSql('n', vis)}`)).toEqual(expected);
+      });
+
       it('countVisibleNotes counts only the notes the role may see', () => {
         expect(countVisibleNotes(world, vis)).toBe(visible[role].length);
       });
@@ -543,7 +556,7 @@ describe('list surfaces — visibility filtering', () => {
 
       it('buildTree (player + gm namespaces) holds only the notes the role may see', () => {
         // Mirrors the sidebar: the gm tree is only built for an admin.
-        const opts = { hideDmOnly: vis.hideDmOnly };
+        const opts = { vis };
         const trees = [buildTree(world, { ...opts, mode: 'player' })];
         if (role === 'admin') trees.push(buildTree(world, { ...opts, mode: 'gm' }));
         expect(trees.flatMap((t) => treeFilePaths(t.root)).sort()).toEqual(

@@ -11,12 +11,12 @@ import { PenTool } from 'lucide-react';
 import { readSession } from '@/lib/session';
 import { getDb } from '@/lib/db';
 import { getWorldFeatures } from '@/lib/groups';
-import { visibilityFor } from '@/lib/notes';
+import { hiddenNotesSql, visibilityFor } from '@/lib/notes';
 import { NewDrawingButton } from '../../../excalidraw/NewDrawingButton';
 
 export const dynamic = 'force-dynamic';
 
-type Row = { path: string; title: string; updated_at: number; gm_only: number; dm_only: number };
+type Row = { path: string; title: string; updated_at: number; gm_only: number };
 
 export default async function ExcalidrawIndexPage(): Promise<ReactElement> {
   const jar = await cookies();
@@ -31,21 +31,16 @@ export default async function ExcalidrawIndexPage(): Promise<ReactElement> {
   if (!features.excalidraw) notFound();
 
   const isAdmin = session.role === 'admin';
-  const rows = getDb()
+  const visible = getDb()
     .query<Row, [string]>(
-      `SELECT path, title, updated_at, gm_only, dm_only
-         FROM notes
-        WHERE group_id = ?
-          AND path LIKE 'Excalidraw/%'
-          AND json_extract(frontmatter_json, '$.kind') = 'excalidraw'
-        ORDER BY updated_at DESC`,
+      `SELECT n.path, n.title, n.updated_at, n.gm_only
+         FROM notes n
+        WHERE n.group_id = ?
+          AND n.path LIKE 'Excalidraw/%'
+          AND json_extract(n.frontmatter_json, '$.kind') = 'excalidraw'${hiddenNotesSql('n', visibilityFor(session.role))}
+        ORDER BY n.updated_at DESC`,
     )
     .all(session.currentGroupId);
-
-  const vis = visibilityFor(session.role);
-  const visible = rows.filter(
-    (r) => !((r.gm_only === 1 && vis.hideGmOnly) || (r.dm_only === 1 && vis.hideDmOnly)),
-  );
   const gmOnly = visible.filter((r) => r.gm_only === 1);
   const shared = visible.filter((r) => r.gm_only !== 1);
 
