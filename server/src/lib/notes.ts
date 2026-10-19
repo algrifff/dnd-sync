@@ -112,7 +112,7 @@ export type TagRow = {
 // drives every route that takes a Note path through these gates.
 //
 // One `gm_only` comparison is not a gate: GM mode (`lib/gm-mode.ts`)
-// picks the namespace the tree, graph and search browse with
+// picks the namespace the tree, graph, search and asset gallery browse with
 // `gm_only = <mode>`. It only narrows, and always runs beside one of the
 // gates above.
 //
