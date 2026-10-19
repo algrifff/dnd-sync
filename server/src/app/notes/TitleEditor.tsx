@@ -9,14 +9,10 @@
 // initiated from the sidebar "..." menu so the URL doesn't shift
 // under the user while they're typing.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type * as Y from 'yjs';
 import { broadcastTreeChange } from '@/lib/tree-sync';
-
-// Hocuspocus debounces its store at ~2 s; we wait 2.5 s so the DB
-// write has landed before the sidebar refresh fires.
-const TREE_REFRESH_DELAY_MS = 2500;
-const COMMIT_REFRESH_DELAY_MS = 500;
+import { createTitleRefresh } from './title-refresh';
 
 export function TitleEditor({
   ydoc,
@@ -47,7 +43,7 @@ export function TitleEditor({
   const [value, setValue] = useState<string>(
     () => yTitle?.toString() || initialTitle,
   );
-  const treeRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [treeRefresh] = useState(() => createTitleRefresh(broadcastTreeChange));
 
   useEffect(() => {
     if (!yTitle) return;
@@ -64,11 +60,7 @@ export function TitleEditor({
     return () => yTitle.unobserve(observer);
   }, [yTitle, initialTitle]);
 
-  useEffect(() => {
-    return () => {
-      if (treeRefreshTimer.current !== null) clearTimeout(treeRefreshTimer.current);
-    };
-  }, []);
+  useEffect(() => treeRefresh.committed, [treeRefresh]);
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
     // No-op while mid-reconnect: `disabled` below should already stop
@@ -81,23 +73,7 @@ export function TitleEditor({
       yTitle.delete(0, yTitle.length);
       yTitle.insert(0, next);
     });
-    if (treeRefreshTimer.current !== null) clearTimeout(treeRefreshTimer.current);
-    treeRefreshTimer.current = setTimeout(() => {
-      treeRefreshTimer.current = null;
-      broadcastTreeChange();
-    }, TREE_REFRESH_DELAY_MS);
-  };
-
-  // Leaving the field (blur or Enter) means the rename is done: pull the
-  // pending sidebar refresh forward. The store fires 200 ms after the
-  // last keystroke, so a short delay still lands after the DB write.
-  const commit = (): void => {
-    if (treeRefreshTimer.current === null) return;
-    clearTimeout(treeRefreshTimer.current);
-    treeRefreshTimer.current = setTimeout(() => {
-      treeRefreshTimer.current = null;
-      broadcastTreeChange();
-    }, COMMIT_REFRESH_DELAY_MS);
+    treeRefresh.edited();
   };
 
   if (lockedTitle) {
@@ -119,7 +95,7 @@ export function TitleEditor({
       type="text"
       value={value}
       onChange={onChange}
-      onBlur={commit}
+      onBlur={treeRefresh.committed}
       onKeyDown={(e) => {
         if (e.key === 'Enter') e.currentTarget.blur();
       }}
