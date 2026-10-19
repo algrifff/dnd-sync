@@ -17,14 +17,10 @@ import { EVENTS } from '@/lib/analytics/events';
 import { getCampaignBySlug, listCampaigns } from '@/lib/characters';
 import { canonicalFolder } from '@/lib/ai/paths';
 import { slugify } from '@/lib/slugify';
-import { canonicalKind, KIND_INPUTS, NOTE_KINDS, type NoteKind } from '@compendium/shared';
-import { getTemplate, type TemplateKind } from '@/lib/templates';
+import { canonicalKind, KIND_INPUTS, NOTE_KINDS } from '@compendium/shared';
+import { createNote, seedFrontmatter } from '@/lib/create-note';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
-import {
-  deriveFolderIndex,
-  deriveFolderIndexesFor,
-  parentFolderUnderCampaign,
-} from '@/lib/campaign-index';
+import { deriveFolderIndexesFor } from '@/lib/campaign-index';
 import { validateSheet } from '@/lib/validateSheet';
 import {
   closeDocumentConnections,
@@ -33,7 +29,6 @@ import {
   signalSheetChanged,
 } from '@/collab/server';
 import { parseCharacter } from '@/lib/character-parser';
-import { writeNote } from '@/lib/import-apply';
 import { applyNoteEdit, type PmDoc } from '@/lib/note-edits';
 import { repointSuggestionPaths } from '@/lib/suggestion-paths';
 import { repointRelations } from '@/lib/relations';
@@ -529,7 +524,7 @@ function entityCreate(ctx: ToolContext) {
       }
 
       // Build the seed frontmatter from the AI's structured input.
-      const frontmatter = buildFrontmatter(canonical, name, sheet ?? {}, ctx.userId);
+      const frontmatter = seedFrontmatter({ kind: canonical, title: name, sheet: sheet ?? {}, username: ctx.userId });
 
       // For characters with a body, run the structured-sheet extractor
       // over the prose so HP/AC/abilities/class/race in markdown tables
@@ -572,39 +567,28 @@ function entityCreate(ctx: ToolContext) {
         frontmatter.sheet = vr.data as Record<string, unknown>;
       }
 
-      // Persist via writeNote so md-to-pm, FTS triggers, note_links,
-      // tags, derived indexes, and Yjs state all stay in lock-step
-      // with every other write path. dm_only is set in a follow-up
-      // UPDATE since writeNote doesn't take it.
+      // createNote persists via writeNote so md-to-pm, FTS triggers,
+      // note_links, tags, derived indexes, and Yjs state stay in
+      // lock-step with every other write path.
       try {
-        writeNote({
-          groupId: ctx.groupId,
+        const made = await createNote(ctx.groupId, {
           userId: ctx.userId,
           path,
+          kind: canonical,
+          title: name,
+          seeded: frontmatter,
           markdown: bodyToWrite,
-          frontmatter,
-          isUpdate: false,
+          dmOnly,
         });
+        if (made.status === 'exists') {
+          return { ok: false as const, error: `Already exists at ${path}` };
+        }
       } catch (err) {
         return {
           ok: false as const,
           error: 'write_failed',
           message: (err as Error).message,
         };
-      }
-      if (dmOnly) {
-        db.query(
-          'UPDATE notes SET dm_only = 1 WHERE group_id = ? AND path = ?',
-        ).run(ctx.groupId, path);
-      }
-
-      const parent = parentFolderUnderCampaign(path);
-      if (parent) {
-        void deriveFolderIndex(ctx.groupId, parent, {
-          userId: ctx.userId,
-        }).catch((err) => {
-          console.error('[ai/tools] folder index refresh failed:', err);
-        });
       }
 
       void captureServer({
@@ -1333,122 +1317,4 @@ function obj(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v)
     ? (v as Record<string, unknown>)
     : {};
-}
-
-// ── Frontmatter builder ────────────────────────────────────────────────
-
-function buildFrontmatter(
-  canonical: NoteKind,
-  name: string,
-  extraSheet: Record<string, unknown>,
-  username: string,
-): Record<string, unknown> {
-  const templated: NoteKind[] = [
-    'character', 'person', 'creature', 'item', 'location', 'session',
-  ];
-  if (canonical === 'quest') return { kind: 'quest' };
-  if (!templated.includes(canonical)) return {};
-
-  const template = getTemplate(canonical as TemplateKind);
-  const sheet: Record<string, unknown> = { name, ...extraSheet };
-  if (template) {
-    for (const section of template.schema.sections) {
-      for (const field of section.fields) {
-        if (field.id !== 'name' && !(field.id in sheet) && field.default !== undefined) {
-          sheet[field.id] = field.default;
-        }
-      }
-    }
-  }
-
-  if (canonical === 'character') {
-    hydrateCharacterSheetFromTemplateDefaults(sheet);
-  }
-
-  const fm: Record<string, unknown> = { kind: canonical, template: canonical, sheet };
-  if (canonical === 'character') fm.player = username;
-  return fm;
-}
-
-/** Template defaults still seed legacy flat keys (`str`, `level`, `class`,
- *  `hp_max`). The sheet header + Zod shape expect nested objects — bridge
- *  them here so AI-created PCs render immediately. */
-function hydrateCharacterSheetFromTemplateDefaults(sheet: Record<string, unknown>): void {
-  const ab = sheet.ability_scores;
-  const hasAbilityBlock =
-    ab &&
-    typeof ab === 'object' &&
-    (['str', 'dex', 'con', 'int', 'wis', 'cha'] as const).some(
-      (k) => typeof (ab as Record<string, unknown>)[k] === 'number',
-    );
-  if (!hasAbilityBlock) {
-    const keys = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
-    const scores: Partial<Record<(typeof keys)[number], number>> = {};
-    let any = false;
-    for (const k of keys) {
-      const v = sheet[k];
-      if (typeof v === 'number' && Number.isFinite(v)) {
-        scores[k] = v;
-        any = true;
-      }
-    }
-    if (any) {
-      sheet.ability_scores = {
-        str: scores.str ?? 10,
-        dex: scores.dex ?? 10,
-        con: scores.con ?? 10,
-        int: scores.int ?? 10,
-        wis: scores.wis ?? 10,
-        cha: scores.cha ?? 10,
-      };
-    }
-  }
-
-  const hasClasses = Array.isArray(sheet.classes) && sheet.classes.length > 0;
-  if (!hasClasses) {
-    const className =
-      typeof sheet.class === 'string' && sheet.class.trim() ? sheet.class.trim() : null;
-    let level: number | null = null;
-    if (typeof sheet.level === 'number' && sheet.level > 0) level = Math.trunc(sheet.level);
-    else if (typeof sheet.level === 'string') {
-      const n = Number(sheet.level);
-      if (Number.isFinite(n) && n > 0) level = Math.trunc(n);
-    }
-    if (className || level !== null) {
-      sheet.classes = [{ ref: { name: className ?? 'Adventurer' }, level: level ?? 1 }];
-    }
-  }
-
-  const hp = sheet.hit_points;
-  const hasHpBlock =
-    hp &&
-    typeof hp === 'object' &&
-    typeof (hp as Record<string, unknown>).max === 'number';
-  if (!hasHpBlock) {
-    const max = typeof sheet.hp_max === 'number' ? sheet.hp_max : null;
-    const cur = typeof sheet.hp_current === 'number' ? sheet.hp_current : null;
-    if (max !== null || cur !== null) {
-      sheet.hit_points = {
-        max: max ?? cur ?? 0,
-        current: cur ?? max ?? 0,
-        temporary:
-          typeof sheet.hp_temporary === 'number' && Number.isFinite(sheet.hp_temporary)
-            ? sheet.hp_temporary
-            : 0,
-      };
-    }
-  }
-
-  const ac = sheet.armor_class;
-  const hasAcBlock =
-    ac &&
-    typeof ac === 'object' &&
-    typeof (ac as Record<string, unknown>).value === 'number';
-  if (!hasAcBlock && typeof sheet.ac === 'number' && Number.isFinite(sheet.ac)) {
-    sheet.armor_class = { value: sheet.ac };
-  }
-
-  if (typeof sheet.speed === 'number' && Number.isFinite(sheet.speed)) {
-    sheet.speed = { walk: sheet.speed };
-  }
 }
