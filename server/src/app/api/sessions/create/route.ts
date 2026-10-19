@@ -25,6 +25,8 @@ import { logAudit } from '@/lib/audit';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
 import { getTemplate } from '@/lib/templates';
 import { generateSessionTitle } from '@/lib/session-title';
+import { nextSessionNumber } from '@/lib/sessions';
+import { visibilityFor } from '@/lib/notes';
 import { slugify } from '@/lib/slugify';
 
 export const dynamic = 'force-dynamic';
@@ -75,8 +77,19 @@ export async function POST(req: NextRequest): Promise<Response> {
       }
     }
   }
+  // No await from here to deriveAllIndexes below, so on the single
+  // server process no other create can read session_notes between this
+  // number and the row that records it.
+  const sessionNumber =
+    body.sessionNumber ??
+    nextSessionNumber({
+      groupId: session.currentGroupId,
+      campaignSlug: body.campaignSlug,
+      folderPath: campaign.folder_path,
+      vis: visibilityFor(session.role),
+    });
   sheet.date = body.date;
-  if (body.sessionNumber != null) sheet.session_number = body.sessionNumber;
+  sheet.session_number = sessionNumber;
   if (body.title) sheet.title = body.title;
 
   const frontmatter: Record<string, unknown> = {
@@ -86,7 +99,9 @@ export async function POST(req: NextRequest): Promise<Response> {
     sheet,
   };
 
-  const titleText = body.title ?? generateSessionTitle(session.displayName || session.username, body.date);
+  const titleText =
+    body.title ??
+    generateSessionTitle(sessionNumber, session.displayName || session.username, body.date);
   const emptyDoc = { type: 'doc', content: [{ type: 'paragraph' }] };
   const schema = getPmSchema();
   const ydoc = prosemirrorJSONToYDoc(schema, emptyDoc, 'default');
