@@ -565,6 +565,38 @@ describe('entity_create — canonical kinds', () => {
     const fm = JSON.parse(readNote('Campaigns/mill/People/grell.md').frontmatter_json);
     expect(fm.kind).toBe('person');
   });
+
+  it("should set a new Character's player to the calling user's id", async () => {
+    seedCampaign();
+    const tools = createTools(ctxFor('dm'));
+
+    const result = await tools.entity_create.execute!(
+      { kind: 'character', name: 'Odo', campaignSlug: 'mill', dmOnly: false },
+      { toolCallId: 'ec3', messages: [] },
+    );
+
+    expect(result).toMatchObject({ ok: true, path: 'Campaigns/mill/Characters/odo.md' });
+    const fm = JSON.parse(readNote('Campaigns/mill/Characters/odo.md').frontmatter_json);
+    expect([fm.kind, fm.player]).toEqual(['character', userId]);
+  });
+
+  it('should refuse an invalid Sheet and write nothing', async () => {
+    seedCampaign();
+    const tools = createTools(ctxFor('dm'));
+
+    const result = await tools.entity_create.execute!(
+      { kind: 'character', name: 'Bad Odo', campaignSlug: 'mill', dmOnly: false, sheet: { hit_points: { max: 'lots' } } },
+      { toolCallId: 'ec4', messages: [] },
+    );
+
+    const written = getDb()
+      .query('SELECT 1 FROM notes WHERE group_id = ? AND path = ?')
+      .get(groupId, 'Campaigns/mill/Characters/bad-odo.md');
+    expect({ error: (result as { error?: string }).error, written: written ?? null }).toEqual({
+      error: 'invalid_sheet for kind character',
+      written: null,
+    });
+  });
 });
 
 describe('backlink_create — link target survives the next collab save', () => {

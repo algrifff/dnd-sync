@@ -13,6 +13,7 @@ import { verifyCsrf } from '@/lib/csrf';
 import { getDb, isUniqueConstraintError } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
 import { isHiddenFrom, visibilityFor } from '@/lib/notes';
+import { nextFreePath } from '@/lib/create-note';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,7 +74,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   // of concurrent requests still terminates in a clean 409 rather than
   // retrying forever.
   const MAX_ATTEMPTS = 5;
-  let newPath = nextAvailablePath(session.currentGroupId, body.path);
+  let newPath = nextFreePath(session.currentGroupId, body.path, copySuffix, 1);
   let newTitle = deriveTitle(src.title, newPath);
   for (let attempt = 1; ; attempt++) {
     try {
@@ -134,7 +135,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       if (attempt >= MAX_ATTEMPTS) {
         return json({ error: 'exists', path: newPath }, 409);
       }
-      newPath = nextAvailablePath(session.currentGroupId, body.path);
+      newPath = nextFreePath(session.currentGroupId, body.path, copySuffix, 1);
       newTitle = deriveTitle(src.title, newPath);
     }
   }
@@ -150,21 +151,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   return json({ ok: true, path: newPath }, 201);
 }
 
-function nextAvailablePath(groupId: string, origPath: string): string {
-  const idx = origPath.lastIndexOf('/');
-  const dir = idx >= 0 ? origPath.slice(0, idx + 1) : '';
-  const leaf = origPath.slice(idx + 1).replace(/\.md$/i, '');
-  for (let i = 1; i < 1000; i++) {
-    const candidate = `${dir}${leaf} (copy${i > 1 ? ' ' + i : ''}).md`;
-    const row = getDb()
-      .query<{ n: number }, [string, string]>(
-        'SELECT COUNT(*) AS n FROM notes WHERE group_id = ? AND path = ?',
-      )
-      .get(groupId, candidate);
-    if ((row?.n ?? 0) === 0) return candidate;
-  }
-  throw new Error('too many duplicates of ' + origPath);
-}
+const copySuffix = (n: number): string => (n === 1 ? ' (copy)' : ` (copy ${n})`);
 
 function deriveTitle(origTitle: string, newPath: string): string {
   const leaf = (newPath.split('/').pop() ?? newPath).replace(/\.md$/i, '');
