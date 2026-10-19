@@ -1,9 +1,9 @@
-// Canonical path resolver for AI tool calls.
+// Canonical note paths: the folder every new note of a given kind lands in.
 //
-// Every entity the AI creates MUST derive its folder from this function.
-// The AI never chooses paths freely — it passes kind + campaignSlug and
-// gets back the exact folder it must write to. This prevents the world
-// from accumulating arbitrary folder structures when the AI operates.
+// Every note a server path creates (Wrap-up, Smart Import, the AI
+// tools) derives its folder from this module. Callers pass kind +
+// campaignSlug and get back the exact folder to write to, so the world
+// does not accumulate arbitrary folder structures.
 //
 // FOLDER CONVENTIONS (enforced by canonicalFolder + isCanonicalPath):
 //
