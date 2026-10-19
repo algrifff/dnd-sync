@@ -2,29 +2,26 @@
 //
 // Body: { campaignSlug, date, title?, sessionNumber? }
 //
-// Builds a note at Campaigns/<folder>/Sessions/<date>-<title-slug>.md
+// Builds a note at Campaigns/<folder>/Adventure Log/<date>-<title-slug>.md
 // with frontmatter:
 //
 //   kind: session
 //   template: session
 //   campaigns: [<slug>]
-//   sheet: { date, session_number?, title?, attendees: [...template default], ...rest from template defaults }
+//   sheet: { date, session_number?, title?, ...template defaults }
 //
 // Any member of the World can open a Session, Players included.
 
-import { randomUUID } from 'node:crypto';
-import { prosemirrorJSONToYDoc } from 'y-prosemirror';
-import * as Y from 'yjs';
 import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
-import { getDb, isUniqueConstraintError } from '@/lib/db';
-import { getPmSchema } from '@/lib/pm-schema';
+import { getDb } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
-import { deriveAllIndexes } from '@/lib/derive-indexes';
-import { getTemplate } from '@/lib/templates';
+import { createNote } from '@/lib/create-note';
 import { generateSessionTitle } from '@/lib/session-title';
+import { nextSessionNumber } from '@/lib/sessions';
+import { visibilityFor } from '@/lib/notes';
 import { slugify } from '@/lib/slugify';
 
 export const dynamic = 'force-dynamic';
@@ -64,81 +61,36 @@ export async function POST(req: NextRequest): Promise<Response> {
   const fileStem = slugTitle ? `${body.date}-${slugTitle}` : body.date;
   const path = `${campaign.folder_path}/Adventure Log/${fileStem}.md`;
 
-  // Seed sheet with template defaults, then layer on the caller's
-  // picks so explicit values win.
-  const template = getTemplate('session');
-  const sheet: Record<string, unknown> = {};
-  if (template) {
-    for (const section of template.schema.sections) {
-      for (const field of section.fields) {
-        if (field.default !== undefined) sheet[field.id] = field.default;
-      }
-    }
-  }
-  sheet.date = body.date;
-  if (body.sessionNumber != null) sheet.session_number = body.sessionNumber;
+  // createNote runs synchronously through deriveAllIndexes, so on the
+  // single server process no other create can read session_notes between
+  // this number and the row that records it.
+  const sessionNumber =
+    body.sessionNumber ??
+    nextSessionNumber({
+      groupId: session.currentGroupId,
+      campaignSlug: body.campaignSlug,
+      folderPath: campaign.folder_path,
+      vis: visibilityFor(session.role),
+    });
+  // The caller's picks win over the template defaults.
+  const sheet: Record<string, unknown> = { date: body.date, session_number: sessionNumber };
   if (body.title) sheet.title = body.title;
 
-  const frontmatter: Record<string, unknown> = {
+  const titleText =
+    body.title ??
+    generateSessionTitle(sessionNumber, session.displayName || session.username, body.date);
+
+  // A lost creation race (a rapid double-click on "New session") is the
+  // same 409 as a taken path.
+  const created = await createNote(session.currentGroupId, {
+    userId: session.userId,
+    path,
     kind: 'session',
-    template: 'session',
-    campaigns: [body.campaignSlug],
+    title: titleText,
     sheet,
-  };
-
-  const titleText = body.title ?? generateSessionTitle(session.displayName || session.username, body.date);
-  const emptyDoc = { type: 'doc', content: [{ type: 'paragraph' }] };
-  const schema = getPmSchema();
-  const ydoc = prosemirrorJSONToYDoc(schema, emptyDoc, 'default');
-  ydoc.getText('title').insert(0, titleText);
-  const state = Y.encodeStateAsUpdate(ydoc);
-
-  const id = randomUUID();
-  const now = Date.now();
-  // Attempt the INSERT directly rather than SELECT-then-INSERT — two
-  // concurrent requests for the same session path (e.g. a rapid
-  // double-click on "New session") would otherwise both pass a
-  // pre-check and the loser's raw INSERT would 500 on the UNIQUE
-  // constraint. Translate a lost race into the same 409 the pre-check
-  // used to return.
-  try {
-    db.query(
-      `INSERT INTO notes (id, group_id, path, title, content_json, content_text,
-                          content_md, yjs_state, frontmatter_json, byte_size,
-                          updated_at, updated_by, created_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      id,
-      session.currentGroupId,
-      path,
-      titleText,
-      JSON.stringify(emptyDoc),
-      '',
-      '',
-      state,
-      JSON.stringify(frontmatter),
-      0,
-      now,
-      session.userId,
-      now,
-      session.userId,
-    );
-  } catch (err) {
-    if (isUniqueConstraintError(err)) {
-      return json({ error: 'exists', path }, 409);
-    }
-    throw err;
-  }
-
-  try {
-    deriveAllIndexes({
-      groupId: session.currentGroupId,
-      notePath: path,
-      frontmatterJson: JSON.stringify(frontmatter),
-    });
-  } catch (err) {
-    console.error('[sessions/create] derive failed:', err);
-  }
+    frontmatter: { campaigns: [body.campaignSlug] },
+  });
+  if (created.status === 'exists') return json({ error: 'exists', path }, 409);
 
   logAudit({
     action: 'note.create',

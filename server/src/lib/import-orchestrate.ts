@@ -44,7 +44,7 @@ import {
 } from './ai/skills/common';
 import { generateStructured } from './ai/openai';
 import { runRelink, type EntityIndexEntry } from './ai/skills/relink';
-import { canonicalPath, type EntityKind } from './ai/paths';
+import { canonicalPath, type EntityKind } from './paths';
 import { listCampaigns, ensureCampaignForPath } from './characters';
 import { ensureIndexNote } from './index-notes';
 import { deriveAllIndexes } from './derive-indexes';

@@ -78,7 +78,7 @@ Key tables:
 | `import_jobs` | AI import pipeline state — `uploaded` → `orchestrating_assets` → `orchestrating_campaign` → `orchestrating_entities` → `orchestrating_quality` → `applied` on the live Smart Import path (can pause at `waiting_for_answer`); `parsing` → `analysing` → `ready` is the legacy manual-review path, still valid statuses but not driven by the current UI |
 | `assets` | Binary files (images etc.) deduplicated by content hash |
 | `note_links` | Graph edges between notes (backlinks) |
-| `note_relations` | Typed Relationships (v52): `from_path relation to_path` from the fixed list in `shared/src/schemas/relation.ts` (each type in one of `RELATION_GROUPS`, which the Orrery colours by), with the Session that established it. Authored, never derived: through a reviewed Wrap-up, or by hand on the Note page by someone who can edit both Notes (ADR 0003); only `lib/relations.ts` reads or writes it, and every rename/move/delete carries its rows |
+| `note_relations` | Typed Relationships (v52): `from_path relation to_path` from the fixed list in `shared/src/schemas/relation.ts` (each type in one of `RELATION_GROUPS`, which the Orrery colours by), with the Session that established it. Authored, never derived: through a reviewed Wrap-up, or by hand on the Note page by someone who can edit both Notes (ADR 0003); only `lib/relations.ts` reads or writes it, and `lib/note-paths.ts` carries its rows through every rename/move/delete |
 | `notes_fts` | FTS5 full-text search index, auto-synced by triggers on `notes` (including path moves). `path` and `group_id` are indexed (v48), so build every MATCH with `worldFtsMatch()` (or `worldBodyPhraseMatch()` for a phrase in the body only) from `lib/search.ts`, never write to it directly |
 | `group_invite_tokens` | Shareable world join links |
 | `audit_log` | Admin action history |
@@ -124,12 +124,18 @@ There is no in-app AI chat. It was removed so players can reach Claude
 through an MCP connector instead (built separately). `OPENAI_API_KEY`
 still powers the import pipeline and PDF character-sheet import below.
 
-**AI tools** (`server/src/lib/ai/tools.ts#createTools`) are currently
-unreferenced outside `tools.test.ts`. They are kept for the MCP
-connector to adopt. `getToolsForRole` filters them per role: `dm` gets
-all 13, `player` loses the 4 GM-only ones below, and `viewer`
-additionally loses every mutating tool, leaving just `campaign_list` /
-`campaign_browse` / `entity_search` / `note_read`.
+**AI tools** (`server/src/lib/ai/tools.ts#createTools`) have no
+production caller. Only tests import them: `ai/tools.test.ts`, plus
+`relations.test.ts` and `character-suggestions.test.ts`, which drive
+`entity_move` / `entity_change_kind`. The MCP connector does not use
+them (it has its own registry in `lib/mcp/tools.ts`). The code they
+share with live paths lives outside `ai/`: note body edits go through
+`lib/note-edits.ts#applyNoteEdit` (tested through its own interface in
+`note-edits.test.ts`) and folder/path rules through `lib/paths.ts`.
+`getToolsForRole` filters them per role: `dm` gets all 13, `player`
+loses the 4 GM-only ones below, and `viewer` additionally loses every
+mutating tool, leaving just `campaign_list` / `campaign_browse` /
+`entity_search` / `note_read`.
 - `campaign_list` — list registered campaigns (slug + name); `entity_create` only accepts these slugs
 - `campaign_browse` — list notes inside a campaign
 - `entity_search` — search before creating (prevent duplicates)
@@ -138,7 +144,7 @@ additionally loses every mutating tool, leaving just `campaign_list` /
 - `entity_edit_content` — append prose to note body
 - `note_read` — read full content + frontmatter of any note
 - `backlink_create` — add knowledge graph edges
-- `inventory_add` — add items to character sheet (GM only)
+- `inventory_add` — add items to character sheet
 - `entity_move`, `entity_change_kind`, `note_write_section`, `session_finalize` (GM only)
 
 **Wrap-up** — the app does not generate it. A Player's own Claude reads `GET /api/sessions/wrap-up/context` (log + visible candidate Notes, flagged `recorded` when their History already links the Session) and submits `POST /api/sessions/wrap-up` (strict Zod `WrapUpSubmission`; a mention of a Note the caller cannot see is a 404). The closer reviews the pending proposal in the End of Session dialog; `POST /api/sessions/wrap-up/apply` adds History entries, creates new Notes, links the log, records the ticked Relationships and closes the Session. A proposal may carry `relations` (`{ from, relation, to, note? }`, each end a `mention` of the same submission by name or an `existing` Note path, `relation` from the shared `RELATION_TYPES`); an unresolvable one is `400 invalid_relation`, an existing end the caller cannot see is a 404, and apply (`acceptedRelations`) records one only when both ends landed, otherwise it comes back in `relationsSkipped`. `GET /api/sessions/wrap-up` also returns `similar`: for each mention that would create a new Note, up to 3 visible Notes with a same or close name (`lib/similar-names.ts`), computed on read. Apply accepts a `useExisting` decision (mention id to Note path) that lands the mention's History on that Note instead of creating a duplicate. A waiting proposal surfaces in the header (`WrapUpInbox`, polling `GET /api/sessions/wrap-up/pending` → `listPendingWrapUps`, visibility-gated); each entry links to the Session with `?review=1`, which opens the review dialog. Logic lives in `server/src/lib/wrap-up.ts`, whose interface is the whole flow (`readWrapUpContext`, `submitWrapUp`, `readWrapUpReview`, `applyWrapUp`, `endSession`): each checks the Session is visible and is a Session, and returns a result union the routes, the MCP tools and `session_finalize` map onto their output. `endSession` is the one close path (`mark-closed`, `session_finalize`) and, like apply, drops a pending proposal.
@@ -219,17 +225,20 @@ whole flow over HTTP) and the MCP Inspector:
 | `server/src/lib/superadmin.ts` | `ADMIN_TOKEN` check for the `/admin/*` `__sa` cookie |
 | `server/src/lib/session.ts` | Session CRUD, CSRF, expiry cleanup |
 | `server/src/lib/notes.ts` | Note CRUD, backlink derivation, FTS sync |
+| `server/src/lib/create-note.ts` | `createNote` for `notes/create`, `sessions/create`, Wrap-up apply and the `entity_create` AI tool: seeded frontmatter (Character Sheet nested + legacy flat), insert with caller-chosen retry on a taken path, derived + folder index refresh. Import, ingest, folder indexes, duplicate, promote and campaign join still insert Notes themselves |
 | `server/src/lib/groups.ts` | Worlds: `listWorldsForSession` (rail order plus role-gated `latestActivityAt` / `openSession`) and `setWorldOrder`, behind `GET /api/worlds` and `PUT /api/worlds/order`. `latestActivityAt` skips the caller's own writes by `notes.updated_by`, so every write that bumps `notes.updated_at` must also stamp `updated_by` with the acting user |
 | `server/src/app/world-rail.ts` | The worlds rail's client model: unread badges against the per-browser seen map, reorder, 1–9 shortcuts and remembered last pages, pure apart from its localStorage wrappers |
-| `server/src/lib/relations.ts` | Relationships: `addRelation` (plus its manual link), `addManualLink` / `removeLink` for plain links, `removeRelation`, visibility-gated `listRelations`, and the repoint/delete helpers every move and delete path calls |
+| `server/src/lib/relations.ts` | Relationships: `addRelation` (plus its manual link), `addManualLink` / `removeLink` for plain links, `removeRelation`, visibility-gated `listRelations`, and the `repointRelations` / `deleteRelationsOf` helpers that `note-paths.ts` calls |
+| `server/src/lib/note-paths.ts` | The one owner of path-keyed rows on `renameNotes` (one Note, a batch or a folder), `copyNote` and `deleteNotes`: each runs its own transaction and refreshes folder indexes, and rename also rewrites wikilinks in other Notes' bodies. `PATH_COLUMNS` lists every path-keyed table: add any new one there and to `note-paths.test.ts`. Auth, visibility and draining open editors stay with the caller |
 | `server/src/lib/note-permissions.ts` | `canEditDoc`, the one edit-rights rule shared by the collab server, the Connections panel and `/api/notes/relations` |
 | `server/src/app/api/notes/relations/route.ts` | `POST`/`DELETE` a Relationship or (`relation: 'link'`) a plain link between two Notes; needs `canEditDoc` on both, hidden Notes 404 first, audits `relation.add` / `relation.remove` |
 | `server/src/lib/unlinked-mentions.ts` | Unlinked mentions: Notes that name this Note's title or an alias as a whole word without linking to it. FTS finds candidates (`worldBodyPhraseMatch`), then a regex-free scan of the original text confirms the word and builds the snippet; read-only |
-| `server/src/lib/ai/tools.ts` | AI tool definitions, unreferenced until the MCP connector adopts them |
+| `server/src/lib/ai/tools.ts` | AI tool definitions; no production caller, only tests import them |
+| `server/src/lib/paths.ts` | `canonicalFolder` / `canonicalPath`: the folder a new note of each kind lands in (Wrap-up, Smart Import) |
 | `server/src/lib/home.ts` | Cross-world reads for Home (`/me`): `listOpenSessionsForUser` (newest open Session per World) and `listCharacterWorlds`. Every row spans all the user's Worlds and is gated by their role in that Note's own World |
 | `server/src/lib/wrap-up.ts` | Wrap-up: proposal shape, the one submission schema, candidate context, stale-checked idempotent apply, the one close path |
 | `server/src/lib/similar-names.ts` | Name similarity: `nameTokens`, `findSimilarNotes` (visibility-gated; same name, close spelling, or one near-identical word; containment deliberately excluded) behind the new-Note warning and the Wrap-up `similar` field |
-| `server/src/lib/note-edits.ts` | Lossless PM-JSON edits: `addHistoryEntry`, `linkMention`, `applyNoteEdit` |
+| `server/src/lib/note-edits.ts` | Lossless PM-JSON edits: `addHistoryEntry`, `linkMention`, `applyNoteEdit`, whose collab-server dependency is the `LiveDocuments` seam (Hocuspocus adapter in prod, in-memory in tests) |
 | `server/src/lib/import-orchestrate.ts` | "Smart Import" — the multi-phase pipeline the vault UI actually drives (assets → campaign → entities → quality) |
 | `server/src/lib/assets.ts` | Content-addressed asset storage — hash/mime dedup, `deleteAsset()` reference-checked delete |
 | `server/src/lib/oauth.ts` | OAuth 2.1 authorization server for the MCP connector — clients (DCR + CIMD), hashed codes/tokens, PKCE, refresh rotation, bearer validation, revocation, prune |
@@ -335,7 +344,7 @@ unlinks that file once no `assets` row anywhere still points at it.
 
 **Legacy flat sheet keys still exist** — `hp_current`, `ac`, `str`/`dex`/…. `CharacterHeader` writes BOTH the new nested shape and the legacy flat keys in one patch so the old `CharacterSheet` side-panel template keeps rendering. Do the same on any new character-touching write path during the transition.
 
-**Kind mapping lives in one place** — `shared/src/schemas/kind.ts`. `NOTE_KINDS` is the canonical list (`character | person | creature | item | location | quest | lore | session | note`) and `KIND_ALIASES` collapses legacy aliases: `pc` → `character`, `npc|ally|villain` → `person`, `monster` → `creature`. Use `canonicalKind()` on validated input and `parseKind()` on untrusted strings. The AI tools and `canonicalFolder()` (`lib/ai/paths.ts`) call it directly; the UI's `sheet-header/util.ts#normalizeKind` is `parseKind()` narrowed to `SHEETED_KINDS`, so quest/lore/session/plain notes return `null` and the SheetHeader renders nothing. Never add a second switch; change the shared table.
+**Kind mapping lives in one place** — `shared/src/schemas/kind.ts`. `NOTE_KINDS` is the canonical list (`character | person | creature | item | location | quest | lore | session | note`) and `KIND_ALIASES` collapses legacy aliases: `pc` → `character`, `npc|ally|villain` → `person`, `monster` → `creature`. Use `canonicalKind()` on validated input and `parseKind()` on untrusted strings. The AI tools and `canonicalFolder()` (`lib/paths.ts`) call it directly; the UI's `sheet-header/util.ts#normalizeKind` is `parseKind()` narrowed to `SHEETED_KINDS`, so quest/lore/session/plain notes return `null` and the SheetHeader renders nothing. Never add a second switch; change the shared table.
 
 **Per-world accent colour flows via CSS variable** — `groups.header_color` → page.tsx reads via `getWorldHeader()` → passed to `SheetHeader` → set as `--world-accent` on the wrapper div. Inline editors read it through `var(--world-accent, #8A7E6B)` — **do not prop-drill**. Also note: a scoped `.sheet-header *:focus-visible { outline: none }` rule in `globals.css` opts the subtree out of the app-wide candlelight focus ring. If you add another global focus style, scope it out too.
 

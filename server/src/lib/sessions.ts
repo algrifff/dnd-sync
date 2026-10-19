@@ -12,6 +12,7 @@
 // not explicit in frontmatter.
 
 import { getDb } from './db';
+import { hiddenNotesSql, type Visibility } from './notes';
 import { slugify } from './slugify';
 
 export type SessionStatus = 'open' | 'closed';
@@ -120,6 +121,37 @@ export function deriveSessionFromFrontmatter(opts: {
     JSON.stringify(attendees),
     Date.now(),
   );
+}
+
+/** One past the highest Session # in a campaign, among the Sessions the
+ *  caller can see. Older Sessions may carry no number, so the count is a
+ *  floor: five unnumbered Sessions make the next one 6, not 1.
+ *
+ *  Hidden Sessions are left out on purpose: counting them would let a
+ *  Player infer Secret Sessions from the number on their own. The cost
+ *  is that a Player's Session can share a number with a hidden one.
+ *
+ *  A Session belongs to the campaign by slug or by living under its
+ *  folder: imported notes often name the campaign in `campaigns:` by
+ *  display name, which slugifies to something other than the slug. */
+export function nextSessionNumber(opts: {
+  groupId: string;
+  campaignSlug: string;
+  folderPath: string;
+  vis: Visibility;
+}): number {
+  const underFolder = `${opts.folderPath.replace(/[\\%_]/g, (c) => `\\${c}`)}/%`;
+  const row = getDb()
+    .query<{ n: number }, [string, string, string]>(
+      `SELECT MAX(COALESCE(MAX(s.session_number), 0), COUNT(*)) AS n
+         FROM session_notes s
+         JOIN notes n ON n.group_id = s.group_id AND n.path = s.note_path
+        WHERE s.group_id = ?
+          AND (s.campaign_slug = ? OR s.note_path LIKE ? ESCAPE '\\')
+          ${hiddenNotesSql('n', opts.vis)}`,
+    )
+    .get(opts.groupId, opts.campaignSlug, underFolder);
+  return (row?.n ?? 0) + 1;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

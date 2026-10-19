@@ -11,20 +11,23 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { getDb } from '@/lib/db';
 import { worldFtsMatch } from '@/lib/search';
-import { loadNote, isAllowedPath } from '@/lib/notes';
+import {
+  hiddenNotesSql,
+  isAllowedPath,
+  isHiddenFrom,
+  loadNote,
+  visibilityFor,
+  type Visibility,
+} from '@/lib/notes';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 import { getCampaignBySlug, listCampaigns } from '@/lib/characters';
-import { canonicalFolder } from '@/lib/ai/paths';
+import { canonicalFolder } from '@/lib/paths';
 import { slugify } from '@/lib/slugify';
-import { canonicalKind, KIND_INPUTS, NOTE_KINDS, type NoteKind } from '@compendium/shared';
-import { getTemplate, type TemplateKind } from '@/lib/templates';
+import { canonicalKind, KIND_INPUTS, NOTE_KINDS } from '@compendium/shared';
+import { createNote, seedFrontmatter } from '@/lib/create-note';
 import { deriveAllIndexes } from '@/lib/derive-indexes';
-import {
-  deriveFolderIndex,
-  deriveFolderIndexesFor,
-  parentFolderUnderCampaign,
-} from '@/lib/campaign-index';
+import { deriveFolderIndexesFor } from '@/lib/campaign-index';
 import { validateSheet } from '@/lib/validateSheet';
 import {
   closeDocumentConnections,
@@ -33,11 +36,9 @@ import {
   signalSheetChanged,
 } from '@/collab/server';
 import { parseCharacter } from '@/lib/character-parser';
-import { writeNote } from '@/lib/import-apply';
 import { applyNoteEdit, type PmDoc } from '@/lib/note-edits';
-import { repointSuggestionPaths } from '@/lib/suggestion-paths';
-import { repointRelations } from '@/lib/relations';
 import { endSession } from '@/lib/wrap-up';
+import { renameNotes } from '@/lib/note-paths';
 import type { PmNode } from '@/lib/md-to-pm';
 
 // ── Context ────────────────────────────────────────────────────────────
@@ -49,10 +50,8 @@ export type ToolContext = {
   // The REAL session role, uncollapsed. `role` above folds both
   // 'admin' and 'editor' into 'dm' for the many places that only care
   // about GM-vs-player — but `gm_only` visibility is stricter than
-  // that fold: only 'admin' may see gm_only content (mirrors
-  // collab/server.ts#isNoteGmOnly and lib/notes.ts#visibilityFor).
-  // Every tool that reads or writes a note by path must gate on THIS
-  // field for gm_only, not on `role`.
+  // that fold: only 'admin' may see gm_only content. Gate on
+  // `visibilityOf(ctx)` below, which reads both fields, never on `role`.
   sessionRole: 'admin' | 'editor' | 'viewer';
   campaignSlug?: string | undefined;
   // Whether this chat turn is running in the GM namespace (mirrors the
@@ -62,22 +61,17 @@ export type ToolContext = {
   gmNamespace: boolean;
 };
 
-/** True when a gm_only note must be hidden from this caller. Mirrors
- *  `collab/server.ts#isNoteGmOnly`'s consumer exactly: gm_only content
- *  is visible ONLY to session role 'admin' — an 'editor' (whose
- *  collapsed `ctx.role` reads 'dm' for every other purpose) must not
- *  see it. Callers should treat a `true` result the same way they treat
- *  a missing note (return the tool's normal not-found error), never a
- *  distinct "access denied" — a hidden note must be indistinguishable
- *  from one that doesn't exist, matching every direct read path. */
-function isGmOnlyHiddenFrom(ctx: ToolContext, note: { gm_only: number }): boolean {
-  return note.gm_only === 1 && ctx.sessionRole !== 'admin';
+/** This caller's `Visibility`. gm_only follows the real session role
+ *  (`visibilityFor`): an 'editor', whose collapsed `ctx.role` reads 'dm',
+ *  must not see it. dm_only follows the collapsed role, so a 'player'
+ *  context never sees it. A hidden note answers like a missing one. */
+function visibilityOf(ctx: ToolContext): Visibility {
+  return { hideDmOnly: ctx.role !== 'dm', hideGmOnly: visibilityFor(ctx.sessionRole).hideGmOnly };
 }
 
-/** True when this caller may not see the note at all: dm_only for a
- *  non-GM, or gm_only for anyone but an admin. */
-function isHiddenFrom(ctx: ToolContext, note: { dm_only: number; gm_only: number }): boolean {
-  return (note.dm_only === 1 && ctx.role !== 'dm') || isGmOnlyHiddenFrom(ctx, note);
+/** True when gm_only alone hides the note from this caller. */
+function isGmOnlyHiddenFrom(ctx: ToolContext, note: { gm_only: number }): boolean {
+  return isHiddenFrom({ dm_only: 0, gm_only: note.gm_only }, visibilityOf(ctx));
 }
 
 /** The error for a move/rename whose destination is taken, or null when
@@ -90,7 +84,7 @@ function destinationTakenError(ctx: ToolContext, path: string): string | null {
     )
     .get(ctx.groupId, path);
   if (!taken) return null;
-  return isHiddenFrom(ctx, taken) ? `Not found: ${path}` : `Path exists: ${path}`;
+  return isHiddenFrom(taken, visibilityOf(ctx)) ? `Not found: ${path}` : `Path exists: ${path}`;
 }
 
 // ── Factory ────────────────────────────────────────────────────────────
@@ -376,8 +370,7 @@ function campaignBrowse(ctx: ToolContext) {
       const kindFilter = kind ?? null;
 
       const results = rows
-        .filter((r) => ctx.role === 'dm' || r.dm_only === 0)
-        .filter((r) => !isGmOnlyHiddenFrom(ctx, r))
+        .filter((r) => !isHiddenFrom(r, visibilityOf(ctx)))
         .map((r) => {
           let fmKind: string | undefined;
           try {
@@ -419,17 +412,13 @@ function entitySearch(ctx: ToolContext) {
 
       type FtsRow = { path: string; title: string; snippet: string };
       const rows = getDb()
-        .query<FtsRow, [string, string, number, number, number]>(
-          // Visibility: dm_only rows are withheld from non-GM callers
-          // (ctx.role === 'dm' ⟺ session role admin|editor). gm_only is
-          // namespace *selection*, not an extra filter — mirrors
-          // api/ui/search/route.ts: ctx.gmNamespace (set from
-          // isGmModeOn(), which itself requires role === 'admin') picks
-          // which partition (player vs GM) this search reads from, so
-          // an admin in GM mode can find the gm_only notes they just
-          // created. This only controls what entity_search can find —
-          // it is not the authorization gate for gm_only content. That
-          // gate now lives on every read/write tool via
+        .query<FtsRow, [string, string, number, number]>(
+          // Visibility: `visibilityOf(ctx)` is the gate. ctx.gmNamespace
+          // (set from isGmModeOn(), which itself requires role ===
+          // 'admin') only selects the partition (player vs GM) this
+          // search reads from — mirrors lib/search.ts — so an admin in
+          // GM mode can find the gm_only notes they just created. The
+          // same gate also lives on every read/write tool via
           // `isGmOnlyHiddenFrom(ctx, note)` (see note_read,
           // entity_edit_sheet, entity_edit_content, note_write_section,
           // backlink_create, inventory_add, entity_move,
@@ -443,12 +432,11 @@ function entitySearch(ctx: ToolContext) {
                ON n.group_id = notes_fts.group_id AND n.path = notes_fts.path
              WHERE notes_fts MATCH ?
                AND notes_fts.group_id = ?
-               AND (n.dm_only = 0 OR ? = 1)
-               AND n.gm_only = ?
+               AND n.gm_only = ?${hiddenNotesSql('n', visibilityOf(ctx))}
              ORDER BY notes_fts.rank
              LIMIT ?`,
         )
-        .all(match, ctx.groupId, ctx.role === 'dm' ? 1 : 0, ctx.gmNamespace ? 1 : 0, limit ?? 10);
+        .all(match, ctx.groupId, ctx.gmNamespace ? 1 : 0, limit ?? 10);
 
       return { ok: true as const, results: rows };
     },
@@ -529,83 +517,70 @@ function entityCreate(ctx: ToolContext) {
         return { ok: false as const, error: `Already exists at ${path}` };
       }
 
-      // Build the seed frontmatter from the AI's structured input.
-      const frontmatter = buildFrontmatter(canonical, name, sheet ?? {}, ctx.userId);
-
       // For characters with a body, run the structured-sheet extractor
       // over the prose so HP/AC/abilities/class/race in markdown tables
-      // flow into `frontmatter.sheet` automatically. Caller-supplied
-      // sheet fields win on conflict (the AI made a deliberate choice).
+      // flow into the Sheet automatically. Parsed-from-body beats template
+      // defaults; caller-supplied sheet fields win on conflict (the AI made
+      // a deliberate choice).
+      let seedSheet: Record<string, unknown> = sheet ?? {};
+      const extraFm: Record<string, unknown> = {};
       let bodyToWrite = '';
       if (typeof body === 'string' && body.trim().length > 0) {
         if (canonical === 'character' || kind === 'character' || kind === 'pc') {
-          const parsed = parseCharacter(body, {
-            defaultPlayer:
-              typeof frontmatter.player === 'string' ? frontmatter.player : ctx.userId,
-          });
+          const parsed = parseCharacter(body, { defaultPlayer: ctx.userId });
           const parsedSheet =
             (parsed.frontmatter.sheet as Record<string, unknown> | undefined) ?? {};
-          const aiSheet =
-            (frontmatter.sheet as Record<string, unknown> | undefined) ?? {};
-          // Parsed-from-body fills blanks; AI explicitly-set fields win.
-          frontmatter.sheet = { ...parsedSheet, ...aiSheet };
+          seedSheet = { ...parsedSheet, name, ...seedSheet };
           // Surface portrait at the top level so transfer-character / derive
           // pick it up (they read fm.portrait, not fm.sheet.portrait).
-          if (parsed.frontmatter.portrait && frontmatter.portrait == null) {
-            frontmatter.portrait = parsed.frontmatter.portrait;
-          }
+          if (parsed.frontmatter.portrait) extraFm.portrait = parsed.frontmatter.portrait;
           bodyToWrite = parsed.body;
         } else {
           bodyToWrite = body;
         }
       }
 
-      const fmKind = typeof frontmatter.kind === 'string' ? frontmatter.kind : undefined;
-      const vr = validateSheet(fmKind, frontmatter.sheet);
-      if (!vr.ok) {
-        return {
-          ok: false as const,
-          error: `invalid_sheet for kind ${fmKind}`,
-          issues: vr.issues,
-        };
-      }
-      if (frontmatter.sheet && typeof frontmatter.sheet === 'object') {
-        frontmatter.sheet = vr.data as Record<string, unknown>;
+      // A Character's `player` is the caller's user id here, as it has
+      // always been for tool-created Characters.
+      const player = ctx.userId;
+      // Validate the seeded Sheet before anything is written; the parsed
+      // result is the Sheet createNote stores.
+      const seeded = seedFrontmatter({ kind: canonical, title: name, player, sheet: seedSheet });
+      if (seeded.sheet && typeof seeded.kind === 'string') {
+        const vr = validateSheet(seeded.kind, seeded.sheet);
+        if (!vr.ok) {
+          return {
+            ok: false as const,
+            error: `invalid_sheet for kind ${seeded.kind}`,
+            issues: vr.issues,
+          };
+        }
+        extraFm.sheet = vr.data;
       }
 
-      // Persist via writeNote so md-to-pm, FTS triggers, note_links,
-      // tags, derived indexes, and Yjs state all stay in lock-step
-      // with every other write path. dm_only is set in a follow-up
-      // UPDATE since writeNote doesn't take it.
+      // createNote persists via writeNote so md-to-pm, FTS triggers,
+      // note_links, tags, derived indexes, and Yjs state stay in
+      // lock-step with every other write path.
       try {
-        writeNote({
-          groupId: ctx.groupId,
+        const made = await createNote(ctx.groupId, {
           userId: ctx.userId,
+          player,
           path,
+          kind: canonical,
+          title: name,
+          frontmatter: extraFm,
           markdown: bodyToWrite,
-          frontmatter,
-          isUpdate: false,
+          dmOnly,
         });
+        if (made.status === 'exists') {
+          return { ok: false as const, error: `Already exists at ${path}` };
+        }
       } catch (err) {
         return {
           ok: false as const,
           error: 'write_failed',
           message: (err as Error).message,
         };
-      }
-      if (dmOnly) {
-        db.query(
-          'UPDATE notes SET dm_only = 1 WHERE group_id = ? AND path = ?',
-        ).run(ctx.groupId, path);
-      }
-
-      const parent = parentFolderUnderCampaign(path);
-      if (parent) {
-        void deriveFolderIndex(ctx.groupId, parent, {
-          userId: ctx.userId,
-        }).catch((err) => {
-          console.error('[ai/tools] folder index refresh failed:', err);
-        });
       }
 
       void captureServer({
@@ -755,7 +730,6 @@ function entityMove(ctx: ToolContext) {
       if (ctx.role !== 'dm') return { ok: false as const, error: 'GM only' };
 
       if (from === to) return { ok: true as const, path: from };
-      const db = getDb();
       const fromNote = loadNote(ctx.groupId, from);
       if (!fromNote) return { ok: false as const, error: `Not found: ${from}` };
       if (isGmOnlyHiddenFrom(ctx, fromNote)) {
@@ -764,70 +738,40 @@ function entityMove(ctx: ToolContext) {
       const taken = destinationTakenError(ctx, to);
       if (taken) return { ok: false as const, error: taken };
 
-      const failed = await renameNoteRow(ctx, from, to, () => {
-        db.query(`UPDATE notes SET path=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
-          .run(to, Date.now(), ctx.userId, ctx.groupId, from);
-      });
+      const failed = await moveDrained(ctx, from, to);
       if (failed) return { ok: false as const, error: failed };
-
-      void deriveFolderIndexesFor(ctx.groupId, [from, to], {
-        userId: ctx.userId,
-      }).catch((err) => {
-        console.error('[ai/tools] folder index refresh failed:', err);
-      });
-
       return { ok: true as const, path: to };
     },
   });
 }
 
-/** Moves the note at `from` to `to`: `updateNote` rewrites the notes row,
- *  and every table keyed by the note's path follows it. Live editors are
- *  drained first so their pending keystrokes land before the path
- *  changes, then whatever reattached is discarded: a document still open
- *  under the old name would store() into a row that no longer exists.
- *  Returns an error string when the source vanished or the destination
- *  was taken while the editors drained (the callers' checks run before
- *  that await), otherwise null. */
-async function renameNoteRow(
+/** Moves the note at `from` to `to` through lib/note-paths, with
+ *  `inTransaction` written alongside. Live editors are drained first so
+ *  their pending keystrokes land before the path changes, then whatever
+ *  reattached is discarded: a document still open under the old name
+ *  would store() into a row that no longer exists. Returns an error
+ *  string when the source vanished or the destination was taken while
+ *  the editors drained (the callers' checks run before that await),
+ *  otherwise null. */
+async function moveDrained(
   ctx: ToolContext,
   from: string,
   to: string,
-  updateNote: () => void,
+  inTransaction?: () => void,
 ): Promise<string | null> {
-  const db = getDb();
   const token = await closeDocumentForWrite(ctx.groupId, from);
   try {
-    let failed: string | null = null;
-    db.transaction(() => {
-      if (!loadNote(ctx.groupId, from)) {
-        failed = `Not found: ${from}`;
-        return;
-      }
-      failed = destinationTakenError(ctx, to);
-      if (failed) return;
-      // Derived-index tables hold FKs on notes(group_id, path) with no
-      // ON UPDATE CASCADE; check them at COMMIT, after the rewrites below.
-      db.exec('PRAGMA defer_foreign_keys = 1');
-      updateNote();
-      for (const tbl of ['note_links', 'tags', 'aliases', 'characters', 'character_campaigns', 'session_notes']) {
-        const col = tbl === 'note_links' ? 'from_path'
-          : tbl === 'characters' || tbl === 'character_campaigns' || tbl === 'session_notes' ? 'note_path'
-          : 'path';
-        db.query(`UPDATE ${tbl} SET ${col}=? WHERE group_id=? AND ${col}=?`).run(to, ctx.groupId, from);
-      }
-      db.query(`UPDATE note_links SET to_path=? WHERE group_id=? AND to_path=?`).run(to, ctx.groupId, from);
-      repointSuggestionPaths(ctx.groupId, from, to);
-      repointRelations(ctx.groupId, from, to);
-      // Structured-note index tables (same FK as above), plus the two soft
-      // references notes/move also rewrites.
-      for (const tbl of ['items', 'locations', 'creatures']) {
-        db.query(`UPDATE ${tbl} SET note_path=? WHERE group_id=? AND note_path=?`).run(to, ctx.groupId, from);
-      }
-      db.query(`UPDATE locations SET parent_path=? WHERE group_id=? AND parent_path=?`).run(to, ctx.groupId, from);
-      db.query(`UPDATE users SET active_character_path=? WHERE active_character_path=?`).run(to, from);
-    })();
-    if (failed) return failed;
+    const result = await renameNotes({
+      groupId: ctx.groupId,
+      userId: ctx.userId,
+      moves: [{ from, to }],
+      ...(inTransaction ? { inTransaction } : {}),
+    });
+    if (!result.ok) {
+      return result.error === 'not_found'
+        ? `Not found: ${from}`
+        : (destinationTakenError(ctx, to) ?? `Path exists: ${to}`);
+    }
     await closeDocumentConnections(ctx.groupId, from, token);
     return null;
   } finally {
@@ -901,9 +845,9 @@ function entityChangeKind(ctx: ToolContext) {
       if (newPath !== path) {
         const taken = destinationTakenError(ctx, newPath);
         if (taken) return { ok: false as const, error: taken };
-        const failed = await renameNoteRow(ctx, path, newPath, () => {
-          db.query(`UPDATE notes SET path=?, frontmatter_json=?, updated_at=?, updated_by=? WHERE group_id=? AND path=?`)
-            .run(newPath, JSON.stringify(nextFm), Date.now(), ctx.userId, ctx.groupId, path);
+        const failed = await moveDrained(ctx, path, newPath, () => {
+          db.query(`UPDATE notes SET frontmatter_json=? WHERE group_id=? AND path=?`)
+            .run(JSON.stringify(nextFm), ctx.groupId, newPath);
         });
         if (failed) return { ok: false as const, error: failed };
       } else {
@@ -922,11 +866,14 @@ function entityChangeKind(ctx: ToolContext) {
         console.error('[ai/tools] derive failed after entity_change_kind:', err);
       }
 
-      void deriveFolderIndexesFor(ctx.groupId, [path, newPath], {
-        userId: ctx.userId,
-      }).catch((err) => {
-        console.error('[ai/tools] folder index refresh failed:', err);
-      });
+      // A move refreshed both folders' indexes already.
+      if (newPath === path) {
+        void deriveFolderIndexesFor(ctx.groupId, [path], {
+          userId: ctx.userId,
+        }).catch((err) => {
+          console.error('[ai/tools] folder index refresh failed:', err);
+        });
+      }
 
       return { ok: true as const, path: newPath, kind: canonical };
     },
@@ -1006,7 +953,7 @@ function inventoryAdd(ctx: ToolContext) {
       // caller cannot see must not be linkable.
       if (itemPath) {
         const item = loadNote(ctx.groupId, itemPath);
-        if (!item || isHiddenFrom(ctx, item)) {
+        if (!item || isHiddenFrom(item, visibilityOf(ctx))) {
           return { ok: false as const, error: `Not found: ${itemPath}` };
         }
       }
@@ -1063,7 +1010,7 @@ function noteRead(ctx: ToolContext) {
       // hidden note is indistinguishable from a missing one. gm_only is
       // stricter than dm_only: an 'editor' has ctx.role === 'dm' but
       // must not see it — see isGmOnlyHiddenFrom.
-      if (!note || isHiddenFrom(ctx, note)) {
+      if (!note || isHiddenFrom(note, visibilityOf(ctx))) {
         return { ok: false as const, error: `Not found: ${path}` };
       }
 
@@ -1331,122 +1278,4 @@ function obj(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v)
     ? (v as Record<string, unknown>)
     : {};
-}
-
-// ── Frontmatter builder ────────────────────────────────────────────────
-
-function buildFrontmatter(
-  canonical: NoteKind,
-  name: string,
-  extraSheet: Record<string, unknown>,
-  username: string,
-): Record<string, unknown> {
-  const templated: NoteKind[] = [
-    'character', 'person', 'creature', 'item', 'location', 'session',
-  ];
-  if (canonical === 'quest') return { kind: 'quest' };
-  if (!templated.includes(canonical)) return {};
-
-  const template = getTemplate(canonical as TemplateKind);
-  const sheet: Record<string, unknown> = { name, ...extraSheet };
-  if (template) {
-    for (const section of template.schema.sections) {
-      for (const field of section.fields) {
-        if (field.id !== 'name' && !(field.id in sheet) && field.default !== undefined) {
-          sheet[field.id] = field.default;
-        }
-      }
-    }
-  }
-
-  if (canonical === 'character') {
-    hydrateCharacterSheetFromTemplateDefaults(sheet);
-  }
-
-  const fm: Record<string, unknown> = { kind: canonical, template: canonical, sheet };
-  if (canonical === 'character') fm.player = username;
-  return fm;
-}
-
-/** Template defaults still seed legacy flat keys (`str`, `level`, `class`,
- *  `hp_max`). The sheet header + Zod shape expect nested objects — bridge
- *  them here so AI-created PCs render immediately. */
-function hydrateCharacterSheetFromTemplateDefaults(sheet: Record<string, unknown>): void {
-  const ab = sheet.ability_scores;
-  const hasAbilityBlock =
-    ab &&
-    typeof ab === 'object' &&
-    (['str', 'dex', 'con', 'int', 'wis', 'cha'] as const).some(
-      (k) => typeof (ab as Record<string, unknown>)[k] === 'number',
-    );
-  if (!hasAbilityBlock) {
-    const keys = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
-    const scores: Partial<Record<(typeof keys)[number], number>> = {};
-    let any = false;
-    for (const k of keys) {
-      const v = sheet[k];
-      if (typeof v === 'number' && Number.isFinite(v)) {
-        scores[k] = v;
-        any = true;
-      }
-    }
-    if (any) {
-      sheet.ability_scores = {
-        str: scores.str ?? 10,
-        dex: scores.dex ?? 10,
-        con: scores.con ?? 10,
-        int: scores.int ?? 10,
-        wis: scores.wis ?? 10,
-        cha: scores.cha ?? 10,
-      };
-    }
-  }
-
-  const hasClasses = Array.isArray(sheet.classes) && sheet.classes.length > 0;
-  if (!hasClasses) {
-    const className =
-      typeof sheet.class === 'string' && sheet.class.trim() ? sheet.class.trim() : null;
-    let level: number | null = null;
-    if (typeof sheet.level === 'number' && sheet.level > 0) level = Math.trunc(sheet.level);
-    else if (typeof sheet.level === 'string') {
-      const n = Number(sheet.level);
-      if (Number.isFinite(n) && n > 0) level = Math.trunc(n);
-    }
-    if (className || level !== null) {
-      sheet.classes = [{ ref: { name: className ?? 'Adventurer' }, level: level ?? 1 }];
-    }
-  }
-
-  const hp = sheet.hit_points;
-  const hasHpBlock =
-    hp &&
-    typeof hp === 'object' &&
-    typeof (hp as Record<string, unknown>).max === 'number';
-  if (!hasHpBlock) {
-    const max = typeof sheet.hp_max === 'number' ? sheet.hp_max : null;
-    const cur = typeof sheet.hp_current === 'number' ? sheet.hp_current : null;
-    if (max !== null || cur !== null) {
-      sheet.hit_points = {
-        max: max ?? cur ?? 0,
-        current: cur ?? max ?? 0,
-        temporary:
-          typeof sheet.hp_temporary === 'number' && Number.isFinite(sheet.hp_temporary)
-            ? sheet.hp_temporary
-            : 0,
-      };
-    }
-  }
-
-  const ac = sheet.armor_class;
-  const hasAcBlock =
-    ac &&
-    typeof ac === 'object' &&
-    typeof (ac as Record<string, unknown>).value === 'number';
-  if (!hasAcBlock && typeof sheet.ac === 'number' && Number.isFinite(sheet.ac)) {
-    sheet.armor_class = { value: sheet.ac };
-  }
-
-  if (typeof sheet.speed === 'number' && Number.isFinite(sheet.speed)) {
-    sheet.speed = { walk: sheet.speed };
-  }
 }

@@ -43,13 +43,18 @@ import {
 import { getDb } from '@/lib/db';
 import { addRelation } from '@/lib/relations';
 import { loadNameIndex, matchName, type NameIndex, type SimilarNote } from '@/lib/similar-names';
-import { loadNote, visibilityFor, type NoteRow } from '@/lib/notes';
+import {
+  hiddenNotesSql,
+  isHiddenFrom,
+  loadNote,
+  visibilityFor,
+  type NoteRow,
+  type Visibility,
+} from '@/lib/notes';
 import { getCampaignBySlug } from '@/lib/characters';
-import { canonicalPath } from '@/lib/ai/paths';
+import { canonicalPath } from '@/lib/paths';
 import { slugify } from '@/lib/slugify';
-import { getTemplate, type TemplateKind } from '@/lib/templates';
-import { writeNote } from '@/lib/import-apply';
-import { deriveFolderIndex, parentFolderUnderCampaign } from '@/lib/campaign-index';
+import { createNote } from '@/lib/create-note';
 import type { UserRole } from '@/lib/session';
 import {
   closeSession,
@@ -248,7 +253,7 @@ type SessionLookup = { status: 'ok'; note: NoteRow } | NotFound | NotASession;
  *  entry point below goes through this once. */
 function loadVisibleSession(groupId: string, role: UserRole, path: string): SessionLookup {
   const note = loadNote(groupId, path);
-  if (!note || isHidden(note, visibilityFor(role))) return { status: 'not_found' };
+  if (!note || isHiddenFrom(note, visibilityFor(role))) return { status: 'not_found' };
   return frontmatterKind(note.frontmatter_json) === 'session'
     ? { status: 'ok', note }
     : { status: 'not_a_session' };
@@ -306,13 +311,10 @@ export function readWrapUpContext(
 
 /** Notes of a mention kind that `role` may see, by title. */
 function visibleCandidates(groupId: string, role: UserRole): Array<Omit<Candidate, 'recorded'>> {
-  const vis = visibilityFor(role);
   const rows = getDb()
     .query<{ path: string; title: string; frontmatter_json: string }, [string]>(
-      `SELECT path, title, frontmatter_json FROM notes
-        WHERE group_id = ?
-          ${vis.hideDmOnly ? 'AND dm_only = 0' : ''}
-          ${vis.hideGmOnly ? 'AND gm_only = 0' : ''}
+      `SELECT path, title, frontmatter_json FROM notes n
+        WHERE n.group_id = ?${hiddenNotesSql('n', visibilityFor(role))}
         ORDER BY lower(title), path`,
     )
     .all(groupId);
@@ -400,7 +402,7 @@ export function submitWrapUp(opts: WrapUpReader & { submission: unknown }): Subm
   for (const mention of submission.mentions) {
     if (mention.match.type !== 'existing') continue;
     const target = loadNote(groupId, mention.match.path);
-    if (!target || isHidden(target, vis)) return { status: 'not_found' };
+    if (!target || isHiddenFrom(target, vis)) return { status: 'not_found' };
     if (!mentionKindOf(target.path, target.frontmatter_json)) {
       return {
         status: 'invalid_target',
@@ -412,7 +414,7 @@ export function submitWrapUp(opts: WrapUpReader & { submission: unknown }): Subm
 
   for (const suggestion of submission.suggestions) {
     const target = loadNote(groupId, suggestion.characterPath);
-    if (!target || isHidden(target, vis)) return { status: 'not_found' };
+    if (!target || isHiddenFrom(target, vis)) return { status: 'not_found' };
     if (parseKind(frontmatterKind(target.frontmatter_json)) !== 'character') {
       return {
         status: 'invalid_suggestion_target',
@@ -455,7 +457,7 @@ function resolveRelations(
   const resolveEnd = (end: SubmittedRelation['from']): ResolvedEnd => {
     if (end.type === 'existing') {
       const note = loadNote(groupId, end.path);
-      if (!note || isHidden(note, vis)) return { status: 'not_found' };
+      if (!note || isHiddenFrom(note, vis)) return { status: 'not_found' };
       return { status: 'ok', end, identity: end.path };
     }
     const wanted = end.name.toLowerCase();
@@ -529,7 +531,7 @@ export function loadPendingWrapUp(
   const vis = visibilityFor(role);
   const visible = (path: string): boolean => {
     const note = loadNote(groupId, path);
-    return note !== null && !isHidden(note, vis);
+    return note !== null && !isHiddenFrom(note, vis);
   };
   const mentions = proposal.mentions.filter((m) => m.match.type !== 'existing' || visible(m.match.path));
   const kept = new Set(mentions.map((m) => m.id));
@@ -572,7 +574,7 @@ export function listPendingWrapUps(groupId: string, role: UserRole): PendingWrap
   const vis = visibilityFor(role);
   const out: PendingWrapUp[] = [];
   for (const row of rows) {
-    if (isHidden(row, vis) || frontmatterKind(row.frontmatter_json) !== 'session') continue;
+    if (isHiddenFrom(row, vis) || frontmatterKind(row.frontmatter_json) !== 'session') continue;
     const proposal = loadPendingWrapUp(groupId, role, row.path);
     if (!proposal) continue;
     out.push({
@@ -818,7 +820,7 @@ async function applyProposal(
 
   const isVisible = (path: string): boolean => {
     const note = loadNote(groupId, path);
-    return note !== null && !isHidden(note, vis);
+    return note !== null && !isHiddenFrom(note, vis);
   };
 
   const { relationsAdded, relationsSkipped } = applyRelations({
@@ -927,8 +929,6 @@ function campaignFor(groupId: string, session: NoteRow): Campaign {
   return row ? { slug: row.slug, folderPath: row.folderPath } : null;
 }
 
-type Visibility = ReturnType<typeof visibilityFor>;
-
 type Target =
   | { status: 'ok'; path: string; created: boolean }
   | { status: 'not_visible' | 'invalid_target' | 'invalid_title' };
@@ -959,14 +959,14 @@ async function resolveTarget(opts: {
 
   if (opts.useExisting !== undefined) {
     const note = loadNote(groupId, opts.useExisting);
-    if (!note || isHidden(note, vis)) return { status: 'not_visible' };
+    if (!note || isHiddenFrom(note, vis)) return { status: 'not_visible' };
     if (!mentionKindOf(note.path, note.frontmatter_json)) return { status: 'invalid_target' };
     return { status: 'ok', path: note.path, created: false };
   }
 
   if (match.type === 'existing' && !opts.forceNew) {
     const note = loadNote(groupId, match.path);
-    return note && !isHidden(note, vis)
+    return note && !isHiddenFrom(note, vis)
       ? { status: 'ok', path: match.path, created: false }
       : { status: 'not_visible' };
   }
@@ -983,27 +983,23 @@ async function resolveTarget(opts: {
 
   const atPath = loadNote(groupId, wanted);
   const landing =
-    atPath && !isHidden(atPath, vis) ? atPath : findVisibleByTitle(groupId, vis, title, mention.kind);
+    atPath && !isHiddenFrom(atPath, vis) ? atPath : findVisibleByTitle(groupId, vis, title, mention.kind);
   if (landing) return { status: 'ok', path: landing.path, created: false };
 
-  const path = atPath ? nextFreePath(groupId, wanted) : wanted;
-  const frontmatter = newNoteFrontmatter(mention.kind, title);
-  // Every derive recomputes the dm_only column from this flag, so the
-  // flag has to be in the frontmatter or the next save un-hides the Note.
-  if (session.dm_only === 1) frontmatter.dm_only = true;
-  writeNote({ groupId, userId, path, title, markdown: summary, frontmatter, isUpdate: false });
-  if (session.dm_only === 1 || session.gm_only === 1) {
-    getDb()
-      .query('UPDATE notes SET dm_only = ?, gm_only = ? WHERE group_id = ? AND path = ?')
-      .run(session.dm_only, session.gm_only, groupId, path);
-  }
-  const parent = parentFolderUnderCampaign(path);
-  if (parent) {
-    await deriveFolderIndex(groupId, parent, { userId }).catch((err) => {
-      console.error('[wrap-up] folder index refresh failed:', err);
-    });
-  }
-  return { status: 'ok', path, created: true };
+  // A hidden holder of the wanted path is never touched: take `-2`, `-3`, ...
+  const made = await createNote(groupId, {
+    userId,
+    path: wanted,
+    kind: mention.kind,
+    title,
+    markdown: summary,
+    dmOnly: session.dm_only === 1,
+    gmOnly: session.gm_only === 1,
+    onTaken: (_taken, n) => ({ path: wanted.replace(/\.md$/, `-${n}.md`), title }),
+  });
+  if (made.status === 'exists') throw new Error(`No free path near ${wanted}`);
+  await made.folderIndex;
+  return { status: 'ok', path: made.path, created: true };
 }
 
 /** The path slug for a title. Titles with no Latin letters or digits
@@ -1013,30 +1009,6 @@ function slugFor(title: string): string {
   const slug = slugify(title);
   if (slug) return slug;
   return `note-${createHash('sha1').update(title.trim().toLowerCase()).digest('hex').slice(0, 8)}`;
-}
-
-/** `foo.md` -> `foo-2.md`, `foo-3.md`, ... the first path nothing holds. */
-function nextFreePath(groupId: string, path: string): string {
-  const base = path.replace(/\.md$/, '');
-  for (let n = 2; n < 1000; n++) {
-    const candidate = `${base}-${n}.md`;
-    if (!loadNote(groupId, candidate)) return candidate;
-  }
-  throw new Error(`No free path near ${path}`);
-}
-
-/** Seed frontmatter for a new Note: its kind and, for kinds with a
- *  template, a Sheet holding the template defaults. */
-function newNoteFrontmatter(kind: MentionKind, title: string): Record<string, unknown> {
-  if (kind === 'quest' || kind === 'lore') return { kind };
-  const template = getTemplate(kind as TemplateKind);
-  const sheet: Record<string, unknown> = { name: title };
-  for (const section of template?.schema.sections ?? []) {
-    for (const field of section.fields) {
-      if (field.id !== 'name' && field.default !== undefined) sheet[field.id] = field.default;
-    }
-  }
-  return { kind, template: kind, sheet };
 }
 
 function findVisibleByTitle(
@@ -1052,7 +1024,7 @@ function findVisibleByTitle(
     .all(groupId, title.trim());
   for (const row of rows) {
     const note = loadNote(groupId, row.path);
-    if (!note || isHidden(note, vis)) continue;
+    if (!note || isHiddenFrom(note, vis)) continue;
     if (mentionKindOf(note.path, note.frontmatter_json) === kind) return note;
   }
   return null;
@@ -1073,8 +1045,4 @@ function frontmatterKind(frontmatterJson: string): unknown {
   } catch {
     return undefined;
   }
-}
-
-function isHidden(note: { dm_only: number; gm_only: number }, vis: Visibility): boolean {
-  return (note.gm_only === 1 && vis.hideGmOnly) || (note.dm_only === 1 && vis.hideDmOnly);
 }

@@ -98,7 +98,7 @@ export const FactionSheet = z.object({
 guild: 'faction',
 
 // 3. util.ts#normalizeKind and ai/tools.ts read the shared table, so they
-//    need no edit. ai/paths.ts#canonicalFolder needs a folder case; the
+//    need no edit. paths.ts#canonicalFolder needs a folder case; the
 //    typechecker flags the missing return.
 
 // 4. FactionHeader.tsx

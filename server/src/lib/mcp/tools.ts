@@ -11,7 +11,15 @@ import { z } from 'zod';
 import { getDb } from '../db';
 import { listCampaigns } from '../characters';
 import { buildNeighborhood } from '../graph';
-import { loadBacklinks, loadNote, loadOutgoingLinks, visibilityFor, type NoteRow } from '../notes';
+import {
+  hiddenNotesSql,
+  isHiddenFrom,
+  loadBacklinks,
+  loadNote,
+  loadOutgoingLinks,
+  visibilityFor,
+  type NoteRow,
+} from '../notes';
 import { listRelations, type RelationView } from '../relations';
 import { searchWorld, type NoteSearchResult } from '../search';
 import { SNIPPET_MARK_CLOSE, SNIPPET_MARK_OPEN } from '../search-snippet';
@@ -74,18 +82,6 @@ export function bounded(text: string): string {
   return text.slice(0, cut > 0 ? cut : room) + '\n\n[truncated]' + cursor;
 }
 
-function visibilitySql(role: UserRole, col = ''): string {
-  const vis = visibilityFor(role);
-  return (vis.hideDmOnly ? ` AND ${col}dm_only = 0` : '') + (vis.hideGmOnly ? ` AND ${col}gm_only = 0` : '');
-}
-
-function canSee(row: Pick<NoteRow, 'dm_only' | 'gm_only'>, role: UserRole): boolean {
-  const vis = visibilityFor(role);
-  if (vis.hideDmOnly && row.dm_only) return false;
-  if (vis.hideGmOnly && row.gm_only) return false;
-  return true;
-}
-
 /** Load a note the caller is allowed to see. Accepts the path with or
  *  without the `.md` suffix and tolerates a leading slash. */
 function loadVisible(ctx: McpContext, rawPath: string): NoteRow | null {
@@ -93,7 +89,7 @@ function loadVisible(ctx: McpContext, rawPath: string): NoteRow | null {
   const candidates = path.endsWith('.md') || path.endsWith('.canvas') ? [path] : [path, `${path}.md`];
   for (const p of candidates) {
     const row = loadNote(ctx.groupId, p);
-    if (row) return canSee(row, ctx.role) ? row : null;
+    if (row) return isHiddenFrom(row, visibilityFor(ctx.role)) ? null : row;
   }
   return null;
 }
@@ -142,7 +138,7 @@ const browseNotesTool = define({
     const limit = args.limit ?? DEFAULT_PAGE;
     const folder = args.folder?.replace(/^\/+|\/+$/g, '');
     const params: (string | number)[] = [ctx.groupId];
-    let where = `group_id = ?${visibilitySql(ctx.role)}`;
+    let where = `n.group_id = ?${hiddenNotesSql('n', visibilityFor(ctx.role))}`;
     if (folder) {
       where += ' AND path LIKE ? ESCAPE \'\\\'';
       params.push(`${folder.replace(/[\\%_]/g, '\\$&')}/%`);
@@ -158,7 +154,7 @@ const browseNotesTool = define({
     params.push(limit + 1);
     const rows = getDb()
       .query<{ path: string; title: string; frontmatter_json: string }, (string | number)[]>(
-        `SELECT path, title, frontmatter_json FROM notes WHERE ${where} ORDER BY path LIMIT ?`,
+        `SELECT path, title, frontmatter_json FROM notes n WHERE ${where} ORDER BY path LIMIT ?`,
       )
       .all(...params);
     const page = rows.slice(0, limit);
@@ -221,7 +217,7 @@ function sharedTagLines(ctx: McpContext, path: string): string[] {
       `SELECT n.path AS path, n.title AS title, group_concat(t.tag, ', ') AS tags
          FROM tags me
          JOIN tags t ON t.group_id = me.group_id AND t.tag = me.tag AND t.path <> me.path
-         JOIN notes n ON n.group_id = t.group_id AND n.path = t.path${visibilitySql(ctx.role, 'n.')}
+         JOIN notes n ON n.group_id = t.group_id AND n.path = t.path${hiddenNotesSql('n', visibilityFor(ctx.role))}
         WHERE me.group_id = ? AND me.path = ?
         GROUP BY n.path
         ORDER BY COUNT(*) DESC, n.path
@@ -300,7 +296,7 @@ const noteNeighborsTool = define({
     if (!note) return notFound(args.path);
     const graph = buildNeighborhood(ctx.groupId, note.path, args.depth ?? 1, {
       mode: note.gm_only ? 'gm' : 'player',
-      hideDmOnly: visibilityFor(ctx.role).hideDmOnly,
+      vis: visibilityFor(ctx.role),
     });
     if (!graph) return notFound(args.path);
 

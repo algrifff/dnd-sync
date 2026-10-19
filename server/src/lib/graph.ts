@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import { type NoteKind, parseKind, type RelationType } from '@compendium/shared';
 import { isAnchorPath } from '@/app/graph/graphStyle';
 import { getDb } from './db';
+import { hiddenNotesSql, type Visibility } from './notes';
 import { listWorldRelations } from './relations';
 
 export type GraphNode = {
@@ -75,14 +76,14 @@ export type GraphMode = 'player' | 'gm';
 export function buildGraph(
   groupId: string,
   scope: GraphScope,
-  opts: { mode?: GraphMode; hideDmOnly: boolean },
+  opts: { mode?: GraphMode; vis: Visibility },
 ): GraphPayload {
   const db = getDb();
   const gmFlag = opts.mode === 'gm' ? 1 : 0;
-  // Viewers don't see dm_only notes. gm_only is already namespace-
-  // selected by `mode` above, so it needs no second predicate here.
-  const dmClause = opts.hideDmOnly ? ' AND dm_only = 0' : '';
-  const dmClauseN = opts.hideDmOnly ? ' AND n.dm_only = 0' : '';
+  // `mode` picks the namespace; `opts.vis` is the gate. GM mode is
+  // admin-only (`lib/gm-mode.ts`), so the gate never empties it.
+  const hidden = hiddenNotesSql('notes', opts.vis);
+  const hiddenN = hiddenNotesSql('n', opts.vis);
 
   // Fetch the scoped note set first; everything else joins off these.
   type NoteRow = { path: string; title: string; updatedAt: number; kind: string | null };
@@ -91,7 +92,7 @@ export function buildGraph(
     noteRows = db
       .query<NoteRow, [string, number]>(
         `SELECT path, title, updated_at AS updatedAt, ${KIND_SQL} AS kind
-           FROM notes WHERE group_id = ? AND gm_only = ?${dmClause}`,
+           FROM notes WHERE group_id = ? AND gm_only = ?${hidden}`,
       )
       .all(groupId, gmFlag);
   } else if (scope.kind === 'folder') {
@@ -99,7 +100,7 @@ export function buildGraph(
       .query<NoteRow, [string, number, string, string]>(
         `SELECT path, title, updated_at AS updatedAt, ${KIND_SQL} AS kind
            FROM notes
-          WHERE group_id = ? AND gm_only = ? AND (path = ? OR path LIKE ? || '/%')${dmClause}`,
+          WHERE group_id = ? AND gm_only = ? AND (path = ? OR path LIKE ? || '/%')${hidden}`,
       )
       .all(groupId, gmFlag, scope.path, scope.path);
   } else {
@@ -108,7 +109,7 @@ export function buildGraph(
         `SELECT n.path AS path, n.title AS title, n.updated_at AS updatedAt, ${KIND_SQL_N} AS kind
            FROM notes n
            JOIN tags t ON t.group_id = n.group_id AND t.path = n.path
-          WHERE n.group_id = ? AND n.gm_only = ? AND t.tag = ?${dmClauseN}`,
+          WHERE n.group_id = ? AND n.gm_only = ? AND t.tag = ?${hiddenN}`,
       )
       .all(groupId, gmFlag, scope.tag);
   }
@@ -164,7 +165,7 @@ export function buildGraph(
     edges,
     relations,
     updatedAt: maxUpdatedAt,
-    etag: `"graph-${opts.mode ?? 'player'}${opts.hideDmOnly ? '-nodm' : ''}-${scope.kind}-${noteRows.length}-${maxUpdatedAt}-${sha1Short(scopeKey(scope))}-${relationsKey(relations)}"`,
+    etag: `"graph-${opts.mode ?? 'player'}${opts.vis.hideDmOnly ? '-nodm' : ''}-${scope.kind}-${noteRows.length}-${maxUpdatedAt}-${sha1Short(scopeKey(scope))}-${relationsKey(relations)}"`,
   };
 }
 
@@ -175,18 +176,18 @@ export function buildNeighborhood(
   groupId: string,
   path: string,
   depth = 1,
-  opts: { mode?: GraphMode; hideDmOnly: boolean },
+  opts: { mode?: GraphMode; vis: Visibility },
 ): GraphPayload | null {
   if (depth < 1) depth = 1;
   if (depth > 2) depth = 2;
   const db = getDb();
   const gmFlag = opts.mode === 'gm' ? 1 : 0;
-  const dmClause = opts.hideDmOnly ? ' AND dm_only = 0' : '';
+  const hidden = hiddenNotesSql('notes', opts.vis);
 
   const root = db
     .query<{ path: string; title: string; updatedAt: number }, [string, number, string]>(
       `SELECT path, title, updated_at AS updatedAt
-         FROM notes WHERE group_id = ? AND gm_only = ? AND path = ?${dmClause}`,
+         FROM notes WHERE group_id = ? AND gm_only = ? AND path = ?${hidden}`,
     )
     .get(groupId, gmFlag, path);
   if (!root) return null;
@@ -222,7 +223,7 @@ export function buildNeighborhood(
   // only via a hidden note would surface in `neighbours` (and later in
   // `nodes`) as an unexplainable orphan, leaking the hidden note's
   // existence + adjacency even though its own title/body stay hidden.
-  const dmClauseN = opts.hideDmOnly ? ' AND n.dm_only = 0' : '';
+  const hiddenN = hiddenNotesSql('n', opts.vis);
   const neighbours = new Set<string>([root.path]);
   let frontier: string[] = [root.path];
   for (let hop = 0; hop < depth && frontier.length > 0; hop++) {
@@ -230,11 +231,11 @@ export function buildNeighborhood(
     const outSql = `SELECT nl.to_path AS to_path
                        FROM note_links nl
                        JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.to_path
-                      WHERE nl.group_id = ? AND nl.from_path IN (${placeholders}) AND n.gm_only = ?${dmClauseN}`;
+                      WHERE nl.group_id = ? AND nl.from_path IN (${placeholders}) AND n.gm_only = ?${hiddenN}`;
     const inSql = `SELECT nl.from_path AS from_path
                       FROM note_links nl
                       JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.from_path
-                     WHERE nl.group_id = ? AND nl.to_path IN (${placeholders}) AND n.gm_only = ?${dmClauseN}`;
+                     WHERE nl.group_id = ? AND nl.to_path IN (${placeholders}) AND n.gm_only = ?${hiddenN}`;
     const outRows = db
       .query<{ to_path: string }, [string, ...string[], number]>(outSql)
       .all(groupId, ...frontier, gmFlag);
@@ -268,7 +269,7 @@ export function buildNeighborhood(
     .query<{ path: string; title: string; updatedAt: number; kind: string | null }, [string, number, ...string[]]>(
       `SELECT path, title, updated_at AS updatedAt, ${KIND_SQL} AS kind
          FROM notes
-        WHERE group_id = ? AND gm_only = ? AND path IN (${placeholders})${dmClause}`,
+        WHERE group_id = ? AND gm_only = ? AND path IN (${placeholders})${hidden}`,
     )
     .all(groupId, gmFlag, ...neighbours);
 
@@ -328,7 +329,7 @@ export function buildNeighborhood(
     edges,
     relations,
     updatedAt: maxUpdatedAt,
-    etag: `"nbhd-${opts.mode ?? 'player'}${opts.hideDmOnly ? '-nodm' : ''}-${depth}-${nodes.length}-${maxUpdatedAt}-${sha1Short(path)}-${relationsKey(relations)}"`,
+    etag: `"nbhd-${opts.mode ?? 'player'}${opts.vis.hideDmOnly ? '-nodm' : ''}-${depth}-${nodes.length}-${maxUpdatedAt}-${sha1Short(path)}-${relationsKey(relations)}"`,
   };
 }
 
@@ -382,10 +383,10 @@ function fallbackTitle(path: string): string {
  *  `buildGraph`. */
 export function listVisibleCampaignNames(
   groupId: string,
-  opts: { mode?: GraphMode; hideDmOnly: boolean },
+  opts: { mode?: GraphMode; vis: Visibility },
 ): Record<string, string> {
   const gmFlag = opts.mode === 'gm' ? 1 : 0;
-  const dmClause = opts.hideDmOnly ? ' AND n.dm_only = 0' : '';
+  const hidden = hiddenNotesSql('n', opts.vis);
   const rows = getDb()
     .query<{ slug: string; name: string }, [string, number]>(
       `SELECT c.slug AS slug, c.name AS name
@@ -393,7 +394,7 @@ export function listVisibleCampaignNames(
         WHERE c.group_id = ?
           AND EXISTS (
             SELECT 1 FROM notes n
-             WHERE n.group_id = c.group_id AND n.gm_only = ?${dmClause}
+             WHERE n.group_id = c.group_id AND n.gm_only = ?${hidden}
                AND substr(n.path, 1, length(c.folder_path) + 1) = c.folder_path || '/'
           )`,
     )

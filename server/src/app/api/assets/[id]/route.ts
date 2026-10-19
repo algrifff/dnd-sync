@@ -11,7 +11,7 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getAssetById, assetPath, deleteAsset } from '@/lib/assets';
 import { logAudit } from '@/lib/audit';
-import { visibilityFor } from '@/lib/notes';
+import { isAssetHiddenFrom, visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,8 +27,7 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
   }
 
   const asset = getAssetById(id, session.currentGroupId);
-  if (!asset) return new Response('not_found', { status: 404 });
-  if (asset.gm_only && session.role !== 'admin') {
+  if (!asset || isAssetHiddenFrom(asset, visibilityFor(session.role))) {
     return new Response('not_found', { status: 404 });
   }
 
@@ -103,7 +102,7 @@ export async function DELETE(req: NextRequest, ctx: RouteCtx): Promise<Response>
   // exactly like a missing one (same gate as GET above).
   const vis = visibilityFor(session.role);
   const asset = getAssetById(id, session.currentGroupId);
-  if (!asset || (asset.gm_only === 1 && vis.hideGmOnly)) return json({ error: 'not_found' }, 404);
+  if (!asset || isAssetHiddenFrom(asset, vis)) return json({ error: 'not_found' }, 404);
 
   const result = deleteAsset(id, session.currentGroupId, vis);
   if (!result.ok) {
