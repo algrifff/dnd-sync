@@ -134,8 +134,10 @@ function parseMetaDocName(
 }
 
 /** Why `vis` hides the note at `path`, or null when it exists and is
- *  visible or does not exist yet (a new doc is created on connect). */
-function hiddenReason(
+ *  visible or does not exist yet (a new doc is created on connect). The
+ *  Secret flag is reported first, so a viewer refused a note carrying
+ *  both flags logs `dm_only_blocked`. Exported for tests. */
+export function hiddenReason(
   groupId: string,
   path: string,
   vis: Visibility,
@@ -146,7 +148,7 @@ function hiddenReason(
     )
     .get(groupId, path);
   if (!row || !isHiddenFrom(row, vis)) return null;
-  return isHiddenFrom({ dm_only: 0, gm_only: row.gm_only }, vis) ? 'gm_only_blocked' : 'dm_only_blocked';
+  return row.dm_only === 1 && vis.hideDmOnly ? 'dm_only_blocked' : 'gm_only_blocked';
 }
 
 /** The DB-writing half of the Hocuspocus `store()` hook for a real

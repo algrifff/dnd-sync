@@ -2,10 +2,18 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
 import { buildGraph, buildNeighborhood, listVisibleCampaignNames } from './graph';
+import { visibilityFor, type MemberRole, type Visibility } from './notes';
 import { setupTestDb, teardownTestDb } from './test-utils';
 import { DEFAULT_GROUP_ID } from './users';
 
 // ── Test helpers ───────────────────────────────────────────────────────
+
+/** A Visibility that leaves gm_only to the namespace `mode` selects, so
+ *  these tests isolate the dm_only gate. Role-derived Visibility is
+ *  covered by the role matrix at the end of this file. */
+function vis(hideDmOnly: boolean): Visibility {
+  return { hideDmOnly, hideGmOnly: false };
+}
 
 function seedNote(
   groupId: string,
@@ -79,17 +87,17 @@ describe('buildGraph — hideDmOnly (kind: all)', () => {
   });
 
   it('omits a dm_only node when hideDmOnly is true', () => {
-    const payload = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { hideDmOnly: true });
+    const payload = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { vis: vis(true) });
     expect(payload.nodes.map((n) => n.id)).not.toContain(dmNote);
   });
 
   it('omits edges touching a hidden dm_only node', () => {
-    const payload = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { hideDmOnly: true });
+    const payload = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { vis: vis(true) });
     expect(payload.edges).toHaveLength(0);
   });
 
   it('still returns the dm_only node when hideDmOnly is false', () => {
-    const payload = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { hideDmOnly: false });
+    const payload = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { vis: vis(false) });
     expect(payload.nodes.map((n) => n.id)).toContain(dmNote);
   });
 });
@@ -107,7 +115,7 @@ describe('buildGraph — hideDmOnly (kind: folder)', () => {
     const payload = buildGraph(
       DEFAULT_GROUP_ID,
       { kind: 'folder', path: 'vault/folder' },
-      { hideDmOnly: true },
+      { vis: vis(true) },
     );
     expect(payload.nodes.map((n) => n.id)).not.toContain(dmNote);
     expect(payload.nodes.map((n) => n.id)).toContain(plain);
@@ -132,7 +140,7 @@ describe('buildGraph — hideDmOnly (kind: tag)', () => {
     const payload = buildGraph(
       DEFAULT_GROUP_ID,
       { kind: 'tag', tag: 'adventure' },
-      { hideDmOnly: true },
+      { vis: vis(true) },
     );
     expect(payload.nodes.map((n) => n.id)).not.toContain(dmNote);
     expect(payload.nodes.map((n) => n.id)).toContain(plain);
@@ -142,7 +150,7 @@ describe('buildGraph — hideDmOnly (kind: tag)', () => {
     const payload = buildGraph(
       DEFAULT_GROUP_ID,
       { kind: 'tag', tag: 'adventure' },
-      { hideDmOnly: false },
+      { vis: vis(false) },
     );
     expect(payload.nodes.map((n) => n.id)).toContain(dmNote);
   });
@@ -161,7 +169,7 @@ describe('buildGraph — gm_only namespace unaffected by hideDmOnly', () => {
 
   it('mode: player returns only gm_only=0 notes, regardless of hideDmOnly', () => {
     for (const hideDmOnly of [true, false]) {
-      const payload = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { mode: 'player', hideDmOnly });
+      const payload = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { mode: 'player', vis: vis(hideDmOnly) });
       expect(payload.nodes.map((n) => n.id)).toContain(playerNote);
       expect(payload.nodes.map((n) => n.id)).not.toContain(gmNote);
     }
@@ -169,7 +177,7 @@ describe('buildGraph — gm_only namespace unaffected by hideDmOnly', () => {
 
   it('mode: gm returns only gm_only=1 notes, regardless of hideDmOnly', () => {
     for (const hideDmOnly of [true, false]) {
-      const payload = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { mode: 'gm', hideDmOnly });
+      const payload = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { mode: 'gm', vis: vis(hideDmOnly) });
       expect(payload.nodes.map((n) => n.id)).toContain(gmNote);
       expect(payload.nodes.map((n) => n.id)).not.toContain(playerNote);
     }
@@ -184,8 +192,8 @@ describe('buildGraph — etag', () => {
   });
 
   it('differs between hideDmOnly true and false on identical input', () => {
-    const withHide = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { hideDmOnly: true });
-    const withoutHide = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { hideDmOnly: false });
+    const withHide = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { vis: vis(true) });
+    const withoutHide = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { vis: vis(false) });
     expect(withHide.etag).not.toBe(withoutHide.etag);
   });
 });
@@ -208,26 +216,26 @@ describe('buildNeighborhood — hideDmOnly', () => {
   it('returns null when the center note is dm_only and hideDmOnly is true', () => {
     seedNote(DEFAULT_GROUP_ID, 'vault/dm-center.md', { dmOnly: true });
     const payload = buildNeighborhood(DEFAULT_GROUP_ID, 'vault/dm-center.md', 1, {
-      hideDmOnly: true,
+      vis: vis(true),
     });
     expect(payload).toBeNull();
   });
 
   it('omits a dm_only neighbour from nodes when hideDmOnly is true', () => {
-    const payload = buildNeighborhood(DEFAULT_GROUP_ID, center, 1, { hideDmOnly: true });
+    const payload = buildNeighborhood(DEFAULT_GROUP_ID, center, 1, { vis: vis(true) });
     expect(payload).not.toBeNull();
     expect(payload!.nodes.map((n) => n.id)).not.toContain(dmNeighbour);
     expect(payload!.nodes.map((n) => n.id)).toContain(plainNeighbour);
   });
 
   it('includes the dm_only neighbour when hideDmOnly is false', () => {
-    const payload = buildNeighborhood(DEFAULT_GROUP_ID, center, 1, { hideDmOnly: false });
+    const payload = buildNeighborhood(DEFAULT_GROUP_ID, center, 1, { vis: vis(false) });
     expect(payload!.nodes.map((n) => n.id)).toContain(dmNeighbour);
   });
 
   it('differs in etag between hideDmOnly true and false', () => {
-    const withHide = buildNeighborhood(DEFAULT_GROUP_ID, center, 1, { hideDmOnly: true });
-    const withoutHide = buildNeighborhood(DEFAULT_GROUP_ID, center, 1, { hideDmOnly: false });
+    const withHide = buildNeighborhood(DEFAULT_GROUP_ID, center, 1, { vis: vis(true) });
+    const withoutHide = buildNeighborhood(DEFAULT_GROUP_ID, center, 1, { vis: vis(false) });
     expect(withHide!.etag).not.toBe(withoutHide!.etag);
   });
 });
@@ -256,7 +264,7 @@ describe('buildNeighborhood — frontier cannot traverse through a hidden note',
   });
 
   it('excludes both the hidden gate and the note only reachable through it, at depth 2, for a viewer', () => {
-    const payload = buildNeighborhood(DEFAULT_GROUP_ID, center, 2, { hideDmOnly: true });
+    const payload = buildNeighborhood(DEFAULT_GROUP_ID, center, 2, { vis: vis(true) });
     expect(payload).not.toBeNull();
     const ids = payload!.nodes.map((n) => n.id);
     expect(ids).not.toContain(dmGate);
@@ -264,7 +272,7 @@ describe('buildNeighborhood — frontier cannot traverse through a hidden note',
   });
 
   it('includes both the gate and the note behind it at depth 2 when not hidden (admin/editor)', () => {
-    const payload = buildNeighborhood(DEFAULT_GROUP_ID, center, 2, { hideDmOnly: false });
+    const payload = buildNeighborhood(DEFAULT_GROUP_ID, center, 2, { vis: vis(false) });
     expect(payload).not.toBeNull();
     const ids = payload!.nodes.map((n) => n.id);
     expect(ids).toContain(dmGate);
@@ -282,7 +290,7 @@ describe('buildGraph — kind / campaign / isIndex', () => {
     seedNote(DEFAULT_GROUP_ID, 'loose.md', { frontmatter: '{"kind":42}' });
     seedNote(DEFAULT_GROUP_ID, 'Campaigns/Overview.md');
 
-    const payload = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { hideDmOnly: false });
+    const payload = buildGraph(DEFAULT_GROUP_ID, { kind: 'all' }, { vis: vis(false) });
     const byId = new Map(payload.nodes.map((n) => [n.id, n]));
 
     expect(byId.get('Campaigns/ember/Characters/Mira.md')).toMatchObject({
@@ -318,7 +326,7 @@ describe('buildGraph — relations', () => {
     seedNote(DEFAULT_GROUP_ID, b);
     seedRelation(DEFAULT_GROUP_ID, a, 'member_of', b);
 
-    const payload = buildGraph(DEFAULT_GROUP_ID, all, { hideDmOnly: true });
+    const payload = buildGraph(DEFAULT_GROUP_ID, all, { vis: vis(true) });
 
     expect(payload.relations).toEqual([{ source: a, target: b, relation: 'member_of' }]);
   });
@@ -330,8 +338,8 @@ describe('buildGraph — relations', () => {
     seedRelation(DEFAULT_GROUP_ID, a, 'leads', b);
     seedRelation(DEFAULT_GROUP_ID, 'vault/c.md', 'owns', a);
 
-    expect(buildGraph(DEFAULT_GROUP_ID, all, { hideDmOnly: true }).relations).toEqual([]);
-    expect(buildGraph(DEFAULT_GROUP_ID, all, { hideDmOnly: false }).relations).toHaveLength(2);
+    expect(buildGraph(DEFAULT_GROUP_ID, all, { vis: vis(true) }).relations).toEqual([]);
+    expect(buildGraph(DEFAULT_GROUP_ID, all, { vis: vis(false) }).relations).toHaveLength(2);
   });
 
   it('hides it from an editor when an end is gm_only', () => {
@@ -339,7 +347,7 @@ describe('buildGraph — relations', () => {
     seedNote(DEFAULT_GROUP_ID, b);
     seedRelation(DEFAULT_GROUP_ID, a, 'leads', b);
 
-    const payload = buildGraph(DEFAULT_GROUP_ID, all, { mode: 'player', hideDmOnly: false });
+    const payload = buildGraph(DEFAULT_GROUP_ID, all, { mode: 'player', vis: vis(false) });
 
     expect(payload.relations).toEqual([]);
   });
@@ -349,7 +357,7 @@ describe('buildGraph — relations', () => {
     seedNote(DEFAULT_GROUP_ID, 'out/b.md');
     seedRelation(DEFAULT_GROUP_ID, 'in/a.md', 'ally_of', 'out/b.md');
 
-    const scoped = buildGraph(DEFAULT_GROUP_ID, { kind: 'folder', path: 'in' }, { hideDmOnly: false });
+    const scoped = buildGraph(DEFAULT_GROUP_ID, { kind: 'folder', path: 'in' }, { vis: vis(false) });
 
     expect(scoped.relations).toEqual([]);
   });
@@ -357,11 +365,11 @@ describe('buildGraph — relations', () => {
   it('changes the etag when a relation is added', () => {
     seedNote(DEFAULT_GROUP_ID, a);
     seedNote(DEFAULT_GROUP_ID, b);
-    const before = buildGraph(DEFAULT_GROUP_ID, all, { hideDmOnly: false }).etag;
+    const before = buildGraph(DEFAULT_GROUP_ID, all, { vis: vis(false) }).etag;
 
     seedRelation(DEFAULT_GROUP_ID, a, 'ally_of', b);
 
-    expect(buildGraph(DEFAULT_GROUP_ID, all, { hideDmOnly: false }).etag).not.toBe(before);
+    expect(buildGraph(DEFAULT_GROUP_ID, all, { vis: vis(false) }).etag).not.toBe(before);
   });
 });
 
@@ -374,7 +382,7 @@ describe('buildNeighborhood — relations', () => {
     seedRelation(DEFAULT_GROUP_ID, 'v/center.md', 'ally_of', 'v/near.md');
     seedRelation(DEFAULT_GROUP_ID, 'v/center.md', 'enemy_of', 'v/far.md');
 
-    const payload = buildNeighborhood(DEFAULT_GROUP_ID, 'v/center.md', 1, { hideDmOnly: false });
+    const payload = buildNeighborhood(DEFAULT_GROUP_ID, 'v/center.md', 1, { vis: vis(false) });
 
     expect(payload!.relations).toEqual([
       { source: 'v/center.md', target: 'v/near.md', relation: 'ally_of' },
@@ -404,14 +412,69 @@ describe('listVisibleCampaignNames', () => {
   });
 
   it('names a campaign that has a visible note', () => {
-    expect(listVisibleCampaignNames(G, { hideDmOnly: true }).open).toBe('The Open One');
+    expect(listVisibleCampaignNames(G, { vis: vis(true) }).open).toBe('The Open One');
   });
 
   it('leaves out a campaign whose only notes are hidden from the caller', () => {
-    expect(Object.keys(listVisibleCampaignNames(G, { hideDmOnly: true }))).toEqual(['open']);
+    expect(Object.keys(listVisibleCampaignNames(G, { vis: vis(true) }))).toEqual(['open']);
   });
 
   it('includes it for a caller who may see dm_only notes', () => {
-    expect(Object.keys(listVisibleCampaignNames(G, { hideDmOnly: false })).sort()).toEqual(['open', 'secret']);
+    expect(Object.keys(listVisibleCampaignNames(G, { vis: vis(false) })).sort()).toEqual(['open', 'secret']);
+  });
+});
+
+// ── Role matrix: what each role sees, through the same call sites ─────
+// The routes pass `visibilityFor(session.role)` and only an admin can
+// reach GM mode (`lib/gm-mode.ts`), so these are the real combinations.
+
+describe('graph visibility by role', () => {
+  const G = DEFAULT_GROUP_ID;
+  const center = 'Campaigns/c/center.md';
+  const paths = {
+    plain: 'Campaigns/c/plain.md',
+    secret: 'Campaigns/c/secret.md',
+    private: 'Campaigns/c/private.md',
+    both: 'Campaigns/c/both.md',
+  };
+
+  beforeEach(() => {
+    getDb().exec('DELETE FROM campaigns');
+    getDb()
+      .query(
+        `INSERT INTO campaigns (group_id, slug, name, folder_path, created_at)
+         VALUES (?, 'c', 'C', 'Campaigns/c', ?)`,
+      )
+      .run(G, Date.now());
+    seedNote(G, center);
+    seedNote(G, paths.plain);
+    seedNote(G, paths.secret, { dmOnly: true });
+    seedNote(G, paths.private, { gmOnly: true });
+    seedNote(G, paths.both, { dmOnly: true, gmOnly: true });
+    for (const p of Object.values(paths)) seedLink(G, center, p);
+  });
+
+  const playerView: Record<MemberRole, string[]> = {
+    viewer: [center, paths.plain],
+    editor: [center, paths.plain, paths.secret],
+    admin: [center, paths.plain, paths.secret],
+  };
+
+  for (const role of ['viewer', 'editor', 'admin'] as const) {
+    it(`player mode shows a ${role} only the notes their role may see`, () => {
+      const v = visibilityFor(role);
+      const graph = buildGraph(G, { kind: 'all' }, { mode: 'player', vis: v });
+      expect(graph.nodes.map((n) => n.id).sort()).toEqual([...playerView[role]].sort());
+      const nbhd = buildNeighborhood(G, center, 1, { mode: 'player', vis: v });
+      expect(nbhd?.nodes.map((n) => n.id).sort()).toEqual([...playerView[role]].sort());
+      expect(Object.keys(listVisibleCampaignNames(G, { mode: 'player', vis: v }))).toEqual(['c']);
+    });
+  }
+
+  it('GM mode shows an admin the whole GM namespace, both flags included', () => {
+    const v = visibilityFor('admin');
+    const graph = buildGraph(G, { kind: 'all' }, { mode: 'gm', vis: v });
+    expect(graph.nodes.map((n) => n.id).sort()).toEqual([paths.both, paths.private].sort());
+    expect(Object.keys(listVisibleCampaignNames(G, { mode: 'gm', vis: v }))).toEqual(['c']);
   });
 });

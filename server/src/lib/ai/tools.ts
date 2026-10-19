@@ -11,7 +11,14 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { getDb } from '@/lib/db';
 import { worldFtsMatch } from '@/lib/search';
-import { isAllowedPath, isHiddenFrom, loadNote, visibilityFor, type Visibility } from '@/lib/notes';
+import {
+  hiddenNotesSql,
+  isAllowedPath,
+  isHiddenFrom,
+  loadNote,
+  visibilityFor,
+  type Visibility,
+} from '@/lib/notes';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 import { getCampaignBySlug, listCampaigns } from '@/lib/characters';
@@ -410,17 +417,13 @@ function entitySearch(ctx: ToolContext) {
 
       type FtsRow = { path: string; title: string; snippet: string };
       const rows = getDb()
-        .query<FtsRow, [string, string, number, number, number]>(
-          // Visibility: dm_only rows are withheld from non-GM callers
-          // (ctx.role === 'dm' ⟺ session role admin|editor). gm_only is
-          // namespace *selection*, not an extra filter — mirrors
-          // api/ui/search/route.ts: ctx.gmNamespace (set from
-          // isGmModeOn(), which itself requires role === 'admin') picks
-          // which partition (player vs GM) this search reads from, so
-          // an admin in GM mode can find the gm_only notes they just
-          // created. This only controls what entity_search can find —
-          // it is not the authorization gate for gm_only content. That
-          // gate now lives on every read/write tool via
+        .query<FtsRow, [string, string, number, number]>(
+          // Visibility: `visibilityOf(ctx)` is the gate. ctx.gmNamespace
+          // (set from isGmModeOn(), which itself requires role ===
+          // 'admin') only selects the partition (player vs GM) this
+          // search reads from — mirrors lib/search.ts — so an admin in
+          // GM mode can find the gm_only notes they just created. The
+          // same gate also lives on every read/write tool via
           // `isGmOnlyHiddenFrom(ctx, note)` (see note_read,
           // entity_edit_sheet, entity_edit_content, note_write_section,
           // backlink_create, inventory_add, entity_move,
@@ -434,12 +437,11 @@ function entitySearch(ctx: ToolContext) {
                ON n.group_id = notes_fts.group_id AND n.path = notes_fts.path
              WHERE notes_fts MATCH ?
                AND notes_fts.group_id = ?
-               AND (n.dm_only = 0 OR ? = 1)
-               AND n.gm_only = ?
+               AND n.gm_only = ?${hiddenNotesSql('n', visibilityOf(ctx))}
              ORDER BY notes_fts.rank
              LIMIT ?`,
         )
-        .all(match, ctx.groupId, ctx.role === 'dm' ? 1 : 0, ctx.gmNamespace ? 1 : 0, limit ?? 10);
+        .all(match, ctx.groupId, ctx.gmNamespace ? 1 : 0, limit ?? 10);
 
       return { ok: true as const, results: rows };
     },

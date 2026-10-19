@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
 import { deriveAllIndexes } from './derive-indexes';
+import { visibilityFor } from './notes';
 import { setupTestDb, teardownTestDb } from './test-utils';
 import { buildTree, type TreeDir } from './tree';
 import { DEFAULT_GROUP_ID } from './users';
@@ -33,7 +34,7 @@ function retitle(path: string, title: string): void {
 }
 
 function labelsIn(folder: string): string[] {
-  let dir: TreeDir = buildTree(DEFAULT_GROUP_ID, { hideDmOnly: false }).root;
+  let dir: TreeDir = buildTree(DEFAULT_GROUP_ID, { vis: visibilityFor('admin') }).root;
   for (const segment of folder.split('/')) {
     const next = dir.children.find(
       (c): c is TreeDir => c.kind === 'dir' && c.name === segment,

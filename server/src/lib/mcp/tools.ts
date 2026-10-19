@@ -301,7 +301,7 @@ const noteNeighborsTool = define({
     if (!note) return notFound(args.path);
     const graph = buildNeighborhood(ctx.groupId, note.path, args.depth ?? 1, {
       mode: note.gm_only ? 'gm' : 'player',
-      hideDmOnly: visibilityFor(ctx.role).hideDmOnly,
+      vis: visibilityFor(ctx.role),
     });
     if (!graph) return notFound(args.path);
 

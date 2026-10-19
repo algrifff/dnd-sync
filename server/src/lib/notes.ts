@@ -105,9 +105,16 @@ export type TagRow = {
 // through this section, in one of three forms:
 //   - one row:   `isHiddenFrom(row, vis)` / `isAssetHiddenFrom(asset, vis)`
 //   - SQL:       `hiddenNotesSql(alias, vis)` / `hiddenAssetsSql(alias, vis)`
+//                appended to a WHERE; `visibleNoteSql(alias, vis)` as a
+//                standalone expression (inside an OR or a CASE)
 //   - by path:   `loadVisibleNote(groupId, path, vis)` → null means 404
 // Never compare a role or a flag by hand. `api/visibility-gates.test.ts`
 // drives every route that takes a Note path through these gates.
+//
+// One `gm_only` comparison is not a gate: GM mode (`lib/gm-mode.ts`)
+// picks the namespace the tree, graph and search browse with
+// `gm_only = <mode>`. It only narrows, and always runs beside one of the
+// gates above.
 //
 // The predicates are strict (`dm_only = 0`, not `dm_only IS NULL OR …`):
 // both columns are `NOT NULL DEFAULT 0` (migrations for dm_only and
@@ -141,13 +148,27 @@ export function visibilityForMember(groupId: string, userId: string): Visibility
   return visibilityFor(role);
 }
 
+/** The terms `vis` puts on `notes <alias>`, one per flag it hides. */
+function visibleNoteTerms(alias: string, vis: Visibility): string[] {
+  return [
+    ...(vis.hideDmOnly ? [`${alias}.dm_only = 0`] : []),
+    ...(vis.hideGmOnly ? [`${alias}.gm_only = 0`] : []),
+  ];
+}
+
 /** ` AND <alias>.dm_only = 0 AND <alias>.gm_only = 0`, or the parts of
  *  it `vis` asks for. Appended to a WHERE clause over `notes <alias>`. */
 export function hiddenNotesSql(alias: string, vis: Visibility): string {
-  return (
-    (vis.hideDmOnly ? ` AND ${alias}.dm_only = 0` : '') +
-    (vis.hideGmOnly ? ` AND ${alias}.gm_only = 0` : '')
-  );
+  return visibleNoteTerms(alias, vis)
+    .map((term) => ` AND ${term}`)
+    .join('');
+}
+
+/** The same predicate as a standalone boolean expression:
+ *  `(<alias>.dm_only = 0 AND …)`, or `TRUE` when `vis` hides nothing. */
+export function visibleNoteSql(alias: string, vis: Visibility): string {
+  const terms = visibleNoteTerms(alias, vis);
+  return terms.length > 0 ? `(${terms.join(' AND ')})` : 'TRUE';
 }
 
 /** SQL predicate: note `<n>` is visible to the member row `<m>` under
@@ -313,7 +334,7 @@ export function loadBacklinks(
          FROM note_links nl
          LEFT JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.from_path
         WHERE nl.group_id = ? AND nl.to_path = ?
-          AND (n.id IS NULL OR (1${hiddenNotesSql('n', vis)}))
+          AND (n.id IS NULL OR ${visibleNoteSql('n', vis)})
         ORDER BY nl.from_path`,
     )
     .all(groupId, path);

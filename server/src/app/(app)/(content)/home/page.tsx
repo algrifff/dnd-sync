@@ -49,7 +49,7 @@ export default async function HomePage(): Promise<ReactElement> {
   const gmMode = treeModeFor(jar.get(GM_MODE_COOKIE)?.value, session.role) === 'gm';
   const tree = buildTree(session.currentGroupId, {
     mode: gmMode ? 'gm' : 'player',
-    hideDmOnly: vis.hideDmOnly,
+    vis,
   });
   const topFolders = tree.root.children.filter((c) => c.kind === 'dir').slice(0, 6);
 

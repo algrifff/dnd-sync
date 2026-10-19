@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, renameSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { getDb } from './db';
-import { hiddenNotesSql, type Visibility } from './notes';
+import { visibleNoteSql, type Visibility } from './notes';
 
 export type AssetRow = {
   id: string;
@@ -420,7 +420,7 @@ export function assetReferenceCount(
     const row = getDb()
       .query<{ total: number; visible: number | null }, [string, string]>(
         `SELECT COUNT(*) AS total,
-                SUM(CASE WHEN 1 = 1${hiddenNotesSql('n', vis)} THEN 1 ELSE 0 END) AS visible
+                SUM(CASE WHEN ${visibleNoteSql('n', vis)} THEN 1 ELSE 0 END) AS visible
            FROM notes n WHERE n.group_id = ? AND n.${column} LIKE ?`,
       )
       .get(groupId, `%${needle}%`);
