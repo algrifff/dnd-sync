@@ -98,14 +98,26 @@ export type TagRow = {
   tag: string;
 };
 
-/** Visibility filter for the note read helpers. Mirrors the gates in
- *  `collab/server.ts`: viewers never see `dm_only` notes, non-admins
- *  never see `gm_only` notes. */
-export type VisibilityOpts = { hideDmOnly?: boolean; hideGmOnly?: boolean };
+// ── Visibility ─────────────────────────────────────────────────────────
+// What a caller may see. A Secret Note (`dm_only`) is hidden from
+// viewers; a Private Note (`gm_only`) from everyone but admin. A hidden
+// Note answers exactly like a missing one. Every gate in the app goes
+// through this section, in one of three forms:
+//   - one row:   `isHiddenFrom(row, vis)` / `isAssetHiddenFrom(asset, vis)`
+//   - SQL:       `hiddenNotesSql(alias, vis)` / `hiddenAssetsSql(alias, vis)`
+//   - by path:   `loadVisibleNote(groupId, path, vis)` → null means 404
+// Never compare a role or a flag by hand. `api/visibility-gates.test.ts`
+// drives every route that takes a Note path through these gates.
+//
+// The predicates are strict (`dm_only = 0`, not `dm_only IS NULL OR …`):
+// both columns are `NOT NULL DEFAULT 0` (migrations for dm_only and
+// gm_only), so NULL never means "visible". A LEFT JOIN whose note row is
+// missing is a different question, answered at that one call site
+// (`loadBacklinks`).
 
-/** A fully specified visibility predicate. List functions take this
- *  rather than `VisibilityOpts` so a caller can't pass `{}` and get
- *  every hidden note back. */
+/** A fully specified visibility predicate, derived from a role with
+ *  `visibilityFor`. Every field is required so a caller can't pass `{}`
+ *  and get every hidden note back. */
 export type Visibility = { hideDmOnly: boolean; hideGmOnly: boolean };
 
 export type MemberRole = 'admin' | 'editor' | 'viewer';
@@ -147,13 +159,22 @@ export function visibleToMemberSql(n: string, m: string): string {
   ).join(' OR ');
 }
 
-/** SQL predicate: asset `<a>` is visible to the member row `<m>`.
- *  Assets carry only `gm_only`, so `hideDmOnly` does not apply. */
+/** SQL predicate: asset `<a>` is visible to the member row `<m>`. */
 export function assetVisibleToMemberSql(a: string, m: string): string {
   return MEMBER_ROLES.map(
-    (role) =>
-      `(${m}.role = '${role}'${visibilityFor(role).hideGmOnly ? ` AND ${a}.gm_only = 0` : ''})`,
+    (role) => `(${m}.role = '${role}'${hiddenAssetsSql(a, visibilityFor(role))})`,
   ).join(' OR ');
+}
+
+/** `hiddenNotesSql` for `assets <alias>`. Assets carry `gm_only` but no
+ *  `dm_only` flag, so only `hideGmOnly` applies. */
+export function hiddenAssetsSql(alias: string, vis: Visibility): string {
+  return vis.hideGmOnly ? ` AND ${alias}.gm_only = 0` : '';
+}
+
+/** The single-row form of `hiddenAssetsSql`. */
+export function isAssetHiddenFrom(asset: { gm_only?: number | null }, vis: Visibility): boolean {
+  return asset.gm_only === 1 && vis.hideGmOnly;
 }
 
 /** Inputs to `canWriteAllSheetFields` — deliberately plain data, no DB
@@ -279,17 +300,11 @@ export function loadUser(userId: string): NoteAuthor | null {
 export function loadBacklinks(
   groupId: string,
   path: string,
-  opts: VisibilityOpts,
+  vis: Visibility,
 ): BacklinkRow[] {
-  // LEFT JOIN — `IS NULL` means the source note row is gone (a dangling
-  // note_links entry). Those stay visible; the panel falls back to
-  // rendering the raw from_path.
-  const dmFilter = opts.hideDmOnly
-    ? ' AND (n.dm_only IS NULL OR n.dm_only = 0)'
-    : '';
-  const gmFilter = opts.hideGmOnly
-    ? ' AND (n.gm_only IS NULL OR n.gm_only = 0)'
-    : '';
+  // LEFT JOIN — `n.id IS NULL` means the source note row is gone (a
+  // dangling note_links entry). Those stay listed: there is no hidden
+  // row behind them, and the panel falls back to the raw from_path.
   return getDb()
     .query<BacklinkRow, [string, string]>(
       `SELECT nl.from_path AS from_path,
@@ -297,7 +312,8 @@ export function loadBacklinks(
               nl.is_manual AS is_manual
          FROM note_links nl
          LEFT JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.from_path
-        WHERE nl.group_id = ? AND nl.to_path = ?${dmFilter}${gmFilter}
+        WHERE nl.group_id = ? AND nl.to_path = ?
+          AND (n.id IS NULL OR (1${hiddenNotesSql('n', vis)}))
         ORDER BY nl.from_path`,
     )
     .all(groupId, path);
@@ -306,12 +322,8 @@ export function loadBacklinks(
 export function loadOutgoingLinks(
   groupId: string,
   fromPath: string,
-  opts: VisibilityOpts,
+  vis: Visibility,
 ): OutgoingLinkRow[] {
-  // INNER JOIN — the target note always exists here, so no IS NULL
-  // disjunct (unlike loadBacklinks).
-  const dmFilter = opts.hideDmOnly ? ' AND n.dm_only = 0' : '';
-  const gmFilter = opts.hideGmOnly ? ' AND n.gm_only = 0' : '';
   return getDb()
     .query<OutgoingLinkRow, [string, string]>(
       // INNER JOIN so only links where the target note actually exists are
@@ -325,7 +337,7 @@ export function loadOutgoingLinks(
          FROM note_links nl
          JOIN notes n ON n.group_id = nl.group_id AND n.path = nl.to_path
         WHERE nl.group_id = ? AND nl.from_path = ?
-          AND nl.to_path NOT LIKE '__orphan__%'${dmFilter}${gmFilter}
+          AND nl.to_path NOT LIKE '__orphan__%'${hiddenNotesSql('n', vis)}
         ORDER BY nl.to_path`,
     )
     .all(groupId, fromPath);
@@ -407,7 +419,7 @@ export function listNoteAndAssetTags(
            UNION ALL
            SELECT at.tag AS tag FROM asset_tags at
              JOIN assets a ON a.id = at.asset_id
-            WHERE at.group_id = ?${vis.hideGmOnly ? ' AND a.gm_only = 0' : ''}
+            WHERE at.group_id = ?${hiddenAssetsSql('a', vis)}
          )
          GROUP BY tag
          ORDER BY count DESC, tag ASC

@@ -11,6 +11,7 @@
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/session';
 import { getAssetByVaultPath } from '@/lib/assets';
+import { isAssetHiddenFrom, visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,8 +23,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   if (!path) return new Response('missing_path', { status: 400 });
 
   const asset = getAssetByVaultPath(path, session.currentGroupId);
-  if (!asset) return new Response('not_found', { status: 404 });
-  if (asset.gm_only && session.role !== 'admin') {
+  if (!asset || isAssetHiddenFrom(asset, visibilityFor(session.role))) {
     return new Response('not_found', { status: 404 });
   }
 

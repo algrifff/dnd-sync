@@ -11,7 +11,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { getDb } from '@/lib/db';
 import { worldFtsMatch } from '@/lib/search';
-import { loadNote, isAllowedPath } from '@/lib/notes';
+import { isAllowedPath, isHiddenFrom, loadNote, visibilityFor, type Visibility } from '@/lib/notes';
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 import { getCampaignBySlug, listCampaigns } from '@/lib/characters';
@@ -48,10 +48,8 @@ export type ToolContext = {
   // The REAL session role, uncollapsed. `role` above folds both
   // 'admin' and 'editor' into 'dm' for the many places that only care
   // about GM-vs-player — but `gm_only` visibility is stricter than
-  // that fold: only 'admin' may see gm_only content (mirrors
-  // collab/server.ts#isNoteGmOnly and lib/notes.ts#visibilityFor).
-  // Every tool that reads or writes a note by path must gate on THIS
-  // field for gm_only, not on `role`.
+  // that fold: only 'admin' may see gm_only content. Gate on
+  // `visibilityOf(ctx)` below, which reads both fields, never on `role`.
   sessionRole: 'admin' | 'editor' | 'viewer';
   campaignSlug?: string | undefined;
   // Whether this chat turn is running in the GM namespace (mirrors the
@@ -61,22 +59,17 @@ export type ToolContext = {
   gmNamespace: boolean;
 };
 
-/** True when a gm_only note must be hidden from this caller. Mirrors
- *  `collab/server.ts#isNoteGmOnly`'s consumer exactly: gm_only content
- *  is visible ONLY to session role 'admin' — an 'editor' (whose
- *  collapsed `ctx.role` reads 'dm' for every other purpose) must not
- *  see it. Callers should treat a `true` result the same way they treat
- *  a missing note (return the tool's normal not-found error), never a
- *  distinct "access denied" — a hidden note must be indistinguishable
- *  from one that doesn't exist, matching every direct read path. */
-function isGmOnlyHiddenFrom(ctx: ToolContext, note: { gm_only: number }): boolean {
-  return note.gm_only === 1 && ctx.sessionRole !== 'admin';
+/** This caller's `Visibility`. gm_only follows the real session role
+ *  (`visibilityFor`): an 'editor', whose collapsed `ctx.role` reads 'dm',
+ *  must not see it. dm_only follows the collapsed role, so a 'player'
+ *  context never sees it. A hidden note answers like a missing one. */
+function visibilityOf(ctx: ToolContext): Visibility {
+  return { hideDmOnly: ctx.role !== 'dm', hideGmOnly: visibilityFor(ctx.sessionRole).hideGmOnly };
 }
 
-/** True when this caller may not see the note at all: dm_only for a
- *  non-GM, or gm_only for anyone but an admin. */
-function isHiddenFrom(ctx: ToolContext, note: { dm_only: number; gm_only: number }): boolean {
-  return (note.dm_only === 1 && ctx.role !== 'dm') || isGmOnlyHiddenFrom(ctx, note);
+/** True when gm_only alone hides the note from this caller. */
+function isGmOnlyHiddenFrom(ctx: ToolContext, note: { gm_only: number }): boolean {
+  return isHiddenFrom({ dm_only: 0, gm_only: note.gm_only }, visibilityOf(ctx));
 }
 
 /** The error for a move/rename whose destination is taken, or null when
@@ -89,7 +82,7 @@ function destinationTakenError(ctx: ToolContext, path: string): string | null {
     )
     .get(ctx.groupId, path);
   if (!taken) return null;
-  return isHiddenFrom(ctx, taken) ? `Not found: ${path}` : `Path exists: ${path}`;
+  return isHiddenFrom(taken, visibilityOf(ctx)) ? `Not found: ${path}` : `Path exists: ${path}`;
 }
 
 // ── Factory ────────────────────────────────────────────────────────────
@@ -375,8 +368,7 @@ function campaignBrowse(ctx: ToolContext) {
       const kindFilter = kind ?? null;
 
       const results = rows
-        .filter((r) => ctx.role === 'dm' || r.dm_only === 0)
-        .filter((r) => !isGmOnlyHiddenFrom(ctx, r))
+        .filter((r) => !isHiddenFrom(r, visibilityOf(ctx)))
         .map((r) => {
           let fmKind: string | undefined;
           try {
@@ -1005,7 +997,7 @@ function inventoryAdd(ctx: ToolContext) {
       // caller cannot see must not be linkable.
       if (itemPath) {
         const item = loadNote(ctx.groupId, itemPath);
-        if (!item || isHiddenFrom(ctx, item)) {
+        if (!item || isHiddenFrom(item, visibilityOf(ctx))) {
           return { ok: false as const, error: `Not found: ${itemPath}` };
         }
       }
@@ -1062,7 +1054,7 @@ function noteRead(ctx: ToolContext) {
       // hidden note is indistinguishable from a missing one. gm_only is
       // stricter than dm_only: an 'editor' has ctx.role === 'dm' but
       // must not see it — see isGmOnlyHiddenFrom.
-      if (!note || isHiddenFrom(ctx, note)) {
+      if (!note || isHiddenFrom(note, visibilityOf(ctx))) {
         return { ok: false as const, error: `Not found: ${path}` };
       }
 

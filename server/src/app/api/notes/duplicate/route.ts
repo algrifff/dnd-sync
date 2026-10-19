@@ -12,7 +12,7 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb, isUniqueConstraintError } from '@/lib/db';
 import { logAudit } from '@/lib/audit';
-import { visibilityFor } from '@/lib/notes';
+import { isHiddenFrom, visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,13 +55,8 @@ export async function POST(req: NextRequest): Promise<Response> {
          FROM notes WHERE group_id = ? AND path = ?`,
     )
     .get(session.currentGroupId, body.path);
-  if (!src) return json({ error: 'not_found' }, 404);
-
-  // Hidden notes must not be duplicatable into visibility the caller
-  // couldn't otherwise see — 404 (not 403) so a hidden path's existence
-  // isn't disclosed, matching `api/notes/[...path]/route.ts`.
-  const vis = visibilityFor(session.role);
-  if ((src.gm_only === 1 && vis.hideGmOnly) || (src.dm_only === 1 && vis.hideDmOnly)) {
+  // A note the caller can't see answers exactly like a missing one.
+  if (!src || isHiddenFrom(src, visibilityFor(session.role))) {
     return json({ error: 'not_found' }, 404);
   }
 

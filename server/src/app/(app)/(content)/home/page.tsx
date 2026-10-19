@@ -13,7 +13,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { readSession } from '@/lib/session';
 import { getDb } from '@/lib/db';
-import { countVisibleNotes, recentlyUpdated, visibilityFor } from '@/lib/notes';
+import { countVisibleNotes, hiddenAssetsSql, recentlyUpdated, visibilityFor } from '@/lib/notes';
 import { buildTree } from '@/lib/tree';
 import { GM_MODE_COOKIE, treeModeFor } from '@/lib/gm-mode';
 import { getWorldHeader } from '@/lib/groups';
@@ -32,12 +32,11 @@ export default async function HomePage(): Promise<ReactElement> {
   const vis = visibilityFor(session.role);
   const counts = {
     notes: countVisibleNotes(session.currentGroupId, vis),
-    // Assets carry gm_only but no dm_only flag.
     assets:
       getDb()
         .query<{ n: number }, [string]>(
-          `SELECT COUNT(*) AS n FROM assets
-            WHERE group_id = ?${vis.hideGmOnly ? ' AND gm_only = 0' : ''}`,
+          `SELECT COUNT(*) AS n FROM assets a
+            WHERE a.group_id = ?${hiddenAssetsSql('a', vis)}`,
         )
         .get(session.currentGroupId)?.n ?? 0,
   };

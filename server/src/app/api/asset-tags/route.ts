@@ -6,7 +6,7 @@ import { requireSession } from '@/lib/session';
 import { verifyCsrf } from '@/lib/csrf';
 import { getDb } from '@/lib/db';
 import { getAssetById } from '@/lib/assets';
-import { visibilityFor } from '@/lib/notes';
+import { isAssetHiddenFrom, visibilityFor } from '@/lib/notes';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +39,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
 
   // A gm_only asset the caller can't see answers exactly like a missing one.
   const asset = getAssetById(body.assetId, session.currentGroupId);
-  if (!asset || (asset.gm_only === 1 && visibilityFor(session.role).hideGmOnly)) {
+  if (!asset || isAssetHiddenFrom(asset, visibilityFor(session.role))) {
     return json({ error: 'not_found' }, 404);
   }
 
