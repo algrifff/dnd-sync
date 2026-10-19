@@ -206,11 +206,20 @@ export type CreateNoteOpts = {
 };
 
 export type CreateNoteResult =
-  | { status: 'created'; path: string; title: string; frontmatter: Record<string, unknown> }
+  | {
+      status: 'created';
+      path: string;
+      title: string;
+      frontmatter: Record<string, unknown>;
+      /** The parent folder index refresh, already started and never
+       *  rejecting. Await it only when the caller needs the index current. */
+      folderIndex: Promise<void>;
+    }
   | { status: 'exists'; path: string };
 
-/** Insert a Note, derive its indexes and refresh the parent folder index.
- *  A taken path is a result, not a throw; unexpected database errors throw. */
+/** Insert a Note, derive its indexes and start the parent folder index
+ *  refresh without waiting for it. A taken path is a result, not a throw;
+ *  unexpected database errors throw. */
 export async function createNote(groupId: string, opts: CreateNoteOpts): Promise<CreateNoteResult> {
   const db = getDb();
   let path = opts.path;
@@ -254,12 +263,12 @@ export async function createNote(groupId: string, opts: CreateNoteOpts): Promise
     console.error('[create-note] derive failed:', err);
   }
   const parent = parentFolderUnderCampaign(path);
-  if (parent) {
-    await deriveFolderIndex(groupId, parent, { userId: opts.userId }).catch((err) => {
-      console.error('[create-note] folder index refresh failed:', err);
-    });
-  }
-  return { status: 'created', path, title, frontmatter };
+  const folderIndex = parent
+    ? deriveFolderIndex(groupId, parent, { userId: opts.userId }).catch((err) => {
+        console.error('[create-note] folder index refresh failed:', err);
+      })
+    : Promise.resolve();
+  return { status: 'created', path, title, frontmatter, folderIndex };
 }
 
 function insertBlank(

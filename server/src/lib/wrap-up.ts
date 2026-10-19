@@ -896,6 +896,7 @@ async function resolveTarget(opts: {
     onTaken: (_taken, n) => ({ path: wanted.replace(/\.md$/, `-${n}.md`), title }),
   });
   if (made.status === 'exists') throw new Error(`No free path near ${wanted}`);
+  await made.folderIndex;
   return { status: 'ok', path: made.path, created: true };
 }
 
