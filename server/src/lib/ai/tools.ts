@@ -15,7 +15,7 @@ import { isAllowedPath, isHiddenFrom, loadNote, visibilityFor, type Visibility }
 import { captureServer } from '@/lib/analytics/capture';
 import { EVENTS } from '@/lib/analytics/events';
 import { getCampaignBySlug, listCampaigns } from '@/lib/characters';
-import { canonicalFolder } from '@/lib/ai/paths';
+import { canonicalFolder } from '@/lib/paths';
 import { slugify } from '@/lib/slugify';
 import { canonicalKind, KIND_INPUTS, NOTE_KINDS, type NoteKind } from '@compendium/shared';
 import { getTemplate, type TemplateKind } from '@/lib/templates';

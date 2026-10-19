@@ -33,7 +33,7 @@ import {
   type Visibility,
 } from '@/lib/notes';
 import { getCampaignBySlug } from '@/lib/characters';
-import { canonicalPath } from '@/lib/ai/paths';
+import { canonicalPath } from '@/lib/paths';
 import { slugify } from '@/lib/slugify';
 import { getTemplate, type TemplateKind } from '@/lib/templates';
 import { writeNote } from '@/lib/import-apply';

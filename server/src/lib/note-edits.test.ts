@@ -2,16 +2,20 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { randomUUID } from 'node:crypto';
 import * as Y from 'yjs';
 import { prosemirrorJSONToYDoc, yDocToProsemirrorJSON } from 'y-prosemirror';
+import { Document } from '@hocuspocus/server';
 import { getDb } from '@/lib/db';
 import { getPmSchema } from '@/lib/pm-schema';
 import { setupTestDb, teardownTestDb } from '@/lib/test-utils';
 import type { PmNode } from '@/lib/md-to-pm';
+import { closeDocumentConnections, collabServer, type ServerWriteToken } from '@/collab/server';
 import {
   addHistoryEntry,
   applyNoteEdit,
   hasHistoryEntry,
+  hocuspocusDocuments,
   linkMention,
   type EditResult,
+  type LiveDocuments,
   type PmDoc,
 } from './note-edits';
 
@@ -317,5 +321,215 @@ describe('applyNoteEdit', () => {
     });
 
     expect(result).toEqual({ status: 'not_found' });
+  });
+
+  // ── The live-document write protocol, through the LiveDocuments seam ──
+
+  /** In-memory adapter. Issues real-shaped tokens, records each call,
+   *  and runs `duringDrain` inside `closeForWrite`, which is where a
+   *  live editor's Hocuspocus flush lands in production. */
+  function memoryDocuments(duringDrain?: () => void) {
+    const issued = new Set<ServerWriteToken>();
+    const evictions: Array<{ path: string; ownToken: boolean; rowAtEvict: string }> = [];
+    const live: LiveDocuments = {
+      async closeForWrite(gid, path) {
+        duringDrain?.();
+        const token: ServerWriteToken = { documentName: `${gid}:${path}` };
+        issued.add(token);
+        return token;
+      },
+      async evictAfterWrite(_gid, path, token) {
+        evictions.push({ path, ownToken: issued.delete(token), rowAtEvict: row(path).content_md });
+      },
+      release(token) {
+        issued.delete(token);
+      },
+    };
+    return { live, evictions, outstandingTokens: () => issued.size };
+  }
+
+  /** What a Hocuspocus `store()` writes when the last editor drops. */
+  function flush(path: string, title: string, body: PmDoc, md: string): void {
+    const ydoc = prosemirrorJSONToYDoc(getPmSchema(), body, 'default');
+    ydoc.getText('title').insert(0, title);
+    getDb()
+      .query('UPDATE notes SET content_json = ?, content_md = ?, yjs_state = ? WHERE group_id = ? AND path = ?')
+      .run(JSON.stringify(body), md, Y.encodeStateAsUpdate(ydoc), groupId, path);
+  }
+
+  /** Plants a loaded Hocuspocus document with a pending debounced
+   *  store, which is what an open editor looks like to the server. An
+   *  eviction that flushes leaves the store pending; one that discards
+   *  cancels it. */
+  function openLiveEditor(path: string): { storePending: () => boolean; close: () => void } {
+    const documentName = `${groupId}:${path}`;
+    const storeId = `onStoreDocument-${documentName}`;
+    collabServer.documents.set(documentName, new Document(documentName));
+    void collabServer.debouncer.debounce(storeId, () => undefined, 5_000, 10_000);
+    return {
+      storePending: () => collabServer.debouncer.isDebounced(storeId),
+      close: () => {
+        collabServer.documents.delete(documentName);
+        void collabServer.debouncer.debounce(storeId, () => undefined, 0, 0);
+      },
+    };
+  }
+
+  const appendParagraph =
+    (t: string) =>
+    (body: PmDoc): EditResult => ({ status: 'changed', doc: { ...body, content: [...(body.content ?? []), paragraph(text(t))] } });
+
+  it('should build on a flush that lands during the drain instead of clobbering it', async () => {
+    seed(PATH, 'Bram', doc(paragraph(text('Runs the Mill inn.'))));
+    const { live } = memoryDocuments(() =>
+      flush(
+        PATH,
+        'Bram',
+        doc(paragraph(text('Runs the Mill inn.')), paragraph(text('Flushed by a live editor.'))),
+        'Runs the Mill inn.\n\nFlushed by a live editor.\n',
+      ),
+    );
+
+    const result = await applyNoteEdit({ groupId, path: PATH, userId, live, edit: appendParagraph('Added by the edit.') });
+
+    expect(result).toEqual({ status: 'applied' });
+    const stored = row(PATH);
+    expect(stored.content_md).toBe('Runs the Mill inn.\n\nFlushed by a live editor.\n\nAdded by the edit.\n');
+    const ydoc = new Y.Doc();
+    Y.applyUpdate(ydoc, stored.yjs_state);
+    expect(yDocToProsemirrorJSON(ydoc, 'default')).toEqual(JSON.parse(stored.content_json));
+    expect(ydoc.getText('title').toString()).toBe('Bram');
+  });
+
+  it('should hand the edit the post-drain row, so a section edit targets the flushed layout', async () => {
+    seed(PATH, 'Bram', doc(heading(2, 'Notes'), paragraph(text('Old.'))));
+    const { live } = memoryDocuments(() =>
+      flush(PATH, 'Bram', doc(paragraph(text('Live intro.')), heading(2, 'Notes'), paragraph(text('Old.'))), ''),
+    );
+    let seen: PmNode[] = [];
+
+    await applyNoteEdit({
+      groupId,
+      path: PATH,
+      userId,
+      live,
+      edit: (body) => {
+        seen = body.content ?? [];
+        return { status: 'unchanged' };
+      },
+    });
+
+    expect(seen[0]).toEqual(paragraph(text('Live intro.')));
+  });
+
+  it('should evict exactly once, after the write, on the written path, with its own token', async () => {
+    seed(PATH, 'Bram', doc(paragraph(text('Body.'))));
+    const { live, evictions, outstandingTokens } = memoryDocuments();
+
+    await applyNoteEdit({ groupId, path: PATH, userId, live, edit: appendParagraph('More.') });
+
+    expect(evictions).toEqual([{ path: PATH, ownToken: true, rowAtEvict: 'Body.\n\nMore.\n' }]);
+    expect(outstandingTokens()).toBe(0);
+  });
+
+  it('should evict nobody and release its token when the edit is unchanged, rejected, missing or throws', async () => {
+    seed(PATH, 'Bram', doc(paragraph(text('Body.'))));
+    const { live, evictions, outstandingTokens } = memoryDocuments();
+    const before = row(PATH);
+
+    const unchanged = await applyNoteEdit({ groupId, path: PATH, userId, live, edit: () => ({ status: 'unchanged' }) });
+    const rejected = await applyNoteEdit({
+      groupId,
+      path: PATH,
+      userId,
+      live,
+      edit: () => ({ status: 'rejected', reason: 'no' }),
+    });
+    const missing = await applyNoteEdit({ groupId, path: 'Nope.md', userId, live, edit: appendParagraph('x') });
+    const thrown = applyNoteEdit({
+      groupId,
+      path: PATH,
+      userId,
+      live,
+      edit: () => {
+        throw new Error('boom');
+      },
+    });
+
+    expect([unchanged, rejected, missing]).toEqual([
+      { status: 'unchanged' },
+      { status: 'rejected', reason: 'no' },
+      { status: 'not_found' },
+    ]);
+    await expect(thrown).rejects.toThrow('boom');
+    expect(evictions).toEqual([]);
+    expect(outstandingTokens()).toBe(0);
+    expect(row(PATH)).toEqual(before);
+  });
+
+  it('should keep other Y roots and the title when rebuilding yjs_state', async () => {
+    const stroke = { id: 'stroke-1', color: '#ff0000', points: [[10, 20], [30, 40]] };
+    const ydoc = prosemirrorJSONToYDoc(getPmSchema(), doc(paragraph(text('Annotated.'))), 'default');
+    ydoc.getText('title').insert(0, 'Map');
+    ydoc.getMap('drawing-strokes-v3').set(stroke.id, stroke);
+    seed(PATH, 'Map', doc(paragraph(text('Annotated.'))));
+    getDb()
+      .query('UPDATE notes SET yjs_state = ? WHERE group_id = ? AND path = ?')
+      .run(Y.encodeStateAsUpdate(ydoc), groupId, PATH);
+
+    await applyNoteEdit({ groupId, path: PATH, userId, live: memoryDocuments().live, edit: appendParagraph('New.') });
+
+    const after = new Y.Doc();
+    Y.applyUpdate(after, row(PATH).yjs_state);
+    expect(after.getMap('drawing-strokes-v3').toJSON()).toEqual({ [stroke.id]: stroke });
+    expect(after.getText('title').toString()).toBe('Map');
+    expect(yDocToProsemirrorJSON(after, 'default').content).toEqual([
+      paragraph(text('Annotated.')),
+      paragraph(text('New.')),
+    ]);
+  });
+
+  describe('with the Hocuspocus adapter', () => {
+    it('should discard a live editor\'s pending store after writing, not flush it back over the write', async () => {
+      seed(PATH, 'Bram', doc(paragraph(text('Body.'))));
+      const editor = openLiveEditor(PATH);
+      try {
+        const result = await applyNoteEdit({ groupId, path: PATH, userId, edit: appendParagraph('More.') });
+
+        expect(result).toEqual({ status: 'applied' });
+        expect(editor.storePending()).toBe(false);
+      } finally {
+        editor.close();
+      }
+    });
+
+    it('should leave a later tokenless eviction non-destructive after a no-op edit', async () => {
+      seed(PATH, 'Bram', doc(paragraph(text('Body.'))));
+      const editor = openLiveEditor(PATH);
+      try {
+        // The drain's flush already holds the change, so the edit is a no-op.
+        const live: LiveDocuments = {
+          ...hocuspocusDocuments,
+          closeForWrite: (gid, path) => {
+            flush(path, 'Bram', doc(paragraph(text('Body.')), paragraph(text('More.'))), '');
+            return hocuspocusDocuments.closeForWrite(gid, path);
+          },
+        };
+        const result = await applyNoteEdit({
+          groupId,
+          path: PATH,
+          userId,
+          live,
+          edit: (body) => ((body.content ?? []).length > 1 ? { status: 'unchanged' } : appendParagraph('More.')(body)),
+        });
+
+        await closeDocumentConnections(groupId, PATH);
+
+        expect(result).toEqual({ status: 'unchanged' });
+        expect(editor.storePending()).toBe(true);
+      } finally {
+        editor.close();
+      }
+    });
   });
 });
